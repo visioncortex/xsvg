@@ -1,0 +1,96 @@
+:root {
+  --bg: #0b0d12;
+  --panel: #141821;
+  --ink: #e6e9ef;
+  --muted: #9aa4b2;
+  --accent: #7c9cff;
+  --border: #232a36;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+header {
+  padding: 20px 24px 8px;
+}
+header h1 { margin: 0; font-size: 22px; }
+header .tag {
+  font-size: 12px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  vertical-align: middle;
+}
+header p { margin: 6px 0 0; color: var(--muted); }
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 16px 24px;
+}
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+.pane h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+
+textarea, pre, .preview {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+  overflow: auto;
+}
+
+textarea, pre {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  resize: none;
+  white-space: pre;
+  tab-size: 2;
+}
+textarea { outline: none; }
+textarea:focus { border-color: var(--accent); }
+
+.preview {
+  background: #fff;
+  display: grid;
+  place-items: center;
+}
+.preview :is(svg) { max-width: 100%; height: auto; }
+
+footer {
+  padding: 8px 24px 28px;
+}
+footer h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+xsvg-view {
+  display: inline-block;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}

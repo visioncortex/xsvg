@@ -1,0 +1,7 @@
+# Rust
+/target
+
+# Node / web
+node_modules
+/dist
+/web/pkg

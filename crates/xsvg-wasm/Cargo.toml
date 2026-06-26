@@ -1,0 +1,15 @@
+[package]
+name = "xsvg-wasm"
+version = "0.0.0"
+edition = "2021"
+description = "wasm-bindgen entry point: compile(xsvg) -> svg. Browser adapter layer."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+xsvg-core = { path = "../xsvg-core" }
+wasm-bindgen = "0.2"
+roxmltree = "0.20"
+console_error_panic_hook = "0.1"

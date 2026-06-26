@@ -1,0 +1,19 @@
+{
+  "name": "xsvg",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "eXtensible SVG — XML interchange format that compiles to a subset of SVG.",
+  "scripts": {
+    "wasm:dev": "wasm-pack build crates/xsvg-wasm --dev --target web --out-dir ../../web/pkg",
+    "wasm:build": "wasm-pack build crates/xsvg-wasm --release --target web --out-dir ../../web/pkg",
+    "dev": "npm run wasm:dev && vite",
+    "build": "npm run wasm:build && vite build",
+    "start": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7"
+  }
+}

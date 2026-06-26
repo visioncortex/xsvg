@@ -1,0 +1,13 @@
+# xsvg — Rust workspace (pure-Rust core, compiles to WASM and native).
+# See PLAN.md §1.2 for the full intended crate layout. v0 ships the minimum: core + wasm.
+[workspace]
+resolver = "2"
+members = [
+    "crates/xsvg-core",
+    "crates/xsvg-wasm",
+]
+
+[profile.release]
+opt-level = "s"   # optimize wasm for size (v0 wants a tiny bundle)
+lto = true
+codegen-units = 1
