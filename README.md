@@ -3,11 +3,11 @@
 **eXtensible SVG** — an XML interchange format that compiles to a subset of SVG. Pure-Rust core,
 compiled to WASM, run entirely client-side in the browser.
 
-- [Vision.md](Vision.md) — north star
-- [Plan.md](Plan.md) — architecture, roadmap, first-milestone spec
-- [Syntax.md](Syntax.md) — language design (graceful-degradation superset of SVG)
-- [Typography.md](Typography.md) — typesetting capabilities catalog
-- [Research.md](Research.md) — cited prior-art research
+- [Vision.md](docs/Vision.md) — north star
+- [Plan.md](docs/Plan.md) — architecture, roadmap, first-milestone spec
+- [Syntax.md](docs/Syntax.md) — language design (graceful-degradation superset of SVG)
+- [Typography.md](docs/Typography.md) — typesetting capabilities catalog
+- [Research.md](docs/Research.md) — cited prior-art research
 
 ## v0 scaffolding
 
@@ -52,5 +52,5 @@ dist/          production build output (git-ignored)
 ### v0 compiler scope
 
 Parses xsvg/SVG, lowers sharp-cornered `<rect>` → `<path>`, recognizes and skips `x:` extension
-elements (lowering passes land in later phases — see [Plan.md](Plan.md) §3), and emits a plain-SVG
+elements (lowering passes land in later phases — see [Plan.md](docs/Plan.md) §3), and emits a plain-SVG
 string. This proves the parse → transform → emit loop end-to-end through WASM.
