@@ -18,6 +18,12 @@ pub(crate) fn fit_size(
     max_h: f64,
     min_size: f64,
 ) -> f64 {
+    if !base_size.is_finite() || base_size <= 0.0 {
+        return 0.0;
+    }
+    // clamp the floor into (0, base] so the search bounds can't invert
+    let min_size = min_size.clamp(0.0, base_size);
+
     let fits = |size: f64| {
         let scale = size / base_size;
         let lines = wrap(measured, max_w, scale).len().max(1) as f64;
@@ -67,5 +73,22 @@ mod tests {
         let m = measured("supercalifragilistic", 0.5, 40.0);
         let s = fit_size(&m, 40.0, 1.2, 5.0, 5.0, 9.0);
         assert_eq!(s, 9.0);
+    }
+
+    #[test]
+    fn degenerate_inputs_dont_panic() {
+        let m = measured("alpha beta", 0.1, 20.0);
+        // min above base → clamped to base (which fits a generous box)
+        assert_eq!(fit_size(&m, 20.0, 1.2, 1000.0, 1000.0, 50.0), 20.0);
+        // zero / negative box dimensions → bottoms out at the (clamped) min
+        assert_eq!(fit_size(&m, 20.0, 1.2, 0.0, 0.0, 6.0), 6.0);
+        assert_eq!(fit_size(&m, 20.0, 1.2, -10.0, -10.0, 6.0), 6.0);
+        // base size zero or non-finite → no fitting, returned as-is (>= 0)
+        assert_eq!(fit_size(&m, 0.0, 1.2, 100.0, 100.0, 6.0), 0.0);
+        assert_eq!(fit_size(&m, f64::INFINITY, 1.2, 100.0, 100.0, 6.0), 0.0);
+        // empty text → no panic, result stays within [min, base]
+        let empty = measured("", 0.1, 20.0);
+        let s = fit_size(&empty, 20.0, 1.2, 10.0, 10.0, 6.0);
+        assert!((6.0..=20.0).contains(&s));
     }
 }

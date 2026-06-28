@@ -126,7 +126,6 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
     let scale = size / style.size;
     let line_texts = wrap(&measured, cw, scale);
     let advance = size * style.line_height;
-    let block_h = line_texts.len() as f64 * advance;
 
     let anchor = spec.align.anchor();
     let ax = match spec.align {
@@ -134,12 +133,19 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
         Align::Center => cx + cw / 2.0,
         Align::End => cx + cw,
     };
-    let top = match spec.valign {
+
+    // Align the cap-height band (first cap-top → last descent), not the em box, so
+    // the letterforms read as centred and Top/Bottom sit flush. Ascenders/accents
+    // may peek above the cap; descenders hang into the reserved descent.
+    let fm = m.font_metrics(style, size);
+    let lines = line_texts.len().max(1) as f64;
+    let band_h = fm.cap_height + fm.descent + (lines - 1.0) * advance;
+    let band_top = match spec.valign {
         VAlign::Top => cy,
-        VAlign::Middle => cy + (ch - block_h) / 2.0,
-        VAlign::Bottom => cy + (ch - block_h),
+        VAlign::Middle => cy + (ch - band_h) / 2.0,
+        VAlign::Bottom => cy + (ch - band_h),
     };
-    let first_baseline = top + m.font_metrics(style, size).ascent;
+    let first_baseline = band_top + fm.cap_height;
 
     let lines = line_texts
         .into_iter()
@@ -156,6 +162,29 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
         font_size: size,
         lines,
     }
+}
+
+/// Inline-size flow anchored at `(x, y)`: wrap to `max_width`, first baseline at
+/// `y` (the SVG `<text>` convention, unlike a box where `y` is the top edge).
+pub fn layout_flow(
+    text: &str,
+    style: &TextStyle,
+    x: f64,
+    y: f64,
+    max_width: f64,
+    m: &dyn Measurer,
+) -> Vec<PlacedLine> {
+    let measured = measure_words(text, style, m);
+    let advance = style.size * style.line_height;
+    wrap(&measured, max_width, 1.0)
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| PlacedLine {
+            text: t,
+            x,
+            baseline: y + i as f64 * advance,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -188,8 +217,29 @@ mod tests {
         assert_eq!(out.anchor, Anchor::Middle);
         assert_eq!(out.lines.len(), 1);
         assert_eq!(out.lines[0].x, 50.0); // content center
-                                          // single line block height = 10*1.2 = 12; top = (100-12)/2 = 44; baseline += ascent 8
-        assert!((out.lines[0].baseline - 52.0).abs() < 1e-9);
+                                          // cap band = cap_height 7 + descent 2 = 9; top = (100-9)/2 = 45.5; baseline = +cap 7
+        assert!((out.lines[0].baseline - 52.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn middle_centering_is_symmetric() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        for text in ["Hi", "alpha beta gamma delta epsilon zeta"] {
+            let s = spec(80.0, 130.0, Align::Center, VAlign::Middle, Fit::None);
+            let out = layout_area(text, &st, &s, &Mono(0.2));
+            let fm = Mono(0.2).font_metrics(&st, out.font_size);
+            let cap_top = out.lines.first().unwrap().baseline - fm.cap_height;
+            let descent_bottom = out.lines.last().unwrap().baseline + fm.descent;
+            let above = cap_top; // cy = 0
+            let below = 130.0 - descent_bottom; // ch = 130
+            assert!(
+                (above - below).abs() < 1e-9,
+                "{text}: above {above} below {below}"
+            );
+        }
     }
 
     #[test]
@@ -211,5 +261,76 @@ mod tests {
         for w in out.lines.windows(2) {
             assert!((w[1].baseline - w[0].baseline - adv).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn empty_text_yields_no_lines() {
+        let st = TextStyle {
+            size: 12.0,
+            ..Default::default()
+        };
+        let s = spec(100.0, 100.0, Align::Start, VAlign::Top, Fit::None);
+        assert!(layout_area("   ", &st, &s, &Mono(0.1)).lines.is_empty());
+    }
+
+    #[test]
+    fn degenerate_box_does_not_panic() {
+        let st = TextStyle {
+            size: 20.0,
+            ..Default::default()
+        };
+        let z = spec(
+            0.0,
+            0.0,
+            Align::Center,
+            VAlign::Middle,
+            Fit::Shrink { min: 5.0 },
+        );
+        let out = layout_area("alpha beta gamma", &st, &z, &Mono(0.2));
+        assert_eq!(out.font_size, 5.0);
+        assert_eq!(out.lines.len(), 3); // zero width → one word per line
+
+        let p = AreaSpec {
+            padding: 80.0,
+            ..spec(100.0, 100.0, Align::Start, VAlign::Top, Fit::None)
+        };
+        assert_eq!(layout_area("a b c", &st, &p, &Mono(0.2)).lines.len(), 3);
+    }
+
+    #[test]
+    fn align_end_anchors_at_content_right() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let s = AreaSpec {
+            padding: 5.0,
+            ..spec(100.0, 40.0, Align::End, VAlign::Top, Fit::None)
+        };
+        let out = layout_area("hi", &st, &s, &Mono(0.1));
+        assert_eq!(out.anchor, Anchor::End);
+        assert_eq!(out.lines[0].x, 95.0);
+    }
+
+    #[test]
+    fn flow_baseline_starts_at_y() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let line = layout_flow("aaa bbb", &st, 7.0, 30.0, 100.0, &Mono(0.1));
+        assert_eq!(line.len(), 1);
+        assert_eq!(line[0].x, 7.0);
+        assert_eq!(line[0].baseline, 30.0);
+
+        let wrapped = layout_flow("aaa bbb", &st, 0.0, 0.0, 4.0, &Mono(0.1));
+        assert_eq!(wrapped.len(), 2);
+        assert!((wrapped[1].baseline - 12.0).abs() < 1e-9);
+
+        assert!(layout_flow("", &st, 0.0, 0.0, 50.0, &Mono(0.1)).is_empty());
+        assert_eq!(
+            layout_flow("a b c", &st, 0.0, 0.0, 0.0, &Mono(0.1)).len(),
+            3
+        );
     }
 }

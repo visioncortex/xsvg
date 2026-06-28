@@ -60,4 +60,17 @@ mod tests {
         // at half scale, widths halve → more fits per line
         assert_eq!(wrap(&m, 4.0, 0.5), vec!["aaa bbb", "ccc"]);
     }
+
+    #[test]
+    fn degenerate_wrap() {
+        assert!(wrap(&measured("", 0.1, 10.0), 100.0, 1.0).is_empty());
+        assert!(wrap(&measured("  \n\t ", 0.1, 10.0), 100.0, 1.0).is_empty());
+
+        let m = measured("aaa bbb", 0.1, 10.0);
+        assert_eq!(wrap(&m, 0.0, 1.0), vec!["aaa", "bbb"]);
+        assert_eq!(wrap(&m, -5.0, 1.0), vec!["aaa", "bbb"]);
+
+        let long = measured("supercalifragilistic", 0.5, 10.0);
+        assert_eq!(wrap(&long, 3.0, 1.0), vec!["supercalifragilistic"]);
+    }
 }

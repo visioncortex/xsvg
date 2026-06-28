@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 590 350" font-family="sans-serif">
+  <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">degenerate inputs — must stay sane, never panic</text>
+
+  <!-- empty text -->
+  <text x="20" y="48" font-size="11" fill="#64748b">empty → blank</text>
+  <rect x="20" y="54" width="170" height="120" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <textArea x="28" y="62" width="154" height="104" font-size="14" fill="#334155"></textArea>
+
+  <!-- inline-size 0 → one word per line -->
+  <text x="210" y="48" font-size="11" fill="#64748b">inline-size=0 → stack</text>
+  <rect x="210" y="54" width="170" height="120" rx="8" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="220" y="78" font-size="15" fill="#1e3a8a" inline-size="0">one two three four</text>
+
+  <!-- font-size 0 → falls back to default -->
+  <text x="400" y="48" font-size="11" fill="#64748b">font-size=0 → default</text>
+  <rect x="400" y="54" width="170" height="120" rx="8" fill="#f0fdf4" stroke="#4ade80"/>
+  <x:textbox x="400" y="54" width="170" height="120" padding="12" align="center" valign="middle"
+             font-size="0" fit="shrink" fill="#14532d">size zero uses the default instead of NaN</x:textbox>
+
+  <!-- shrink to fit -->
+  <text x="20" y="200" font-size="11" fill="#64748b">fit=shrink</text>
+  <rect x="20" y="206" width="170" height="120" rx="8" fill="#fff7ed" stroke="#fb923c"/>
+  <x:textbox x="20" y="206" width="170" height="120" padding="12" align="center" valign="middle"
+             font-size="40" fit="shrink" fit-min="6" fill="#7c2d12">this paragraph shrinks until it fits the box</x:textbox>
+
+  <!-- fit-min above font-size → clamped -->
+  <text x="210" y="200" font-size="11" fill="#64748b">fit-min&gt;size → clamp</text>
+  <rect x="210" y="206" width="170" height="120" rx="8" fill="#fdf4ff" stroke="#d946ef"/>
+  <x:textbox x="210" y="206" width="170" height="120" padding="12" align="center" valign="middle"
+             font-size="12" fit="shrink" fit-min="40" fill="#86198f">a floor above the base size is clamped to the base</x:textbox>
+
+  <!-- unbreakable word wider than the box → one overflowing line -->
+  <text x="400" y="200" font-size="11" fill="#64748b">long word overflows</text>
+  <rect x="400" y="206" width="170" height="120" rx="8" fill="#fef2f2" stroke="#f87171"/>
+  <textArea x="408" y="234" width="154" height="104" font-size="16" fill="#7f1d1d">supercalifragilisticexpialidocious</textArea>
+</svg>

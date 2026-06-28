@@ -41,6 +41,8 @@ pub(crate) mod test_support {
             FontMetrics {
                 ascent: 0.8 * size,
                 descent: 0.2 * size,
+                cap_height: 0.7 * size,
+                x_height: 0.5 * size,
             }
         }
     }

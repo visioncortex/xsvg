@@ -3,6 +3,8 @@
   "baseSize": 100,
   "ascent": 83,
   "descent": 30,
+  "capHeight": 57.129,
+  "xHeight": 42.285,
   "space": 60.01,
   "chars": {
     "0": 60.01,

@@ -14,7 +14,7 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area, measure_words, wrap, Align, AreaSpec, Fit, Measurer, TextStyle, VAlign,
+    layout_area, layout_flow, Align, AreaLayout, AreaSpec, Fit, Measurer, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -94,9 +94,12 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, m: &dyn Mea
         other => other,
     };
 
-    // <text inline-size> → wrapped lines.
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, m);
+        return;
+    }
+    if name == "textArea" {
+        emit_text_area(node, out, m);
         return;
     }
 
@@ -142,27 +145,24 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
     let x = attr_num(node, "x", 0.0);
     let y = attr_num(node, "y", 0.0);
     let max_w = attr_num(node, "inline-size", 0.0);
-
-    let text = collect_text(node);
-    let measured = measure_words(&text, &style, m);
-    let lines = wrap(&measured, max_w, 1.0);
-    let advance = style.size * style.line_height;
+    let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
 
     out.push_str("<text");
     copy_attrs(node, out, &["inline-size", "line-height"]);
     out.push('>');
-    for (i, line) in lines.iter().enumerate() {
-        let ly = y + i as f64 * advance;
-        out.push_str(&format!("<tspan x=\"{}\" y=\"{}\">", fmt(x), fmt(ly)));
-        push_escaped(out, line, false);
+    for line in &lines {
+        out.push_str(&format!(
+            "<tspan x=\"{}\" y=\"{}\">",
+            fmt(line.x),
+            fmt(line.baseline)
+        ));
+        push_escaped(out, &line.text, false);
         out.push_str("</tspan>");
     }
     out.push_str("</text>");
 }
 
-/// `<x:textbox>` → wrapped, aligned, optionally shrink-to-fit `<text>`.
-/// All placement math lives in `xsvg_core::text::area`; here we just read
-/// attributes, lay out, and serialize.
+/// `<x:textbox>` (Rung 3): explicit `align`/`valign`/`padding`/`fit`.
 fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     let style = style_from(node);
     let spec = AreaSpec {
@@ -173,18 +173,43 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         padding: attr_num(node, "padding", 0.0),
         align: Align::parse(node.attribute("align").unwrap_or("start")),
         valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
-        fit: if node.attribute("fit") == Some("shrink") {
-            Fit::Shrink {
-                min: attr_num(node, "fit-min", 6.0),
-            }
-        } else {
-            Fit::None
-        },
+        fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
     };
-    let fill = node.attribute("fill").unwrap_or("#000");
-
     let layout = layout_area(&collect_text(node), &style, &spec, m);
+    write_area_text(
+        out,
+        &layout,
+        &style,
+        node.attribute("fill").unwrap_or("#000"),
+    );
+}
 
+/// `<textArea>` (Rung 2, SVG 1.2 Tiny vocabulary): top-aligned flow in a box;
+/// horizontal alignment from `text-anchor`, optional shrink via `x:fit`.
+fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
+    let style = style_from(node);
+    let spec = AreaSpec {
+        x: attr_num(node, "x", 0.0),
+        y: attr_num(node, "y", 0.0),
+        width: attr_num(node, "width", 0.0),
+        height: attr_num(node, "height", 0.0),
+        padding: 0.0,
+        align: align_from_anchor(node.attribute("text-anchor")),
+        valign: VAlign::Top,
+        fit: fit_from(node.attribute((XSVG_NS, "fit")), || {
+            attr_num_ns(node, "fit-min", 6.0)
+        }),
+    };
+    let layout = layout_area(&collect_text(node), &style, &spec, m);
+    write_area_text(
+        out,
+        &layout,
+        &style,
+        node.attribute("fill").unwrap_or("#000"),
+    );
+}
+
+fn write_area_text(out: &mut String, layout: &AreaLayout, style: &TextStyle, fill: &str) {
     out.push_str(&format!(
         "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">",
         layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
@@ -201,6 +226,22 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     out.push_str("</text>");
 }
 
+fn fit_from(fit: Option<&str>, min: impl FnOnce() -> f64) -> Fit {
+    if fit == Some("shrink") {
+        Fit::Shrink { min: min() }
+    } else {
+        Fit::None
+    }
+}
+
+fn align_from_anchor(anchor: Option<&str>) -> Align {
+    match anchor {
+        Some("middle") => Align::Center,
+        Some("end") => Align::End,
+        _ => Align::Start,
+    }
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 fn style_from(node: roxmltree::Node) -> TextStyle {
@@ -209,13 +250,13 @@ fn style_from(node: roxmltree::Node) -> TextStyle {
             .attribute("font-family")
             .unwrap_or("sans-serif")
             .to_string(),
-        size: attr_num(node, "font-size", 16.0),
+        size: attr_pos(node, "font-size", 16.0),
         weight: node
             .attribute("font-weight")
             .unwrap_or("normal")
             .to_string(),
         style: node.attribute("font-style").unwrap_or("normal").to_string(),
-        line_height: attr_num(node, "line-height", 1.2),
+        line_height: attr_pos(node, "line-height", 1.2),
     }
 }
 
@@ -250,13 +291,31 @@ fn attr_num(node: roxmltree::Node, name: &str, default: f64) -> f64 {
     node.attribute(name).and_then(parse_num).unwrap_or(default)
 }
 
+fn attr_num_ns(node: roxmltree::Node, name: &str, default: f64) -> f64 {
+    node.attribute((XSVG_NS, name))
+        .and_then(parse_num)
+        .unwrap_or(default)
+}
+
+/// `attr_num` but falls back to `default` for non-positive values (e.g. a 0 or
+/// negative `font-size`), keeping degenerate input out of the layout math.
+fn attr_pos(node: roxmltree::Node, name: &str, default: f64) -> f64 {
+    let v = attr_num(node, name, default);
+    if v > 0.0 {
+        v
+    } else {
+        default
+    }
+}
+
 /// Parse a leading numeric value, tolerating a trailing unit (e.g. `"13px"` → 13.0).
+/// Rejects non-finite results (`inf`/`NaN`).
 fn parse_num(s: &str) -> Option<f64> {
     let s = s.trim();
     let end = s
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
         .unwrap_or(s.len());
-    s[..end].parse().ok()
+    s[..end].parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
 /// Format a float without a trailing `.0` for whole numbers (tidier path/coords).
@@ -337,5 +396,63 @@ mod tests {
     #[test]
     fn malformed_errors() {
         assert!(compile_impl("<svg><unclosed></svg>", "balanced", &Mono).is_err());
+    }
+
+    fn font_size_of(svg: &str) -> f64 {
+        svg.split("font-size=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap()
+    }
+
+    #[test]
+    fn text_area_wraps_and_aligns() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" height="100" font-size="10" text-anchor="middle">one two three four five</textArea></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains("<text"));
+        assert!(out.contains(r#"text-anchor="middle""#));
+        assert!(out.matches("<tspan").count() >= 2);
+        assert!(!out.contains("<textArea"));
+    }
+
+    #[test]
+    fn text_area_shrinks_with_x_fit() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><textArea x="0" y="0" width="40" height="20" font-size="40" x:fit="shrink" x:fit-min="5">long label that must shrink to fit</textArea></svg>"#;
+        let size = font_size_of(&compile_test(svg));
+        assert!(size < 40.0 && size >= 5.0, "expected shrink, got {size}");
+    }
+
+    #[test]
+    fn degenerate_text_does_not_panic() {
+        // empty textArea → empty <text>, no tspans
+        let a = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="50" height="50"></textArea></svg>"#,
+        );
+        assert!(a.contains("<text") && !a.contains("<tspan"));
+
+        // textArea with no width/height (defaults 0)
+        let b = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea>hello world</textArea></svg>"#,
+        );
+        assert!(b.contains("<text"));
+
+        // inline-size 0 → one word per line
+        let c = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="0">a b c</text></svg>"#,
+        );
+        assert_eq!(c.matches("<tspan").count(), 3);
+
+        // font-size 0 → falls back to default, no NaN from a 0/0 scale
+        let d = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="50" height="50" font-size="0" fit="shrink">hi there friend</x:textbox></svg>"#,
+        );
+        assert!(d.contains("<text") && !d.contains("NaN"));
+
+        // non-finite numeric attribute → default
+        let e = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="1e999" y="10" font-size="10" inline-size="40">x y z</text></svg>"#,
+        );
+        assert!(!e.contains("inf") && !e.contains("NaN"));
     }
 }

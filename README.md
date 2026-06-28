@@ -78,6 +78,7 @@ Parses xsvg/SVG and runs lowering passes, emitting a plain-SVG string:
 
 - sharp-cornered `<rect>` → `<path>`
 - **`<text inline-size="W">` → wrapped `<tspan>` lines** (Syntax.md Rung 1)
+- **`<textArea>` → wrapped box text** (Syntax.md Rung 2; `text-anchor` for alignment, optional `x:fit="shrink"`)
 - **`<x:textbox>` → wrapped, aligned, shrink-to-fit text** (Syntax.md Rung 3, `fit="shrink"`)
 - other `x:` extensions are recognized and skipped with a marker (later phases — see
   [Plan.md](docs/Plan.md) §3)

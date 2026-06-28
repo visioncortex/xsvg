@@ -13,6 +13,8 @@ interface FontFixture {
   baseSize: number;
   ascent: number;
   descent: number;
+  capHeight: number;
+  xHeight: number;
   space: number;
   chars: Record<string, number>;
 }
@@ -27,12 +29,14 @@ function measureFont(family: string): FontFixture {
     const ch = String.fromCharCode(i);
     chars[ch] = round(ctx.measureText(ch).width);
   }
-  const tm = ctx.measureText("Hg"); // vertical metrics are font-level
+  const box = ctx.measureText("Hg"); // em box is font-level
   return {
     family,
     baseSize: BASE,
-    ascent: round(tm.fontBoundingBoxAscent),
-    descent: round(tm.fontBoundingBoxDescent),
+    ascent: round(box.fontBoundingBoxAscent),
+    descent: round(box.fontBoundingBoxDescent),
+    capHeight: round(ctx.measureText("H").actualBoundingBoxAscent),
+    xHeight: round(ctx.measureText("x").actualBoundingBoxAscent),
     space: chars[" "],
     chars,
   };

@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 use xsvg_core::{
-    layout_area, measure_words, wrap, Align, Anchor, AreaSpec, Fit, FontMetrics, Measurer,
-    TextStyle, VAlign,
+    layout_area, layout_flow, measure_words, wrap, Align, Anchor, AreaSpec, Fit, FontMetrics,
+    Measurer, TextStyle, VAlign,
 };
 
 /// A font fixture: glyph advances and vertical metrics at `base_size`.
@@ -16,6 +16,8 @@ struct FixtureFont {
     base_size: f64,
     ascent: f64,
     descent: f64,
+    cap_height: f64,
+    x_height: f64,
     space: f64,
     chars: HashMap<char, f64>,
 }
@@ -25,6 +27,7 @@ impl FixtureFont {
         let path = format!("{}/tests/fixtures/{slug}.json", env!("CARGO_MANIFEST_DIR"));
         let txt = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
         let v: serde_json::Value = serde_json::from_str(&txt).unwrap();
+        let num = |k: &str| v[k].as_f64().unwrap();
         let chars = v["chars"]
             .as_object()
             .unwrap()
@@ -32,10 +35,12 @@ impl FixtureFont {
             .map(|(k, val)| (k.chars().next().unwrap(), val.as_f64().unwrap()))
             .collect();
         FixtureFont {
-            base_size: v["baseSize"].as_f64().unwrap(),
-            ascent: v["ascent"].as_f64().unwrap(),
-            descent: v["descent"].as_f64().unwrap(),
-            space: v["space"].as_f64().unwrap(),
+            base_size: num("baseSize"),
+            ascent: num("ascent"),
+            descent: num("descent"),
+            cap_height: num("capHeight"),
+            x_height: num("xHeight"),
+            space: num("space"),
             chars,
         }
     }
@@ -54,6 +59,8 @@ impl Measurer for FixtureFont {
         FontMetrics {
             ascent: self.ascent * k,
             descent: self.descent * k,
+            cap_height: self.cap_height * k,
+            x_height: self.x_height * k,
         }
     }
 }
@@ -138,9 +145,9 @@ fn shrink_to_fit_respects_box_in_every_font() {
     }
 }
 
-/// Placement uses the fixture's real ascent and centers correctly.
+/// Placement uses the fixture's real cap-height and centers correctly.
 #[test]
-fn placement_uses_real_ascent_and_centers() {
+fn placement_uses_cap_height_and_centers() {
     let font = FixtureFont::load("times-new-roman");
     let st = style(20.0);
     let spec = AreaSpec {
@@ -160,9 +167,8 @@ fn placement_uses_real_ascent_and_centers() {
     let (cx, cw) = (10.0 + 10.0, 120.0 - 20.0);
     assert!((out.lines[0].x - (cx + cw / 2.0)).abs() < TOL);
 
-    // vertical: top-aligned, first baseline = content top + ascent(20px).
-    // Times ascent 89 @100px → 17.8 @20px.
-    let expected = cx + font.ascent * 20.0 / 100.0; // cy == cx here (both 20)
+    // vertical: top-aligned → first baseline = content top + cap_height(20px).
+    let expected = cx + font.cap_height * 20.0 / 100.0; // cy == cx here (both 20)
     assert!(
         (out.lines[0].baseline - expected).abs() < 1e-3,
         "baseline {} != {expected}",
@@ -213,4 +219,88 @@ fn fonts_can_wrap_differently() {
     );
     // sanity: descent is positive in a loaded fixture
     assert!(FixtureFont::load("georgia").descent > 0.0);
+}
+
+/// Degenerate geometry must not panic and must produce sane output, every font.
+#[test]
+fn degenerate_layouts_hold_across_fonts() {
+    for slug in FONTS {
+        let font = FixtureFont::load(slug);
+        let st = style(20.0);
+        let base = AreaSpec {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 60.0,
+            padding: 8.0,
+            align: Align::Center,
+            valign: VAlign::Middle,
+            fit: Fit::None,
+        };
+
+        assert!(
+            layout_area("", &st, &base, &font).lines.is_empty(),
+            "{slug}: empty text should yield no lines"
+        );
+
+        let zero = AreaSpec {
+            width: 0.0,
+            height: 0.0,
+            padding: 0.0,
+            fit: Fit::Shrink { min: 5.0 },
+            ..base
+        };
+        let out = layout_area("alpha beta gamma", &st, &zero, &font);
+        assert_eq!(out.font_size, 5.0, "{slug}");
+        assert_eq!(out.lines.len(), 3, "{slug}: zero width → one word per line");
+
+        let long = layout_area("supercalifragilisticexpialidocious", &st, &base, &font);
+        assert_eq!(
+            long.lines.len(),
+            1,
+            "{slug}: long word is one overflow line"
+        );
+    }
+}
+
+/// `layout_flow` puts the first baseline at `y` (the SVG `<text>` convention).
+#[test]
+fn flow_first_baseline_at_y_real_font() {
+    let font = FixtureFont::load("arial");
+    let st = style(16.0);
+    let lines = layout_flow("hello world", &st, 5.0, 40.0, 1000.0, &font);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].x, 5.0);
+    assert_eq!(lines[0].baseline, 40.0);
+}
+
+/// Descenders must not move the baseline: alignment reserves the *font's* descent
+/// (constant), not the per-string ink, so a descender-free and a descender-heavy
+/// label land on the exact same baseline for every valign.
+#[test]
+fn descenders_do_not_shift_alignment() {
+    let font = FixtureFont::load("arial");
+    let st = style(20.0);
+    for valign in [VAlign::Top, VAlign::Middle, VAlign::Bottom] {
+        let spec = AreaSpec {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 80.0,
+            padding: 8.0,
+            align: Align::Start,
+            valign,
+            fit: Fit::None,
+        };
+        let plain = layout_area("Aa Bb", &st, &spec, &font);
+        let desc = layout_area("Aa Gg", &st, &spec, &font);
+        assert_eq!(plain.lines.len(), 1);
+        assert_eq!(desc.lines.len(), 1);
+        assert!(
+            (plain.lines[0].baseline - desc.lines[0].baseline).abs() < TOL,
+            "{valign:?}: descender shifted baseline {} vs {}",
+            plain.lines[0].baseline,
+            desc.lines[0].baseline
+        );
+    }
 }
