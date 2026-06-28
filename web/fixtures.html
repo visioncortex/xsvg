@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xsvg — font metric fixtures</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; color: #0f172a; }
+      #downloads a { margin-right: 14px; color: #2563eb; }
+      pre { background: #f1f5f9; padding: 12px; border-radius: 8px; overflow: auto; max-height: 50vh; }
+    </style>
+  </head>
+  <body>
+    <h1>font metric fixtures</h1>
+    <p>
+      Per-glyph advance widths + vertical metrics measured via canvas
+      <code>measureText</code> at a 100px base size. Download each font's JSON into
+      <code>crates/xsvg-core/tests/fixtures/</code>.
+    </p>
+    <div id="downloads"></div>
+    <pre id="readable"></pre>
+    <!-- base64 marker for headless capture (avoids HTML-escaping of < > & char keys) -->
+    <pre id="out" style="display: none"></pre>
+    <script type="module" src="/src/fixtures.ts"></script>
+  </body>
+</html>

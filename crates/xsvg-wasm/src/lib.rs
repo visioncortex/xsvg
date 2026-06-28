@@ -13,7 +13,9 @@
 //! core layout logic lives in `xsvg-core` and stays platform-free.
 
 use wasm_bindgen::prelude::*;
-use xsvg_core::{fit_size, measure_words, wrap, Measurer, TextStyle};
+use xsvg_core::{
+    layout_area, measure_words, wrap, Align, AreaSpec, Fit, Measurer, TextStyle, VAlign,
+};
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
@@ -33,7 +35,11 @@ impl Measurer for JsMeasurer<'_> {
     fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
         let css = style.font_css(size);
         self.func
-            .call2(&JsValue::NULL, &JsValue::from_str(text), &JsValue::from_str(&css))
+            .call2(
+                &JsValue::NULL,
+                &JsValue::from_str(text),
+                &JsValue::from_str(&css),
+            )
             .ok()
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0)
@@ -54,7 +60,10 @@ pub fn compile_impl(input: &str, quality: &str, m: &dyn Measurer) -> Result<Stri
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
 
     let mut out = String::new();
-    out.push_str(&format!("<!-- compiled by xsvg v0 (quality={}) -->\n", q.as_str()));
+    out.push_str(&format!(
+        "<!-- compiled by xsvg v0 (quality={}) -->\n",
+        q.as_str()
+    ));
     serialize(doc.root_element(), &mut out, true, m);
     Ok(out)
 }
@@ -152,54 +161,41 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
 }
 
 /// `<x:textbox>` → wrapped, aligned, optionally shrink-to-fit `<text>`.
+/// All placement math lives in `xsvg_core::text::area`; here we just read
+/// attributes, lay out, and serialize.
 fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     let style = style_from(node);
-    let bx = attr_num(node, "x", 0.0);
-    let by = attr_num(node, "y", 0.0);
-    let bw = attr_num(node, "width", 0.0);
-    let bh = attr_num(node, "height", 0.0);
-    let pad = attr_num(node, "padding", 0.0);
-    let align = node.attribute("align").unwrap_or("start");
-    let valign = node.attribute("valign").unwrap_or("top");
-    let fit = node.attribute("fit").unwrap_or("none");
-    let fit_min = attr_num(node, "fit-min", 6.0);
+    let spec = AreaSpec {
+        x: attr_num(node, "x", 0.0),
+        y: attr_num(node, "y", 0.0),
+        width: attr_num(node, "width", 0.0),
+        height: attr_num(node, "height", 0.0),
+        padding: attr_num(node, "padding", 0.0),
+        align: Align::parse(node.attribute("align").unwrap_or("start")),
+        valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
+        fit: if node.attribute("fit") == Some("shrink") {
+            Fit::Shrink {
+                min: attr_num(node, "fit-min", 6.0),
+            }
+        } else {
+            Fit::None
+        },
+    };
     let fill = node.attribute("fill").unwrap_or("#000");
 
-    let (cx, cy, cw, ch) = (bx + pad, by + pad, bw - 2.0 * pad, bh - 2.0 * pad);
-
-    let text = collect_text(node);
-    let measured = measure_words(&text, &style, m);
-
-    let size = if fit == "shrink" {
-        fit_size(&measured, style.size, style.line_height, cw, ch, fit_min)
-    } else {
-        style.size
-    };
-    let scale = size / style.size;
-    let lines = wrap(&measured, cw, scale);
-    let advance = size * style.line_height;
-    let block_h = lines.len() as f64 * advance;
-
-    let (anchor, ax) = match align {
-        "center" => ("middle", cx + cw / 2.0),
-        "end" => ("end", cx + cw),
-        _ => ("start", cx),
-    };
-    let top = match valign {
-        "middle" => cy + (ch - block_h) / 2.0,
-        "bottom" => cy + (ch - block_h),
-        _ => cy,
-    };
-    let first_baseline = top + size * 0.8; // approx ascent
+    let layout = layout_area(&collect_text(node), &style, &spec, m);
 
     out.push_str(&format!(
-        "<text text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">",
-        style.family, fmt(size), style.weight, style.style, fill
+        "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">",
+        layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
     ));
-    for (i, line) in lines.iter().enumerate() {
-        let ly = first_baseline + i as f64 * advance;
-        out.push_str(&format!("<tspan x=\"{}\" y=\"{}\">", fmt(ax), fmt(ly)));
-        push_escaped(out, line, false);
+    for line in &layout.lines {
+        out.push_str(&format!(
+            "<tspan x=\"{}\" y=\"{}\">",
+            fmt(line.x),
+            fmt(line.baseline)
+        ));
+        push_escaped(out, &line.text, false);
         out.push_str("</tspan>");
     }
     out.push_str("</text>");
@@ -209,9 +205,15 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
 
 fn style_from(node: roxmltree::Node) -> TextStyle {
     TextStyle {
-        family: node.attribute("font-family").unwrap_or("sans-serif").to_string(),
+        family: node
+            .attribute("font-family")
+            .unwrap_or("sans-serif")
+            .to_string(),
         size: attr_num(node, "font-size", 16.0),
-        weight: node.attribute("font-weight").unwrap_or("normal").to_string(),
+        weight: node
+            .attribute("font-weight")
+            .unwrap_or("normal")
+            .to_string(),
         style: node.attribute("font-style").unwrap_or("normal").to_string(),
         line_height: attr_num(node, "line-height", 1.2),
     }

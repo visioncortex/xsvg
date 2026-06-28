@@ -6,3 +6,7 @@ description = "xsvg shared types (pure Rust, no platform deps)."
 publish = false
 
 [dependencies]
+
+[dev-dependencies]
+# test-only (does not affect the library or the wasm build)
+serde_json = "1"
