@@ -13,8 +13,21 @@ function ensureReady(): Promise<unknown> {
   return ready;
 }
 
+// Font metrics for text layout — the browser implementation of the core's
+// `Measurer` seam. The Rust compiler calls this back synchronously during
+// lowering (e.g. for `inline-size` wrapping and `<x:textbox>` shrink-to-fit).
+let measureCtx: CanvasRenderingContext2D | null = null;
+function measure(text: string, fontCss: string): number {
+  if (!measureCtx) {
+    measureCtx = document.createElement("canvas").getContext("2d");
+  }
+  if (!measureCtx) return 0;
+  measureCtx.font = fontCss;
+  return measureCtx.measureText(text).width;
+}
+
 /** Compile an xsvg source string to a plain-SVG string (runs entirely client-side). */
 export async function compileXsvg(source: string, quality = "balanced"): Promise<string> {
   await ensureReady();
-  return compile(source, quality);
+  return compile(source, quality, measure);
 }

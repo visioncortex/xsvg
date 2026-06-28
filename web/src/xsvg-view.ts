@@ -44,7 +44,9 @@ export class XsvgView extends HTMLElement {
       const source = await this.readSource();
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
-      this.shadow.innerHTML = await compileXsvg(source, quality);
+      const svg = await compileXsvg(source, quality);
+      // compiled SVGs have a viewBox but no width/height — make it fill the host
+      this.shadow.innerHTML = `<style>svg{display:block;width:100%;height:auto}</style>${svg}`;
     } catch (err) {
       this.shadow.innerHTML = `<pre style="color:#b00020;white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace;margin:0">${escapeHtml(
         String(err),

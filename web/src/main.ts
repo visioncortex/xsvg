@@ -1,66 +1,78 @@
-// v0 dev playground: edit xsvg on the left, see the compiled SVG render on the
-// right, plus the emitted SVG source. Also instantiates an <xsvg-view> to
-// exercise the embeddable-component path.
-import "./xsvg-view"; // registers <xsvg-view>
+// Full-screen xsvg viewer + a dev-only sample index.
+//
+//   /                     → (dev only) a <ul> index of dataset/ samples
+//   /view/<name>.xsvg     → that sample, rendered full-screen
+//   /?file=<name>         → same, via query param (works on any static host)
+//
+// The compiled SVG fills the viewport; the chosen sample, source, compiled
+// output, and sample list are logged to the console.
 import { compileXsvg } from "./xsvg";
 
-const DEMO = `<svg xmlns="http://www.w3.org/2000/svg"
-     xmlns:x="https://xsvg.dev/ns"
-     viewBox="0 0 220 140">
-  <!-- this <rect> is lowered to a <path> by the compiler -->
-  <rect x="10" y="10" width="200" height="120" fill="#eef2ff" stroke="#8899cc"/>
-  <text x="110" y="74" text-anchor="middle" font-family="sans-serif" font-size="14">
-    edit me — hello xsvg
-  </text>
-</svg>`;
+// All dataset samples, enumerated from the directory at build time (raw strings).
+// In dev, Vite re-evaluates this glob when files are added/removed.
+const sampleModules = import.meta.glob("../../dataset/*.xsvg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+const samples: Record<string, string> = {};
+for (const [path, content] of Object.entries(sampleModules)) {
+  samples[path.split("/").pop()!] = content; // "wrap-vs-overflow.xsvg"
+}
+const sampleNames = Object.keys(samples).sort();
+const DEFAULT_SAMPLE = sampleNames.includes("wrap-vs-overflow.xsvg")
+  ? "wrap-vs-overflow.xsvg"
+  : sampleNames[0];
+
+/** Sample explicitly requested by `/view/<name>` or `?file=<name>`, else null. */
+function requestedSample(): string | null {
+  const fromPath = location.pathname.match(/^\/view\/(.+)$/)?.[1];
+  let name = fromPath
+    ? decodeURIComponent(fromPath)
+    : (new URLSearchParams(location.search).get("file") ?? "");
+  if (!name) return null;
+  if (!name.endsWith(".xsvg")) name += ".xsvg";
+  return samples[name] ? name : null;
+}
 
 const app = document.getElementById("app")!;
-app.innerHTML = `
-  <header>
-    <h1>xsvg <span class="tag">v0</span></h1>
-    <p>Pure-Rust core → WASM, compiled in your browser. Edit the source; output updates live.</p>
-  </header>
-  <main>
-    <section class="pane">
-      <h2>source (xsvg)</h2>
-      <textarea id="src" spellcheck="false"></textarea>
-    </section>
-    <section class="pane">
-      <h2>rendered (browser draws the compiled SVG)</h2>
-      <div id="preview" class="preview"></div>
-    </section>
-    <section class="pane">
-      <h2>output (compiled SVG)</h2>
-      <pre id="out"></pre>
-    </section>
-  </main>
-  <footer>
-    <h2>&lt;xsvg-view&gt; component</h2>
-    <xsvg-view>
-      <script type="application/xsvg+xml"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60"><rect x="5" y="5" width="110" height="50" fill="#fff7ed" stroke="#fb923c"/><text x="60" y="35" text-anchor="middle" font-family="sans-serif" font-size="12">via component</text></svg></script>
-    </xsvg-view>
-  </footer>`;
 
-const srcEl = document.getElementById("src") as HTMLTextAreaElement;
-const preview = document.getElementById("preview")!;
-const out = document.getElementById("out")!;
-srcEl.value = DEMO;
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
-async function run() {
+function renderIndex() {
+  console.log("[xsvg] index — samples in dataset/:", sampleNames);
+  const items = sampleNames
+    .map((n) => `<li><a href="/view/${encodeURIComponent(n)}">${escapeHtml(n)}</a></li>`)
+    .join("");
+  app.innerHTML = `<nav class="index"><h1>xsvg samples</h1><ul>${items}</ul></nav>`;
+}
+
+async function renderSample(name: string) {
+  const source = samples[name] ?? "";
+  console.log("%c[xsvg] sample: " + name, "font-weight:bold");
+  console.log("[xsvg] source:\n" + source);
   try {
-    const svg = await compileXsvg(srcEl.value, "balanced");
-    preview.innerHTML = svg;
-    out.textContent = svg;
+    const svg = await compileXsvg(source, "balanced");
+    console.log("[xsvg] compiled SVG:\n" + svg);
+    app.innerHTML = svg;
   } catch (err) {
-    preview.innerHTML = "";
-    out.textContent = String(err);
+    console.error("[xsvg] compile error:", err);
+    app.innerHTML = `<pre class="error">${escapeHtml(String(err))}</pre>`;
   }
 }
 
-let timer: number | undefined;
-srcEl.addEventListener("input", () => {
-  window.clearTimeout(timer);
-  timer = window.setTimeout(run, 150);
-});
+async function render() {
+  const name = requestedSample();
+  if (name) {
+    await renderSample(name);
+  } else if (import.meta.env.DEV) {
+    renderIndex();
+  } else {
+    await renderSample(DEFAULT_SAMPLE);
+  }
+}
 
-void run();
+window.addEventListener("popstate", () => void render());
+void render();

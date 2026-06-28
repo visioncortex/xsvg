@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 560 210" font-family="sans-serif">
+  <text x="20" y="24" font-size="13" font-weight="bold" fill="#0f172a">The problem, and two fixes</text>
+
+  <!-- A: plain SVG text — overflows the box -->
+  <text x="20" y="50" font-size="11" fill="#64748b">plain &lt;text&gt; — overflows</text>
+  <rect x="20" y="60" width="150" height="120" rx="8" fill="#fef2f2" stroke="#f87171"/>
+  <text x="30" y="92" font-size="14" fill="#7f1d1d">This caption is far too long to fit and spills out of the box</text>
+
+  <!-- B: add inline-size — wraps to the width -->
+  <text x="205" y="50" font-size="11" fill="#64748b">inline-size — wraps</text>
+  <rect x="205" y="60" width="150" height="120" rx="8" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="215" y="86" font-size="14" fill="#1e3a8a" inline-size="130">This caption is far too long to fit and spills out of the box</text>
+
+  <!-- C: x:textbox fit="shrink" — wraps, centers, and shrinks to fit -->
+  <text x="390" y="50" font-size="11" fill="#64748b">x:textbox fit="shrink"</text>
+  <rect x="390" y="60" width="150" height="120" rx="8" fill="#f0fdf4" stroke="#4ade80"/>
+  <x:textbox x="390" y="60" width="150" height="120" padding="12" align="center" valign="middle"
+             font-size="22" fit="shrink" fit-min="7" fill="#14532d">This caption is far too long to fit and spills out of the box</x:textbox>
+</svg>
