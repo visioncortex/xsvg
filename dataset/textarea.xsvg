@@ -1,13 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
-     viewBox="0 0 380 180" font-family="sans-serif">
-  <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">&lt;textArea&gt; — Rung 2</text>
+     viewBox="0 0 400 210" font-family="sans-serif">
+  <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">&lt;textArea&gt; — SVG Tiny 1.2 flowed text</text>
 
-  <text x="20" y="48" font-size="11" fill="#64748b">wraps to the box width</text>
-  <rect x="20" y="58" width="150" height="110" rx="8" fill="#eff6ff" stroke="#60a5fa"/>
-  <textArea x="28" y="66" width="134" height="96" font-size="14" fill="#1e3a8a">A textArea flows its text top-down and wraps to the box width, just like SVG 1.2 Tiny intended.</textArea>
+  <text x="20" y="46" font-size="11" fill="#64748b">text-align:start · display-align:before</text>
+  <rect x="20" y="54" width="170" height="140" rx="6" fill="#eff6ff" stroke="#60a5fa"/>
+  <textArea x="30" y="62" width="150" height="124" font-size="14" fill="#1e3a8a">A textArea wraps its text to the width and flows top-down, the way SVG Tiny 1.2 specifies.</textArea>
 
-  <text x="200" y="48" font-size="11" fill="#64748b">text-anchor + x:fit</text>
-  <rect x="200" y="58" width="160" height="110" rx="8" fill="#f0fdf4" stroke="#4ade80"/>
-  <textArea x="208" y="66" width="144" height="96" font-size="30" text-anchor="middle"
-            x:fit="shrink" x:fit-min="7" fill="#14532d">Centered, and shrunk just enough to fit inside this fixed box.</textArea>
+  <text x="210" y="46" font-size="11" fill="#64748b">text-align:center · display-align:center</text>
+  <rect x="210" y="54" width="170" height="140" rx="6" fill="#f0fdf4" stroke="#4ade80"/>
+  <textArea x="220" y="62" width="150" height="124" font-size="14" text-align="center" display-align="center" fill="#14532d">Centered both ways using text-align and display-align.</textArea>
 </svg>

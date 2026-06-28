@@ -9,7 +9,7 @@ wrapping, and `<x:textbox>` shrink-to-fit). Each is a complete `<svg xmlns:x="â€
 | [pipeline.xsvg](pipeline.xsvg) | Boxes + arrows; each stage label wraps & shrinks to fit a uniform box |
 | [flowchart.xsvg](flowchart.xsvg) | Start / process / decision (diamond) / end, with wrapping labels |
 | [cards.xsvg](cards.xsvg) | Equal-size cards whose variable-length descriptions all shrink to fit |
-| [textarea.xsvg](textarea.xsvg) | `<textArea>` (Rung 2): top-down box flow + `text-anchor` + `x:fit` |
+| [textarea.xsvg](textarea.xsvg) | `<textArea>` (Rung 2, SVG Tiny 1.2): `text-align`, `display-align`, `line-increment`, auto width/height |
 | [alignment.xsvg](alignment.xsvg) | `<x:textbox>` align Ã— valign matrix (all nine placements) |
 | [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |

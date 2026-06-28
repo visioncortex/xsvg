@@ -14,7 +14,8 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area, layout_flow, Align, AreaLayout, AreaSpec, Fit, Measurer, TextStyle, VAlign,
+    layout_area, layout_flow, layout_text_area, Align, AreaLayout, AreaSpec, DisplayAlign, Fit,
+    LineIncrement, Measurer, TextAlign, TextAreaSpec, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -184,23 +185,21 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     );
 }
 
-/// `<textArea>` (Rung 2, SVG 1.2 Tiny vocabulary): top-aligned flow in a box;
-/// horizontal alignment from `text-anchor`, optional shrink via `x:fit`.
+/// `<textArea>` (Rung 2, SVG Tiny 1.2 vocabulary): flowed text per the spec —
+/// `text-align` (inline), `display-align` (block), `line-increment` (line height),
+/// and `auto` width/height.
 fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     let style = style_from(node);
-    let spec = AreaSpec {
+    let spec = TextAreaSpec {
         x: attr_num(node, "x", 0.0),
         y: attr_num(node, "y", 0.0),
-        width: attr_num(node, "width", 0.0),
-        height: attr_num(node, "height", 0.0),
-        padding: 0.0,
-        align: align_from_anchor(node.attribute("text-anchor")),
-        valign: VAlign::Top,
-        fit: fit_from(node.attribute((XSVG_NS, "fit")), || {
-            attr_num_ns(node, "fit-min", 6.0)
-        }),
+        width: dim_attr(node, "width"),
+        height: dim_attr(node, "height"),
+        text_align: TextAlign::parse(node.attribute("text-align").unwrap_or("start")),
+        display_align: DisplayAlign::parse(node.attribute("display-align").unwrap_or("auto")),
+        line_increment: line_increment_attr(node),
     };
-    let layout = layout_area(&collect_text(node), &style, &spec, m);
+    let layout = layout_text_area(&collect_text(node), &style, &spec, m);
     write_area_text(
         out,
         &layout,
@@ -234,11 +233,20 @@ fn fit_from(fit: Option<&str>, min: impl FnOnce() -> f64) -> Fit {
     }
 }
 
-fn align_from_anchor(anchor: Option<&str>) -> Align {
-    match anchor {
-        Some("middle") => Align::Center,
-        Some("end") => Align::End,
-        _ => Align::Start,
+/// A textArea dimension: absent or `"auto"` → `None` (auto), else a parsed length.
+fn dim_attr(node: roxmltree::Node, name: &str) -> Option<f64> {
+    match node.attribute(name) {
+        None | Some("auto") => None,
+        Some(v) => parse_num(v),
+    }
+}
+
+fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
+    match node.attribute("line-increment") {
+        None | Some("auto") => LineIncrement::Auto,
+        Some(v) => parse_num(v)
+            .map(LineIncrement::Fixed)
+            .unwrap_or(LineIncrement::Auto),
     }
 }
 
@@ -289,12 +297,6 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
 
 fn attr_num(node: roxmltree::Node, name: &str, default: f64) -> f64 {
     node.attribute(name).and_then(parse_num).unwrap_or(default)
-}
-
-fn attr_num_ns(node: roxmltree::Node, name: &str, default: f64) -> f64 {
-    node.attribute((XSVG_NS, name))
-        .and_then(parse_num)
-        .unwrap_or(default)
 }
 
 /// `attr_num` but falls back to `default` for non-positive values (e.g. a 0 or
@@ -398,29 +400,27 @@ mod tests {
         assert!(compile_impl("<svg><unclosed></svg>", "balanced", &Mono).is_err());
     }
 
-    fn font_size_of(svg: &str) -> f64 {
-        svg.split("font-size=\"")
-            .nth(1)
-            .and_then(|s| s.split('"').next())
-            .and_then(|s| s.parse().ok())
-            .unwrap()
-    }
-
     #[test]
-    fn text_area_wraps_and_aligns() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" height="100" font-size="10" text-anchor="middle">one two three four five</textArea></svg>"#;
+    fn text_area_wraps_and_uses_text_align() {
+        // SVG Tiny 1.2: text-align (not text-anchor); explicit width wraps.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" height="100" font-size="10" text-align="center">one two three four five</textArea></svg>"#;
         let out = compile_test(svg);
         assert!(out.contains("<text"));
-        assert!(out.contains(r#"text-anchor="middle""#));
+        assert!(out.contains(r#"text-anchor="middle""#)); // text-align:center → anchor middle
         assert!(out.matches("<tspan").count() >= 2);
         assert!(!out.contains("<textArea"));
     }
 
     #[test]
-    fn text_area_shrinks_with_x_fit() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><textArea x="0" y="0" width="40" height="20" font-size="40" x:fit="shrink" x:fit-min="5">long label that must shrink to fit</textArea></svg>"#;
-        let size = font_size_of(&compile_test(svg));
-        assert!(size < 40.0 && size >= 5.0, "expected shrink, got {size}");
+    fn text_area_auto_width_does_not_wrap() {
+        // lacuna width = auto ⇒ single line, no wrapping
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="10" font-size="10">one two three four five</textArea></svg>"#;
+        let out = compile_test(svg);
+        assert_eq!(
+            out.matches("<tspan").count(),
+            1,
+            "auto width must not wrap: {out}"
+        );
     }
 
     #[test]
@@ -431,11 +431,11 @@ mod tests {
         );
         assert!(a.contains("<text") && !a.contains("<tspan"));
 
-        // textArea with no width/height (defaults 0)
+        // textArea with no width/height (lacuna = auto) → single unwrapped line
         let b = compile_test(
             r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea>hello world</textArea></svg>"#,
         );
-        assert!(b.contains("<text"));
+        assert_eq!(b.matches("<tspan").count(), 1);
 
         // inline-size 0 → one word per line
         let c = compile_test(

@@ -68,16 +68,21 @@ Optional unprefixed companions (real CSS names): `text-wrap="balance"` (even rag
 for labels), `line-height`. **Lowers to** positioned `<tspan>`s (v0, browser-shaped) or outlined
 `<path>` runs (Phase 2b).
 
-### Rung 2 — `<textArea>` *(swap the tag)*
+### Rung 2 — `<textArea>` *(swap the tag — SVG Tiny 1.2)*
 
-A width × height **box** with wrapping. Revives SVG 1.2 Tiny's element; familiar spec name.
+A box with flowed text, implemented to the **SVG Tiny 1.2** spec: `text-align`
+(`start|end|center`), `display-align` (`before|center|after`), `line-increment`
+(`auto` = 1.1·em, or a length), and `auto` width/height (`width:auto` ⇒ no wrap;
+`height:auto` ⇒ grow; an explicit height clips overflow lines).
 
 ```svg
-<textArea x="15" y="15" width="150" height="50">
-  Long label that wraps inside a fixed box
+<textArea x="15" y="15" width="150" height="60"
+          text-align="center" display-align="center">
+  Long label that wraps inside the box
 </textArea>
 ```
-Because it has *both* dimensions, this is where **fitting** (below) becomes meaningful.
+For richer control — padding, cap-height vertical centring, shrink-to-fit, binding
+to a shape — use the xsvg `<x:textbox>` below.
 
 ### Rung 3 — `<x:textbox>` *(full diagram ergonomics)*
 
@@ -99,14 +104,13 @@ are unprefixed (we own the element): `padding`, `align` (start|center|end), `val
 
 ## Fitting text to a box — `fit` *(shrink-to-fit and friends)*
 
-The requested mode: **make the font size smaller until the whole paragraph fits the box.** Applies to
-any *bounded* box (Rung 2 `<textArea>` or Rung 3 `<x:textbox>`; on a standard element it's `x:fit`,
-inside `<x:textbox>` it's plain `fit`).
+The requested mode: **make the font size smaller until the whole paragraph fits the box.** This is an
+xsvg extension on **`<x:textbox>`** (SVG Tiny 1.2's `<textArea>` has no fit — use a textbox for it).
 
 ```svg
-<textArea x="15" y="15" width="150" height="50" x:fit="shrink" x:fit-min="9">
+<x:textbox x="15" y="15" width="150" height="50" fit="shrink" fit-min="9">
   This paragraph shrinks its font size just enough to fit in the box, down to a 9px floor
-</textArea>
+</x:textbox>
 ```
 
 **`fit` values:**
