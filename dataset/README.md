@@ -10,6 +10,8 @@ wrapping, and `<x:textbox>` shrink-to-fit). Each is a complete `<svg xmlns:x="�
 | [flowchart.xsvg](flowchart.xsvg) | Start / process / decision (diamond) / end, with wrapping labels |
 | [cards.xsvg](cards.xsvg) | Equal-size cards whose variable-length descriptions all shrink to fit |
 | [textarea.xsvg](textarea.xsvg) | `<textArea>` (Rung 2, SVG Tiny 1.2): `text-align`, `display-align`, `line-increment`, auto width/height |
+| [textarea-align.xsvg](textarea-align.xsvg) | `<textArea>` `text-align` × `display-align` matrix (all nine) |
+| [textarea-sizing.xsvg](textarea-sizing.xsvg) | `<textArea>` `width=auto` (no wrap), wrapping, height clipping, `line-increment` auto/loose/tight |
 | [alignment.xsvg](alignment.xsvg) | `<x:textbox>` align × valign matrix (all nine placements) |
 | [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |
