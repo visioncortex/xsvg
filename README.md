@@ -4,6 +4,7 @@
 compiled to WASM, run entirely client-side in the browser.
 
 - [Vision.md](docs/Vision.md) — north star
+- [Specification.md](docs/Specification.md) — normative spec (language + lowering rules), evolving
 - [Plan.md](docs/Plan.md) — architecture, roadmap, first-milestone spec
 - [Syntax.md](docs/Syntax.md) — language design (graceful-degradation superset of SVG)
 - [Typography.md](docs/Typography.md) — typesetting capabilities catalog

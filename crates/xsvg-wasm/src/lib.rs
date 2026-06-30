@@ -15,7 +15,7 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area, layout_flow, layout_text_area, Align, AreaLayout, AreaSpec, DisplayAlign, Fit,
-    LineIncrement, Measurer, TextAlign, TextAreaSpec, TextStyle, VAlign,
+    LineIncrement, Measurer, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -175,6 +175,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         align: Align::parse(node.attribute("align").unwrap_or("start")),
         valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
         fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
+        text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
     let layout = layout_area(&collect_text(node), &style, &spec, m);
     write_area_text(
@@ -198,6 +199,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         text_align: TextAlign::parse(node.attribute("text-align").unwrap_or("start")),
         display_align: DisplayAlign::parse(node.attribute("display-align").unwrap_or("auto")),
         line_increment: line_increment_attr(node),
+        text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
     let layout = layout_text_area(&collect_text(node), &style, &spec, m);
     write_area_text(
@@ -454,5 +456,14 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="1e999" y="10" font-size="10" inline-size="40">x y z</text></svg>"#,
         );
         assert!(!e.contains("inf") && !e.contains("NaN"));
+    }
+
+    #[test]
+    fn text_overflow_ellipsis_emits_marker() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="80" height="30" font-size="12" text-overflow="ellipsis">this paragraph is far too tall to fit inside the short box provided here</textArea></svg>"#;
+        assert!(compile_test(svg).contains('…'), "expected ellipsis marker");
+        // default (clip) emits no marker
+        let clip = svg.replace(" text-overflow=\"ellipsis\"", "");
+        assert!(!compile_test(&clip).contains('…'));
     }
 }

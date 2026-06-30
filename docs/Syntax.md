@@ -121,8 +121,9 @@ xsvg extension on **`<x:textbox>`** (SVG Tiny 1.2's `<textArea>` has no fit — 
 | `grow-shrink` | scale font size to best fill the box in either direction |
 
 **Companions:** `fit-min` (font-size floor, e.g. `9`), `fit-max` (cap for `grow-shrink`, default =
-the authored `font-size`), `fit-overflow` (`visible` | `clip` | `ellipsis`) — what to do if it still
-won't fit at `fit-min`.
+the authored `font-size`). What to do when it *still* doesn't fit at `fit-min` is governed by
+`text-overflow` (`clip` | `ellipsis`) — specified in [Specification.md §6.6](Specification.md). The
+pipeline is shrink-to-fit → then truncate.
 
 **Algorithm (engine):** binary-search the font size in `[fit-min, font-size]`; at each trial,
 re-wrap at the box width and measure total block height; pick the largest size whose block fits
@@ -135,8 +136,8 @@ v0, in Chrome and Safari.
 
 > Font-size shrink is the readable default. Other "copyfit" strategies from
 > [Typography.md](Typography.md) — horizontal glyph condensing (`textLength`-style), tracking/leading
-> reduction, truncation/ellipsis — are alternative or fallback fit strategies we can add later (e.g.
-> shrink to `fit-min`, then `fit-overflow="ellipsis"`).
+> reduction — are alternative fit strategies we can add later. Overflow truncation (`text-overflow`)
+> is specified separately in [Specification.md §6.6](Specification.md).
 
 ---
 

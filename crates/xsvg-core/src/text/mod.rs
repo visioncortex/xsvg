@@ -15,6 +15,7 @@ pub mod fit;
 pub mod measure;
 pub mod style;
 pub mod text_area;
+pub mod truncate;
 pub mod wrap;
 
 // Glob re-exports: the public API is governed by `pub` vs `pub(crate)` at each
@@ -25,6 +26,7 @@ pub use area::*;
 pub use measure::*;
 pub use style::*;
 pub use text_area::*;
+pub use truncate::*;
 pub use wrap::*;
 
 #[cfg(test)]

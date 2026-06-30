@@ -9,6 +9,7 @@
 use super::area::{Anchor, AreaLayout, PlacedLine};
 use super::measure::{measure_words, Measurer};
 use super::style::TextStyle;
+use super::truncate::{apply_ellipsis, TextOverflow};
 use super::wrap::wrap;
 
 /// `text-align` — inline alignment of lines.
@@ -82,6 +83,7 @@ pub struct TextAreaSpec {
     pub text_align: TextAlign,
     pub display_align: DisplayAlign,
     pub line_increment: LineIncrement,
+    pub text_overflow: TextOverflow,
 }
 
 /// Lay flowed text into a textArea per SVG Tiny 1.2: wrap to the width (or not, if
@@ -123,11 +125,13 @@ pub fn layout_text_area(
     };
 
     let mut lines = Vec::new();
+    let mut dropped = false;
     for (i, text) in line_texts.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
         if let Some(h) = spec.height {
             let box_top = baseline - baseline_offset;
             if box_top < spec.y - 1e-6 || box_top + line_h > spec.y + h + 1e-6 {
+                dropped = true;
                 continue; // outside the region in the block direction → not rendered
             }
         }
@@ -136,6 +140,9 @@ pub fn layout_text_area(
             x: ax,
             baseline,
         });
+    }
+    if spec.text_overflow == TextOverflow::Ellipsis {
+        apply_ellipsis(&mut lines, dropped, max_w, style, size, m);
     }
 
     AreaLayout {
@@ -159,6 +166,7 @@ mod tests {
             text_align: TextAlign::Start,
             display_align: DisplayAlign::Before,
             line_increment: LineIncrement::Auto,
+            text_overflow: TextOverflow::Clip,
         }
     }
 
@@ -268,5 +276,18 @@ mod tests {
             &Mono(0.1),
         );
         assert_eq!(out.lines.len(), 2);
+    }
+
+    #[test]
+    fn ellipsis_marks_clipped_textarea() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let mut s = spec(Some(2.0), Some(30.0));
+        s.text_overflow = TextOverflow::Ellipsis;
+        let out = layout_text_area("aa bb cc dd ee ff", &st, &s, &Mono(0.1));
+        assert!(!out.lines.is_empty());
+        assert!(out.lines.last().unwrap().text.ends_with('…'));
     }
 }

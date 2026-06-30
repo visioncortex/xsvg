@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use xsvg_core::{
     layout_area, layout_flow, measure_words, wrap, Align, Anchor, AreaSpec, Fit, FontMetrics,
-    Measurer, TextStyle, VAlign,
+    Measurer, TextOverflow, TextStyle, VAlign,
 };
 
 /// A font fixture: glyph advances and vertical metrics at `base_size`.
@@ -114,6 +114,7 @@ fn shrink_to_fit_respects_box_in_every_font() {
             align: Align::Center,
             valign: VAlign::Middle,
             fit: Fit::Shrink { min: 6.0 },
+            text_overflow: TextOverflow::Clip,
         };
         let out = layout_area(text, &st, &spec, &font);
         assert!(
@@ -159,6 +160,7 @@ fn placement_uses_cap_height_and_centers() {
         align: Align::Center,
         valign: VAlign::Top,
         fit: Fit::None,
+        text_overflow: TextOverflow::Clip,
     };
     let out = layout_area("hi there", &st, &spec, &font);
     assert_eq!(out.anchor, Anchor::Middle);
@@ -236,6 +238,7 @@ fn degenerate_layouts_hold_across_fonts() {
             align: Align::Center,
             valign: VAlign::Middle,
             fit: Fit::None,
+            text_overflow: TextOverflow::Clip,
         };
 
         assert!(
@@ -248,11 +251,12 @@ fn degenerate_layouts_hold_across_fonts() {
             height: 0.0,
             padding: 0.0,
             fit: Fit::Shrink { min: 5.0 },
+            text_overflow: TextOverflow::Clip,
             ..base
         };
         let out = layout_area("alpha beta gamma", &st, &zero, &font);
-        assert_eq!(out.font_size, 5.0, "{slug}");
-        assert_eq!(out.lines.len(), 3, "{slug}: zero width → one word per line");
+        assert_eq!(out.font_size, 5.0, "{slug}"); // fit bottoms out at the floor
+        assert!(out.lines.is_empty(), "{slug}: zero height clips every line");
 
         let long = layout_area("supercalifragilisticexpialidocious", &st, &base, &font);
         assert_eq!(
@@ -291,6 +295,7 @@ fn descenders_do_not_shift_alignment() {
             align: Align::Start,
             valign,
             fit: Fit::None,
+            text_overflow: TextOverflow::Clip,
         };
         let plain = layout_area("Aa Bb", &st, &spec, &font);
         let desc = layout_area("Aa Gg", &st, &spec, &font);
@@ -302,5 +307,57 @@ fn descenders_do_not_shift_alignment() {
             plain.lines[0].baseline,
             desc.lines[0].baseline
         );
+    }
+}
+
+/// text-overflow=ellipsis marks block + inline overflow, with real font metrics.
+#[test]
+fn ellipsis_truncates_in_every_font() {
+    for slug in FONTS {
+        let font = FixtureFont::load(slug);
+        let st = style(16.0);
+
+        // block overflow: a tall paragraph in a short box → last line ends with …
+        let block = AreaSpec {
+            x: 0.0,
+            y: 0.0,
+            width: 120.0,
+            height: 40.0,
+            padding: 4.0,
+            align: Align::Start,
+            valign: VAlign::Top,
+            fit: Fit::None,
+            text_overflow: TextOverflow::Ellipsis,
+        };
+        let out = layout_area(
+            "wrapping produces several lines that cannot all fit this short box",
+            &st,
+            &block,
+            &font,
+        );
+        assert!(!out.lines.is_empty(), "{slug}");
+        let last = &out.lines.last().unwrap().text;
+        assert!(
+            last.ends_with('…'),
+            "{slug}: last line {last:?} lacks ellipsis"
+        );
+        assert!(
+            font.measure(last, &st, out.font_size) <= (120.0 - 8.0) + TOL,
+            "{slug}: ellipsized line overflows width"
+        );
+
+        // inline overflow: one unbreakable word wider than the box → ellipsized to fit
+        let inline = AreaSpec {
+            width: 60.0,
+            height: 200.0,
+            ..block
+        };
+        let out2 = layout_area("supercalifragilisticexpialidocious", &st, &inline, &font);
+        let only = &out2.lines[0].text;
+        assert!(
+            only.ends_with('…'),
+            "{slug}: inline overflow not ellipsized"
+        );
+        assert!(font.measure(only, &st, out2.font_size) <= (60.0 - 8.0) + TOL);
     }
 }

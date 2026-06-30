@@ -5,6 +5,7 @@ use super::{
     fit::fit_size,
     measure::{measure_words, Measurer},
     style::TextStyle,
+    truncate::{apply_ellipsis, TextOverflow},
     wrap::wrap,
 };
 
@@ -91,6 +92,7 @@ pub struct AreaSpec {
     pub align: Align,
     pub valign: VAlign,
     pub fit: Fit,
+    pub text_overflow: TextOverflow,
 }
 
 /// One laid-out line: its text and the absolute coordinates of its anchor point.
@@ -147,15 +149,24 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
     };
     let first_baseline = band_top + fm.cap_height;
 
-    let lines = line_texts
-        .into_iter()
-        .enumerate()
-        .map(|(i, text)| PlacedLine {
+    let mut lines = Vec::new();
+    let mut dropped = false;
+    for (i, text) in line_texts.into_iter().enumerate() {
+        let baseline = first_baseline + i as f64 * advance;
+        // clip to the content height by the line's ink band [cap-top, descent]
+        if baseline - fm.cap_height < cy - 1e-6 || baseline + fm.descent > cy + ch + 1e-6 {
+            dropped = true;
+            continue;
+        }
+        lines.push(PlacedLine {
             text,
             x: ax,
-            baseline: first_baseline + i as f64 * advance,
-        })
-        .collect();
+            baseline,
+        });
+    }
+    if spec.text_overflow == TextOverflow::Ellipsis {
+        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
+    }
 
     AreaLayout {
         anchor,
@@ -202,6 +213,7 @@ mod tests {
             align,
             valign,
             fit,
+            text_overflow: TextOverflow::Clip,
         }
     }
 
@@ -287,14 +299,14 @@ mod tests {
             Fit::Shrink { min: 5.0 },
         );
         let out = layout_area("alpha beta gamma", &st, &z, &Mono(0.2));
-        assert_eq!(out.font_size, 5.0);
-        assert_eq!(out.lines.len(), 3); // zero width → one word per line
+        assert_eq!(out.font_size, 5.0); // fit still bottoms out at the floor
+        assert!(out.lines.is_empty()); // zero height clips every line away
 
         let p = AreaSpec {
             padding: 80.0,
             ..spec(100.0, 100.0, Align::Start, VAlign::Top, Fit::None)
         };
-        assert_eq!(layout_area("a b c", &st, &p, &Mono(0.2)).lines.len(), 3);
+        assert!(layout_area("a b c", &st, &p, &Mono(0.2)).lines.is_empty());
     }
 
     #[test]
@@ -332,5 +344,39 @@ mod tests {
             layout_flow("a b c", &st, 0.0, 0.0, 0.0, &Mono(0.1)).len(),
             3
         );
+    }
+
+    #[test]
+    fn ellipsis_marks_block_overflow() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let s = AreaSpec {
+            text_overflow: TextOverflow::Ellipsis,
+            ..spec(30.0, 14.0, Align::Start, VAlign::Top, Fit::None)
+        };
+        let out = layout_area("alpha beta gamma delta epsilon zeta", &st, &s, &Mono(0.2));
+        assert!(!out.lines.is_empty());
+        assert!(
+            out.lines.last().unwrap().text.ends_with('…'),
+            "{:?}",
+            out.lines
+        );
+    }
+
+    #[test]
+    fn ellipsis_marks_inline_overflow() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let s = AreaSpec {
+            text_overflow: TextOverflow::Ellipsis,
+            ..spec(20.0, 100.0, Align::Start, VAlign::Top, Fit::None)
+        };
+        let out = layout_area("supercalifragilistic", &st, &s, &Mono(0.2));
+        assert!(out.lines[0].text.ends_with('…'));
+        assert!(Mono(0.2).measure(&out.lines[0].text, &st, 10.0) <= 20.0 + 1e-9);
     }
 }
