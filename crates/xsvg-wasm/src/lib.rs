@@ -15,7 +15,7 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area, layout_flow, layout_text_area, Align, AreaLayout, AreaSpec, DisplayAlign, Fit,
-    LineIncrement, Measurer, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    LineIncrement, Measurer, PlacedLine, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -27,15 +27,17 @@ pub fn on_start() {
     console_error_panic_hook::set_once();
 }
 
-/// Browser-backed `Measurer`: calls the JS `measure(text, fontCss)` callback.
+/// Browser-backed `Measurer`. `measure(text, fontCss) -> width` and
+/// `metrics(fontCss) -> [ascent, descent, capHeight, xHeight]` are canvas callbacks.
 struct JsMeasurer<'a> {
-    func: &'a js_sys::Function,
+    measure: &'a js_sys::Function,
+    metrics: &'a js_sys::Function,
 }
 
 impl Measurer for JsMeasurer<'_> {
     fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
         let css = style.font_css(size);
-        self.func
+        self.measure
             .call2(
                 &JsValue::NULL,
                 &JsValue::from_str(text),
@@ -45,13 +47,45 @@ impl Measurer for JsMeasurer<'_> {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0)
     }
+
+    fn font_metrics(&self, style: &TextStyle, size: f64) -> xsvg_core::FontMetrics {
+        let default = xsvg_core::FontMetrics {
+            ascent: 0.8 * size,
+            descent: 0.2 * size,
+            cap_height: 0.7 * size,
+            x_height: 0.5 * size,
+        };
+        let css = style.font_css(size);
+        let Ok(v) = self.metrics.call1(&JsValue::NULL, &JsValue::from_str(&css)) else {
+            return default;
+        };
+        let arr = js_sys::Array::from(&v);
+        let get = |i: u32, d: f64| {
+            arr.get(i)
+                .as_f64()
+                .filter(|n| n.is_finite() && *n > 0.0)
+                .unwrap_or(d)
+        };
+        xsvg_core::FontMetrics {
+            ascent: get(0, default.ascent),
+            descent: get(1, default.descent),
+            cap_height: get(2, default.cap_height),
+            x_height: get(3, default.x_height),
+        }
+    }
 }
 
-/// WASM entry point. `measure` is a JS `(text, fontCss) => number` (canvas measureText).
+/// WASM entry point. `measure(text, fontCss) => number` and
+/// `metrics(fontCss) => [ascent, descent, capHeight, xHeight]` are canvas callbacks.
 /// Throws on malformed XML so the JS side can surface the error.
 #[wasm_bindgen]
-pub fn compile(input: &str, quality: &str, measure: &js_sys::Function) -> Result<String, JsError> {
-    let m = JsMeasurer { func: measure };
+pub fn compile(
+    input: &str,
+    quality: &str,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
     compile_impl(input, quality, &m).map_err(|e| JsError::new(&e))
 }
 
@@ -146,19 +180,14 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
     let x = attr_num(node, "x", 0.0);
     let y = attr_num(node, "y", 0.0);
     let max_w = attr_num(node, "inline-size", 0.0);
+    let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
     let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
 
     out.push_str("<text");
     copy_attrs(node, out, &["inline-size", "line-height"]);
     out.push('>');
     for line in &lines {
-        out.push_str(&format!(
-            "<tspan x=\"{}\" y=\"{}\">",
-            fmt(line.x),
-            fmt(line.baseline)
-        ));
-        push_escaped(out, &line.text, false);
-        out.push_str("</tspan>");
+        emit_tspan(out, line, &style, style.size, gx, m);
     }
     out.push_str("</text>");
 }
@@ -177,18 +206,21 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
+    let gx = attr_num(node, "glyph-x-scale", 1.0);
     let layout = layout_area(&collect_text(node), &style, &spec, m);
     write_area_text(
         out,
         &layout,
         &style,
         node.attribute("fill").unwrap_or("#000"),
+        gx,
+        m,
     );
 }
 
 /// `<textArea>` (Rung 2, SVG Tiny 1.2 vocabulary): flowed text per the spec —
 /// `text-align` (inline), `display-align` (block), `line-increment` (line height),
-/// and `auto` width/height.
+/// `auto` width/height, and `<tbreak/>` forced breaks.
 fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
     let style = style_from(node);
     let spec = TextAreaSpec {
@@ -201,30 +233,60 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         line_increment: line_increment_attr(node),
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
-    let layout = layout_text_area(&collect_text(node), &style, &spec, m);
+    let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
+    let layout = layout_text_area(&collect_text_with_breaks(node), &style, &spec, m);
     write_area_text(
         out,
         &layout,
         &style,
         node.attribute("fill").unwrap_or("#000"),
+        gx,
+        m,
     );
 }
 
-fn write_area_text(out: &mut String, layout: &AreaLayout, style: &TextStyle, fill: &str) {
+fn write_area_text(
+    out: &mut String,
+    layout: &AreaLayout,
+    style: &TextStyle,
+    fill: &str,
+    glyph_x_scale: f64,
+    m: &dyn Measurer,
+) {
     out.push_str(&format!(
         "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">",
         layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
     ));
     for line in &layout.lines {
-        out.push_str(&format!(
-            "<tspan x=\"{}\" y=\"{}\">",
-            fmt(line.x),
-            fmt(line.baseline)
-        ));
-        push_escaped(out, &line.text, false);
-        out.push_str("</tspan>");
+        emit_tspan(out, line, style, layout.font_size, glyph_x_scale, m);
     }
     out.push_str("</text>");
+}
+
+/// Emit one `<tspan>`, scaling glyph widths via `textLength` when `glyph_x_scale != 1`.
+fn emit_tspan(
+    out: &mut String,
+    line: &PlacedLine,
+    style: &TextStyle,
+    size: f64,
+    glyph_x_scale: f64,
+    m: &dyn Measurer,
+) {
+    out.push_str(&format!(
+        "<tspan x=\"{}\" y=\"{}\"",
+        fmt(line.x),
+        fmt(line.baseline)
+    ));
+    if (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
+        let len = m.measure(&line.text, style, size) * glyph_x_scale;
+        out.push_str(&format!(
+            " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
+            fmt(len)
+        ));
+    }
+    out.push('>');
+    push_escaped(out, &line.text, false);
+    out.push_str("</tspan>");
 }
 
 fn fit_from(fit: Option<&str>, min: impl FnOnce() -> f64) -> Fit {
@@ -283,6 +345,22 @@ fn collect_text(node: roxmltree::Node) -> String {
     s
 }
 
+/// Like [`collect_text`], but each `<tbreak/>` element becomes a `'\n'` (the
+/// SVG Tiny 1.2 forced line break). Document order is preserved.
+fn collect_text_with_breaks(node: roxmltree::Node) -> String {
+    let mut s = String::new();
+    for d in node.descendants() {
+        if d.is_text() {
+            if let Some(t) = d.text() {
+                s.push_str(t);
+            }
+        } else if d.is_element() && d.tag_name().name() == "tbreak" {
+            s.push('\n');
+        }
+    }
+    s
+}
+
 /// Copy a node's attributes (skipping `x:`-namespaced ones and any in `skip`).
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     for attr in node.attributes() {
@@ -299,6 +377,14 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
 
 fn attr_num(node: roxmltree::Node, name: &str, default: f64) -> f64 {
     node.attribute(name).and_then(parse_num).unwrap_or(default)
+}
+
+/// Read an `x:`-namespaced numeric attribute (e.g. `x:glyph-x-scale` on a plain
+/// SVG element), falling back to `default`.
+fn attr_num_ns(node: roxmltree::Node, name: &str, default: f64) -> f64 {
+    node.attribute((XSVG_NS, name))
+        .and_then(parse_num)
+        .unwrap_or(default)
 }
 
 /// `attr_num` but falls back to `default` for non-positive values (e.g. a 0 or
@@ -465,5 +551,29 @@ mod tests {
         // default (clip) emits no marker
         let clip = svg.replace(" text-overflow=\"ellipsis\"", "");
         assert!(!compile_test(&clip).contains('…'));
+    }
+
+    #[test]
+    fn tbreak_forces_lines() {
+        // auto width would be a single line; each <tbreak/> forces a new one.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" font-size="10">one<tbreak/>two<tbreak/>three</textArea></svg>"#;
+        let out = compile_test(svg);
+        assert_eq!(out.matches("<tspan").count(), 3, "tbreak lines: {out}");
+    }
+
+    #[test]
+    fn glyph_x_scale_emits_text_length() {
+        // x:glyph-x-scale on a plain textArea → textLength/lengthAdjust per line.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><textArea x="0" y="10" font-size="10" x:glyph-x-scale="1.5">hello</textArea></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains("lengthAdjust=\"spacingAndGlyphs\""), "{out}");
+        // "hello" = 5 chars × 0.5 × 10 = 25; scaled ×1.5 = 37.5
+        assert!(out.contains("textLength=\"37.5\""), "{out}");
+
+        // no scale attribute → no textLength emitted
+        let plain = compile_test(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="10" font-size="10">hello</textArea></svg>"#,
+        );
+        assert!(!plain.contains("textLength"));
     }
 }

@@ -98,8 +98,21 @@ pub fn layout_text_area(
 ) -> AreaLayout {
     let size = style.size;
     let max_w = spec.width.unwrap_or(f64::INFINITY); // auto width → no wrapping
-    let measured = measure_words(text, style, m);
-    let line_texts = wrap(&measured, max_w, 1.0);
+
+    // `\n` marks a forced break (<tbreak/>); wrap each segment independently.
+    let segments: Vec<&str> = text.split('\n').collect();
+    let has_breaks = segments.len() > 1;
+    let mut line_texts: Vec<String> = Vec::new();
+    for seg in segments {
+        let wrapped = wrap(&measure_words(seg, style, m), max_w, 1.0);
+        if wrapped.is_empty() {
+            if has_breaks {
+                line_texts.push(String::new()); // forced blank line
+            }
+        } else {
+            line_texts.extend(wrapped);
+        }
+    }
 
     let line_h = spec.line_increment.resolve(size);
     let fm = m.font_metrics(style, size);
@@ -276,6 +289,21 @@ mod tests {
             &Mono(0.1),
         );
         assert_eq!(out.lines.len(), 2);
+    }
+
+    #[test]
+    fn tbreak_forces_breaks() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // auto width would be one line; \n (from <tbreak/>) forces breaks
+        let out = layout_text_area("one\ntwo\nthree", &st, &spec(None, None), &Mono(0.2));
+        assert_eq!(out.lines.len(), 3);
+        // consecutive breaks → a blank line between
+        let out2 = layout_text_area("a\n\nb", &st, &spec(None, None), &Mono(0.2));
+        assert_eq!(out2.lines.len(), 3);
+        assert_eq!(out2.lines[1].text, "");
     }
 
     #[test]

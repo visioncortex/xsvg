@@ -97,7 +97,11 @@ the font ascent for an assumed font-size = `line-increment`. `display-align` the
 (`before`=top, `center`=middle, `after`=bottom). With an explicit `height`, lines whose box falls
 outside the region are **not rendered** (clipped; see §6.6).
 
-**Not yet implemented:** `<tbreak/>`, `xml:space="preserve"`, full UAX #14 line-breaking (we break on
+**`<tbreak/>`** [implemented] — a forced line break, per SVG Tiny 1.2. Each `<tbreak/>` child ends the
+current line and starts a new one; wrapping resumes independently on each side. Consecutive breaks
+produce blank lines. This is the only child element `<textArea>` interprets in v0.
+
+**Not yet implemented:** `xml:space="preserve"`, full UAX #14 line-breaking (we break on
 whitespace), `editable`.
 
 ### 6.4 `<x:textbox>` — Rung 3, xsvg box [implemented]
@@ -130,7 +134,7 @@ the per-string ink. Therefore a descender-free and a descender-bearing label in 
 the **same baseline** — descenders fill the reserved descent rather than shifting the text. This MUST
 hold for every alignment.
 
-### 6.6 Overflow & truncation — `text-overflow` [spec'd]
+### 6.6 Overflow & truncation — `text-overflow` [implemented]
 
 Applies to box-bound text (`<textArea>`, `<x:textbox>`); not to point text or `inline-size` flow.
 
@@ -177,6 +181,23 @@ Trimming is by character (CSS-like). v0 truncates at the **inline end** only; th
 **Differs from CSS/SVG 2:** one property covers **both** block (multi-line, like `-webkit-line-clamp`)
 and inline overflow; implemented by emitting `<tspan>`s, so it renders without SVG-2 support.
 
+### 6.7 Glyph width scaling — `x:glyph-x-scale` [implemented]
+
+A purely **visual** horizontal scale on rendered glyphs. Applies to all three text front-ends:
+unprefixed `glyph-x-scale` on `<x:textbox>`; `x:`-prefixed `x:glyph-x-scale` on plain-SVG `<text
+inline-size>` and `<textArea>` (the prefix policy of §3 — a new attribute on a reused SVG element is
+namespaced).
+
+| Attr | Values | Initial | Effect |
+|---|---|---|---|
+| `glyph-x-scale` | `<number>` | `1` | multiply each line's advance width by this factor |
+
+**Lowering.** Per emitted line, the compiler measures the natural advance `w`, then emits
+`textLength="w · scale" lengthAdjust="spacingAndGlyphs"` on the `<tspan>`. Renderers stretch/compress
+the glyphs and inter-glyph spacing to hit that length. **Layout is unchanged** — wrapping, fitting and
+overflow all run at the natural width; only the final rendered glyphs are scaled. A value of `1` (the
+initial) emits nothing. Empty lines are left untouched.
+
 ## 7. Other pillars [planned]
 
 Sketched in [Plan.md §2](Plan.md); not yet implemented.
@@ -199,9 +220,12 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | `<rect>` → `<path>` | implemented |
 | `<text inline-size>` wrap flow | implemented |
 | `<textArea>` (text-align, display-align, line-increment, auto sizing, clip) | implemented |
+| `<tbreak/>` forced line break | implemented |
 | `<x:textbox>` (align, valign, padding, fit) + cap-height centering | implemented |
-| `text-overflow` (clip default; **ellipsis**) | spec'd, not built |
+| Real browser font metrics (ascent, descent, cap-height, x-height) | implemented |
+| `text-overflow` (clip default; **ellipsis**) | implemented |
+| `glyph-x-scale` (visual glyph width scaling via `textLength`) | implemented |
 | `<x:textbox in="#shape">` binding | planned |
-| `<tbreak/>`, `xml:space=preserve`, UAX #14, `editable` | not implemented |
+| `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Outlined-text backend; concrete SVG-subset list; WebGPU renderer | planned |

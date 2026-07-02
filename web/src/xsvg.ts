@@ -17,17 +17,36 @@ function ensureReady(): Promise<unknown> {
 // `Measurer` seam. The Rust compiler calls this back synchronously during
 // lowering (e.g. for `inline-size` wrapping and `<x:textbox>` shrink-to-fit).
 let measureCtx: CanvasRenderingContext2D | null = null;
+function ctx(): CanvasRenderingContext2D | null {
+  if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+  return measureCtx;
+}
+
 function measure(text: string, fontCss: string): number {
-  if (!measureCtx) {
-    measureCtx = document.createElement("canvas").getContext("2d");
-  }
-  if (!measureCtx) return 0;
-  measureCtx.font = fontCss;
-  return measureCtx.measureText(text).width;
+  const c = ctx();
+  if (!c) return 0;
+  c.font = fontCss;
+  return c.measureText(text).width;
+}
+
+// Vertical font metrics at the given font: [ascent, descent, capHeight, xHeight].
+function metrics(fontCss: string): number[] {
+  const c = ctx();
+  if (!c) return [];
+  c.font = fontCss;
+  const box = c.measureText("Hg");
+  const cap = c.measureText("H");
+  const ex = c.measureText("x");
+  return [
+    box.fontBoundingBoxAscent,
+    box.fontBoundingBoxDescent,
+    cap.actualBoundingBoxAscent,
+    ex.actualBoundingBoxAscent,
+  ];
 }
 
 /** Compile an xsvg source string to a plain-SVG string (runs entirely client-side). */
 export async function compileXsvg(source: string, quality = "balanced"): Promise<string> {
   await ensureReady();
-  return compile(source, quality, measure);
+  return compile(source, quality, measure, metrics);
 }
