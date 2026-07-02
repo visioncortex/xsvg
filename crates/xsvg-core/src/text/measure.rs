@@ -36,12 +36,13 @@ pub trait Measurer {
 
 /// Word advance widths measured once at the style's base size. Trial sizes scale
 /// these linearly (good enough for layout; avoids re-measuring per fit iteration).
-/// `letter_spacing` is carried through so wrapping can add it per grapheme gap
-/// without scaling it (it is an absolute length; see [`TextStyle::letter_spacing`]).
+/// `letter_spacing`/`word_spacing` are carried through so wrapping can add them
+/// without scaling (they are absolute lengths; see [`TextStyle`]).
 pub struct Measured {
     pub words: Vec<(String, f64)>,
     pub space: f64,
     pub letter_spacing: f64,
+    pub word_spacing: f64,
 }
 
 /// Measure each whitespace-separated word (and a space) at `style.size`.
@@ -54,14 +55,18 @@ pub fn measure_words(text: &str, style: &TextStyle, m: &dyn Measurer) -> Measure
         words,
         space: m.measure(" ", style, style.size),
         letter_spacing: style.letter_spacing,
+        word_spacing: style.word_spacing,
     }
 }
 
-/// Rendered advance of a whole run at `size`, including `letter-spacing` tracking
-/// (added once per inter-grapheme gap, on top of the kerned glyph advances that
-/// `measure` returns). This is the width a renderer produces for the emitted
-/// `letter-spacing` attribute, so layout math must use it, not the raw advance.
+/// Rendered advance of a whole run at `size`, including `letter-spacing` (once per
+/// inter-grapheme gap) and `word-spacing` (once per ASCII space), layered on top of
+/// the kerned glyph advances `measure` returns. This is the width a renderer
+/// produces for the emitted attributes, so layout math must use it, not the raw
+/// advance. Wrapped lines join words with a single space, so counting `' '` gives
+/// the inter-word gap count.
 pub fn line_advance(text: &str, style: &TextStyle, size: f64, m: &dyn Measurer) -> f64 {
     let gaps = text.chars().count().saturating_sub(1) as f64;
-    m.measure(text, style, size) + gaps * style.letter_spacing
+    let spaces = text.chars().filter(|c| *c == ' ').count() as f64;
+    m.measure(text, style, size) + gaps * style.letter_spacing + spaces * style.word_spacing
 }

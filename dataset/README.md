@@ -25,6 +25,7 @@ wrapping, `<textArea>` flow, `<x:textbox>` shrink-to-fit, `text-overflow`, `<tbr
 | [textarea-ellipsis.xsvg](textarea-ellipsis.xsvg) | `text-overflow`: clip vs ellipsis (block overflow) and inline overflow truncation |
 | [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
 | [letter-spacing.xsvg](letter-spacing.xsvg) | `letter-spacing` tracking scale, kerning-preserved pairs, and layout-aware wrapping (tracked text wraps sooner) |
+| [word-spacing.xsvg](word-spacing.xsvg) | `word-spacing` scale and layout-aware wrapping (wider word gaps wrap the same box sooner) |
 | [alignment.xsvg](alignment.xsvg) | `<x:textbox>` align × valign matrix (all nine placements) |
 | [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |

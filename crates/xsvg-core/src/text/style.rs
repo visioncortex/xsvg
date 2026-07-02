@@ -12,6 +12,9 @@ pub struct TextStyle {
     /// (not em-relative): it does not scale with `size`, matching CSS/SVG
     /// `letter-spacing`, and it layers on top of the font's kerning.
     pub letter_spacing: f64,
+    /// Extra space added at each inter-word gap, in user units. Absolute, like
+    /// [`Self::letter_spacing`]; matches CSS/SVG `word-spacing`.
+    pub word_spacing: f64,
 }
 
 impl Default for TextStyle {
@@ -23,6 +26,7 @@ impl Default for TextStyle {
             style: "normal".into(),
             line_height: 1.2,
             letter_spacing: 0.0,
+            word_spacing: 0.0,
         }
     }
 }

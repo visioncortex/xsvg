@@ -199,31 +199,34 @@ overflow all run at the natural width; only the final rendered glyphs are scaled
 initial) emits nothing. Empty lines are left untouched. When combined with `letter-spacing` (§6.8),
 the `textLength` target is computed from the letter-spaced advance so the two compose.
 
-### 6.8 Letter spacing — `letter-spacing` [implemented]
+### 6.8 Letter & word spacing — `letter-spacing`, `word-spacing` [implemented]
 
-CSS/SVG tracking: uniform extra space between grapheme clusters, on every text element (unprefixed —
-`letter-spacing` is an existing SVG/CSS name, §3).
+CSS/SVG tracking: uniform extra space between grapheme clusters (`letter-spacing`) and at each
+inter-word gap (`word-spacing`), on every text element (unprefixed — both are existing SVG/CSS
+names, §3).
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
 | `letter-spacing` | `normal` \| `<length>` | `normal` (= 0) | extra advance added per inter-grapheme gap |
+| `word-spacing` | `normal` \| `<length>` | `normal` (= 0) | extra advance added per inter-word space |
 
-**Model (normative).** Letter-spacing is an **absolute length** in user units — it does *not* scale
-with `font-size` (so under shrink-to-fit the tracking stays put while glyphs shrink), matching CSS/SVG.
-It is **additive on top of kerning**, not a replacement: the font's pair kerning stays in the glyph
-advances (whatever the measurer models — real for canvas, none for the test fixtures) and tracking is
-layered over it. The rendered advance of a run of *n* grapheme clusters is:
+**Model (normative).** Both are **absolute lengths** in user units — they do *not* scale with
+`font-size` (so under shrink-to-fit the spacing stays put while glyphs shrink), matching CSS/SVG. They
+are **additive on top of kerning**, not a replacement: the font's pair kerning stays in the glyph
+advances (whatever the measurer models — real for canvas, none for the test fixtures) and the spacing
+is layered over it. The rendered advance of a run of *n* grapheme clusters containing *s* inter-word
+spaces is:
 
 ```
-advance = kerned_advance(run) + (n − 1) × letter-spacing
+advance = kerned_advance(run) + (n − 1) × letter-spacing + s × word-spacing
 ```
 
-**Layout-aware.** This letter-spaced advance — not the raw glyph advance — drives wrapping,
-shrink-to-fit, ellipsis truncation and alignment, so tracked text breaks and fits correctly. The
-`letter-spacing` attribute is then emitted on the output `<text>` (or forwarded on a passed-through
-`<text inline-size>`); the renderer reproduces exactly the width layout assumed. `normal` and `0`
-emit nothing. Gap count uses code-point count in v0 (grapheme-cluster segmentation is a future
-refinement); `font-kerning` is left at the renderer default (`normal`).
+**Layout-aware.** This spaced advance — not the raw glyph advance — drives wrapping, shrink-to-fit,
+ellipsis truncation and alignment, so tracked text breaks and fits correctly. The attributes are then
+emitted on the output `<text>` (or forwarded on a passed-through `<text inline-size>`); the renderer
+reproduces exactly the width layout assumed. `normal` and `0` emit nothing. Counts use code points in
+v0 (grapheme-cluster segmentation is a future refinement; wrapped lines join words with a single
+space, so the inter-word count is exact); `font-kerning` is left at the renderer default (`normal`).
 
 ## 7. Other pillars [planned]
 
@@ -252,7 +255,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | Real browser font metrics (ascent, descent, cap-height, x-height) | implemented |
 | `text-overflow` (clip default; **ellipsis**) | implemented |
 | `glyph-x-scale` (visual glyph width scaling via `textLength`) | implemented |
-| `letter-spacing` (layout-aware tracking, kerning-preserving) | implemented |
+| `letter-spacing` / `word-spacing` (layout-aware tracking, kerning-preserving) | implemented |
 | `<x:textbox in="#shape">` binding | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |

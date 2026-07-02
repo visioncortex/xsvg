@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 600 360" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="600" height="360" fill="#ffffff"/>
+  <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">word-spacing — layout-aware inter-word gaps</text>
+
+  <!-- 1. same phrase, increasing word-spacing -->
+  <text x="20" y="54" font-size="11" fill="#64748b">word-spacing scale (0 · 6 · 16 px)</text>
+  <textArea x="20" y="62" width="560" font-size="20" fill="#0f172a">the quick brown fox</textArea>
+  <textArea x="20" y="92" width="560" font-size="20" fill="#0f172a" word-spacing="6">the quick brown fox</textArea>
+  <textArea x="20" y="122" width="560" font-size="20" fill="#0f172a" word-spacing="16">the quick brown fox</textArea>
+
+  <!-- 2. layout-aware: wider word gaps wrap the same box sooner -->
+  <text x="20" y="176" font-size="11" fill="#64748b">wrapping accounts for word-spacing (same box, same size)</text>
+  <rect x="20" y="184" width="270" height="150" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <textArea x="32" y="194" width="246" height="130" font-size="15" fill="#0f172a">Word spacing pushes the words apart and the lines break to match.</textArea>
+  <rect x="310" y="184" width="270" height="150" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <textArea x="322" y="194" width="246" height="130" font-size="15" fill="#0f172a" word-spacing="12">Word spacing pushes the words apart and the lines break to match.</textArea>
+</svg>

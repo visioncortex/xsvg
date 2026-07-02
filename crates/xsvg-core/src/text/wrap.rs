@@ -6,12 +6,13 @@ use super::measure::Measured;
 /// widths to the trial size (`scale = trial_size / style.size`). A word wider than
 /// `max_width` is placed alone (overflow) rather than dropped.
 ///
-/// A line's width includes `letter-spacing`, added once per inter-grapheme gap and
-/// *not* scaled by `scale` (it is an absolute length). Tracked separately from the
-/// natural advance so the two accumulators stay exact; with no letter-spacing the
-/// result is identical to plain greedy wrapping.
+/// A line's width includes `letter-spacing` (once per inter-grapheme gap) and
+/// `word-spacing` (folded into each inter-word space), both *not* scaled by `scale`
+/// (they are absolute lengths). Tracked separately from the natural advance so the
+/// accumulators stay exact; with neither set, the result is identical to plain
+/// greedy wrapping.
 pub fn wrap(measured: &Measured, max_width: f64, scale: f64) -> Vec<String> {
-    let space = measured.space * scale;
+    let space = measured.space * scale + measured.word_spacing;
     let ls = measured.letter_spacing;
     let gaps = |graphemes: usize| graphemes.saturating_sub(1) as f64;
 
@@ -96,6 +97,27 @@ mod tests {
         // letter-spacing is absolute: halving the scale halves the glyphs (1.5 each)
         // but not the spacing, so "aaa" = 1.5 + 2·1 = 3.5 ≤ 4 while "aaa bbb" won't fit.
         assert_eq!(wrap(&spaced, 4.0, 0.5), vec!["aaa", "bbb"]);
+    }
+
+    #[test]
+    fn word_spacing_widens_and_wraps_earlier() {
+        // Mono(0.1) at size 10: char = 1.0, space = 1.0. "aaa bbb" = 7 (one gap).
+        let plain = measured("aaa bbb", 0.1, 10.0);
+        assert_eq!(wrap(&plain, 7.0, 1.0), vec!["aaa bbb"]); // fits at word-spacing 0
+
+        let spaced = {
+            let st = TextStyle {
+                size: 10.0,
+                word_spacing: 3.0,
+                ..Default::default()
+            };
+            measure_words("aaa bbb", &st, &Mono(0.1))
+        };
+        // word-spacing=3 widens the single inter-word gap: 7 + 3 = 10 > 7 → breaks.
+        assert_eq!(wrap(&spaced, 7.0, 1.0), vec!["aaa", "bbb"]);
+        // absolute: at half scale glyphs (3.0) + scaled space (0.5) halve but the
+        // word-spacing (3.0) stays, so "aaa bbb" = 6.5 > 6 still breaks.
+        assert_eq!(wrap(&spaced, 6.0, 0.5), vec!["aaa", "bbb"]);
     }
 
     #[test]

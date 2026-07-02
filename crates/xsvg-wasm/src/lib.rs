@@ -264,6 +264,9 @@ fn write_area_text(
             fmt(style.letter_spacing)
         ));
     }
+    if style.word_spacing != 0.0 {
+        out.push_str(&format!(" word-spacing=\"{}\"", fmt(style.word_spacing)));
+    }
     out.push('>');
     for line in &layout.lines {
         emit_tspan(out, line, style, layout.font_size, glyph_x_scale, m);
@@ -337,10 +340,16 @@ fn style_from(node: roxmltree::Node) -> TextStyle {
             .to_string(),
         style: node.attribute("font-style").unwrap_or("normal").to_string(),
         line_height: attr_pos(node, "line-height", 1.2),
-        letter_spacing: match node.attribute("letter-spacing") {
-            None | Some("normal") => 0.0,
-            Some(v) => parse_num(v).unwrap_or(0.0),
-        },
+        letter_spacing: spacing_attr(node, "letter-spacing"),
+        word_spacing: spacing_attr(node, "word-spacing"),
+    }
+}
+
+/// A `letter-spacing`/`word-spacing` value: `normal` or absent → 0, else a length.
+fn spacing_attr(node: roxmltree::Node, name: &str) -> f64 {
+    match node.attribute(name) {
+        None | Some("normal") => 0.0,
+        Some(v) => parse_num(v).unwrap_or(0.0),
     }
 }
 
@@ -663,6 +672,24 @@ mod tests {
         // On <text inline-size> the attribute is forwarded verbatim (passthrough).
         let flow = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="500" letter-spacing="2">hi there</text></svg>"#;
         assert!(compile_test(flow).contains("letter-spacing=\"2\""));
+    }
+
+    #[test]
+    fn word_spacing_affects_layout_and_is_emitted() {
+        // Mono: char = 0.5 × size. At size 10, "aa bb" = 10 + 5 + 10 = 25 (one gap).
+        let base = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="25" font-size="10">aa bb</textArea></svg>"#;
+        assert_eq!(compile_test(base).matches("<tspan").count(), 1);
+
+        // word-spacing=6 widens the inter-word gap: 25 + 6 = 31 > 25 → wraps, and
+        // the attribute lands on the synthesized <text>.
+        let spaced = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="25" font-size="10" word-spacing="6">aa bb</textArea></svg>"#;
+        let out = compile_test(spaced);
+        assert_eq!(out.matches("<tspan").count(), 2, "{out}");
+        assert!(out.contains("word-spacing=\"6\""), "{out}");
+
+        // Forwarded on <text inline-size> too.
+        let flow = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="500" word-spacing="4">hi there</text></svg>"#;
+        assert!(compile_test(flow).contains("word-spacing=\"4\""));
     }
 
     #[test]
