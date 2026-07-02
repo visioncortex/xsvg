@@ -121,6 +121,23 @@ mod tests {
     }
 
     #[test]
+    fn negative_spacing_condenses_without_panic() {
+        // Negative letter/word-spacing (tighter tracking) is valid CSS; it must not
+        // underflow or panic — the saturating gap arithmetic just yields a smaller
+        // (possibly ≤0) line width, so everything fits on one line.
+        let st = TextStyle {
+            size: 10.0,
+            letter_spacing: -2.0,
+            word_spacing: -3.0,
+            ..Default::default()
+        };
+        let m = measure_words("aaa bbb ccc", &st, &Mono(0.1));
+        assert_eq!(wrap(&m, 50.0, 1.0), vec!["aaa bbb ccc"]);
+        // even a zero-width box can't panic (condensed width goes ≤0 → all fits)
+        assert!(!wrap(&m, 0.0, 1.0).is_empty());
+    }
+
+    #[test]
     fn degenerate_wrap() {
         assert!(wrap(&measured("", 0.1, 10.0), 100.0, 1.0).is_empty());
         assert!(wrap(&measured("  \n\t ", 0.1, 10.0), 100.0, 1.0).is_empty());

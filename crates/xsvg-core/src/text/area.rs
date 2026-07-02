@@ -125,7 +125,13 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
         Fit::Shrink { min } => fit_size(&measured, style.size, style.line_height, cw, ch, min),
         Fit::None => style.size,
     };
-    let scale = size / style.size;
+    // Guard the base-size divide: a zero/degenerate `style.size` must not produce
+    // NaN coordinates (scale falls back to 0 → zero-width glyphs, no NaN).
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        0.0
+    };
     let line_texts = wrap(&measured, cw, scale);
     let advance = size * style.line_height;
 
@@ -363,6 +369,82 @@ mod tests {
             "{:?}",
             out.lines
         );
+    }
+
+    /// A degenerate measurer returning a fixed advance for every string — used to
+    /// prove pathological metrics (NaN/inf/negative) never crash or leak NaN coords.
+    struct Const(f64);
+    impl Measurer for Const {
+        fn measure(&self, _t: &str, _s: &TextStyle, _z: f64) -> f64 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn zero_font_size_produces_no_nan() {
+        let st = TextStyle {
+            size: 0.0,
+            ..Default::default()
+        };
+        for fit in [Fit::None, Fit::Shrink { min: 0.0 }] {
+            let s = spec(100.0, 100.0, Align::Center, VAlign::Middle, fit);
+            let out = layout_area("hi there world", &st, &s, &Mono(0.1));
+            for l in &out.lines {
+                assert!(
+                    l.x.is_finite() && l.baseline.is_finite(),
+                    "size=0 leaked NaN: {l:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn negative_dimensions_do_not_panic() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let neg = AreaSpec {
+            x: 0.0,
+            y: 0.0,
+            width: -50.0,
+            height: -20.0,
+            padding: -5.0,
+            align: Align::Center,
+            valign: VAlign::Middle,
+            fit: Fit::Shrink { min: 5.0 },
+            text_overflow: TextOverflow::Ellipsis,
+        };
+        let out = layout_area("alpha beta gamma", &st, &neg, &Mono(0.2));
+        for l in &out.lines {
+            assert!(l.x.is_finite() && l.baseline.is_finite());
+        }
+    }
+
+    #[test]
+    fn pathological_measurer_never_panics_or_leaks_nan() {
+        let st = TextStyle {
+            size: 12.0,
+            ..Default::default()
+        };
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1e9, 0.0] {
+            let s = spec(
+                80.0,
+                40.0,
+                Align::Center,
+                VAlign::Middle,
+                Fit::Shrink { min: 5.0 },
+            );
+            let out = layout_area("some words placed here now", &st, &s, &Const(bad));
+            // Coordinates come from size + vertical metrics, never from `measure`,
+            // so they must stay finite even when advances are garbage.
+            for l in &out.lines {
+                assert!(
+                    l.x.is_finite() && l.baseline.is_finite(),
+                    "measurer={bad} leaked NaN coord: {l:?}"
+                );
+            }
+        }
     }
 
     #[test]

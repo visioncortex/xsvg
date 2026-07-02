@@ -22,6 +22,12 @@ use xsvg_core::{
 const XSVG_NS: &str = "https://xsvg.dev/ns";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
+/// Maximum element nesting depth accepted. `roxmltree`'s parser recurses per level,
+/// so pathologically deep input would overflow the stack (a hard abort, worse on
+/// wasm's smaller stack). Real documents nest a few dozen deep; this is a generous
+/// ceiling that still leaves a wide stack margin.
+const MAX_NESTING_DEPTH: usize = 512;
+
 /// Runs once when the module is instantiated: route Rust panics to `console.error`.
 #[wasm_bindgen(start)]
 pub fn on_start() {
@@ -93,6 +99,7 @@ pub fn compile(
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
 pub fn compile_impl(input: &str, quality: &str, m: &dyn Measurer) -> Result<String, String> {
     let q = xsvg_core::QualityProfile::parse(quality);
+    check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
 
     let mut out = String::new();
@@ -288,7 +295,9 @@ fn emit_tspan(
         fmt(line.x),
         fmt(line.baseline)
     ));
-    if (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
+    // A non-positive scale is meaningless (would emit a zero/negative textLength);
+    // treat it as "no scaling" rather than emitting invalid SVG.
+    if glyph_x_scale > 0.0 && (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
         let len = line_advance(&line.text, style, size, m) * glyph_x_scale;
         out.push_str(&format!(
             " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
@@ -417,6 +426,39 @@ fn attr_pos(node: roxmltree::Node, name: &str, default: f64) -> f64 {
     } else {
         default
     }
+}
+
+/// Reject pathologically nested input *before* the recursive XML parser sees it, so
+/// deep nesting returns a clean error instead of overflowing the stack. A single
+/// left-to-right scan tracking element depth; comments / CDATA / PIs / declarations
+/// and self-closing tags do not add depth. This is a safety bound, not a validator —
+/// `roxmltree` still does the real parsing (and rejects malformed input) afterward.
+fn check_nesting_depth(input: &str, max: usize) -> Result<(), String> {
+    let mut rest = input;
+    let mut depth = 0usize;
+    while let Some(lt) = rest.find('<') {
+        rest = &rest[lt + 1..];
+        if let Some(after) = rest.strip_prefix("!--") {
+            rest = after.find("-->").map(|j| &after[j + 3..]).unwrap_or("");
+        } else if let Some(after) = rest.strip_prefix("![CDATA[") {
+            rest = after.find("]]>").map(|j| &after[j + 3..]).unwrap_or("");
+        } else if rest.starts_with('!') || rest.starts_with('?') {
+            rest = rest.find('>').map(|j| &rest[j + 1..]).unwrap_or("");
+        } else if let Some(after) = rest.strip_prefix('/') {
+            depth = depth.saturating_sub(1);
+            rest = after.find('>').map(|j| &after[j + 1..]).unwrap_or("");
+        } else {
+            let end = rest.find('>').unwrap_or(rest.len());
+            if !rest[..end].ends_with('/') {
+                depth += 1;
+                if depth > max {
+                    return Err(format!("xsvg: element nesting depth exceeds {max}"));
+                }
+            }
+            rest = rest.get(end + 1..).unwrap_or("");
+        }
+    }
+    Ok(())
 }
 
 /// Parse a leading numeric value, tolerating a trailing unit (e.g. `"13px"` → 13.0).
@@ -690,6 +732,67 @@ mod tests {
         // Forwarded on <text inline-size> too.
         let flow = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="500" word-spacing="4">hi there</text></svg>"#;
         assert!(compile_test(flow).contains("word-spacing=\"4\""));
+    }
+
+    #[test]
+    fn deep_nesting_errors_instead_of_aborting() {
+        // Far past the stack-overflow threshold; the depth guard must turn this into
+        // a clean Err rather than a hard abort (see check_nesting_depth).
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
+            "<g>".repeat(5000),
+            "</g>".repeat(5000)
+        );
+        let err = compile_impl(&svg, "balanced", &Mono).unwrap_err();
+        assert!(err.contains("nesting depth"), "{err}");
+    }
+
+    #[test]
+    fn many_siblings_and_self_closing_are_not_rejected() {
+        // Depth guard must count nesting, not element count: thousands of siblings
+        // (net depth 1) stay well under the limit.
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}</svg>",
+            "<rect/>".repeat(3000)
+        );
+        assert!(compile_impl(&svg, "balanced", &Mono).is_ok());
+        // and modest legitimate nesting is fine
+        let nested = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
+            "<g>".repeat(64),
+            "</g>".repeat(64)
+        );
+        assert!(compile_impl(&nested, "balanced", &Mono).is_ok());
+    }
+
+    #[test]
+    fn glyph_x_scale_non_positive_is_ignored() {
+        // 0 and negative scales must not emit a zero/negative textLength or NaN.
+        for v in ["0", "-1.5"] {
+            let svg = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.dev/ns\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
+            );
+            let out = compile_impl(&svg, "balanced", &Mono).unwrap();
+            assert!(out.contains("<text") && !out.contains("<textArea"));
+            assert!(
+                !out.contains("textLength"),
+                "scale {v} still emitted: {out}"
+            );
+            assert!(!out.contains("NaN"));
+        }
+    }
+
+    #[test]
+    fn tbreak_only_textarea_does_not_panic() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="50" font-size="10"><tbreak/></textArea></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains("<text") && !out.contains("NaN"));
+    }
+
+    #[test]
+    fn negative_geometry_does_not_panic_or_leak_nan() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="-40" height="-20" padding="-5" fit="shrink" align="center" valign="middle" font-size="10">hi there friend</x:textbox></svg>"#;
+        assert!(!compile_test(svg).contains("NaN"));
     }
 
     #[test]

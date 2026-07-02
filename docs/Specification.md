@@ -55,6 +55,13 @@ returning, for a string at a size, its advance width and the font's vertical met
 `measureText`; defaults approximate `ascent 0.8em, descent 0.2em, cap_height 0.7em, x_height 0.5em`.
 Architecture: [Plan.md §1](Plan.md).
 
+**Robustness (normative).** Compilation is total on well-formed input: degenerate geometry
+(zero/negative width, height, padding, or `font-size`), degenerate spacing (negative
+`letter-spacing`/`word-spacing`), and pathological measurer output (non-finite or negative advances)
+must never panic and must never emit `NaN`/`inf` coordinates — they collapse to empty or zero-sized
+output instead. **Element nesting is bounded** at a fixed depth (v0: 512); deeper input is rejected
+with an error rather than risking a parser stack overflow. Malformed XML returns an error.
+
 ## 5. Graphics elements (reused SVG) [implemented]
 
 `<g>`, `<path>`, basic shapes, gradients, `transform`, `fill`/`stroke` are normalized or passed
