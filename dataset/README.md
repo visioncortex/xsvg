@@ -1,7 +1,17 @@
 # dataset — sample xsvg diagrams
 
 Hand-authored `.xsvg` samples that exercise the v0 compiler (rect→path lowering, `inline-size`
-wrapping, and `<x:textbox>` shrink-to-fit). Each is a complete `<svg xmlns:x="…">` document.
+wrapping, `<textArea>` flow, `<x:textbox>` shrink-to-fit, `text-overflow`, `<tbreak/>`, and
+`glyph-x-scale`). Each is a complete `<svg xmlns:x="…">` document.
+
+**Showcases** — realistic composites that combine several features:
+
+| File | Shows |
+|---|---|
+| [architecture.xsvg](architecture.xsvg) | System diagram: uniform service boxes with unequal labels (shrink-to-fit), `<tbreak/>` two-line data nodes, a `glyph-x-scale` banner, and arrow markers |
+| [kanban.xsvg](kanban.xsvg) | Sprint board: cards whose bodies wrap and truncate with `text-overflow="ellipsis"`, `<tbreak/>` title/body splits, right-aligned counts |
+
+**Feature drills** — one concept each:
 
 | File | Shows |
 |---|---|

@@ -576,4 +576,74 @@ mod tests {
         );
         assert!(!plain.contains("textLength"));
     }
+
+    #[test]
+    fn glyph_x_scale_on_textbox_and_inline_size() {
+        // <x:textbox> takes it unprefixed; "hi" = 2 × 0.5 × 10 = 10, ×1.5 = 15.
+        let box_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="100" height="40" font-size="10" glyph-x-scale="1.5">hi</x:textbox></svg>"#;
+        assert!(compile_test(box_svg).contains("textLength=\"15\""));
+
+        // <text inline-size> takes it x:-prefixed (reused SVG element).
+        let flow_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><text x="0" y="10" font-size="10" inline-size="500" x:glyph-x-scale="1.5">hi</text></svg>"#;
+        assert!(compile_test(flow_svg).contains("textLength=\"15\""));
+    }
+
+    // ---- degradation / passthrough contract ----
+
+    #[test]
+    fn rounded_rect_passes_through() {
+        // rx/ry present → not lowered to a path; emitted as <rect> unchanged.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="2" width="3" height="4" rx="2"/></svg>"#;
+        let out = compile_test(svg);
+        assert!(
+            out.contains("<rect"),
+            "rounded rect should pass through: {out}"
+        );
+        assert!(out.contains("rx=\"2\""));
+        assert!(!out.contains("<path"));
+    }
+
+    #[test]
+    fn xsvg_root_aliases_to_svg() {
+        let svg = r#"<xsvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><g/></xsvg>"#;
+        let out = compile_test(svg);
+        assert!(
+            out.contains("<svg"),
+            "root <xsvg> should become <svg>: {out}"
+        );
+        assert!(!out.contains("<xsvg"));
+        assert!(out.contains(&format!("xmlns=\"{SVG_NS}\"")));
+    }
+
+    #[test]
+    fn unknown_extension_degrades_to_marker() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:mesh/></svg>"#;
+        let out = compile_test(svg);
+        assert!(
+            out.contains("<!-- xsvg: <x:mesh> not yet lowered -->"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn xsvg_attributes_are_stripped() {
+        // an x:-namespaced attribute on a passed-through element is dropped.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><circle cx="5" cy="5" r="3" x:note="hint"/></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains("<circle"));
+        assert!(out.contains("r=\"3\""));
+        assert!(!out.contains("note"), "x: attr should be stripped: {out}");
+    }
+
+    #[test]
+    fn xml_special_chars_are_escaped() {
+        // text content and attribute values must be entity-escaped.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" aria-label="a &quot;b&quot; &amp; c">x &lt; y &amp; z</text></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains("x &lt; y &amp; z"), "text not escaped: {out}");
+        assert!(
+            out.contains("&quot;b&quot;") && out.contains("&amp; c"),
+            "attr not escaped: {out}"
+        );
+    }
 }

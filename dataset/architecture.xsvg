@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 920 620" font-family="'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="920" height="620" fill="#f8fafc"/>
+
+  <!-- stretched banner (glyph-x-scale) + wrapping subtitle (textArea) -->
+  <textArea x="10" y="26" width="900" font-size="30" font-weight="700" fill="#0f172a"
+            text-align="center" x:glyph-x-scale="1.18">SYSTEM ARCHITECTURE</textArea>
+  <textArea x="210" y="64" width="500" font-size="13" fill="#64748b" text-align="center">Every label below is compiled from xsvg — it wraps to its box, shrinks to fit, and breaks exactly where authored.</textArea>
+
+  <!-- connectors (drawn first, under the boxes) -->
+  <g fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M340,168 L455,205"/>
+    <path d="M580,168 L465,205"/>
+    <path d="M460,265 L460,299"/>
+    <path d="M420,359 C300,378 220,378 190,399"/>
+    <path d="M460,359 L460,399"/>
+    <path d="M500,359 C620,378 700,378 730,399"/>
+    <path d="M190,483 L190,519"/>
+    <path d="M460,483 L460,519"/>
+    <path d="M730,483 L730,519"/>
+  </g>
+
+  <!-- client tier -->
+  <rect x="250" y="108" width="180" height="60" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <x:textbox x="250" y="108" width="180" height="60" padding="8" align="center" valign="middle" font-size="18" font-weight="600" fill="#3730a3">Web App</x:textbox>
+  <rect x="490" y="108" width="180" height="60" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <x:textbox x="490" y="108" width="180" height="60" padding="8" align="center" valign="middle" font-size="18" font-weight="600" fill="#3730a3">Mobile App</x:textbox>
+
+  <!-- edge tier -->
+  <rect x="360" y="205" width="200" height="60" rx="12" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/>
+  <x:textbox x="360" y="205" width="200" height="60" padding="8" align="center" valign="middle" font-size="18" font-weight="600" fill="#075985">CDN / Edge Cache</x:textbox>
+
+  <!-- gateway tier -->
+  <rect x="360" y="299" width="200" height="60" rx="12" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <x:textbox x="360" y="299" width="200" height="60" padding="8" align="center" valign="middle" font-size="18" font-weight="600" fill="#5b21b6">API Gateway</x:textbox>
+
+  <!-- service tier: uniform boxes, unequal labels → shrink-to-fit does the work -->
+  <rect x="70" y="399" width="240" height="84" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <x:textbox x="70" y="399" width="240" height="84" padding="12" align="center" valign="middle" fit="shrink" fit-min="10" font-size="22" font-weight="600" fill="#065f46">Auth</x:textbox>
+  <rect x="340" y="399" width="240" height="84" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <x:textbox x="340" y="399" width="240" height="84" padding="12" align="center" valign="middle" fit="shrink" fit-min="10" font-size="22" font-weight="600" fill="#065f46">Orders &amp; Fulfillment Pipeline Service</x:textbox>
+  <rect x="610" y="399" width="240" height="84" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <x:textbox x="610" y="399" width="240" height="84" padding="12" align="center" valign="middle" fit="shrink" fit-min="10" font-size="22" font-weight="600" fill="#065f46">Catalog</x:textbox>
+
+  <!-- data tier: two-line labels via <tbreak/> -->
+  <rect x="70" y="519" width="240" height="72" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <textArea x="82" y="529" width="216" height="56" font-size="17" fill="#92400e" text-align="center" display-align="center" font-weight="600">PostgreSQL<tbreak/>primary + 2 replicas</textArea>
+  <rect x="340" y="519" width="240" height="72" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <textArea x="352" y="529" width="216" height="56" font-size="17" fill="#92400e" text-align="center" display-align="center" font-weight="600">Redis<tbreak/>session cache</textArea>
+  <rect x="610" y="519" width="240" height="72" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <textArea x="622" y="529" width="216" height="56" font-size="17" fill="#92400e" text-align="center" display-align="center" font-weight="600">Kafka<tbreak/>event stream</textArea>
+</svg>
