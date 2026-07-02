@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 600 430" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="600" height="430" fill="#ffffff"/>
+  <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">letter-spacing (tracking) — layout-aware, kerning preserved</text>
+
+  <!-- 1. same word, increasing tracking -->
+  <text x="20" y="54" font-size="11" fill="#64748b">tracking scale (0 · 2 · 6 px)</text>
+  <textArea x="20" y="62" width="560" font-size="24" font-weight="600" fill="#0f172a">WAVE</textArea>
+  <textArea x="20" y="96" width="560" font-size="24" font-weight="600" fill="#0f172a" letter-spacing="2">WAVE</textArea>
+  <textArea x="20" y="130" width="560" font-size="24" font-weight="600" fill="#0f172a" letter-spacing="6">WAVE</textArea>
+
+  <!-- 2. kerning coexists: AV / To / Wa keep their pair-kerns, tracking adds on top -->
+  <text x="20" y="182" font-size="11" fill="#64748b">kerning pairs (AV · To · Wa) survive the added tracking</text>
+  <textArea x="20" y="192" width="560" font-size="22" fill="#334155">AVA To Wave — normal</textArea>
+  <textArea x="20" y="224" width="560" font-size="22" fill="#334155" letter-spacing="3">AVA To Wave — tracked</textArea>
+
+  <!-- 3. layout-aware: tracked text wraps sooner inside the same box -->
+  <text x="20" y="278" font-size="11" fill="#64748b">wrapping accounts for tracking (same box, same size)</text>
+  <rect x="20" y="286" width="270" height="126" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <textArea x="32" y="296" width="246" height="106" font-size="15" fill="#0f172a">Wrapping counts the extra space between letters, so lines break where they truly end.</textArea>
+  <rect x="310" y="286" width="270" height="126" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <textArea x="322" y="296" width="246" height="106" font-size="15" fill="#0f172a" letter-spacing="2">Wrapping counts the extra space between letters, so lines break where they truly end.</textArea>
+</svg>

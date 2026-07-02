@@ -14,8 +14,9 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area, layout_flow, layout_text_area, Align, AreaLayout, AreaSpec, DisplayAlign, Fit,
-    LineIncrement, Measurer, PlacedLine, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    layout_area, layout_flow, layout_text_area, line_advance, Align, AreaLayout, AreaSpec,
+    DisplayAlign, Fit, LineIncrement, Measurer, PlacedLine, TextAlign, TextAreaSpec, TextOverflow,
+    TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -254,9 +255,16 @@ fn write_area_text(
     m: &dyn Measurer,
 ) {
     out.push_str(&format!(
-        "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">",
+        "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
         layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
     ));
+    if style.letter_spacing != 0.0 {
+        out.push_str(&format!(
+            " letter-spacing=\"{}\"",
+            fmt(style.letter_spacing)
+        ));
+    }
+    out.push('>');
     for line in &layout.lines {
         emit_tspan(out, line, style, layout.font_size, glyph_x_scale, m);
     }
@@ -278,7 +286,7 @@ fn emit_tspan(
         fmt(line.baseline)
     ));
     if (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
-        let len = m.measure(&line.text, style, size) * glyph_x_scale;
+        let len = line_advance(&line.text, style, size, m) * glyph_x_scale;
         out.push_str(&format!(
             " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
             fmt(len)
@@ -329,6 +337,10 @@ fn style_from(node: roxmltree::Node) -> TextStyle {
             .to_string(),
         style: node.attribute("font-style").unwrap_or("normal").to_string(),
         line_height: attr_pos(node, "line-height", 1.2),
+        letter_spacing: match node.attribute("letter-spacing") {
+            None | Some("normal") => 0.0,
+            Some(v) => parse_num(v).unwrap_or(0.0),
+        },
     }
 }
 
@@ -633,6 +645,24 @@ mod tests {
         assert!(out.contains("<circle"));
         assert!(out.contains("r=\"3\""));
         assert!(!out.contains("note"), "x: attr should be stripped: {out}");
+    }
+
+    #[test]
+    fn letter_spacing_affects_layout_and_is_emitted() {
+        // Mono: char = 0.5 × size. At size 10, "aa bb" = 10 + 5 + 10 = 25 wide (4 gaps).
+        let base = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="25" font-size="10">aa bb</textArea></svg>"#;
+        assert_eq!(compile_test(base).matches("<tspan").count(), 1);
+
+        // letter-spacing=3 adds 4·3 = 12 → 37 > 25, so it must wrap to two lines,
+        // and the attribute is written onto the synthesized <text>.
+        let spaced = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="25" font-size="10" letter-spacing="3">aa bb</textArea></svg>"#;
+        let out = compile_test(spaced);
+        assert_eq!(out.matches("<tspan").count(), 2, "{out}");
+        assert!(out.contains("letter-spacing=\"3\""), "{out}");
+
+        // On <text inline-size> the attribute is forwarded verbatim (passthrough).
+        let flow = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="500" letter-spacing="2">hi there</text></svg>"#;
+        assert!(compile_test(flow).contains("letter-spacing=\"2\""));
     }
 
     #[test]

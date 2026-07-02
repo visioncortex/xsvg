@@ -134,10 +134,28 @@ changes the wrap points.
 result is plain `<text>`/`<tspan>` emitted at the solved font size. No outlining required — works in
 v0, in Chrome and Safari.
 
-> Font-size shrink is the readable default. Other "copyfit" strategies from
-> [Typography.md](Typography.md) — horizontal glyph condensing (`textLength`-style), tracking/leading
-> reduction — are alternative fit strategies we can add later. Overflow truncation (`text-overflow`)
-> is specified separately in [Specification.md §6.6](Specification.md).
+> Font-size shrink is the readable default. Overflow truncation (`text-overflow`) is specified
+> separately in [Specification.md §6.6](Specification.md).
+
+---
+
+## Typographic controls *(work on every text element)*
+
+Three shaping controls, usable on `<text inline-size>`, `<textArea>`, and `<x:textbox>` alike. All are
+**layout-aware** — wrapping, shrink-to-fit and truncation see their effect — and normative in
+[Specification.md §6.7–6.8](Specification.md) / §6.3.
+
+| Control | Where | Does |
+|---|---|---|
+| `letter-spacing` | unprefixed (real SVG/CSS name) | uniform tracking between letters; an absolute length (doesn't scale with font-size) that **adds on top of kerning**. Widens lines, so text wraps sooner. |
+| `glyph-x-scale` | `glyph-x-scale` inside `<x:textbox>`; `x:glyph-x-scale` on reused `<text>`/`<textArea>` | *visual* horizontal stretch/condense of glyphs via `textLength` — layout is unchanged, only the rendered glyphs are scaled. |
+| `<tbreak/>` | child of `<textArea>` | a forced line break (SVG Tiny 1.2); wrapping resumes on each side, consecutive breaks make blank lines. |
+
+```svg
+<textArea x="10" y="10" width="240" letter-spacing="1.5" x:glyph-x-scale="1.1">
+  Tracked, slightly extended<tbreak/>and hand-broken here.
+</textArea>
+```
 
 ---
 

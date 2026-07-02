@@ -8,6 +8,10 @@ pub struct TextStyle {
     pub style: String,
     /// Line advance as a multiple of `size`.
     pub line_height: f64,
+    /// Extra tracking added between grapheme clusters, in user units. Absolute
+    /// (not em-relative): it does not scale with `size`, matching CSS/SVG
+    /// `letter-spacing`, and it layers on top of the font's kerning.
+    pub letter_spacing: f64,
 }
 
 impl Default for TextStyle {
@@ -18,6 +22,7 @@ impl Default for TextStyle {
             weight: "normal".into(),
             style: "normal".into(),
             line_height: 1.2,
+            letter_spacing: 0.0,
         }
     }
 }

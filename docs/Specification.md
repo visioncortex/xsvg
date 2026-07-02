@@ -196,7 +196,34 @@ namespaced).
 `textLength="w · scale" lengthAdjust="spacingAndGlyphs"` on the `<tspan>`. Renderers stretch/compress
 the glyphs and inter-glyph spacing to hit that length. **Layout is unchanged** — wrapping, fitting and
 overflow all run at the natural width; only the final rendered glyphs are scaled. A value of `1` (the
-initial) emits nothing. Empty lines are left untouched.
+initial) emits nothing. Empty lines are left untouched. When combined with `letter-spacing` (§6.8),
+the `textLength` target is computed from the letter-spaced advance so the two compose.
+
+### 6.8 Letter spacing — `letter-spacing` [implemented]
+
+CSS/SVG tracking: uniform extra space between grapheme clusters, on every text element (unprefixed —
+`letter-spacing` is an existing SVG/CSS name, §3).
+
+| Attr | Values | Initial | Effect |
+|---|---|---|---|
+| `letter-spacing` | `normal` \| `<length>` | `normal` (= 0) | extra advance added per inter-grapheme gap |
+
+**Model (normative).** Letter-spacing is an **absolute length** in user units — it does *not* scale
+with `font-size` (so under shrink-to-fit the tracking stays put while glyphs shrink), matching CSS/SVG.
+It is **additive on top of kerning**, not a replacement: the font's pair kerning stays in the glyph
+advances (whatever the measurer models — real for canvas, none for the test fixtures) and tracking is
+layered over it. The rendered advance of a run of *n* grapheme clusters is:
+
+```
+advance = kerned_advance(run) + (n − 1) × letter-spacing
+```
+
+**Layout-aware.** This letter-spaced advance — not the raw glyph advance — drives wrapping,
+shrink-to-fit, ellipsis truncation and alignment, so tracked text breaks and fits correctly. The
+`letter-spacing` attribute is then emitted on the output `<text>` (or forwarded on a passed-through
+`<text inline-size>`); the renderer reproduces exactly the width layout assumed. `normal` and `0`
+emit nothing. Gap count uses code-point count in v0 (grapheme-cluster segmentation is a future
+refinement); `font-kerning` is left at the renderer default (`normal`).
 
 ## 7. Other pillars [planned]
 
@@ -225,6 +252,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | Real browser font metrics (ascent, descent, cap-height, x-height) | implemented |
 | `text-overflow` (clip default; **ellipsis**) | implemented |
 | `glyph-x-scale` (visual glyph width scaling via `textLength`) | implemented |
+| `letter-spacing` (layout-aware tracking, kerning-preserving) | implemented |
 | `<x:textbox in="#shape">` binding | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |

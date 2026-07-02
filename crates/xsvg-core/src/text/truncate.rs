@@ -1,7 +1,7 @@
 //! Overflow truncation shared by box text layouts (Specification.md §6.6).
 
 use super::area::PlacedLine;
-use super::measure::Measurer;
+use super::measure::{line_advance, Measurer};
 use super::style::TextStyle;
 
 const ELLIPSIS: &str = "…";
@@ -36,11 +36,11 @@ pub fn ellipsize_line(
     size: f64,
     m: &dyn Measurer,
 ) -> Option<String> {
-    if m.measure(ELLIPSIS, style, size) > max_width {
+    if line_advance(ELLIPSIS, style, size, m) > max_width {
         return None;
     }
     let mut s: String = line.trim_end().to_string();
-    while m.measure(&format!("{s}{ELLIPSIS}"), style, size) > max_width {
+    while line_advance(&format!("{s}{ELLIPSIS}"), style, size, m) > max_width {
         if s.pop().is_none() {
             break;
         }
@@ -63,7 +63,9 @@ pub fn apply_ellipsis(
     m: &dyn Measurer,
 ) {
     for line in lines.iter_mut() {
-        if !line.text.ends_with(ELLIPSIS) && m.measure(&line.text, style, size) > max_width + 1e-6 {
+        if !line.text.ends_with(ELLIPSIS)
+            && line_advance(&line.text, style, size, m) > max_width + 1e-6
+        {
             line.text = ellipsize_line(&line.text, max_width, style, size, m).unwrap_or_default();
         }
     }
