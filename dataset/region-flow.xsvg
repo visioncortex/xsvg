@@ -1,17 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
-     viewBox="0 0 660 300" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="660" height="300" fill="#ffffff"/>
+     viewBox="0 0 900 300" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="900" height="300" fill="#ffffff"/>
   <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">&lt;x:textbox in="#shape"&gt; — text flowed inside an arbitrary outline</text>
 
-  <!-- triangle (polygon), apex down: lines start wide and narrow toward the point -->
-  <polygon id="tri" points="30,52 230,52 130,250" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-  <x:textbox in="#tri" align="center" padding="6" font-size="12" fill="#3730a3">Text poured into a triangle keeps its lines full at the wide top and lets them shrink as the sides close toward the apex.</x:textbox>
+  <!-- triangle (apex down): top-aligned, lines shrink toward the apex -->
+  <polygon id="tri" points="20,54 200,54 110,262" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <x:textbox in="#tri" align="center" padding="6" font-size="12" fill="#3730a3">Text in a triangle stays full at the wide top and shrinks toward the apex.</x:textbox>
 
-  <!-- circle (curve): short at top and bottom, widest across the middle band -->
-  <circle id="cir" cx="360" cy="150" r="100" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
-  <x:textbox in="#cir" align="center" valign="middle" padding="6" font-size="12" fill="#065f46">Inside a circle the first and last lines are short while the middle lines stretch across the widest part of the disc.</x:textbox>
+  <!-- circle: short at top and bottom, widest across the middle -->
+  <circle id="cir" cx="320" cy="160" r="96" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <x:textbox in="#cir" align="center" valign="middle" padding="6" font-size="12" fill="#065f46">In a circle the first and last lines are short while the middle spans the widest part of the disc.</x:textbox>
 
-  <!-- diamond (polygon): widest in the middle, narrow at top and bottom -->
-  <polygon id="dia" points="590,52 640,150 590,250 540,150" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
-  <x:textbox in="#dia" align="center" valign="middle" padding="4" font-size="11" fill="#92400e">A diamond widens then narrows so the lines follow suit.</x:textbox>
+  <!-- diamond: narrow + tall so the lines taper to the points -->
+  <polygon id="dia" points="520,44 588,160 520,276 452,160" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <x:textbox in="#dia" align="center" valign="middle" padding="4" font-size="12" fill="#92400e">A diamond widens then narrows, so the lines follow suit.</x:textbox>
+
+  <!-- hourglass: a concave (vertical-pinch) outline — still one run per row -->
+  <polygon id="hg" points="650,60 840,60 775,160 840,260 650,260 715,160" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <x:textbox in="#hg" align="center" valign="middle" padding="6" font-size="12" fill="#5b21b6">An hourglass pinches at the waist and spreads out again — concave, but still flows.</x:textbox>
 </svg>

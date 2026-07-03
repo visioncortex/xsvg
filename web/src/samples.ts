@@ -55,7 +55,7 @@ export const CATALOG: Category[] = [
       {
         file: "region-flow.xsvg",
         title: "Text in a shape",
-        blurb: "Text flowed inside a triangle, circle, and diamond; valign centers the block",
+        blurb: "Flowed inside a triangle, circle, diamond, and a concave hourglass; valign centers the block",
       },
       {
         file: "badges.xsvg",

@@ -19,7 +19,7 @@ Realistic composites that combine several features into one artifact.
 | File | Shows |
 |---|---|
 | [chat.xsvg](chat.xsvg) | `in="#rect"` binds a label to each rounded bubble — "draw the box once, attach the text" |
-| [region-flow.xsvg](region-flow.xsvg) | Text flowed *inside* a triangle, circle, and diamond — lines follow each outline; `valign` centers the block |
+| [region-flow.xsvg](region-flow.xsvg) | Text flowed *inside* a triangle, circle, diamond, and a concave hourglass — lines follow each outline; `valign` centers the block |
 | [badges.xsvg](badges.xsvg) | Centered labels poured into a hexagon, circle seal, shield (curved path), and pentagon |
 
 ## Box models & alignment (§6.3–6.5)

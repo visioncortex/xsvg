@@ -289,9 +289,12 @@ when the block is taller than the region, so it never drops words top-alignment 
 
 **v0 scope.** No **shrink-to-fit** in region mode (rect fast-path only). `text-overflow` clips at the
 region's bottom and can ellipsize the last line. Vertical resolution is coarse (row height ≈
-font-size ⁄ 3). Convex shapes are ideal; a non-convex row collapses to its outer `[leftmost, rightmost]`
-span. A word wider than a line's span still overflows the outline (the usual lone-word rule) unless
-`text-overflow="ellipsis"` trims it.
+font-size ⁄ 3). Any outline whose every horizontal slice is a **single run** flows correctly —
+including vertical-pinch concavities like an hourglass (lines just narrow at the waist). A row that
+splits into **two runs** (a donut, a horizontal bowtie, a `U`) collapses to its outer
+`[leftmost, rightmost]` span, so text bridges the gap — v0 has no multi-span rows. A word wider than a
+line's span still overflows the outline (the usual lone-word rule) unless `text-overflow="ellipsis"`
+trims it.
 
 ## 7. Other pillars [planned]
 

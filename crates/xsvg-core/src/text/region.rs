@@ -178,19 +178,39 @@ pub fn layout_region(
         (lines, widths, dropped || i < measured.words.len())
     };
 
-    // Pass 1 (top): size the block, then shift for valign and re-flow if needed.
-    let pass1 = flow(content_top);
-    let block_h = pass1.0.len() as f64 * line_h;
-    let offset = match spec.valign {
-        VAlign::Top => 0.0,
-        VAlign::Middle => ((content_bottom - content_top - block_h) / 2.0).max(0.0),
-        VAlign::Bottom => (content_bottom - content_top - block_h).max(0.0),
+    // Vertical placement. The line count changes with the start height (the shape is
+    // wider lower down → fewer lines), so a single top-pass estimate mis-centers.
+    // Iterate the offset to a fixpoint: re-flow, recount, re-offset — bounded, and
+    // convex shapes settle in a step or two.
+    let available = content_bottom - content_top;
+    let offset_for = |n: usize| -> f64 {
+        let block_h = n as f64 * line_h;
+        match spec.valign {
+            VAlign::Top => 0.0,
+            VAlign::Middle => ((available - block_h) / 2.0).max(0.0),
+            VAlign::Bottom => (available - block_h).max(0.0),
+        }
     };
-    let (mut lines, widths, dropped) = if offset <= 1e-6 {
-        pass1
-    } else {
-        flow(content_top + offset)
-    };
+    // `result` always holds a complete, valid layout — initialized top-aligned,
+    // then reassigned each iteration below.
+    let mut result = flow(content_top);
+    if spec.valign != VAlign::Top {
+        // Iterate toward a stable offset, re-flowing since the line count shifts as
+        // the shape widens lower down. Stop once the offset settles to within a line
+        // height — finer precision isn't meaningful, and this skips a negligible
+        // shift. Hard-capped: if it never settles (e.g. the count oscillates), we
+        // keep the last iterate — a valid, if slightly off-centre, layout. Cannot loop.
+        let mut applied = 0.0;
+        for _ in 0..4 {
+            let target = offset_for(result.0.len());
+            if (target - applied).abs() < line_h {
+                break;
+            }
+            result = flow(content_top + target);
+            applied = target;
+        }
+    }
+    let (mut lines, widths, dropped) = result;
 
     if spec.text_overflow == TextOverflow::Ellipsis {
         // inline overflow: a lone word wider than its span
