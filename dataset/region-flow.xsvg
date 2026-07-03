@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+     viewBox="0 0 660 300" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="660" height="300" fill="#ffffff"/>
+  <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">&lt;x:textbox in="#shape"&gt; — text flowed inside an arbitrary outline</text>
+
+  <!-- triangle (polygon), apex down: lines start wide and narrow toward the point -->
+  <polygon id="tri" points="30,52 230,52 130,250" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <x:textbox in="#tri" align="center" padding="6" font-size="12" fill="#3730a3">Text poured into a triangle keeps its lines full at the wide top and lets them shrink as the sides close toward the apex.</x:textbox>
+
+  <!-- circle (curve): short at top and bottom, widest across the middle band -->
+  <circle id="cir" cx="360" cy="150" r="100" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <x:textbox in="#cir" align="center" padding="6" font-size="12" fill="#065f46">Inside a circle the first and last lines are short while the middle lines stretch across the widest part of the disc.</x:textbox>
+
+  <!-- diamond (polygon): widest in the middle, narrow at top and bottom -->
+  <polygon id="dia" points="590,52 640,150 590,250 540,150" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <x:textbox in="#dia" align="center" padding="4" font-size="11" fill="#92400e">A diamond widens then narrows so the lines follow suit.</x:textbox>
+</svg>

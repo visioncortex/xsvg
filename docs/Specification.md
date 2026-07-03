@@ -55,6 +55,10 @@ returning, for a string at a size, its advance width and the font's vertical met
 `measureText`; defaults approximate `ascent 0.8em, descent 0.2em, cap_height 0.7em, x_height 0.5em`.
 Architecture: [Plan.md §1](Plan.md).
 
+Shape geometry for region flow (§6.10) is obtained through a parallel *shaper* seam: it rasterizes a
+filled path into coarse per-row inside-spans. In v0 the browser supplies it (`getBBox` +
+`isPointInFill`); a pure-Rust backend can slot in behind the same trait later.
+
 **Robustness (normative).** Compilation is total on well-formed input: degenerate geometry
 (zero/negative width, height, padding, or `font-size`), degenerate spacing (negative
 `letter-spacing`/`word-spacing`), and pathological measurer output (non-finite or negative advances)
@@ -117,8 +121,8 @@ Box text with diagram ergonomics. Distinct from `<textArea>` in vertical model (
 
 | Attr | Values | Default | Effect |
 |---|---|---|---|
-| `x`,`y`,`width`,`height` | length | — | box geometry |
-| `in` | `#id` | — | bind to a referenced shape's geometry *(planned)* |
+| `x`,`y`,`width`,`height` | length | — | box geometry (ignored when `in` is set) |
+| `in` | `#id` | — | bind to a referenced shape (§6.10) |
 | `padding` | length | 0 | uniform content inset |
 | `align` | `start` \| `center` \| `end` \| `justify` | `start` | horizontal alignment (§6.9) |
 | `valign` | `top` \| `middle` \| `bottom` | `top` | vertical alignment |
@@ -256,6 +260,33 @@ scaled — contrast `glyph-x-scale`, §6.7, which uses `spacingAndGlyphs`). On a
 both, justification wins. v0 distributes slack uniformly across all gaps (not word-gaps-only); a
 word-spacing-only composer is a future refinement.
 
+### 6.10 Shape binding & region flow — `<x:textbox in="#id">` [implemented]
+
+Binds a textbox to a referenced shape instead of its own `x/y/width/height`.
+
+- **`in="#id"`** resolves to any element in the document. A missing target renders nothing (a comment
+  marker is emitted).
+- If the target is a **`rect`**, the textbox uses its box and the rectangular model of §6.4/§6.5 —
+  `fit`, `valign`, `padding`, `align` all apply. This is the common "label a box" case.
+- **Any other fillable shape** (`path`, `circle`, `ellipse`, `polygon`, `polyline`) → text is flowed
+  **inside the actual filled outline** (the Vision's *fit-text-in-polygon*): each line is wrapped to
+  the shape's inside width *at that height*, so a triangle's lines shorten toward its apex and a
+  circle's bulge across the middle.
+
+**Geometry seam (normative architecture).** Region geometry is obtained through a host-supplied
+*shaper* — the geometric analog of the *measurer* (§4). The shaper rasterizes a filled path into a
+coarse table of per-row inside-spans `[left, right]`; the pure layout then flows text into that table
+(intersecting spans across each line box so glyphs never cross the outline). In v0 the browser is the
+shaper — curve flattening, bounds, and inside-testing are deferred to `getBBox` + `isPointInFill` — and
+native tests replay browser-generated raster fixtures. A pure-Rust shaper (flatten + scanline) is a
+later backend behind the same seam.
+
+**v0 scope.** Region flow is **top-aligned** (no `valign`/`display-align`) and has **no
+shrink-to-fit** — both remain in the rect fast-path only. `align` (`start`/`center`/`end`) positions
+each line within its own span; `text-overflow` clips at the region's bottom and can ellipsize the last
+line. Vertical resolution is coarse (row height ≈ font-size ⁄ 3). Convex shapes are ideal; a non-convex
+row collapses to its outer `[leftmost, rightmost]` span.
+
 ## 7. Other pillars [planned]
 
 Sketched in [Plan.md §2](Plan.md); not yet implemented.
@@ -285,7 +316,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | `glyph-x-scale` (visual glyph width scaling via `textLength`) | implemented |
 | `letter-spacing` / `word-spacing` (layout-aware tracking, kerning-preserving) | implemented |
 | `text-align="justify"` / `align="justify"` (greedy full-justify via `textLength`) | implemented |
-| `<x:textbox in="#shape">` binding | planned |
+| `<x:textbox in="#shape">` binding (rect box + region flow into curved outlines) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Outlined-text backend; concrete SVG-subset list; WebGPU renderer | planned |

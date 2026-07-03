@@ -12,41 +12,51 @@ use super::measure::Measured;
 /// accumulators stay exact; with neither set, the result is identical to plain
 /// greedy wrapping.
 pub fn wrap(measured: &Measured, max_width: f64, scale: f64) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < measured.words.len() {
+        let (line, next) = fill_line(measured, i, max_width, scale);
+        lines.push(line);
+        i = next; // fill_line always consumes ≥1 word, so this terminates
+    }
+    lines
+}
+
+/// Fill one line greedily starting at word `start`: always take that word (even if
+/// it alone overflows `max_width`), then append following words while the line — with
+/// `letter-spacing`/`word-spacing` folded in and *not* scaled — still fits. Returns
+/// the joined line text and the index of the next unconsumed word (`> start`).
+///
+/// The shared inner loop of both rectangular wrapping ([`wrap`]) and region flow,
+/// where each line has its own available width.
+pub(crate) fn fill_line(
+    measured: &Measured,
+    start: usize,
+    max_width: f64,
+    scale: f64,
+) -> (String, usize) {
     let space = measured.space * scale + measured.word_spacing;
     let ls = measured.letter_spacing;
     let gaps = |graphemes: usize| graphemes.saturating_sub(1) as f64;
 
-    let mut lines: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut nat = 0.0; // scaled natural advance of the current line (words + spaces)
-    let mut graph = 0usize; // grapheme count of the current line (spaces included)
+    let (first, w0) = &measured.words[start];
+    let mut line = first.clone();
+    let mut nat = w0 * scale; // scaled natural advance (words + spaces)
+    let mut graph = first.chars().count(); // grapheme count (spaces included)
+    let mut i = start + 1;
 
-    for (word, w0) in &measured.words {
-        let w = w0 * scale;
-        let g = word.chars().count();
-        if cur.is_empty() {
-            cur.push_str(word);
-            nat = w;
-            graph = g;
-        } else {
-            let (cand_nat, cand_graph) = (nat + space + w, graph + 1 + g);
-            if cand_nat + gaps(cand_graph) * ls <= max_width {
-                cur.push(' ');
-                cur.push_str(word);
-                nat = cand_nat;
-                graph = cand_graph;
-            } else {
-                lines.push(std::mem::take(&mut cur));
-                cur.push_str(word);
-                nat = w;
-                graph = g;
-            }
+    while let Some((word, w)) = measured.words.get(i) {
+        let (cand_nat, cand_graph) = (nat + space + w * scale, graph + 1 + word.chars().count());
+        if cand_nat + gaps(cand_graph) * ls > max_width {
+            break;
         }
+        line.push(' ');
+        line.push_str(word);
+        nat = cand_nat;
+        graph = cand_graph;
+        i += 1;
     }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
-    lines
+    (line, i)
 }
 
 #[cfg(test)]

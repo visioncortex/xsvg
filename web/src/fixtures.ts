@@ -1,9 +1,12 @@
-// Font-metric fixture generator (dev tool, not shipped in the production build).
+// Font-metric + region fixture generator (dev tool, not shipped in production).
 //
 // Measures per-glyph advance widths and vertical metrics for a few common system
-// fonts via canvas measureText, at a 100px base size. Emits one JSON file per
-// font for crates/xsvg-core/tests/fixtures/, consumed by the integration test's
-// FixtureMeasurer. Open at http://localhost:5173/fixtures.html.
+// fonts via canvas measureText, at a 100px base size. Also rasterizes a few shapes
+// (via the browser Shaper path) into coarse span tables. Emits JSON for
+// crates/xsvg-core/tests/fixtures/, consumed by the integration tests. Open at
+// http://localhost:5173/fixtures.html.
+
+import { rasterize } from "./xsvg";
 
 const FONTS = ["Arial", "Times New Roman", "Courier New", "Georgia"];
 const BASE = 100;
@@ -62,3 +65,45 @@ for (const [name, fix] of Object.entries(fonts)) {
   a.textContent = `download ${slug(name)}.json`;
   downloads.appendChild(a);
 }
+
+// ---- region fixtures: coarse shape rasters (browser Shaper) -----------------
+
+interface RegionFixture {
+  name: string;
+  minX: number;
+  minY: number;
+  w: number;
+  h: number;
+  rowH: number;
+  rows: ([number, number] | null)[]; // inside [left,right] per row, null if empty
+}
+
+const SHAPES: { name: string; d: string; rowH: number }[] = [
+  { name: "triangle-down", d: "M10,10 L110,10 L60,130 Z", rowH: 8 },
+  { name: "circle", d: "M0,60 a60,60 0 1,0 120,0 a60,60 0 1,0 -120,0 Z", rowH: 8 },
+  { name: "diamond", d: "M60,10 L120,70 L60,130 L0,70 Z", rowH: 8 },
+];
+
+function shapeFixture(name: string, d: string, rowH: number): RegionFixture {
+  const a = rasterize(d, rowH);
+  const rows: ([number, number] | null)[] = [];
+  for (let i = 5; i + 1 < a.length; i += 2) {
+    const l = a[i];
+    const r = a[i + 1];
+    rows.push(Number.isNaN(l) || Number.isNaN(r) ? null : [round(l), round(r)]);
+  }
+  return {
+    name,
+    minX: round(a[0]),
+    minY: round(a[1]),
+    w: round(a[2]),
+    h: round(a[3]),
+    rowH: round(a[4]),
+    rows,
+  };
+}
+
+const regions = SHAPES.map((s) => shapeFixture(s.name, s.d, s.rowH));
+const regionJson = JSON.stringify({ regions }, null, 2);
+document.getElementById("regionsOut")!.textContent = "REGION_B64:" + btoa(regionJson) + ":END";
+document.getElementById("regionsReadable")!.textContent = regionJson;

@@ -96,10 +96,12 @@ fitting, and the ability to **bind to an existing shape** (draw the box once, at
   Long node label that wraps, centers, and shrinks to fit the box
 </x:textbox>
 ```
-`in="#shape"` flows into a referenced shape's geometry (any path/polygon, not just rects — the
-Vision's "fit text in polygon"). Without `in`, give inline `x`/`y`/`width`/`height`. Attributes here
-are unprefixed (we own the element): `padding`, `align` (start|center|end), `valign`
-(top|middle|bottom), `fit`, `line-height`, etc.
+`in="#shape"` binds to a referenced shape ([Specification.md §6.10](Specification.md)): a **rect** uses
+its box (with `fit`/`valign`), while a **curved shape** (path/circle/ellipse/polygon) flows text
+*inside the actual outline* — the Vision's "fit text in polygon", so lines follow a triangle or circle.
+Region flow is top-aligned in v0 (no `fit`/`valign`). Without `in`, give inline `x`/`y`/`width`/`height`.
+Attributes here are unprefixed (we own the element): `padding`, `align` (start|center|end|justify),
+`valign` (top|middle|bottom), `fit`, `line-height`, etc.
 
 ---
 

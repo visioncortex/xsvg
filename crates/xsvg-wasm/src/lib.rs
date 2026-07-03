@@ -14,9 +14,9 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area, layout_flow, layout_text_area, line_advance, Align, AreaLayout, AreaSpec,
-    DisplayAlign, Fit, LineIncrement, Measurer, PlacedLine, TextAlign, TextAreaSpec, TextOverflow,
-    TextStyle, VAlign,
+    layout_area, layout_flow, layout_region, layout_text_area, line_advance, Align, AreaLayout,
+    AreaSpec, DisplayAlign, Fit, LineIncrement, Measurer, PlacedLine, RasterRegion, Rect,
+    RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.dev/ns";
@@ -82,22 +82,86 @@ impl Measurer for JsMeasurer<'_> {
     }
 }
 
-/// WASM entry point. `measure(text, fontCss) => number` and
-/// `metrics(fontCss) => [ascent, descent, capHeight, xHeight]` are canvas callbacks.
-/// Throws on malformed XML so the JS side can surface the error.
+/// Browser-backed [`Shaper`]: `rasterize(pathD, rowH) => Float64Array` where the
+/// array is `[minX, minY, width, height, rowH, l0, r0, l1, r1, …]` (a `NaN` pair for
+/// an empty row). The browser flattens curves + scans via `getBBox`/`isPointInFill`.
+struct JsShaper<'a> {
+    rasterize: &'a js_sys::Function,
+}
+
+impl Shaper for JsShaper<'_> {
+    fn rasterize(&self, path_d: &str, row_h: f64) -> Option<RasterRegion> {
+        let v = self
+            .rasterize
+            .call2(
+                &JsValue::NULL,
+                &JsValue::from_str(path_d),
+                &JsValue::from_f64(row_h),
+            )
+            .ok()?;
+        let arr = js_sys::Array::from(&v);
+        if arr.length() < 6 {
+            return None;
+        }
+        let g = |i: u32| arr.get(i).as_f64();
+        let (minx, miny, w, h, rh) = (g(0)?, g(1)?, g(2)?, g(3)?, g(4)?);
+        if !(w > 0.0 && h > 0.0 && rh > 0.0) {
+            return None;
+        }
+        let mut rows = Vec::new();
+        let mut i = 5;
+        while i + 1 < arr.length() {
+            let span = match (arr.get(i).as_f64(), arr.get(i + 1).as_f64()) {
+                (Some(l), Some(r)) if l.is_finite() && r.is_finite() && r > l => Some((l, r)),
+                _ => None,
+            };
+            rows.push(span);
+            i += 2;
+        }
+        Some(RasterRegion::new(
+            Rect {
+                x: minx,
+                y: miny,
+                w,
+                h,
+            },
+            miny,
+            rh,
+            rows,
+        ))
+    }
+}
+
+/// Everything a lowering pass needs from the platform: font metrics + shape raster.
+struct Ctx<'a> {
+    m: &'a dyn Measurer,
+    shaper: &'a dyn Shaper,
+}
+
+/// WASM entry point. `measure(text, fontCss) => number`,
+/// `metrics(fontCss) => [ascent, descent, capHeight, xHeight]`, and
+/// `rasterize(pathD, rowH) => Float64Array` are browser callbacks. Throws on
+/// malformed XML so the JS side can surface the error.
 #[wasm_bindgen]
 pub fn compile(
     input: &str,
     quality: &str,
     measure: &js_sys::Function,
     metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
-    compile_impl(input, quality, &m).map_err(|e| JsError::new(&e))
+    let shaper = JsShaper { rasterize };
+    compile_impl(input, quality, &m, &shaper).map_err(|e| JsError::new(&e))
 }
 
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
-pub fn compile_impl(input: &str, quality: &str, m: &dyn Measurer) -> Result<String, String> {
+pub fn compile_impl(
+    input: &str,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+) -> Result<String, String> {
     let q = xsvg_core::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
@@ -107,12 +171,12 @@ pub fn compile_impl(input: &str, quality: &str, m: &dyn Measurer) -> Result<Stri
         "<!-- compiled by xsvg v0 (quality={}) -->\n",
         q.as_str()
     ));
-    serialize(doc.root_element(), &mut out, true, m);
+    serialize(doc.root_element(), &mut out, true, &Ctx { m, shaper });
     Ok(out)
 }
 
 /// Recursively emit a node as SVG.
-fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, m: &dyn Measurer) {
+fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) {
     if !node.is_element() {
         if node.is_text() {
             if let Some(t) = node.text() {
@@ -125,7 +189,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, m: &dyn Mea
     // xsvg extension elements.
     if node.tag_name().namespace() == Some(XSVG_NS) {
         match node.tag_name().name() {
-            "textbox" => emit_textbox(node, out, m),
+            "textbox" => emit_textbox(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -138,11 +202,11 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, m: &dyn Mea
     };
 
     if name == "text" && node.attribute("inline-size").is_some() {
-        emit_inline_size_text(node, out, m);
+        emit_inline_size_text(node, out, ctx.m);
         return;
     }
     if name == "textArea" {
-        emit_text_area(node, out, m);
+        emit_text_area(node, out, ctx.m);
         return;
     }
 
@@ -162,7 +226,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, m: &dyn Mea
     if node.has_children() {
         out.push('>');
         for child in node.children() {
-            serialize(child, out, false, m);
+            serialize(child, out, false, ctx);
         }
         out.push_str(&format!("</{name}>"));
     } else {
@@ -200,30 +264,134 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
     out.push_str("</text>");
 }
 
-/// `<x:textbox>` (Rung 3): explicit `align`/`valign`/`padding`/`fit`.
-fn emit_textbox(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
+/// `<x:textbox>` (Rung 3): explicit `align`/`valign`/`padding`/`fit`, or — with
+/// `in="#id"` — bound to a referenced shape (rect → rectangular; any other shape →
+/// flowed inside its outline, §6.10).
+fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
-    let spec = AreaSpec {
-        x: attr_num(node, "x", 0.0),
-        y: attr_num(node, "y", 0.0),
-        width: attr_num(node, "width", 0.0),
-        height: attr_num(node, "height", 0.0),
+    let fill = node.attribute("fill").unwrap_or("#000");
+    let gx = attr_num(node, "glyph-x-scale", 1.0);
+
+    if let Some(reference) = node.attribute("in") {
+        let Some(target) = resolve_ref(node, reference) else {
+            out.push_str("<!-- xsvg: <x:textbox in> target not found -->");
+            return;
+        };
+        // rect → reuse the rectangular path with the target's geometry (keeps fit/valign)
+        if target.tag_name().name() == "rect" {
+            let spec = textbox_area_spec(node, target);
+            let layout = layout_area(&collect_text(node), &style, &spec, ctx.m);
+            write_area_text(out, &layout, &style, fill, gx, ctx.m);
+            return;
+        }
+        // any other shape → flow inside its filled outline via the raster region
+        let region = shape_to_path_d(target)
+            .and_then(|d| ctx.shaper.rasterize(&d, (style.size / 3.0).max(1.0)));
+        let Some(region) = region else {
+            out.push_str("<!-- xsvg: <x:textbox in> shape not rasterizable -->");
+            return;
+        };
+        let spec = RegionSpec {
+            padding: attr_num(node, "padding", 0.0),
+            align: Align::parse(node.attribute("align").unwrap_or("start")),
+            text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+        };
+        let layout = layout_region(&collect_text(node), &style, &region, &spec, ctx.m);
+        write_area_text(out, &layout, &style, fill, gx, ctx.m);
+        return;
+    }
+
+    let spec = textbox_area_spec(node, node);
+    let layout = layout_area(&collect_text(node), &style, &spec, ctx.m);
+    write_area_text(out, &layout, &style, fill, gx, ctx.m);
+}
+
+/// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
+/// (the textbox itself, or a referenced `rect`) and options from the textbox `node`.
+fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) -> AreaSpec {
+    AreaSpec {
+        x: attr_num(geom, "x", 0.0),
+        y: attr_num(geom, "y", 0.0),
+        width: attr_num(geom, "width", 0.0),
+        height: attr_num(geom, "height", 0.0),
         padding: attr_num(node, "padding", 0.0),
         align: Align::parse(node.attribute("align").unwrap_or("start")),
         valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
         fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
-    };
-    let gx = attr_num(node, "glyph-x-scale", 1.0);
-    let layout = layout_area(&collect_text(node), &style, &spec, m);
-    write_area_text(
-        out,
-        &layout,
-        &style,
-        node.attribute("fill").unwrap_or("#000"),
-        gx,
-        m,
-    );
+    }
+}
+
+/// Resolve a `#id` (or bare `id`) reference to its element anywhere in the document.
+fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::Node<'a, 'a>> {
+    let id = r.strip_prefix('#').unwrap_or(r);
+    node.document()
+        .descendants()
+        .find(|n| n.attribute("id") == Some(id))
+}
+
+/// Convert a fillable SVG shape element to a path `d` string (for rasterization).
+/// `rect` is handled separately (rectangular fast path); returns `None` for shapes
+/// with no fillable area (e.g. `<line>`).
+fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
+    match node.tag_name().name() {
+        "path" => node.attribute("d").map(str::to_string),
+        "circle" => {
+            let (cx, cy, r) = (
+                attr_num(node, "cx", 0.0),
+                attr_num(node, "cy", 0.0),
+                attr_num(node, "r", 0.0),
+            );
+            (r > 0.0).then(|| {
+                format!(
+                    "M{},{} a{r},{r} 0 1,0 {},0 a{r},{r} 0 1,0 {},0 Z",
+                    cx - r,
+                    cy,
+                    2.0 * r,
+                    -2.0 * r
+                )
+            })
+        }
+        "ellipse" => {
+            let (cx, cy, rx, ry) = (
+                attr_num(node, "cx", 0.0),
+                attr_num(node, "cy", 0.0),
+                attr_num(node, "rx", 0.0),
+                attr_num(node, "ry", 0.0),
+            );
+            (rx > 0.0 && ry > 0.0).then(|| {
+                format!(
+                    "M{},{} a{rx},{ry} 0 1,0 {},0 a{rx},{ry} 0 1,0 {},0 Z",
+                    cx - rx,
+                    cy,
+                    2.0 * rx,
+                    -2.0 * rx
+                )
+            })
+        }
+        "polygon" | "polyline" => node.attribute("points").and_then(points_to_path_d),
+        _ => None,
+    }
+}
+
+/// `points="x0,y0 x1,y1 …"` → `"Mx0,y0 Lx1,y1 … Z"`. `None` if fewer than 2 points.
+fn points_to_path_d(points: &str) -> Option<String> {
+    let nums: Vec<f64> = points
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .filter_map(parse_num)
+        .collect();
+    if nums.len() < 4 {
+        return None;
+    }
+    let mut d = String::new();
+    for (i, pair) in nums.chunks_exact(2).enumerate() {
+        d.push_str(if i == 0 { "M" } else { "L" });
+        d.push_str(&format!("{},{}", fmt(pair[0]), fmt(pair[1])));
+        d.push(' ');
+    }
+    d.push('Z');
+    Some(d)
 }
 
 /// `<textArea>` (Rung 2, SVG Tiny 1.2 vocabulary): flowed text per the spec —
@@ -513,8 +681,41 @@ mod tests {
         }
     }
 
+    /// No shape rasterizer (the default for tests that don't use `in=`).
+    struct NoShaper;
+    impl Shaper for NoShaper {
+        fn rasterize(&self, _d: &str, _row_h: f64) -> Option<RasterRegion> {
+            None
+        }
+    }
+
+    /// Pretends every shape is a 60×60 box, so `in=`-region flow can be exercised
+    /// without a browser (the real raster comes from the browser / fixtures).
+    struct BoxShaper;
+    impl Shaper for BoxShaper {
+        fn rasterize(&self, _d: &str, row_h: f64) -> Option<RasterRegion> {
+            let n = (60.0 / row_h).ceil().max(1.0) as usize;
+            Some(RasterRegion::new(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 60.0,
+                    h: 60.0,
+                },
+                0.0,
+                row_h,
+                vec![Some((0.0, 60.0)); n],
+            ))
+        }
+    }
+
     fn compile_test(svg: &str) -> String {
-        compile_impl(svg, "balanced", &Mono).unwrap()
+        compile_impl(svg, "balanced", &Mono, &NoShaper).unwrap()
+    }
+
+    /// Compile with the 60×60 `BoxShaper`, for `<x:textbox in>` region-flow tests.
+    fn compile_shaped(svg: &str) -> String {
+        compile_impl(svg, "balanced", &Mono, &BoxShaper).unwrap()
     }
 
     #[test]
@@ -555,7 +756,7 @@ mod tests {
 
     #[test]
     fn malformed_errors() {
-        assert!(compile_impl("<svg><unclosed></svg>", "balanced", &Mono).is_err());
+        assert!(compile_impl("<svg><unclosed></svg>", "balanced", &Mono, &NoShaper).is_err());
     }
 
     #[test]
@@ -768,6 +969,38 @@ mod tests {
     }
 
     #[test]
+    fn textbox_in_rect_binds_to_referenced_geometry() {
+        // The textbox has no geometry of its own; it takes the rect's box.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><rect id="card" x="10" y="10" width="200" height="80"/><x:textbox in="#card" align="center" valign="middle">label</x:textbox></svg>"##;
+        let out = compile_test(svg); // rect fast path — no shaper needed
+        assert!(out.contains("<text") && !out.contains("<x:textbox"));
+        assert!(out.contains(r#"text-anchor="middle""#));
+        // centered in content box: x=10, width 200 → anchor x = 10 + 100 = 110
+        assert!(out.contains(r#"x="110""#), "{out}");
+    }
+
+    #[test]
+    fn textbox_in_shape_flows_region() {
+        // Non-rect target → region flow via the (test) shaper; emits <text>/<tspan>.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><circle id="blob" cx="30" cy="30" r="30"/><x:textbox in="#blob" align="start" font-size="10">one two three four five six seven</x:textbox></svg>"##;
+        let out = compile_shaped(svg);
+        assert!(out.contains("<text") && !out.contains("<x:textbox"));
+        assert!(out.contains(r#"text-anchor="start""#));
+        assert!(
+            out.matches("<tspan").count() >= 2,
+            "expected flowed lines: {out}"
+        );
+    }
+
+    #[test]
+    fn textbox_in_missing_target_degrades_to_marker() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox in="#ghost">hi</x:textbox></svg>"##;
+        let out = compile_shaped(svg);
+        assert!(out.contains("target not found"), "{out}");
+        assert!(!out.contains("<text"));
+    }
+
+    #[test]
     fn deep_nesting_errors_instead_of_aborting() {
         // Far past the stack-overflow threshold; the depth guard must turn this into
         // a clean Err rather than a hard abort (see check_nesting_depth).
@@ -776,7 +1009,7 @@ mod tests {
             "<g>".repeat(5000),
             "</g>".repeat(5000)
         );
-        let err = compile_impl(&svg, "balanced", &Mono).unwrap_err();
+        let err = compile_impl(&svg, "balanced", &Mono, &NoShaper).unwrap_err();
         assert!(err.contains("nesting depth"), "{err}");
     }
 
@@ -788,14 +1021,14 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}</svg>",
             "<rect/>".repeat(3000)
         );
-        assert!(compile_impl(&svg, "balanced", &Mono).is_ok());
+        assert!(compile_impl(&svg, "balanced", &Mono, &NoShaper).is_ok());
         // and modest legitimate nesting is fine
         let nested = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
             "<g>".repeat(64),
             "</g>".repeat(64)
         );
-        assert!(compile_impl(&nested, "balanced", &Mono).is_ok());
+        assert!(compile_impl(&nested, "balanced", &Mono, &NoShaper).is_ok());
     }
 
     #[test]
@@ -805,7 +1038,7 @@ mod tests {
             let svg = format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.dev/ns\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
             );
-            let out = compile_impl(&svg, "balanced", &Mono).unwrap();
+            let out = compile_impl(&svg, "balanced", &Mono, &NoShaper).unwrap();
             assert!(out.contains("<text") && !out.contains("<textArea"));
             assert!(
                 !out.contains("textLength"),

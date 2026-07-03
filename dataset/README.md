@@ -10,6 +10,7 @@ wrapping, `<textArea>` flow, `<x:textbox>` shrink-to-fit, `text-overflow`, `<tbr
 |---|---|
 | [architecture.xsvg](architecture.xsvg) | System diagram: uniform service boxes with unequal labels (shrink-to-fit), `<tbreak/>` two-line data nodes, a `glyph-x-scale` banner, and arrow markers |
 | [kanban.xsvg](kanban.xsvg) | Sprint board: cards whose bodies wrap and truncate with `text-overflow="ellipsis"`, `<tbreak/>` title/body splits, right-aligned counts |
+| [region-flow.xsvg](region-flow.xsvg) | `<x:textbox in="#shape">`: text flowed inside a triangle, a circle, and a diamond — lines follow each outline |
 
 **Feature drills** — one concept each:
 

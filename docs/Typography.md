@@ -33,7 +33,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 |---|---|---|---|---|
 | **Point type** (unwrapped text at an anchor) | AI | C | ✅ | maps to SVG `<text x y>` (passthrough) |
 | **Area type** — flow inside a **rectangle** | AI | C | ✅ | shipped as `<textArea>` / `<x:textbox>`: greedy wrap from `measureText` → positioned `<tspan>`s |
-| **Area type in an arbitrary polygon/path** | AI | C | ❌ | region-aware line breaking — custom pass (the Vision's "fit text in polygon") |
+| **Area type in an arbitrary polygon/path** | AI | C | ✅ | **shipped** — `<x:textbox in="#shape">` flows into the outline via a coarse browser raster (top-aligned, convex-ideal); the Vision's "fit text in polygon" |
 | **Auto-fit / shrink-to-fit-box** (shrink font until paragraph fits) | AI/PPT | C | ✅ | binary-search font size via `measureText`, re-wrap per trial; see [Syntax.md](Syntax.md) `fit` |
 | **Type on a path** (baseline follows a curve) | AI | E | ◑ | SVG `<textPath>` exists (passthrough); align-to-path + spacing options need custom |
 | Type-on-path options: align (asc/desc/center/baseline), spacing, flip, effect (rainbow/skew/3D-ribbon/stair/gravity) | AI | S | ❌ | own placement after outlining |
@@ -145,7 +145,8 @@ checklist that the high-level features above all have a precise low-level repres
 
 ## Status summary
 
-**Shipped today (✅):** point & rectangular area type, shrink-to-fit, alignment (incl. **full-justify**),
+**Shipped today (✅):** point, rectangular, **and arbitrary-shape** area type (`<x:textbox in="#shape">`
+flows into a triangle/circle/polygon outline), shrink-to-fit, alignment (incl. **full-justify**),
 leading, named fonts, **tracking** (`letter-spacing` + `word-spacing`, layout-aware), **horizontal
 glyph scale** (`glyph-x-scale`), baseline shift, and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
 (`<tbreak/>`), overflow truncation (`text-overflow`), and real browser font metrics — see
@@ -158,10 +159,10 @@ forwarded to the SVG output, but the layout engine doesn't fully reason about th
 **Planned, v0-feasible (○):** indents, drop cap, multi-column, tabs, vertical scale, and no-break
 ranges — all reachable on the browser-`<text>` path without outlining.
 
-**Needs Phase 2b (❌ — outlining + custom layout):** arbitrary-polygon flow, Knuth-Plass
-justification with glyph-scaling limits, hyphenation, optical margin alignment, the **★ mesh-gradient
-fill** and **★ variable-width stroke** on glyphs, pattern fills, envelope/warp distortion,
-precise/optical kerning, true small caps, glyph-by-GID access, and deterministic cross-browser layout.
+**Needs Phase 2b (❌ — outlining + custom layout):** Knuth-Plass justification with glyph-scaling
+limits, hyphenation, optical margin alignment, the **★ mesh-gradient fill** and **★ variable-width
+stroke** on glyphs, pattern fills, envelope/warp distortion, precise/optical kerning, true small caps,
+glyph-by-GID access, and deterministic cross-browser layout.
 
 The dividing line is exactly **"Create Outlines"**: everything the browser can render as live
 `<text>` is v0; everything that treats a glyph as an editable vector path is Phase 2b — which is also

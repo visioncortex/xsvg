@@ -45,8 +45,63 @@ function metrics(fontCss: string): number[] {
   ];
 }
 
+// Shape rasterizer — the browser implementation of the core's `Shaper` seam, used
+// by `<x:textbox in="#shape">` to flow text inside a curved outline. Curve
+// flattening + inside-testing are deferred to the browser (`getBBox` +
+// `isPointInFill`) on a hidden offscreen <svg> probe.
+const SVG_NS = "http://www.w3.org/2000/svg";
+let probePath: SVGPathElement | null = null;
+function probe(): SVGPathElement {
+  if (!probePath) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    // rendered but off-screen: getBBox needs layout (display:none returns zeros)
+    svg.setAttribute("style", "position:absolute;left:-99999px;top:0;overflow:hidden");
+    probePath = document.createElementNS(SVG_NS, "path");
+    svg.appendChild(probePath);
+    document.body.appendChild(svg);
+  }
+  return probePath;
+}
+
+// Rasterize a filled path `d` into [minX, minY, w, h, rowH, l0,r0, l1,r1, …] — one
+// inside [left,right] span per ~rowH-tall row (NaN pair if that row is empty).
+// Exported so the fixture generator (fixtures.ts) can reuse the exact browser path.
+export function rasterize(d: string, rowH: number): number[] {
+  const p = probe();
+  p.setAttribute("d", d);
+  let bb: DOMRect;
+  try {
+    bb = p.getBBox();
+  } catch {
+    return [];
+  }
+  if (!(bb.width > 0 && bb.height > 0 && rowH > 0)) return [];
+
+  const rows = Math.max(1, Math.ceil(bb.height / rowH));
+  const rh = bb.height / rows;
+  const xSteps = Math.max(24, Math.min(400, Math.ceil(bb.width)));
+  const dx = bb.width / xSteps;
+  const out: number[] = [bb.x, bb.y, bb.width, bb.height, rh];
+  const pt = new DOMPoint(0, 0);
+
+  for (let r = 0; r < rows; r++) {
+    pt.y = bb.y + (r + 0.5) * rh;
+    let left = NaN;
+    let right = NaN;
+    for (let i = 0; i <= xSteps; i++) {
+      pt.x = bb.x + i * dx;
+      if (p.isPointInFill(pt)) {
+        if (Number.isNaN(left)) left = pt.x;
+        right = pt.x;
+      }
+    }
+    out.push(left, right);
+  }
+  return out;
+}
+
 /** Compile an xsvg source string to a plain-SVG string (runs entirely client-side). */
 export async function compileXsvg(source: string, quality = "balanced"): Promise<string> {
   await ensureReady();
-  return compile(source, quality, measure, metrics);
+  return compile(source, quality, measure, metrics, rasterize);
 }
