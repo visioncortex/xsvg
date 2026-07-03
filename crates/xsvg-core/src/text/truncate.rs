@@ -67,6 +67,7 @@ pub fn apply_ellipsis(
             && line_advance(&line.text, style, size, m) > max_width + 1e-6
         {
             line.text = ellipsize_line(&line.text, max_width, style, size, m).unwrap_or_default();
+            line.justify_width = None; // an ellipsized line renders at natural width
         }
     }
     if dropped {
@@ -74,6 +75,7 @@ pub fn apply_ellipsis(
             if !last.text.ends_with(ELLIPSIS) {
                 last.text =
                     ellipsize_line(&last.text, max_width, style, size, m).unwrap_or_default();
+                last.justify_width = None;
             }
         }
     }

@@ -94,7 +94,7 @@ Flowed text in a region, per the SVG Tiny 1.2 Recommendation.
 |---|---|---|---|
 | `x`, `y` | length | 0 | region corner |
 | `width`, `height` | length \| `auto` | `auto` | `width:auto` ⇒ no wrap; `height:auto` ⇒ grow (no clip) |
-| `text-align` | `start` \| `end` \| `center` | `start` | inline alignment |
+| `text-align` | `start` \| `end` \| `center` \| `justify` | `start` | inline alignment (`justify` extends Tiny 1.2 — §6.9) |
 | `display-align` | `auto` \| `before` \| `center` \| `after` | `auto` (= `before`) | block alignment |
 | `line-increment` | `auto` \| `<number>` | `auto` | line-box height; `auto` = 1.1 × font-size |
 
@@ -120,7 +120,7 @@ Box text with diagram ergonomics. Distinct from `<textArea>` in vertical model (
 | `x`,`y`,`width`,`height` | length | — | box geometry |
 | `in` | `#id` | — | bind to a referenced shape's geometry *(planned)* |
 | `padding` | length | 0 | uniform content inset |
-| `align` | `start` \| `center` \| `end` | `start` | horizontal alignment |
+| `align` | `start` \| `center` \| `end` \| `justify` | `start` | horizontal alignment (§6.9) |
 | `valign` | `top` \| `middle` \| `bottom` | `top` | vertical alignment |
 | `fit` | `none` \| `shrink` | `none` | shrink-to-fit (§6.1) |
 | `fit-min` | length | 6 | font-size floor for `shrink` |
@@ -235,6 +235,27 @@ reproduces exactly the width layout assumed. `normal` and `0` emit nothing. Coun
 v0 (grapheme-cluster segmentation is a future refinement; wrapped lines join words with a single
 space, so the inter-word count is exact); `font-kerning` is left at the renderer default (`normal`).
 
+### 6.9 Justification — `text-align="justify"` / `align="justify"` [implemented]
+
+Full-justify on the box front-ends (`<textArea>` via `text-align`, `<x:textbox>` via `align`). The
+value `justify` extends the SVG Tiny 1.2 `text-align` vocabulary with the CSS/SVG 2 value (§3).
+
+**Model (normative).** After wrapping, a line is **justified** — stretched to the content width — iff
+**all** of:
+- alignment is `justify` and the box has a **positive, known content width** (auto-width `<textArea>`
+  has no target, so it degrades to `start`);
+- it is **not** the last line of its paragraph (the last line, and the last line before each
+  `<tbreak/>`, stay ragged — normal typographic convention);
+- it contains **more than one word** (a lone word has nothing to stretch between).
+
+An ellipsized line (§6.6) is never justified. Justified lines anchor at the **start** edge.
+
+**Lowering.** A justified line emits `textLength="<content-width>" lengthAdjust="spacing"` on its
+`<tspan>`; the renderer distributes the slack into the inter-glyph/word spacing (glyph shapes are not
+scaled — contrast `glyph-x-scale`, §6.7, which uses `spacingAndGlyphs`). On a line that would carry
+both, justification wins. v0 distributes slack uniformly across all gaps (not word-gaps-only); a
+word-spacing-only composer is a future refinement.
+
 ## 7. Other pillars [planned]
 
 Sketched in [Plan.md §2](Plan.md); not yet implemented.
@@ -263,6 +284,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | `text-overflow` (clip default; **ellipsis**) | implemented |
 | `glyph-x-scale` (visual glyph width scaling via `textLength`) | implemented |
 | `letter-spacing` / `word-spacing` (layout-aware tracking, kerning-preserving) | implemented |
+| `text-align="justify"` / `align="justify"` (greedy full-justify via `textLength`) | implemented |
 | `<x:textbox in="#shape">` binding | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |

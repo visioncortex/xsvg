@@ -12,13 +12,15 @@ use super::style::TextStyle;
 use super::truncate::{apply_ellipsis, TextOverflow};
 use super::wrap::wrap;
 
-/// `text-align` — inline alignment of lines.
+/// `text-align` — inline alignment of lines. `justify` extends the SVG Tiny 1.2
+/// vocabulary with the CSS/SVG 2 value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TextAlign {
     #[default]
     Start,
     Center,
     End,
+    Justify,
 }
 
 impl TextAlign {
@@ -26,14 +28,16 @@ impl TextAlign {
         match s {
             "center" => Self::Center,
             "end" => Self::End,
+            "justify" => Self::Justify,
             _ => Self::Start,
         }
     }
     fn anchor(self) -> Anchor {
         match self {
-            Self::Start => Anchor::Start,
             Self::Center => Anchor::Middle,
             Self::End => Anchor::End,
+            // justified lines begin at the start edge; textLength fills to the right
+            Self::Start | Self::Justify => Anchor::Start,
         }
     }
 }
@@ -99,18 +103,23 @@ pub fn layout_text_area(
     let size = style.size;
     let max_w = spec.width.unwrap_or(f64::INFINITY); // auto width → no wrapping
 
-    // `\n` marks a forced break (<tbreak/>); wrap each segment independently.
+    // `\n` marks a forced break (<tbreak/>); wrap each segment independently. Track
+    // whether each line is its segment's last, so justification can leave the
+    // paragraph-final line ragged.
     let segments: Vec<&str> = text.split('\n').collect();
     let has_breaks = segments.len() > 1;
-    let mut line_texts: Vec<String> = Vec::new();
+    let mut line_texts: Vec<(String, bool)> = Vec::new(); // (text, is_segment_final)
     for seg in segments {
         let wrapped = wrap(&measure_words(seg, style, m), max_w, 1.0);
         if wrapped.is_empty() {
             if has_breaks {
-                line_texts.push(String::new()); // forced blank line
+                line_texts.push((String::new(), true)); // forced blank line
             }
         } else {
-            line_texts.extend(wrapped);
+            let n = wrapped.len();
+            for (j, w) in wrapped.into_iter().enumerate() {
+                line_texts.push((w, j + 1 == n));
+            }
         }
     }
 
@@ -137,9 +146,15 @@ pub fn layout_text_area(
         _ => spec.x,
     };
 
+    // Justify needs a known, positive width; auto-width falls back to `start`.
+    let justify_w = match (spec.text_align, spec.width) {
+        (TextAlign::Justify, Some(w)) if w > 0.0 => Some(w),
+        _ => None,
+    };
+
     let mut lines = Vec::new();
     let mut dropped = false;
-    for (i, text) in line_texts.into_iter().enumerate() {
+    for (i, (text, is_final)) in line_texts.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
         if let Some(h) = spec.height {
             let box_top = baseline - baseline_offset;
@@ -148,10 +163,13 @@ pub fn layout_text_area(
                 continue; // outside the region in the block direction → not rendered
             }
         }
+        // stretch full, non-paragraph-final, multi-word lines to the content width
+        let justify_width = justify_w.filter(|_| !is_final && text.contains(' '));
         lines.push(PlacedLine {
             text,
             x: ax,
             baseline,
+            justify_width,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {
@@ -289,6 +307,64 @@ mod tests {
             &Mono(0.1),
         );
         assert_eq!(out.lines.len(), 2);
+    }
+
+    #[test]
+    fn justify_stretches_full_lines_only() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // width 8 (Mono: char=1, space=1) → "aa bb cc" | "dd ee ff", two full lines
+        let mut s = spec(Some(8.0), None);
+        s.text_align = TextAlign::Justify;
+        let out = layout_text_area("aa bb cc dd ee ff", &st, &s, &Mono(0.1));
+        assert!(out.lines.len() >= 2);
+        assert_eq!(out.anchor, Anchor::Start);
+        let (all_but_last, last) = out.lines.split_at(out.lines.len() - 1);
+        for l in all_but_last {
+            assert_eq!(l.justify_width, Some(8.0), "full line not justified: {l:?}");
+        }
+        // paragraph-final line stays ragged
+        assert_eq!(last[0].justify_width, None);
+    }
+
+    #[test]
+    fn justify_leaves_paragraph_final_lines_ragged_across_tbreak() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // width 8 → each paragraph wraps to "xx yy zz" | "ww": a justified full line
+        // then a ragged segment-final line. Two paragraphs → 2 justified, 2 ragged.
+        let mut s = spec(Some(8.0), None);
+        s.text_align = TextAlign::Justify;
+        let out = layout_text_area("aa bb cc dd\nee ff gg hh", &st, &s, &Mono(0.1));
+        let justified = out
+            .lines
+            .iter()
+            .filter(|l| l.justify_width.is_some())
+            .count();
+        let ragged = out.lines.len() - justified;
+        assert!(
+            justified >= 2 && ragged >= 2,
+            "each paragraph should have a justified line + a ragged final line: {:?}",
+            out.lines
+        );
+    }
+
+    #[test]
+    fn justify_needs_a_width() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // auto width → nothing to justify against → all lines ragged (degrades to start)
+        let mut s = spec(None, None);
+        s.text_align = TextAlign::Justify;
+        let out = layout_text_area("aa bb cc dd", &st, &s, &Mono(0.1));
+        assert!(out.lines.iter().all(|l| l.justify_width.is_none()));
+        assert_eq!(out.anchor, Anchor::Start);
     }
 
     #[test]

@@ -16,6 +16,8 @@ pub enum Align {
     Start,
     Center,
     End,
+    /// Full-justify: stretch every line but the paragraph's last to the content width.
+    Justify,
 }
 
 impl Align {
@@ -23,14 +25,16 @@ impl Align {
         match s {
             "center" => Self::Center,
             "end" => Self::End,
+            "justify" => Self::Justify,
             _ => Self::Start,
         }
     }
     pub fn anchor(self) -> Anchor {
         match self {
-            Self::Start => Anchor::Start,
             Self::Center => Anchor::Middle,
             Self::End => Anchor::End,
+            // justify lines begin at the start edge; textLength fills to the right
+            Self::Start | Self::Justify => Anchor::Start,
         }
     }
 }
@@ -101,6 +105,10 @@ pub struct PlacedLine {
     pub text: String,
     pub x: f64,
     pub baseline: f64,
+    /// If `Some(w)`, this line is justified: render it stretched to width `w`
+    /// (via SVG `textLength`/`lengthAdjust="spacing"`). Only full, non-final,
+    /// multi-word lines get this; the rest stay at natural width.
+    pub justify_width: Option<f64>,
 }
 
 /// The result of laying text into an area.
@@ -137,9 +145,9 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
 
     let anchor = spec.align.anchor();
     let ax = match spec.align {
-        Align::Start => cx,
         Align::Center => cx + cw / 2.0,
         Align::End => cx + cw,
+        Align::Start | Align::Justify => cx,
     };
 
     // Align the cap-height band (first cap-top → last descent), not the em box, so
@@ -155,6 +163,11 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
     };
     let first_baseline = band_top + fm.cap_height;
 
+    // A line is justified iff align=justify, it isn't the paragraph's last line, it
+    // has something to stretch (>1 word), and the box has a positive content width.
+    let last = line_texts.len().saturating_sub(1);
+    let justify = spec.align == Align::Justify && cw > 0.0;
+
     let mut lines = Vec::new();
     let mut dropped = false;
     for (i, text) in line_texts.into_iter().enumerate() {
@@ -164,10 +177,12 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
             dropped = true;
             continue;
         }
+        let justify_width = (justify && i < last && text.contains(' ')).then_some(cw);
         lines.push(PlacedLine {
             text,
             x: ax,
             baseline,
+            justify_width,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {
@@ -200,6 +215,7 @@ pub fn layout_flow(
             text: t,
             x,
             baseline: y + i as f64 * advance,
+            justify_width: None,
         })
         .collect()
 }
@@ -378,6 +394,39 @@ mod tests {
         fn measure(&self, _t: &str, _s: &TextStyle, _z: f64) -> f64 {
             self.0
         }
+    }
+
+    #[test]
+    fn justify_marks_full_lines_in_textbox() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // content width 8 (no padding); Mono char=1, space=1 → wraps to 2 full lines
+        let s = spec(8.0, 200.0, Align::Justify, VAlign::Top, Fit::None);
+        let out = layout_area("aa bb cc dd ee ff", &st, &s, &Mono(0.1));
+        assert_eq!(out.anchor, Anchor::Start);
+        assert!(out.lines.len() >= 2);
+        let n = out.lines.len();
+        for (i, l) in out.lines.iter().enumerate() {
+            if i + 1 < n {
+                assert_eq!(l.justify_width, Some(8.0), "full line not justified: {l:?}");
+            } else {
+                assert_eq!(l.justify_width, None, "last line must stay ragged");
+            }
+        }
+    }
+
+    #[test]
+    fn justify_skips_single_word_lines() {
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        // each word alone per line (tiny width) → nothing to stretch between words
+        let s = spec(1.0, 200.0, Align::Justify, VAlign::Top, Fit::None);
+        let out = layout_area("aaa bbb ccc", &st, &s, &Mono(0.1));
+        assert!(out.lines.iter().all(|l| l.justify_width.is_none()));
     }
 
     #[test]

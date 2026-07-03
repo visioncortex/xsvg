@@ -71,9 +71,10 @@ for labels), `line-height`. **Lowers to** positioned `<tspan>`s (v0, browser-sha
 ### Rung 2 — `<textArea>` *(swap the tag — SVG Tiny 1.2)*
 
 A box with flowed text, implemented to the **SVG Tiny 1.2** spec: `text-align`
-(`start|end|center`), `display-align` (`before|center|after`), `line-increment`
-(`auto` = 1.1·em, or a length), and `auto` width/height (`width:auto` ⇒ no wrap;
-`height:auto` ⇒ grow; an explicit height clips overflow lines).
+(`start|end|center`, plus `justify` from CSS/SVG 2), `display-align`
+(`before|center|after`), `line-increment` (`auto` = 1.1·em, or a length), and `auto`
+width/height (`width:auto` ⇒ no wrap; `height:auto` ⇒ grow; an explicit height clips
+overflow lines). `justify` stretches full lines to the width and needs an explicit width.
 
 ```svg
 <textArea x="15" y="15" width="150" height="60"

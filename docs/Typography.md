@@ -48,7 +48,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
 | **Alignment**: left / right / center | AI | C | ✅ | `text-anchor` per line (`text-align` / `align`) |
-| **Justify** (last line left/center/right/full) | AI | C | ○ | needs measured wrap + space distribution |
+| **Justify** (last line left/center/right/full) | AI | C | ✅ | **shipped** — greedy full-justify via `textLength`/`lengthAdjust="spacing"`; paragraph-final lines stay ragged |
 | **Justification engine** (every-line vs single-line composer) | AI | E | ❌ | greedy v0 → Knuth-Plass "every-line" in Phase 2b |
 | **Justification limits**: word-spacing, letter-spacing, **glyph-scaling** each min/desired/max | AI | E | ❌ | the levers the composer adjusts to set lines |
 | **Leading / line spacing**: absolute + auto (% of size) | AI | C | ✅ | line advance in layout (`line-height` / `line-increment`) |
@@ -145,9 +145,9 @@ checklist that the high-level features above all have a precise low-level repres
 
 ## Status summary
 
-**Shipped today (✅):** point & rectangular area type, shrink-to-fit, alignment, leading, named fonts,
-**tracking** (`letter-spacing` + `word-spacing`, layout-aware), **horizontal glyph scale**
-(`glyph-x-scale`), baseline shift, and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
+**Shipped today (✅):** point & rectangular area type, shrink-to-fit, alignment (incl. **full-justify**),
+leading, named fonts, **tracking** (`letter-spacing` + `word-spacing`, layout-aware), **horizontal
+glyph scale** (`glyph-x-scale`), baseline shift, and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
 (`<tbreak/>`), overflow truncation (`text-overflow`), and real browser font metrics — see
 [Specification.md](Specification.md) Appendix A.
 
@@ -155,8 +155,8 @@ checklist that the high-level features above all have a precise low-level repres
 bidi, gradient / stroke fills, opacity, filters, clip & mask. These render because the attribute is
 forwarded to the SVG output, but the layout engine doesn't fully reason about them yet.
 
-**Planned, v0-feasible (○):** justify, indents, drop cap, multi-column, tabs, vertical scale, and
-no-break ranges — all reachable on the browser-`<text>` path without outlining.
+**Planned, v0-feasible (○):** indents, drop cap, multi-column, tabs, vertical scale, and no-break
+ranges — all reachable on the browser-`<text>` path without outlining.
 
 **Needs Phase 2b (❌ — outlining + custom layout):** arbitrary-polygon flow, Knuth-Plass
 justification with glyph-scaling limits, hyphenation, optical margin alignment, the **★ mesh-gradient

@@ -295,9 +295,16 @@ fn emit_tspan(
         fmt(line.x),
         fmt(line.baseline)
     ));
-    // A non-positive scale is meaningless (would emit a zero/negative textLength);
-    // treat it as "no scaling" rather than emitting invalid SVG.
-    if glyph_x_scale > 0.0 && (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
+    if let Some(w) = line.justify_width {
+        // Justification: stretch inter-word/glyph spacing (not glyph shapes) to fill
+        // the content width. Takes precedence over glyph-x-scale on this line.
+        out.push_str(&format!(
+            " textLength=\"{}\" lengthAdjust=\"spacing\"",
+            fmt(w)
+        ));
+    } else if glyph_x_scale > 0.0 && (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
+        // A non-positive scale is meaningless (would emit a zero/negative textLength);
+        // treat it as "no scaling" rather than emitting invalid SVG.
         let len = line_advance(&line.text, style, size, m) * glyph_x_scale;
         out.push_str(&format!(
             " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
@@ -732,6 +739,32 @@ mod tests {
         // Forwarded on <text inline-size> too.
         let flow = r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10" font-size="10" inline-size="500" word-spacing="4">hi there</text></svg>"#;
         assert!(compile_test(flow).contains("word-spacing=\"4\""));
+    }
+
+    #[test]
+    fn justify_emits_textlength_spacing_on_full_lines() {
+        // Mono: char = 0.5 × size. Wraps to several lines at width 40, size 10.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" font-size="10" text-align="justify">aa bb cc dd ee ff</textArea></svg>"#;
+        let out = compile_test(svg);
+        assert!(out.contains(r#"text-anchor="start""#), "{out}");
+        assert!(
+            out.contains(r#"textLength="40" lengthAdjust="spacing""#),
+            "expected justified full lines: {out}"
+        );
+        // start alignment (no justify) emits no textLength
+        let plain = svg.replace(" text-align=\"justify\"", "");
+        assert!(!compile_test(&plain).contains("textLength"));
+    }
+
+    #[test]
+    fn justify_on_textbox_uses_content_width() {
+        // width 60, padding 10 → content width 40 is the justify target.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="60" height="200" padding="10" align="justify" font-size="10">aa bb cc dd ee ff</x:textbox></svg>"#;
+        let out = compile_test(svg);
+        assert!(
+            out.contains(r#"textLength="40" lengthAdjust="spacing""#),
+            "{out}"
+        );
     }
 
     #[test]
