@@ -252,7 +252,7 @@ hard lowering.
 `<defs>`, `<use>`, `<linearGradient>/<radialGradient>`, `fill`/`stroke`/`opacity`/`clip`/`mask`.
 
 ```xml
-<xsvg xmlns:x="https://xsvg.dev/ext" viewBox="0 0 200 120" quality="balanced">
+<xsvg xmlns:x="https://xsvg.visioncortex.org" viewBox="0 0 200 120" quality="balanced">
   <g transform="translate(10,10)">
     <rect x="0" y="0" width="60" height="40" rx="4" fill="#e23"/>
     <path d="M0,0 C40,0 40,80 80,80" fill="none" stroke="#148" stroke-width="3"/>

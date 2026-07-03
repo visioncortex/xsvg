@@ -16,7 +16,7 @@ attribute*, and nothing you add can break the file.
    features browsers fumbled — `inline-size` (SVG2 auto-wrap), `<textArea>` (SVG 1.2 Tiny box text),
    `<meshgradient>` (dropped from SVG2). LLMs already know these; raw files still render their valid
    parts. We invent names only where SVG has no concept.
-3. **Keep the `<svg>` root.** An author adds `xmlns:x="https://xsvg.dev/ns"` to their existing
+3. **Keep the `<svg>` root.** An author adds `xmlns:x="https://xsvg.visioncortex.org"` to their existing
    `<svg>` and starts using extensions. No new root; true drop-in.
 
 ### Prefix policy

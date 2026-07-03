@@ -19,7 +19,7 @@ use xsvg_core::{
     RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
 };
 
-const XSVG_NS: &str = "https://xsvg.dev/ns";
+const XSVG_NS: &str = "https://xsvg.visioncortex.org";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
 /// Maximum element nesting depth accepted. `roxmltree`'s parser recurses per level,
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn textbox_shrinks_to_fit() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="40" height="20" font-size="40" fit="shrink" fit-min="5" align="center" valign="middle">long label that must shrink</x:textbox></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="40" height="20" font-size="40" fit="shrink" fit-min="5" align="center" valign="middle">long label that must shrink</x:textbox></svg>"#;
         let out = compile_test(svg);
         assert!(out.contains(r#"text-anchor="middle""#));
         // font-size must have been reduced from the authored 40
@@ -805,7 +805,7 @@ mod tests {
 
         // font-size 0 → falls back to default, no NaN from a 0/0 scale
         let d = compile_test(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="50" height="50" font-size="0" fit="shrink">hi there friend</x:textbox></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="50" height="50" font-size="0" fit="shrink">hi there friend</x:textbox></svg>"#,
         );
         assert!(d.contains("<text") && !d.contains("NaN"));
 
@@ -836,7 +836,7 @@ mod tests {
     #[test]
     fn glyph_x_scale_emits_text_length() {
         // x:glyph-x-scale on a plain textArea → textLength/lengthAdjust per line.
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><textArea x="0" y="10" font-size="10" x:glyph-x-scale="1.5">hello</textArea></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="10" font-size="10" x:glyph-x-scale="1.5">hello</textArea></svg>"#;
         let out = compile_test(svg);
         assert!(out.contains("lengthAdjust=\"spacingAndGlyphs\""), "{out}");
         // "hello" = 5 chars × 0.5 × 10 = 25; scaled ×1.5 = 37.5
@@ -852,11 +852,11 @@ mod tests {
     #[test]
     fn glyph_x_scale_on_textbox_and_inline_size() {
         // <x:textbox> takes it unprefixed; "hi" = 2 × 0.5 × 10 = 10, ×1.5 = 15.
-        let box_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="100" height="40" font-size="10" glyph-x-scale="1.5">hi</x:textbox></svg>"#;
+        let box_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="40" font-size="10" glyph-x-scale="1.5">hi</x:textbox></svg>"#;
         assert!(compile_test(box_svg).contains("textLength=\"15\""));
 
         // <text inline-size> takes it x:-prefixed (reused SVG element).
-        let flow_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><text x="0" y="10" font-size="10" inline-size="500" x:glyph-x-scale="1.5">hi</text></svg>"#;
+        let flow_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><text x="0" y="10" font-size="10" inline-size="500" x:glyph-x-scale="1.5">hi</text></svg>"#;
         assert!(compile_test(flow_svg).contains("textLength=\"15\""));
     }
 
@@ -889,7 +889,7 @@ mod tests {
 
     #[test]
     fn unknown_extension_degrades_to_marker() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:mesh/></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:mesh/></svg>"#;
         let out = compile_test(svg);
         assert!(
             out.contains("<!-- xsvg: <x:mesh> not yet lowered -->"),
@@ -900,7 +900,7 @@ mod tests {
     #[test]
     fn xsvg_attributes_are_stripped() {
         // an x:-namespaced attribute on a passed-through element is dropped.
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><circle cx="5" cy="5" r="3" x:note="hint"/></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><circle cx="5" cy="5" r="3" x:note="hint"/></svg>"#;
         let out = compile_test(svg);
         assert!(out.contains("<circle"));
         assert!(out.contains("r=\"3\""));
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn justify_on_textbox_uses_content_width() {
         // width 60, padding 10 → content width 40 is the justify target.
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="60" height="200" padding="10" align="justify" font-size="10">aa bb cc dd ee ff</x:textbox></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="60" height="200" padding="10" align="justify" font-size="10">aa bb cc dd ee ff</x:textbox></svg>"#;
         let out = compile_test(svg);
         assert!(
             out.contains(r#"textLength="40" lengthAdjust="spacing""#),
@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn textbox_in_rect_binds_to_referenced_geometry() {
         // The textbox has no geometry of its own; it takes the rect's box.
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><rect id="card" x="10" y="10" width="200" height="80"/><x:textbox in="#card" align="center" valign="middle">label</x:textbox></svg>"##;
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><rect id="card" x="10" y="10" width="200" height="80"/><x:textbox in="#card" align="center" valign="middle">label</x:textbox></svg>"##;
         let out = compile_test(svg); // rect fast path — no shaper needed
         assert!(out.contains("<text") && !out.contains("<x:textbox"));
         assert!(out.contains(r#"text-anchor="middle""#));
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn textbox_in_shape_flows_region() {
         // Non-rect target → region flow via the (test) shaper; emits <text>/<tspan>.
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><circle id="blob" cx="30" cy="30" r="30"/><x:textbox in="#blob" align="start" font-size="10">one two three four five six seven</x:textbox></svg>"##;
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><circle id="blob" cx="30" cy="30" r="30"/><x:textbox in="#blob" align="start" font-size="10">one two three four five six seven</x:textbox></svg>"##;
         let out = compile_shaped(svg);
         assert!(out.contains("<text") && !out.contains("<x:textbox"));
         assert!(out.contains(r#"text-anchor="start""#));
@@ -995,7 +995,7 @@ mod tests {
 
     #[test]
     fn textbox_in_missing_target_degrades_to_marker() {
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox in="#ghost">hi</x:textbox></svg>"##;
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox in="#ghost">hi</x:textbox></svg>"##;
         let out = compile_shaped(svg);
         assert!(out.contains("target not found"), "{out}");
         assert!(!out.contains("<text"));
@@ -1037,7 +1037,7 @@ mod tests {
         // 0 and negative scales must not emit a zero/negative textLength or NaN.
         for v in ["0", "-1.5"] {
             let svg = format!(
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.dev/ns\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.visioncortex.org\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
             );
             let out = compile_impl(&svg, "balanced", &Mono, &NoShaper).unwrap();
             assert!(out.contains("<text") && !out.contains("<textArea"));
@@ -1058,7 +1058,7 @@ mod tests {
 
     #[test]
     fn negative_geometry_does_not_panic_or_leak_nan() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"><x:textbox x="0" y="0" width="-40" height="-20" padding="-5" fit="shrink" align="center" valign="middle" font-size="10">hi there friend</x:textbox></svg>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="-40" height="-20" padding="-5" fit="shrink" align="center" valign="middle" font-size="10">hi there friend</x:textbox></svg>"#;
         assert!(!compile_test(svg).contains("NaN"));
     }
 

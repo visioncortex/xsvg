@@ -20,7 +20,7 @@ one attribute, and nothing added can break the file. Design rationale is in [Syn
 | Namespace | URI |
 |---|---|
 | SVG | `http://www.w3.org/2000/svg` |
-| xsvg extensions | `https://xsvg.dev/ns` (conventional prefix `x:`) |
+| xsvg extensions | `https://xsvg.visioncortex.org` (conventional prefix `x:`) |
 
 The document root MAY be `<svg>` (with `xmlns:x` declared) or `<xsvg>` (an alias the compiler treats
 as `<svg>`). Naming rules:

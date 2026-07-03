@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 460 366" font-family="'Helvetica Neue', Arial, sans-serif">
   <rect x="0" y="0" width="460" height="366" fill="#f8fafc"/>
   <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">chat — &lt;x:textbox in="#bubble"&gt; binds a label to each rounded box</text>

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 600 360" font-family="'Helvetica Neue', Arial, sans-serif">
   <rect x="0" y="0" width="600" height="360" fill="#ffffff"/>
   <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">word-spacing — layout-aware inter-word gaps</text>
