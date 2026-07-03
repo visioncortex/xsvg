@@ -13,6 +13,7 @@ body {
   padding: 16px;
   display: grid;
   place-items: center;
+  overflow: auto; /* the dev index can be taller than the viewport (aligned to top) */
 }
 
 /* compiled SVGs carry a viewBox but no width/height — fill the viewport,
@@ -23,26 +24,67 @@ body {
   display: block;
 }
 
-/* dev-only sample index */
+/* dev-only sample index — a curated, categorized landing page */
 .index {
-  place-self: start;
-  font: 14px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif;
+  place-self: start stretch;
+  align-self: start;
+  max-width: 920px;
+  margin: 0 auto;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #0f172a;
 }
 .index h1 {
-  font-size: 16px;
-  margin: 0 0 10px;
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.index section {
+  margin-top: 22px;
+}
+.index h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.index .note {
+  margin: -4px 0 10px;
+  color: #94a3b8;
+  font-size: 12.5px;
 }
 .index ul {
+  list-style: none;
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
 }
 .index a {
-  color: #2563eb;
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   text-decoration: none;
+  color: inherit;
+  background: #fff;
 }
 .index a:hover {
-  text-decoration: underline;
+  border-color: #93c5fd;
+  background: #f8fafc;
+}
+.index .title {
+  display: block;
+  font-weight: 600;
+  color: #2563eb;
+}
+.index .blurb {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12.5px;
 }
 
 /* compile errors */

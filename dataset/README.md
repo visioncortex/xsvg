@@ -1,34 +1,62 @@
 # dataset — sample xsvg diagrams
 
-Hand-authored `.xsvg` samples that exercise the v0 compiler (rect→path lowering, `inline-size`
-wrapping, `<textArea>` flow, `<x:textbox>` shrink-to-fit, `text-overflow`, `<tbreak/>`, and
-`glyph-x-scale`). Each is a complete `<svg xmlns:x="…">` document.
+Hand-authored `.xsvg` samples, each a complete `<svg xmlns:x="…">` document, grouped by the feature
+they exercise. Cross-referenced with the normative [Specification.md](../docs/Specification.md).
 
-**Showcases** — realistic composites that combine several features:
+## Showcases
+
+Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
 | [architecture.xsvg](architecture.xsvg) | System diagram: uniform service boxes with unequal labels (shrink-to-fit), `<tbreak/>` two-line data nodes, a `glyph-x-scale` banner, and arrow markers |
 | [kanban.xsvg](kanban.xsvg) | Sprint board: cards whose bodies wrap and truncate with `text-overflow="ellipsis"`, `<tbreak/>` title/body splits, right-aligned counts |
-| [region-flow.xsvg](region-flow.xsvg) | `<x:textbox in="#shape">`: text flowed inside a triangle, a circle, and a diamond — lines follow each outline |
 
-**Feature drills** — one concept each:
+## Shape binding & region flow — `<x:textbox in="#id">` (§6.10)
+
+| File | Shows |
+|---|---|
+| [chat.xsvg](chat.xsvg) | `in="#rect"` binds a label to each rounded bubble — "draw the box once, attach the text" |
+| [region-flow.xsvg](region-flow.xsvg) | Text flowed *inside* a triangle, circle, and diamond — lines follow each outline; `valign` centers the block |
+| [badges.xsvg](badges.xsvg) | Centered labels poured into a hexagon, circle seal, shield (curved path), and pentagon |
+
+## Box models & alignment (§6.3–6.5)
+
+| File | Shows |
+|---|---|
+| [textarea.xsvg](textarea.xsvg) | `<textArea>` (SVG Tiny 1.2): `text-align`, `display-align`, `line-increment`, auto width/height |
+| [textarea-align.xsvg](textarea-align.xsvg) | `<textArea>` `text-align` × `display-align` matrix (all nine) |
+| [alignment.xsvg](alignment.xsvg) | `<x:textbox>` `align` × `valign` matrix (all nine placements, cap-height centering) |
+
+## Wrapping, fitting & overflow (§6.1–6.2, 6.6)
 
 | File | Shows |
 |---|---|
 | [wrap-vs-overflow.xsvg](wrap-vs-overflow.xsvg) | The core win: plain `<text>` overflowing vs `inline-size` wrapping vs `<x:textbox fit="shrink">` |
+| [cards.xsvg](cards.xsvg) | Equal-size cards whose variable-length descriptions all shrink to fit |
+| [textarea-sizing.xsvg](textarea-sizing.xsvg) | `width=auto` (no wrap), wrapping, height clipping, `line-increment` auto/loose/tight |
+| [textarea-ellipsis.xsvg](textarea-ellipsis.xsvg) | `text-overflow`: clip vs ellipsis (block overflow) and inline overflow truncation |
+
+## Paragraph & character typography (§6.7–6.9)
+
+| File | Shows |
+|---|---|
+| [justify.xsvg](justify.xsvg) | `text-align="justify"`: full lines flush both edges, last line ragged, `<tbreak/>` resets per paragraph |
+| [letter-spacing.xsvg](letter-spacing.xsvg) | `letter-spacing` tracking scale, kerning-preserved pairs, layout-aware wrapping |
+| [word-spacing.xsvg](word-spacing.xsvg) | `word-spacing` scale + layout-aware wrapping (wider word gaps wrap sooner) |
+| [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
+
+## Applied diagrams
+
+| File | Shows |
+|---|---|
 | [pipeline.xsvg](pipeline.xsvg) | Boxes + arrows; each stage label wraps & shrinks to fit a uniform box |
 | [flowchart.xsvg](flowchart.xsvg) | Start / process / decision (diamond) / end, with wrapping labels |
-| [cards.xsvg](cards.xsvg) | Equal-size cards whose variable-length descriptions all shrink to fit |
-| [textarea.xsvg](textarea.xsvg) | `<textArea>` (Rung 2, SVG Tiny 1.2): `text-align`, `display-align`, `line-increment`, auto width/height |
-| [textarea-align.xsvg](textarea-align.xsvg) | `<textArea>` `text-align` × `display-align` matrix (all nine) |
-| [textarea-sizing.xsvg](textarea-sizing.xsvg) | `<textArea>` `width=auto` (no wrap), wrapping, height clipping, `line-increment` auto/loose/tight |
-| [textarea-ellipsis.xsvg](textarea-ellipsis.xsvg) | `text-overflow`: clip vs ellipsis (block overflow) and inline overflow truncation |
-| [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
-| [letter-spacing.xsvg](letter-spacing.xsvg) | `letter-spacing` tracking scale, kerning-preserved pairs, and layout-aware wrapping (tracked text wraps sooner) |
-| [word-spacing.xsvg](word-spacing.xsvg) | `word-spacing` scale and layout-aware wrapping (wider word gaps wrap the same box sooner) |
-| [justify.xsvg](justify.xsvg) | `text-align="justify"`: full lines flush both edges, last line ragged, and `<tbreak/>` resetting justification per paragraph |
-| [alignment.xsvg](alignment.xsvg) | `<x:textbox>` align × valign matrix (all nine placements) |
+
+## Edge cases & invariants
+
+| File | Shows |
+|---|---|
 | [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |
 
