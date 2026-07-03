@@ -3,27 +3,27 @@
   <rect x="0" y="0" width="460" height="366" fill="#f8fafc"/>
   <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">chat — &lt;x:textbox in="#bubble"&gt; binds a label to each rounded box</text>
 
-  <!-- received (left, grey) -->
+  <!-- received (left, grey): tail base sits on the bottom edge by the left corner -->
   <rect id="b1" x="24" y="44" width="256" height="58" rx="16" fill="#e5e7eb"/>
-  <path d="M30,96 l-12,14 l18,-4 z" fill="#e5e7eb"/>
+  <path d="M40,102 L28,114 L54,102 Z" fill="#e5e7eb"/>
   <x:textbox in="#b1" padding="12" font-size="13" fill="#111827">Did the region-flow feature land? I want to pour text into shapes.</x:textbox>
-  <text x="30" y="116" font-size="10" fill="#94a3b8">9:41</text>
+  <text x="272" y="118" font-size="10" fill="#94a3b8" text-anchor="end">9:41</text>
 
-  <!-- sent (right, blue) -->
+  <!-- sent (right, blue): tail base sits on the bottom edge by the right corner -->
   <rect id="b2" x="180" y="120" width="256" height="58" rx="16" fill="#3b82f6"/>
-  <path d="M430,172 l12,14 l-18,-4 z" fill="#3b82f6"/>
+  <path d="M406,178 L420,178 L432,190 Z" fill="#3b82f6"/>
   <x:textbox in="#b2" padding="12" font-size="13" fill="#ffffff">Yes — text now flows inside any outline, curves included.</x:textbox>
-  <text x="430" y="192" font-size="10" fill="#94a3b8" text-anchor="end">9:41</text>
+  <text x="188" y="194" font-size="10" fill="#94a3b8">9:41</text>
 
   <!-- received -->
   <rect id="b3" x="24" y="196" width="276" height="58" rx="16" fill="#e5e7eb"/>
-  <path d="M30,248 l-12,14 l18,-4 z" fill="#e5e7eb"/>
+  <path d="M40,254 L28,266 L54,254 Z" fill="#e5e7eb"/>
   <x:textbox in="#b3" padding="12" font-size="13" fill="#111827">And the curve math is deferred to the browser? No Rust flattener?</x:textbox>
-  <text x="30" y="268" font-size="10" fill="#94a3b8">9:42</text>
+  <text x="292" y="270" font-size="10" fill="#94a3b8" text-anchor="end">9:42</text>
 
   <!-- sent -->
   <rect id="b4" x="160" y="272" width="276" height="58" rx="16" fill="#3b82f6"/>
-  <path d="M430,324 l12,14 l-18,-4 z" fill="#3b82f6"/>
+  <path d="M406,330 L420,330 L432,342 Z" fill="#3b82f6"/>
   <x:textbox in="#b4" padding="12" font-size="13" fill="#ffffff">Right — getBBox and isPointInFill do all the work.</x:textbox>
-  <text x="430" y="344" font-size="10" fill="#94a3b8" text-anchor="end">9:42</text>
+  <text x="168" y="346" font-size="10" fill="#94a3b8">9:42</text>
 </svg>

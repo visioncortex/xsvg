@@ -1,28 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.dev/ns"
-     viewBox="0 0 660 150" font-family="sans-serif">
-  <text x="20" y="24" font-size="13" font-weight="bold" fill="#0f172a">xsvg compiler pipeline</text>
+     viewBox="0 0 720 210" font-family="'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="720" height="210" fill="#f8fafc"/>
 
-  <!-- connectors with arrowheads -->
-  <g stroke="#94a3b8" stroke-width="2" fill="#94a3b8">
-    <line x1="120" y1="80" x2="143" y2="80"/><path d="M143,75 L150,80 L143,85 Z"/>
-    <line x1="250" y1="80" x2="273" y2="80"/><path d="M273,75 L280,80 L273,85 Z"/>
-    <line x1="380" y1="80" x2="403" y2="80"/><path d="M403,75 L410,80 L403,85 Z"/>
-    <line x1="510" y1="80" x2="533" y2="80"/><path d="M533,75 L540,80 L533,85 Z"/>
+  <!-- stretched heading + wrapping subtitle -->
+  <textArea x="20" y="30" width="680" font-size="22" font-weight="700" fill="#0f172a"
+            x:glyph-x-scale="1.12" letter-spacing="2">XSVG COMPILE PIPELINE</textArea>
+  <textArea x="20" y="64" width="560" font-size="12" fill="#64748b">One client-side pass: parse → resolve → lower (quality-parameterized) → emit a static SVG subset.</textArea>
+
+  <!-- connectors -->
+  <g fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M130,116 H158"/>
+    <path d="M270,116 H298"/>
+    <path d="M410,116 H438"/>
+    <path d="M550,116 H578"/>
   </g>
 
-  <!-- stages: each box label wraps + shrinks to fit -->
-  <rect x="20" y="50" width="100" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
-  <x:textbox x="20" y="50" width="100" height="60" padding="8" align="center" valign="middle" font-size="15" fit="shrink" fit-min="8">.xsvg source (XML)</x:textbox>
+  <!-- stages: uniform boxes; labels shrink-to-fit; captions wrap below -->
+  <rect x="20" y="86" width="110" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
+  <x:textbox x="20" y="86" width="110" height="60" padding="8" align="center" valign="middle" font-size="15" font-weight="600" fit="shrink" fit-min="9" fill="#3730a3">source .xsvg</x:textbox>
+  <textArea x="20" y="150" width="110" height="40" font-size="10" fill="#94a3b8" text-align="center">the XML you author</textArea>
 
-  <rect x="150" y="50" width="100" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
-  <x:textbox x="150" y="50" width="100" height="60" padding="8" align="center" valign="middle" font-size="15" fit="shrink" fit-min="8">AST — parsed tree</x:textbox>
+  <rect x="160" y="86" width="110" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
+  <x:textbox x="160" y="86" width="110" height="60" padding="8" align="center" valign="middle" font-size="15" font-weight="600" fit="shrink" fit-min="9" fill="#3730a3">parse → AST</x:textbox>
+  <textArea x="160" y="150" width="110" height="40" font-size="10" fill="#94a3b8" text-align="center">roxmltree syntax tree</textArea>
 
-  <rect x="280" y="50" width="100" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
-  <x:textbox x="280" y="50" width="100" height="60" padding="8" align="center" valign="middle" font-size="15" fit="shrink" fit-min="8">HIR — rich scene</x:textbox>
+  <rect x="300" y="86" width="110" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
+  <x:textbox x="300" y="86" width="110" height="60" padding="8" align="center" valign="middle" font-size="15" font-weight="600" fit="shrink" fit-min="9" fill="#3730a3">resolve → HIR</x:textbox>
+  <textArea x="300" y="150" width="110" height="40" font-size="10" fill="#94a3b8" text-align="center">refs, styles, metrics</textArea>
 
-  <rect x="410" y="50" width="100" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
-  <x:textbox x="410" y="50" width="100" height="60" padding="8" align="center" valign="middle" font-size="15" fit="shrink" fit-min="8">LIR — SVG subset</x:textbox>
+  <rect x="440" y="86" width="110" height="60" rx="8" fill="#eef2ff" stroke="#818cf8"/>
+  <x:textbox x="440" y="86" width="110" height="60" padding="8" align="center" valign="middle" font-size="15" font-weight="600" fit="shrink" fit-min="9" fill="#3730a3">lower → LIR</x:textbox>
+  <textArea x="440" y="150" width="110" height="40" font-size="10" fill="#94a3b8" text-align="center">wrap · fit · flow · path</textArea>
 
-  <rect x="540" y="50" width="100" height="60" rx="8" fill="#dcfce7" stroke="#4ade80"/>
-  <x:textbox x="540" y="50" width="100" height="60" padding="8" align="center" valign="middle" font-size="15" fit="shrink" fit-min="8">SVG output</x:textbox>
+  <rect x="580" y="86" width="120" height="60" rx="8" fill="#dcfce7" stroke="#4ade80"/>
+  <x:textbox x="580" y="86" width="120" height="60" padding="8" align="center" valign="middle" font-size="15" font-weight="600" fit="shrink" fit-min="9" fill="#166534">emit SVG subset</x:textbox>
+  <textArea x="580" y="150" width="120" height="40" font-size="10" fill="#94a3b8" text-align="center">renders anywhere</textArea>
 </svg>

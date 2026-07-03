@@ -11,6 +11,8 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [architecture.xsvg](architecture.xsvg) | System diagram: uniform service boxes with unequal labels (shrink-to-fit), `<tbreak/>` two-line data nodes, a `glyph-x-scale` banner, and arrow markers |
 | [kanban.xsvg](kanban.xsvg) | Sprint board: cards whose bodies wrap and truncate with `text-overflow="ellipsis"`, `<tbreak/>` title/body splits, right-aligned counts |
+| [pipeline.xsvg](pipeline.xsvg) | Compile pipeline: stretched heading, five shrink-to-fit stages with wrapping captions, arrow markers |
+| [flowchart.xsvg](flowchart.xsvg) | Request flow: branching yes/no decision, shrink-to-fit nodes, terminal states, arrow markers |
 
 ## Shape binding & region flow — `<x:textbox in="#id">` (§6.10)
 
@@ -45,13 +47,6 @@ Realistic composites that combine several features into one artifact.
 | [letter-spacing.xsvg](letter-spacing.xsvg) | `letter-spacing` tracking scale, kerning-preserved pairs, layout-aware wrapping |
 | [word-spacing.xsvg](word-spacing.xsvg) | `word-spacing` scale + layout-aware wrapping (wider word gaps wrap sooner) |
 | [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
-
-## Applied diagrams
-
-| File | Shows |
-|---|---|
-| [pipeline.xsvg](pipeline.xsvg) | Boxes + arrows; each stage label wraps & shrinks to fit a uniform box |
-| [flowchart.xsvg](flowchart.xsvg) | Start / process / decision (diamond) / end, with wrapping labels |
 
 ## Edge cases & invariants
 

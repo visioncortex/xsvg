@@ -31,6 +31,16 @@ export const CATALOG: Category[] = [
         title: "Sprint board",
         blurb: "Cards that wrap and ellipsis-truncate, <tbreak/> title/body splits, right-aligned counts",
       },
+      {
+        file: "pipeline.xsvg",
+        title: "Compile pipeline",
+        blurb: "Stretched heading, five shrink-to-fit stages with wrapping captions, arrow markers",
+      },
+      {
+        file: "flowchart.xsvg",
+        title: "Request flow",
+        blurb: "Branching yes/no decision, shrink-to-fit nodes, terminal states, arrow markers",
+      },
     ],
   },
   {
@@ -121,21 +131,6 @@ export const CATALOG: Category[] = [
         file: "tbreak-and-glyph-scale.xsvg",
         title: "tbreak & glyph-x-scale",
         blurb: "Forced breaks plus condensed / regular / extended glyph widths",
-      },
-    ],
-  },
-  {
-    name: "Applied diagrams",
-    samples: [
-      {
-        file: "pipeline.xsvg",
-        title: "Pipeline",
-        blurb: "Boxes + arrows; each stage label wraps and shrinks to a uniform box",
-      },
-      {
-        file: "flowchart.xsvg",
-        title: "Flowchart",
-        blurb: "Start / process / decision / end with wrapping labels",
       },
     ],
   },
