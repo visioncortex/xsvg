@@ -294,6 +294,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let spec = RegionSpec {
             padding: attr_num(node, "padding", 0.0),
             align: Align::parse(node.attribute("align").unwrap_or("start")),
+            valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
             text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
         };
         let layout = layout_region(&collect_text(node), &style, &region, &spec, ctx.m);

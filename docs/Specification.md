@@ -281,11 +281,17 @@ shaper — curve flattening, bounds, and inside-testing are deferred to `getBBox
 native tests replay browser-generated raster fixtures. A pure-Rust shaper (flatten + scanline) is a
 later backend behind the same seam.
 
-**v0 scope.** Region flow is **top-aligned** (no `valign`/`display-align`) and has **no
-shrink-to-fit** — both remain in the rect fast-path only. `align` (`start`/`center`/`end`) positions
-each line within its own span; `text-overflow` clips at the region's bottom and can ellipsize the last
-line. Vertical resolution is coarse (row height ≈ font-size ⁄ 3). Convex shapes are ideal; a non-convex
-row collapses to its outer `[leftmost, rightmost]` span.
+**Alignment.** `align` (`start`/`center`/`end`) positions each line within its own span. `valign`
+(`top`/`middle`/`bottom`) positions the flowed block within the region's vertical extent: a first pass
+sizes the block, then the flow re-runs from a shifted start (so each line still gets the span at its
+final height — a middle-aligned block in a diamond straddles the widest band). The shift clamps to 0
+when the block is taller than the region, so it never drops words top-alignment wouldn't.
+
+**v0 scope.** No **shrink-to-fit** in region mode (rect fast-path only). `text-overflow` clips at the
+region's bottom and can ellipsize the last line. Vertical resolution is coarse (row height ≈
+font-size ⁄ 3). Convex shapes are ideal; a non-convex row collapses to its outer `[leftmost, rightmost]`
+span. A word wider than a line's span still overflows the outline (the usual lone-word rule) unless
+`text-overflow="ellipsis"` trims it.
 
 ## 7. Other pillars [planned]
 

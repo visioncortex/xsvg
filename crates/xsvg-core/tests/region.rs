@@ -9,7 +9,7 @@
 use serde_json::Value;
 use xsvg_core::{
     layout_region, Align, FontMetrics, Measurer, RasterRegion, Rect, Region, RegionSpec,
-    TextOverflow, TextStyle,
+    TextOverflow, TextStyle, VAlign,
 };
 
 /// Proportional test measurer: width = chars × per_char × size.
@@ -72,6 +72,7 @@ fn spec(align: Align) -> RegionSpec {
     RegionSpec {
         padding: 0.0,
         align,
+        valign: VAlign::Top,
         text_overflow: TextOverflow::Clip,
     }
 }

@@ -33,7 +33,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 |---|---|---|---|---|
 | **Point type** (unwrapped text at an anchor) | AI | C | ✅ | maps to SVG `<text x y>` (passthrough) |
 | **Area type** — flow inside a **rectangle** | AI | C | ✅ | shipped as `<textArea>` / `<x:textbox>`: greedy wrap from `measureText` → positioned `<tspan>`s |
-| **Area type in an arbitrary polygon/path** | AI | C | ✅ | **shipped** — `<x:textbox in="#shape">` flows into the outline via a coarse browser raster (top-aligned, convex-ideal); the Vision's "fit text in polygon" |
+| **Area type in an arbitrary polygon/path** | AI | C | ✅ | **shipped** — `<x:textbox in="#shape">` flows into the outline via a coarse browser raster (align + valign, convex-ideal); the Vision's "fit text in polygon" |
 | **Auto-fit / shrink-to-fit-box** (shrink font until paragraph fits) | AI/PPT | C | ✅ | binary-search font size via `measureText`, re-wrap per trial; see [Syntax.md](Syntax.md) `fit` |
 | **Type on a path** (baseline follows a curve) | AI | E | ◑ | SVG `<textPath>` exists (passthrough); align-to-path + spacing options need custom |
 | Type-on-path options: align (asc/desc/center/baseline), spacing, flip, effect (rainbow/skew/3D-ribbon/stair/gravity) | AI | S | ❌ | own placement after outlining |

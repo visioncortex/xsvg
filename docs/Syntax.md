@@ -99,7 +99,8 @@ fitting, and the ability to **bind to an existing shape** (draw the box once, at
 `in="#shape"` binds to a referenced shape ([Specification.md §6.10](Specification.md)): a **rect** uses
 its box (with `fit`/`valign`), while a **curved shape** (path/circle/ellipse/polygon) flows text
 *inside the actual outline* — the Vision's "fit text in polygon", so lines follow a triangle or circle.
-Region flow is top-aligned in v0 (no `fit`/`valign`). Without `in`, give inline `x`/`y`/`width`/`height`.
+Region flow honors `align` and `valign` (so text centers in a badge/seal) but has no `fit` in v0.
+Without `in`, give inline `x`/`y`/`width`/`height`.
 Attributes here are unprefixed (we own the element): `padding`, `align` (start|center|end|justify),
 `valign` (top|middle|bottom), `fit`, `line-height`, etc.
 

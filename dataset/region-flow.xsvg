@@ -9,9 +9,9 @@
 
   <!-- circle (curve): short at top and bottom, widest across the middle band -->
   <circle id="cir" cx="360" cy="150" r="100" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
-  <x:textbox in="#cir" align="center" padding="6" font-size="12" fill="#065f46">Inside a circle the first and last lines are short while the middle lines stretch across the widest part of the disc.</x:textbox>
+  <x:textbox in="#cir" align="center" valign="middle" padding="6" font-size="12" fill="#065f46">Inside a circle the first and last lines are short while the middle lines stretch across the widest part of the disc.</x:textbox>
 
   <!-- diamond (polygon): widest in the middle, narrow at top and bottom -->
   <polygon id="dia" points="590,52 640,150 590,250 540,150" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
-  <x:textbox in="#dia" align="center" padding="4" font-size="11" fill="#92400e">A diamond widens then narrows so the lines follow suit.</x:textbox>
+  <x:textbox in="#dia" align="center" valign="middle" padding="4" font-size="11" fill="#92400e">A diamond widens then narrows so the lines follow suit.</x:textbox>
 </svg>

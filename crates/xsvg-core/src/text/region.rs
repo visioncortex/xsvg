@@ -9,7 +9,7 @@
 //! coarse scan of the shape (curve flattening + inside-testing deferred to the
 //! browser); tests use analytic regions or browser-generated raster fixtures.
 
-use super::area::{Align, AreaLayout, PlacedLine};
+use super::area::{Align, AreaLayout, PlacedLine, VAlign};
 use super::measure::{line_advance, measure_words, Measurer};
 use super::style::TextStyle;
 use super::truncate::{ellipsize_line, TextOverflow};
@@ -99,18 +99,25 @@ pub trait Shaper {
 }
 
 /// Flow options for [`layout_region`]. `padding` insets the region on all sides;
-/// `align` positions each line within its own span (`justify` behaves as `start`).
+/// `align` positions each line within its own span (`justify` behaves as `start`);
+/// `valign` positions the flowed block within the region's vertical extent.
 #[derive(Clone, Copy, Debug)]
 pub struct RegionSpec {
     pub padding: f64,
     pub align: Align,
+    pub valign: VAlign,
     pub text_overflow: TextOverflow,
 }
 
 /// Pour `text` into `region`: for each line box (height `line-height · font-size`),
 /// take the inside span at that height, greedily fill it with words, place the line,
 /// and step down. Lines that run past the region's bottom (or words that don't fit
-/// at all) overflow per `text_overflow`. Top-aligned; no shrink-to-fit in v0.
+/// at all) overflow per `text_overflow`. No shrink-to-fit in v0.
+///
+/// `valign` centers/bottom-aligns the flowed block: a first pass counts the lines to
+/// size the block, then the flow re-runs from a shifted start so the block sits at
+/// the requested vertical position. The re-flow always terminates and drops no words
+/// beyond what top-alignment would (a too-tall block just clamps back to the top).
 pub fn layout_region(
     text: &str,
     style: &TextStyle,
@@ -131,46 +138,59 @@ pub fn layout_region(
     let measured = measure_words(text, style, m);
     let anchor = spec.align.anchor();
 
-    let mut lines = Vec::new();
-    let mut widths = Vec::new(); // each placed line's available span width (for ellipsis)
-    let mut i = 0; // word cursor
-    let mut y = content_top;
-    let mut dropped = false;
-
-    while i < measured.words.len() {
-        if line_h <= 0.0 || y + line_h > content_bottom + 1e-6 {
-            dropped = true; // no vertical room left
-            break;
+    // One flow pass starting at `start_y`; returns placed lines, their span widths,
+    // and whether any content overflowed (vertically or as leftover words).
+    let flow = |start_y: f64| -> (Vec<PlacedLine>, Vec<f64>, bool) {
+        let mut lines = Vec::new();
+        let mut widths = Vec::new();
+        let mut i = 0;
+        let mut y = start_y;
+        let mut dropped = false;
+        while i < measured.words.len() {
+            if line_h <= 0.0 || y + line_h > content_bottom + 1e-6 {
+                dropped = true;
+                break;
+            }
+            let span = region
+                .span(y, y + line_h)
+                .map(|(l, r)| (l.max(content_left), r.min(content_right)))
+                .filter(|(l, r)| r - l > 1e-6);
+            let Some((l, r)) = span else {
+                y += line_h; // band too narrow here — try the next one down
+                continue;
+            };
+            let (text, next) = fill_line(&measured, i, r - l, 1.0);
+            let ax = match spec.align {
+                Align::Center => (l + r) / 2.0,
+                Align::End => r,
+                Align::Start | Align::Justify => l,
+            };
+            lines.push(PlacedLine {
+                text,
+                x: ax,
+                baseline: y + fm.ascent,
+                justify_width: None,
+            });
+            widths.push(r - l);
+            i = next;
+            y += line_h;
         }
-        // inside span for this line box, clamped to the horizontal content bounds
-        let span = region
-            .span(y, y + line_h)
-            .map(|(l, r)| (l.max(content_left), r.min(content_right)))
-            .filter(|(l, r)| r - l > 1e-6);
-        let Some((l, r)) = span else {
-            y += line_h; // band too narrow here — try the next one down
-            continue;
-        };
+        (lines, widths, dropped || i < measured.words.len())
+    };
 
-        let (text, next) = fill_line(&measured, i, r - l, 1.0);
-        let ax = match spec.align {
-            Align::Center => (l + r) / 2.0,
-            Align::End => r,
-            Align::Start | Align::Justify => l,
-        };
-        lines.push(PlacedLine {
-            text,
-            x: ax,
-            baseline: y + fm.ascent,
-            justify_width: None,
-        });
-        widths.push(r - l);
-        i = next;
-        y += line_h;
-    }
-    if i < measured.words.len() {
-        dropped = true; // words left unplaced
-    }
+    // Pass 1 (top): size the block, then shift for valign and re-flow if needed.
+    let pass1 = flow(content_top);
+    let block_h = pass1.0.len() as f64 * line_h;
+    let offset = match spec.valign {
+        VAlign::Top => 0.0,
+        VAlign::Middle => ((content_bottom - content_top - block_h) / 2.0).max(0.0),
+        VAlign::Bottom => (content_bottom - content_top - block_h).max(0.0),
+    };
+    let (mut lines, widths, dropped) = if offset <= 1e-6 {
+        pass1
+    } else {
+        flow(content_top + offset)
+    };
 
     if spec.text_overflow == TextOverflow::Ellipsis {
         // inline overflow: a lone word wider than its span
@@ -214,6 +234,7 @@ mod tests {
         RegionSpec {
             padding: 0.0,
             align,
+            valign: VAlign::Top,
             text_overflow: overflow,
         }
     }
@@ -358,6 +379,30 @@ mod tests {
             &Mono(0.1),
         );
         assert!(out2.lines.is_empty());
+    }
+
+    #[test]
+    fn valign_centers_and_bottom_aligns_the_block() {
+        // A short block in a tall rectangle: middle sits below top, bottom below middle.
+        let r = RectRegion(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 300.0,
+        });
+        let text = "aa bb cc"; // one short line
+        let first = |align, va| {
+            let mut s = spec(align, TextOverflow::Clip);
+            s.valign = va;
+            layout_region(text, &style(10.0), &r, &s, &Mono(0.1)).lines[0].baseline
+        };
+        let top = first(Align::Start, VAlign::Top);
+        let mid = first(Align::Start, VAlign::Middle);
+        let bot = first(Align::Start, VAlign::Bottom);
+        assert!(mid > top + 50.0, "middle {mid} not well below top {top}");
+        assert!(bot > mid + 50.0, "bottom {bot} not well below middle {mid}");
+        // bottom line's box ends at (near) the content bottom
+        assert!(bot <= 300.0 + 1e-6);
     }
 
     #[test]
