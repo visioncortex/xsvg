@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xsvg — playground</title>
+  </head>
+  <body>
+    <div class="playground">
+      <header class="toolbar">
+        <a class="brand" href="https://xsvg.visioncortex.org" target="_blank" rel="noopener">xsvg</a>
+        <span class="sub">playground</span>
+        <span class="spacer"></span>
+        <label class="picker">Sample <select id="sample"></select></label>
+        <button id="copy-link" title="Copy a shareable link to this document">Copy link</button>
+        <a id="open-viewer" href="/viewer/">Open in viewer →</a>
+      </header>
+      <div class="body">
+        <div id="editor" class="editor"></div>
+        <div class="preview-wrap">
+          <div id="preview" class="preview"></div>
+          <div id="error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/playground/main.ts"></script>
+  </body>
+</html>

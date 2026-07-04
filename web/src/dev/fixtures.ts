@@ -4,9 +4,9 @@
 // fonts via canvas measureText, at a 100px base size. Also rasterizes a few shapes
 // (via the browser Shaper path) into coarse span tables. Emits JSON for
 // crates/xsvg-core/tests/fixtures/, consumed by the integration tests. Open at
-// http://localhost:5173/fixtures.html.
+// http://localhost:5173/fixtures/.
 
-import { rasterize } from "./xsvg";
+import { rasterize } from "../core/compiler";
 
 const FONTS = ["Arial", "Times New Roman", "Courier New", "Georgia"];
 const BASE = 100;

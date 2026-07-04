@@ -15,5 +15,5 @@
     "allowJs": true,
     "types": []
   },
-  "include": ["web/src", "web/pkg", "vite.config.ts"]
+  "include": ["web/src", "web/pkg"]
 }

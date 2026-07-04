@@ -1,8 +1,8 @@
 // Curated index of the dataset samples, grouped by the feature they exercise.
-// This is the source of truth for the dev index page (main.ts) — hand-maintained
-// so the landing page reads as a guided tour rather than a raw directory listing.
-// Kept in step with dataset/README.md. Any *.xsvg on disk that isn't listed here
-// still shows up under "Uncategorized" so new samples are never silently hidden.
+// This is the source of truth for the landing page (dev/index.ts) — hand-maintained
+// so it reads as a guided tour rather than a raw directory listing. Kept in step
+// with dataset/README.md. Any *.xsvg on disk that isn't listed here still shows up
+// under "Uncategorized" so new samples are never silently hidden.
 
 export interface Sample {
   file: string;

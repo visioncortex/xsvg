@@ -1,0 +1,19 @@
+/* Minimal shared reset for the xsvg tool pages. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #fff;
+  -webkit-font-smoothing: antialiased;
+}

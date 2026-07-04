@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xsvg — &lt;xsvg-view&gt; embed demo</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 760px; padding: 32px 20px; color: #0f172a; }
+      h1 { font-size: 22px; }
+      p { color: #475569; }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      pre { background: #f1f5f9; padding: 14px; border-radius: 8px; overflow: auto; font-size: 13px; }
+      .demo { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin: 18px 0; }
+      xsvg-view { display: block; }
+    </style>
+  </head>
+  <body>
+    <h1>&lt;xsvg-view&gt; — vanilla embed</h1>
+    <p>
+      The barebone viewer. In production you include one self-contained script and drop
+      the element into any page — it renders like an image, no other code required:
+    </p>
+    <pre>&lt;script src="xsvg.js"&gt;&lt;/script&gt;
+&lt;xsvg-view src="diagram.xsvg"&gt;&lt;/xsvg-view&gt;</pre>
+    <p>
+      This dev page registers the element from source instead. Inline documents live
+      in a <code>&lt;script type="application/xsvg+xml"&gt;</code> data island so the
+      HTML parser leaves the custom XML alone.
+    </p>
+
+    <div class="demo">
+      <xsvg-view>
+        <script type="application/xsvg+xml">
+          <xsvg viewBox="0 0 320 140" xmlns:x="https://xsvg.visioncortex.org">
+            <rect x="10" y="10" width="300" height="120" rx="14" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+            <x:textbox x="10" y="10" width="300" height="120" align="center" valign="middle"
+                       font-family="sans-serif" font-size="26" font-weight="bold" fill="#3730a3" fit="shrink">
+              Shrink-to-fit inside a box
+            </x:textbox>
+          </xsvg>
+        </script>
+      </xsvg-view>
+    </div>
+
+    <div class="demo">
+      <xsvg-view>
+        <script type="application/xsvg+xml">
+          <xsvg viewBox="0 0 320 160">
+            <text x="16" y="34" font-family="Georgia, serif" font-size="18" fill="#0f172a" inline-size="288">
+              This paragraph wraps to the inline-size width, compiled entirely in the browser by the xsvg WASM module.
+            </text>
+          </xsvg>
+        </script>
+      </xsvg-view>
+    </div>
+
+    <script type="module" src="/src/embed/demo.ts"></script>
+  </body>
+</html>

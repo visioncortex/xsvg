@@ -133,33 +133,55 @@ impl Shaper for JsShaper<'_> {
     }
 }
 
-/// Everything a lowering pass needs from the platform: font metrics + shape raster.
+/// Everything a lowering pass needs from the platform: font metrics + shape raster,
+/// plus whether to emit source-position attributes (`data-xsvg-pos`).
 struct Ctx<'a> {
     m: &'a dyn Measurer,
     shaper: &'a dyn Shaper,
+    sourcemap: bool,
+}
+
+/// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
+/// source) when the source map is enabled, else empty. Attached to each emitted
+/// top-level element so a viewer can project a rendered element back to its source.
+fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
+    if !ctx.sourcemap {
+        return String::new();
+    }
+    let r = node.range();
+    format!(" data-xsvg-pos=\"{}-{}\"", r.start, r.end)
 }
 
 /// WASM entry point. `measure(text, fontCss) => number`,
 /// `metrics(fontCss) => [ascent, descent, capHeight, xHeight]`, and
 /// `rasterize(pathD, rowH) => Float64Array` are browser callbacks. Throws on
 /// malformed XML so the JS side can surface the error.
+///
+/// When `sourcemap` is true, every emitted top-level element carries a
+/// `data-xsvg-pos="START-END"` attribute — the byte range of the originating xsvg
+/// node in `input` — so an interactive viewer can project a rendered element back
+/// to its authoring source. Synthesized subtrees (e.g. `<x:textbox>` → `<text>…`)
+/// tag only their root element; a viewer resolves inner nodes via the nearest
+/// ancestor carrying the attribute.
 #[wasm_bindgen]
 pub fn compile(
     input: &str,
     quality: &str,
+    sourcemap: bool,
     measure: &js_sys::Function,
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
     let shaper = JsShaper { rasterize };
-    compile_impl(input, quality, &m, &shaper).map_err(|e| JsError::new(&e))
+    compile_impl(input, quality, sourcemap, &m, &shaper).map_err(|e| JsError::new(&e))
 }
 
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
 pub fn compile_impl(
     input: &str,
     quality: &str,
+    sourcemap: bool,
     m: &dyn Measurer,
     shaper: &dyn Shaper,
 ) -> Result<String, String> {
@@ -172,7 +194,16 @@ pub fn compile_impl(
         "<!-- compiled by xsvg v0 (quality={}) -->\n",
         q.as_str()
     ));
-    serialize(doc.root_element(), &mut out, true, &Ctx { m, shaper });
+    serialize(
+        doc.root_element(),
+        &mut out,
+        true,
+        &Ctx {
+            m,
+            shaper,
+            sourcemap,
+        },
+    );
     Ok(out)
 }
 
@@ -203,17 +234,17 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     };
 
     if name == "text" && node.attribute("inline-size").is_some() {
-        emit_inline_size_text(node, out, ctx.m);
+        emit_inline_size_text(node, out, ctx);
         return;
     }
     if name == "textArea" {
-        emit_text_area(node, out, ctx.m);
+        emit_text_area(node, out, ctx);
         return;
     }
 
     // Sharp-cornered <rect> → <path>. Rounded rects pass through unchanged.
     if name == "rect" && node.attribute("rx").is_none() && node.attribute("ry").is_none() {
-        emit_rect_as_path(node, out);
+        emit_rect_as_path(node, out, ctx);
         return;
     }
 
@@ -223,6 +254,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         out.push_str(&format!(" xmlns=\"{SVG_NS}\""));
     }
     copy_attrs(node, out, &[]);
+    out.push_str(&pos_attr(node, ctx));
 
     if node.has_children() {
         out.push('>');
@@ -236,7 +268,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 }
 
 /// `<rect x y width height …>` → equivalent `<path d=… …>`.
-fn emit_rect_as_path(node: roxmltree::Node, out: &mut String) {
+fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let x = attr_num(node, "x", 0.0);
     let y = attr_num(node, "y", 0.0);
     let w = attr_num(node, "width", 0.0);
@@ -244,11 +276,13 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String) {
 
     out.push_str("<path");
     copy_attrs(node, out, &["x", "y", "width", "height"]);
+    out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" d=\"M{x},{y} h{w} v{h} h{} Z\"/>", -w));
 }
 
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
-fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
+fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let m = ctx.m;
     let style = style_from(node);
     let x = attr_num(node, "x", 0.0);
     let y = attr_num(node, "y", 0.0);
@@ -258,6 +292,7 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
 
     out.push_str("<text");
     copy_attrs(node, out, &["inline-size", "line-height"]);
+    out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let base = [EmitAttrs::default()];
     for line in &lines {
@@ -273,6 +308,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
+    let pos = pos_attr(node, ctx);
 
     if let Some(reference) = node.attribute("in") {
         let Some(target) = resolve_ref(node, reference) else {
@@ -289,7 +325,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 &spec,
                 ctx.m,
             );
-            write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits);
+            write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits, &pos);
             return;
         }
         // any other shape → flow inside its filled outline via the raster region
@@ -315,6 +351,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             gx,
             ctx.m,
             &[EmitAttrs::default()],
+            &pos,
         );
         return;
     }
@@ -327,7 +364,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &spec,
         ctx.m,
     );
-    write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits);
+    write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits, &pos);
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -421,7 +458,8 @@ fn points_to_path_d(points: &str) -> Option<String> {
 /// `<textArea>` (Rung 2, SVG Tiny 1.2 vocabulary): flowed text per the spec —
 /// `text-align` (inline), `display-align` (block), `line-increment` (line height),
 /// `auto` width/height, and `<tbreak/>` forced breaks.
-fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
+fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let m = ctx.m;
     let style = style_from(node);
     let spec = TextAreaSpec {
         x: attr_num(node, "x", 0.0),
@@ -444,6 +482,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         gx,
         m,
         &emits,
+        &pos_attr(node, ctx),
     );
 }
 
@@ -455,11 +494,13 @@ fn write_area_text(
     glyph_x_scale: f64,
     m: &dyn Measurer,
     emits: &[EmitAttrs],
+    pos: &str,
 ) {
     out.push_str(&format!(
         "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
         layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
     ));
+    out.push_str(pos);
     if style.letter_spacing != 0.0 {
         out.push_str(&format!(
             " letter-spacing=\"{}\"",
@@ -866,12 +907,17 @@ mod tests {
     }
 
     fn compile_test(svg: &str) -> String {
-        compile_impl(svg, "balanced", &Mono, &NoShaper).unwrap()
+        compile_impl(svg, "balanced", false, &Mono, &NoShaper).unwrap()
     }
 
     /// Compile with the 60×60 `BoxShaper`, for `<x:textbox in>` region-flow tests.
     fn compile_shaped(svg: &str) -> String {
-        compile_impl(svg, "balanced", &Mono, &BoxShaper).unwrap()
+        compile_impl(svg, "balanced", false, &Mono, &BoxShaper).unwrap()
+    }
+
+    /// Compile with the source map on (`data-xsvg-pos` attributes emitted).
+    fn compile_mapped(svg: &str) -> String {
+        compile_impl(svg, "balanced", true, &Mono, &NoShaper).unwrap()
     }
 
     #[test]
@@ -912,7 +958,9 @@ mod tests {
 
     #[test]
     fn malformed_errors() {
-        assert!(compile_impl("<svg><unclosed></svg>", "balanced", &Mono, &NoShaper).is_err());
+        assert!(
+            compile_impl("<svg><unclosed></svg>", "balanced", false, &Mono, &NoShaper).is_err()
+        );
     }
 
     #[test]
@@ -1165,7 +1213,7 @@ mod tests {
             "<g>".repeat(5000),
             "</g>".repeat(5000)
         );
-        let err = compile_impl(&svg, "balanced", &Mono, &NoShaper).unwrap_err();
+        let err = compile_impl(&svg, "balanced", false, &Mono, &NoShaper).unwrap_err();
         assert!(err.contains("nesting depth"), "{err}");
     }
 
@@ -1177,14 +1225,14 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}</svg>",
             "<rect/>".repeat(3000)
         );
-        assert!(compile_impl(&svg, "balanced", &Mono, &NoShaper).is_ok());
+        assert!(compile_impl(&svg, "balanced", false, &Mono, &NoShaper).is_ok());
         // and modest legitimate nesting is fine
         let nested = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
             "<g>".repeat(64),
             "</g>".repeat(64)
         );
-        assert!(compile_impl(&nested, "balanced", &Mono, &NoShaper).is_ok());
+        assert!(compile_impl(&nested, "balanced", false, &Mono, &NoShaper).is_ok());
     }
 
     #[test]
@@ -1194,7 +1242,7 @@ mod tests {
             let svg = format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.visioncortex.org\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
             );
-            let out = compile_impl(&svg, "balanced", &Mono, &NoShaper).unwrap();
+            let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper).unwrap();
             assert!(out.contains("<text") && !out.contains("<textArea"));
             assert!(
                 !out.contains("textLength"),
@@ -1246,6 +1294,51 @@ mod tests {
         assert!(
             out.contains("&quot;b&quot;") && out.contains("&amp; c"),
             "attr not escaped: {out}"
+        );
+    }
+
+    // ---- source map (data-xsvg-pos) ----
+
+    #[test]
+    fn sourcemap_off_by_default() {
+        // The default compile (sourcemap=false) must not pollute the output.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="10" y="20" width="30" height="40"/></svg>"#;
+        assert!(!compile_test(svg).contains("data-xsvg-pos"));
+    }
+
+    #[test]
+    fn sourcemap_tags_elements_with_valid_source_ranges() {
+        // A passthrough <rect>→<path>, a synthesized <x:textbox>→<text>, plus the
+        // <svg> root all get tagged; every range is well-formed and in-bounds, and
+        // maps back to the authoring node's markup.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><rect id="r" x="10" y="20" width="30" height="40"/><x:textbox x="0" y="0" width="80" height="20" font-size="10">hi there</x:textbox></svg>"##;
+        let out = compile_mapped(svg);
+        let n = svg.len();
+
+        let ranges: Vec<(usize, usize)> = out
+            .split("data-xsvg-pos=\"")
+            .skip(1)
+            .map(|s| {
+                let r = s.split('"').next().unwrap();
+                let (a, b) = r.split_once('-').unwrap();
+                (a.parse().unwrap(), b.parse().unwrap())
+            })
+            .collect();
+
+        // svg root + rect + textbox
+        assert!(ranges.len() >= 3, "expected >=3 tagged elements: {out}");
+        for &(a, b) in &ranges {
+            assert!(a < b && b <= n, "bad range {a}-{b} (len {n}): {out}");
+        }
+        // ranges point back at the authoring nodes
+        let slices: Vec<&str> = ranges.iter().map(|&(a, b)| &svg[a..b]).collect();
+        assert!(
+            slices.iter().any(|s| s.contains("rect")),
+            "no range covers the <rect>: {slices:?}"
+        );
+        assert!(
+            slices.iter().any(|s| s.contains("x:textbox")),
+            "no range covers the <x:textbox>: {slices:?}"
         );
     }
 }

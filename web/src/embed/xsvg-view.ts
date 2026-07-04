@@ -9,7 +9,9 @@
 //
 // It compiles its source via WASM and renders the resulting SVG into its shadow
 // root (style-isolated). The browser's own SVG engine does the actual drawing.
-import { compileXsvg } from "./xsvg";
+// This is the "barebone viewer" use case — no pan/zoom/inspector, renders like an
+// image. Source maps are intentionally off, so the emitted SVG stays clean.
+import { compileXsvg } from "../core/compiler";
 
 export class XsvgView extends HTMLElement {
   static observedAttributes = ["src", "quality"];
@@ -44,7 +46,7 @@ export class XsvgView extends HTMLElement {
       const source = await this.readSource();
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
-      const svg = await compileXsvg(source, quality);
+      const svg = await compileXsvg(source, { quality });
       // compiled SVGs have a viewBox but no width/height — make it fill the host
       this.shadow.innerHTML = `<style>svg{display:block;width:100%;height:auto}</style>${svg}`;
     } catch (err) {

@@ -1,0 +1,114 @@
+/* Playground: editor left, live compiled preview right. */
+.playground {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 14px;
+}
+.toolbar .brand {
+  font-weight: 700;
+  font-size: 15px;
+  color: #2563eb;
+}
+.toolbar .sub {
+  color: #64748b;
+}
+.toolbar .spacer {
+  flex: 1;
+}
+.toolbar .picker {
+  color: #64748b;
+  font-size: 13px;
+}
+.toolbar select {
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+.toolbar button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.toolbar button:hover {
+  border-color: #93c5fd;
+  background: #f0f7ff;
+}
+.toolbar a {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 13px;
+}
+.toolbar a[href]:hover {
+  text-decoration: underline;
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.editor {
+  flex: 1 1 50%;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid #e2e8f0;
+}
+
+.preview-wrap {
+  position: relative;
+  flex: 1 1 50%;
+  min-width: 0;
+  background: #f1f5f9;
+  background-image:
+    linear-gradient(45deg, #e6ebf2 25%, transparent 25%),
+    linear-gradient(-45deg, #e6ebf2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e6ebf2 75%),
+    linear-gradient(-45deg, transparent 75%, #e6ebf2 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+.preview {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow: auto;
+}
+.preview > svg {
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.14);
+}
+
+.error {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b00020;
+  border-radius: 8px;
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}

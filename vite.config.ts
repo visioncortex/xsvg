@@ -1,29 +1,33 @@
-import { defineConfig, type PluginOption } from "vite";
+import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-// Dev-server SPA fallback: serve the app for `/view/<name>.xsvg` URLs so the
-// client can route on the path. (Pretty URLs are dev-only; `?file=` works on
-// any static host.)
-const viewRoutes: PluginOption = {
-  name: "xsvg-view-routes",
-  configureServer(server) {
-    server.middlewares.use((req, _res, next) => {
-      const r = req as { url?: string };
-      if (r.url && r.url.startsWith("/view/")) r.url = "/";
-      next();
-    });
-  },
-};
+const root = dirname(fileURLToPath(import.meta.url));
 
-// The SPA lives in web/ and imports the wasm-pack output from web/pkg.
-// `--target web` emits `new URL('..._bg.wasm', import.meta.url)`, which Vite
-// handles as an asset natively in both dev and build (no extra plugin needed).
+// The multi-page app lives in web/ and imports the wasm-pack output from web/pkg.
+// `--target web` emits `new URL('..._bg.wasm', import.meta.url)`, which Vite handles
+// as an asset natively in both dev and build (no extra plugin needed).
+//
+// One entry per page, as directory-style index.html files so URLs drop the
+// `.html` and work on any static host (e.g. `/viewer/` → `web/viewer/index.html`,
+// no server rewrites needed). The landing hub is `/`. fixtures/ and embed-demo/
+// are dev-only (served by the dev server, not part of the production build). The
+// barebone embed is built separately by web/vite.embed.config.ts into a single
+// self-contained dist/xsvg.js.
 export default defineConfig({
   root: "web",
-  plugins: [viewRoutes],
   build: {
     outDir: "../dist",
     emptyOutDir: true,
     target: "es2022",
+    rollupOptions: {
+      input: {
+        index: resolve(root, "web/index.html"),
+        viewer: resolve(root, "web/viewer/index.html"),
+        playground: resolve(root, "web/playground/index.html"),
+        preview: resolve(root, "web/preview/index.html"),
+      },
+    },
   },
   server: {
     port: 5173,

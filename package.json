@@ -8,12 +8,19 @@
     "wasm:dev": "wasm-pack build crates/xsvg-wasm --dev --target web --out-dir ../../web/pkg",
     "wasm:build": "wasm-pack build crates/xsvg-wasm --release --target web --out-dir ../../web/pkg",
     "dev": "npm run wasm:dev && vite",
-    "build": "npm run wasm:build && vite build",
+    "build": "npm run wasm:build && vite build && npm run build:embed",
+    "build:embed": "vite build --config web/vite.embed.config.ts",
     "start": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^8.1.0"
+  },
+  "dependencies": {
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/state": "^6.7.0",
+    "@codemirror/view": "^6.43.5",
+    "codemirror": "^6.0.2"
   }
 }

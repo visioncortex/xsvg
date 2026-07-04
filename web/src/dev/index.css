@@ -1,0 +1,102 @@
+/* Landing hub: links to the tools + a guided index of the dataset samples. */
+.hub {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hero h1 {
+  font-size: 30px;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+.hero p {
+  margin: 0 0 20px;
+  color: #64748b;
+  font-size: 15px;
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 40px;
+}
+.tool {
+  display: block;
+  padding: 16px 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+  transition: border-color 0.12s, background 0.12s;
+}
+.tool:hover {
+  border-color: #93c5fd;
+  background: #f8fafc;
+}
+.tool .name {
+  font-weight: 700;
+  color: #2563eb;
+  font-size: 15px;
+}
+.tool .desc {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+section {
+  margin-top: 26px;
+}
+section h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+section .note {
+  margin: -4px 0 10px;
+  color: #94a3b8;
+  font-size: 12.5px;
+}
+ul.samples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px;
+}
+ul.samples li {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+ul.samples a.open {
+  display: block;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+}
+ul.samples a.open:hover {
+  background: #f8fafc;
+}
+ul.samples .title {
+  display: block;
+  font-weight: 600;
+  color: #2563eb;
+}
+ul.samples .blurb {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12.5px;
+}
