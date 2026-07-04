@@ -50,7 +50,7 @@ export const CATALOG: Category[] = [
       {
         file: "chat.xsvg",
         title: "Chat bubbles",
-        blurb: "in=\"#rect\" binds a label to each rounded box — draw once, attach the text",
+        blurb: "Two <x:textbox in=\"#rect\"> reuse each box — message + a bottom-right timestamp",
       },
       {
         file: "region-flow.xsvg",

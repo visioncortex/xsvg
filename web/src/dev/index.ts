@@ -46,7 +46,7 @@ document.getElementById("app")!.innerHTML = `
   <div class="hub">
     <div class="hero">
       <h1>xsvg</h1>
-      <p>eXtensible SVG — an XML interchange format that compiles to a subset of SVG, entirely in the browser.</p>
+      <p>eXtensible SVG — an XML graphics format that compiles to plain SVG, with the text layout and typography SVG lacks.</p>
     </div>
     <div class="tools">
       <a class="tool" href="/viewer/">
