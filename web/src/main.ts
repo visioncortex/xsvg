@@ -87,7 +87,6 @@ function renderIndex() {
 async function renderSample(name: string) {
   const source = samples[name] ?? "";
   console.log("%c[xsvg] sample: " + name, "font-weight:bold");
-  console.log("[xsvg] source:\n" + source);
   try {
     const svg = await compileXsvg(source, "balanced");
     console.log("[xsvg] compiled SVG:\n" + svg);

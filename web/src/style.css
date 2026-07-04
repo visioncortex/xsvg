@@ -10,7 +10,6 @@ body {
   box-sizing: border-box;
   width: 100vw;
   height: 100vh;
-  padding: 16px;
   display: grid;
   place-items: center;
   overflow: auto; /* the dev index can be taller than the viewport (aligned to top) */
@@ -24,12 +23,15 @@ body {
   display: block;
 }
 
-/* dev-only sample index — a curated, categorized landing page */
+/* dev-only sample index — a curated, categorized landing page. The viewer itself
+   is edge-to-edge (no #app padding); the index gets its own inset. */
 .index {
   place-self: start stretch;
   align-self: start;
-  max-width: 920px;
+  box-sizing: border-box;
+  max-width: 952px;
   margin: 0 auto;
+  padding: 24px 16px;
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #0f172a;
 }
