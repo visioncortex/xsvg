@@ -296,6 +296,33 @@ splits into **two runs** (a donut, a horizontal bowtie, a `U`) collapses to its 
 line's span still overflows the outline (the usual lone-word rule) unless `text-overflow="ellipsis"`
 trims it.
 
+### 6.11 Styled runs — `<tspan>` [implemented]
+
+Inline styling inside `<textArea>` and `<x:textbox>`: a child `<tspan>` is a **run** whose text
+shares the surrounding paragraph but overrides its paint/style. This reuses SVG's own inline-span
+element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now also read on input.
+
+| Overridable on a run | Notes |
+|---|---|
+| `fill` | per-run colour |
+| `font-weight`, `font-style` | e.g. bold / italic words |
+| `font-family` | per-run typeface |
+
+**Model (normative).** Runs affect a word's **advance** (weight/style/family change glyph widths), so
+each word is measured in its own run style and wrapping stays correct; a run boundary may fall
+mid-word (two pieces, no break between them). **`font-size` is not overridable in v0** — mixed sizes
+would perturb line-height and baseline; runs share the paragraph size, `letter-spacing`, and
+`word-spacing`. Nested `<tspan>`s compose (inner wins). `<tbreak/>` still breaks across runs.
+
+**Lowering.** Each output line is one positioning `<tspan x y>` (which also carries any justify /
+`glyph-x-scale` `textLength`); within it, base-styled text is emitted bare and each run becomes a
+nested `<tspan>` carrying only the attributes that differ from the base `<text>`. So a plain paragraph
+emits exactly as before (no nested spans). Ellipsis truncates from the last run inward.
+
+**v0 limits.** Styled runs apply to the rectangular box front-ends (`<textArea>`, `<x:textbox>` — incl.
+`in="#rect"`); curved-shape region flow (§6.10) and `<text inline-size>` flatten runs to the base
+style. Per-run `stroke` and `font-size` are future work.
+
 ## 7. Other pillars [planned]
 
 Sketched in [Plan.md §2](Plan.md); not yet implemented.
@@ -326,6 +353,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | `letter-spacing` / `word-spacing` (layout-aware tracking, kerning-preserving) | implemented |
 | `text-align="justify"` / `align="justify"` (greedy full-justify via `textLength`) | implemented |
 | `<x:textbox in="#shape">` binding (rect box + region flow into curved outlines) | implemented |
+| Styled runs (`<tspan>` per-run fill / weight / style / family in flowed text) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Outlined-text backend; concrete SVG-subset list; WebGPU renderer | planned |

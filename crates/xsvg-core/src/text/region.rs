@@ -9,10 +9,10 @@
 //! coarse scan of the shape (curve flattening + inside-testing deferred to the
 //! browser); tests use analytic regions or browser-generated raster fixtures.
 
-use super::area::{Align, AreaLayout, PlacedLine, VAlign};
+use super::area::{merge_pieces, Align, AreaLayout, PlacedLine, VAlign};
 use super::measure::{line_advance, measure_words, Measurer};
 use super::style::TextStyle;
-use super::truncate::{ellipsize_line, TextOverflow};
+use super::truncate::{ellipsize_placed, TextOverflow};
 use super::wrap::fill_line;
 
 /// An axis-aligned rectangle in user units.
@@ -159,7 +159,8 @@ pub fn layout_region(
                 y += line_h; // band too narrow here — try the next one down
                 continue;
             };
-            let (text, next) = fill_line(&measured, i, r - l, 1.0);
+            let (pieces, next) = fill_line(&measured, i, r - l, 1.0);
+            let (text, runs) = merge_pieces(pieces);
             let ax = match spec.align {
                 Align::Center => (l + r) / 2.0,
                 Align::End => r,
@@ -170,6 +171,7 @@ pub fn layout_region(
                 x: ax,
                 baseline: y + fm.ascent,
                 justify_width: None,
+                runs,
             });
             widths.push(r - l);
             i = next;
@@ -216,14 +218,14 @@ pub fn layout_region(
         // inline overflow: a lone word wider than its span
         for (line, w) in lines.iter_mut().zip(widths.iter()) {
             if !line.text.ends_with('…') && line_advance(&line.text, style, size, m) > w + 1e-6 {
-                line.text = ellipsize_line(&line.text, *w, style, size, m).unwrap_or_default();
+                ellipsize_placed(line, *w, style, size, m);
             }
         }
         // block overflow: mark the last placed line
         if dropped {
             if let (Some(line), Some(w)) = (lines.last_mut(), widths.last()) {
                 if !line.text.ends_with('…') {
-                    line.text = ellipsize_line(&line.text, *w, style, size, m).unwrap_or_default();
+                    ellipsize_placed(line, *w, style, size, m);
                 }
             }
         }

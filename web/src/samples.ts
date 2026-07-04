@@ -132,6 +132,11 @@ export const CATALOG: Category[] = [
         title: "tbreak & glyph-x-scale",
         blurb: "Forced breaks plus condensed / regular / extended glyph widths",
       },
+      {
+        file: "styled-runs.xsvg",
+        title: "Styled runs",
+        blurb: "<tspan> runs: per-run fill / weight / style flowing and wrapping inline",
+      },
     ],
   },
   {

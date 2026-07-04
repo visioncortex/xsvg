@@ -1,6 +1,6 @@
 //! Greedy (first-fit) line breaking.
 
-use super::measure::Measured;
+use super::measure::{Measured, Piece};
 
 /// Break `measured` into lines no wider than `max_width`. `scale` maps base-size
 /// widths to the trial size (`scale = trial_size / style.size`). A word wider than
@@ -12,11 +12,19 @@ use super::measure::Measured;
 /// accumulators stay exact; with neither set, the result is identical to plain
 /// greedy wrapping.
 pub fn wrap(measured: &Measured, max_width: f64, scale: f64) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
+    wrap_pieces(measured, max_width, scale)
+        .into_iter()
+        .map(|pieces| pieces.iter().map(|p| p.text.as_str()).collect())
+        .collect()
+}
+
+/// Like [`wrap`], but keeps each line's styled [`Piece`]s (for run-aware layout).
+pub(crate) fn wrap_pieces(measured: &Measured, max_width: f64, scale: f64) -> Vec<Vec<Piece>> {
+    let mut lines = Vec::new();
     let mut i = 0;
     while i < measured.words.len() {
-        let (line, next) = fill_line(measured, i, max_width, scale);
-        lines.push(line);
+        let (pieces, next) = fill_line(measured, i, max_width, scale);
+        lines.push(pieces);
         i = next; // fill_line always consumes ≥1 word, so this terminates
     }
     lines
@@ -25,38 +33,43 @@ pub fn wrap(measured: &Measured, max_width: f64, scale: f64) -> Vec<String> {
 /// Fill one line greedily starting at word `start`: always take that word (even if
 /// it alone overflows `max_width`), then append following words while the line — with
 /// `letter-spacing`/`word-spacing` folded in and *not* scaled — still fits. Returns
-/// the joined line text and the index of the next unconsumed word (`> start`).
+/// the line's styled pieces (inter-word spaces inherit the preceding piece's style so
+/// same-style runs merge) and the index of the next unconsumed word (`> start`).
 ///
-/// The shared inner loop of both rectangular wrapping ([`wrap`]) and region flow,
-/// where each line has its own available width.
+/// The shared inner loop of rectangular wrapping ([`wrap`]) and region flow, where
+/// each line has its own available width.
 pub(crate) fn fill_line(
     measured: &Measured,
     start: usize,
     max_width: f64,
     scale: f64,
-) -> (String, usize) {
+) -> (Vec<Piece>, usize) {
     let space = measured.space * scale + measured.word_spacing;
     let ls = measured.letter_spacing;
     let gaps = |graphemes: usize| graphemes.saturating_sub(1) as f64;
 
-    let (first, w0) = &measured.words[start];
-    let mut line = first.clone();
-    let mut nat = w0 * scale; // scaled natural advance (words + spaces)
-    let mut graph = first.chars().count(); // grapheme count (spaces included)
+    let first = &measured.words[start];
+    let mut pieces: Vec<Piece> = first.pieces.clone();
+    let mut nat = first.advance * scale; // scaled natural advance (words + spaces)
+    let mut graph = first.graphemes; // grapheme count (spaces included)
     let mut i = start + 1;
 
-    while let Some((word, w)) = measured.words.get(i) {
-        let (cand_nat, cand_graph) = (nat + space + w * scale, graph + 1 + word.chars().count());
+    while let Some(w) = measured.words.get(i) {
+        let (cand_nat, cand_graph) = (nat + space + w.advance * scale, graph + 1 + w.graphemes);
         if cand_nat + gaps(cand_graph) * ls > max_width {
             break;
         }
-        line.push(' ');
-        line.push_str(word);
+        let sp_style = pieces.last().map(|p| p.style).unwrap_or(0);
+        pieces.push(Piece {
+            text: " ".to_string(),
+            style: sp_style,
+        });
+        pieces.extend(w.pieces.iter().cloned());
         nat = cand_nat;
         graph = cand_graph;
         i += 1;
     }
-    (line, i)
+    (pieces, i)
 }
 
 #[cfg(test)]

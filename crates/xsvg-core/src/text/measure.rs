@@ -34,28 +34,111 @@ pub trait Measurer {
     }
 }
 
-/// Word advance widths measured once at the style's base size. Trial sizes scale
-/// these linearly (good enough for layout; avoids re-measuring per fit iteration).
+/// A styled slice of a word: its text and an index into the layout's style table
+/// (0 = the paragraph's base style). A plain word is a single piece with style 0; a
+/// word split by a `<tspan>` boundary (even mid-word) is several pieces.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Piece {
+    pub text: String,
+    pub style: usize,
+}
+
+/// One wrap unit (a "word"): its total advance and grapheme count at the base size,
+/// plus the styled pieces it is made of. `advance` sums each piece measured in its
+/// own style, so mixed weight/family wraps correctly; trial sizes scale it linearly.
+#[derive(Clone, Debug)]
+pub struct Word {
+    pub advance: f64,
+    pub graphemes: usize,
+    pub pieces: Vec<Piece>,
+}
+
+/// Word advance widths measured once at the base size. Trial sizes scale these
+/// linearly (good enough for layout; avoids re-measuring per fit iteration).
 /// `letter_spacing`/`word_spacing` are carried through so wrapping can add them
 /// without scaling (they are absolute lengths; see [`TextStyle`]).
 pub struct Measured {
-    pub words: Vec<(String, f64)>,
+    pub words: Vec<Word>,
     pub space: f64,
     pub letter_spacing: f64,
     pub word_spacing: f64,
 }
 
-/// Measure each whitespace-separated word (and a space) at `style.size`.
+/// Measure each whitespace-separated word (and a space) at `style.size`. Single
+/// style: every word is one piece with style index 0.
 pub fn measure_words(text: &str, style: &TextStyle, m: &dyn Measurer) -> Measured {
-    let words: Vec<(String, f64)> = text
+    let words = text
         .split_whitespace()
-        .map(|w| (w.to_string(), m.measure(w, style, style.size)))
+        .map(|w| Word {
+            advance: m.measure(w, style, style.size),
+            graphemes: w.chars().count(),
+            pieces: vec![Piece {
+                text: w.to_string(),
+                style: 0,
+            }],
+        })
         .collect();
     Measured {
         words,
         space: m.measure(" ", style, style.size),
         letter_spacing: style.letter_spacing,
         word_spacing: style.word_spacing,
+    }
+}
+
+/// Measure a run of styled segments (`(text, style_id)`, from `<tspan>` runs) into
+/// wrap units. Whitespace — anywhere, in any segment — separates words; adjacent
+/// non-space chunks with no whitespace between them (even across a segment boundary)
+/// join into one word with multiple pieces. `styles[0]` is the base style and
+/// supplies the space advance and spacing (runs share the paragraph's size/spacing).
+pub fn measure_runs(
+    segments: &[(String, usize)],
+    styles: &[TextStyle],
+    m: &dyn Measurer,
+) -> Measured {
+    let base = &styles[0];
+    let mut words: Vec<Word> = Vec::new();
+    let mut cur: Option<Word> = None;
+
+    for (text, sid) in segments {
+        let style = styles.get(*sid).unwrap_or(base);
+        // walk maximal non-space / space chunks
+        let mut rest = text.as_str();
+        while !rest.is_empty() {
+            let ws = rest.starts_with(char::is_whitespace);
+            let end = rest
+                .find(|c: char| c.is_whitespace() != ws)
+                .unwrap_or(rest.len());
+            let (chunk, tail) = rest.split_at(end);
+            rest = tail;
+            if ws {
+                if let Some(w) = cur.take() {
+                    words.push(w); // whitespace ends the current word
+                }
+            } else {
+                let w = cur.get_or_insert_with(|| Word {
+                    advance: 0.0,
+                    graphemes: 0,
+                    pieces: Vec::new(),
+                });
+                w.advance += m.measure(chunk, style, style.size);
+                w.graphemes += chunk.chars().count();
+                w.pieces.push(Piece {
+                    text: chunk.to_string(),
+                    style: *sid,
+                });
+            }
+        }
+    }
+    if let Some(w) = cur {
+        words.push(w);
+    }
+
+    Measured {
+        words,
+        space: m.measure(" ", base, base.size),
+        letter_spacing: base.letter_spacing,
+        word_spacing: base.word_spacing,
     }
 }
 

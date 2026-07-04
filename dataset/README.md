@@ -47,6 +47,7 @@ Realistic composites that combine several features into one artifact.
 | [letter-spacing.xsvg](letter-spacing.xsvg) | `letter-spacing` tracking scale, kerning-preserved pairs, layout-aware wrapping |
 | [word-spacing.xsvg](word-spacing.xsvg) | `word-spacing` scale + layout-aware wrapping (wider word gaps wrap sooner) |
 | [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
+| [styled-runs.xsvg](styled-runs.xsvg) | `<tspan>` runs: per-run fill / weight / style flowing and wrapping inline, incl. under justify |
 
 ## Edge cases & invariants
 

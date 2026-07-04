@@ -6,11 +6,11 @@
 //! width/height, and overflow clipping. Shares measurement and wrapping with the
 //! rest of the engine.
 
-use super::area::{Anchor, AreaLayout, PlacedLine};
-use super::measure::{measure_words, Measurer};
+use super::area::{merge_pieces, Anchor, AreaLayout, PlacedLine};
+use super::measure::{measure_runs, Measurer, Piece};
 use super::style::TextStyle;
 use super::truncate::{apply_ellipsis, TextOverflow};
-use super::wrap::wrap;
+use super::wrap::wrap_pieces;
 
 /// `text-align` — inline alignment of lines. `justify` extends the SVG Tiny 1.2
 /// vocabulary with the CSS/SVG 2 value.
@@ -100,26 +100,56 @@ pub fn layout_text_area(
     spec: &TextAreaSpec,
     m: &dyn Measurer,
 ) -> AreaLayout {
+    layout_text_area_runs(&[(text.to_string(), 0)], &[style.clone()], spec, m)
+}
+
+/// Like [`layout_text_area`], but takes styled segments (`(text, style_id)`, from
+/// `<tspan>` runs) plus the style table (`styles[0]` is the base). `'\n'` — anywhere
+/// in the segment stream — is a `<tbreak/>` forced break, splitting into paragraphs
+/// that wrap independently.
+pub fn layout_text_area_runs(
+    segments: &[(String, usize)],
+    styles: &[TextStyle],
+    spec: &TextAreaSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
+    let style = &styles[0];
     let size = style.size;
     let max_w = spec.width.unwrap_or(f64::INFINITY); // auto width → no wrapping
 
-    // `\n` marks a forced break (<tbreak/>); wrap each segment independently. Track
-    // whether each line is its segment's last, so justification can leave the
-    // paragraph-final line ragged.
-    let segments: Vec<&str> = text.split('\n').collect();
-    let has_breaks = segments.len() > 1;
-    let mut line_texts: Vec<(String, bool)> = Vec::new(); // (text, is_segment_final)
-    for seg in segments {
-        let wrapped = wrap(&measure_words(seg, style, m), max_w, 1.0);
-        if wrapped.is_empty() {
+    // Split the styled segment stream at `'\n'` into paragraphs (each a list of
+    // styled sub-segments), then wrap each independently. Track whether each line is
+    // its paragraph's last, so justification leaves the paragraph-final line ragged.
+    let mut paragraphs: Vec<Vec<(String, usize)>> = vec![Vec::new()];
+    let mut breaks = 0usize;
+    for (text, sid) in segments {
+        for (k, part) in text.split('\n').enumerate() {
+            if k > 0 {
+                paragraphs.push(Vec::new());
+                breaks += 1;
+            }
+            if !part.is_empty() {
+                paragraphs
+                    .last_mut()
+                    .unwrap()
+                    .push((part.to_string(), *sid));
+            }
+        }
+    }
+    let has_breaks = breaks > 0;
+
+    let mut line_metas: Vec<(Vec<Piece>, bool)> = Vec::new(); // (pieces, is_paragraph_final)
+    for para in &paragraphs {
+        if para.is_empty() {
             if has_breaks {
-                line_texts.push((String::new(), true)); // forced blank line
+                line_metas.push((Vec::new(), true)); // forced blank line
             }
-        } else {
-            let n = wrapped.len();
-            for (j, w) in wrapped.into_iter().enumerate() {
-                line_texts.push((w, j + 1 == n));
-            }
+            continue;
+        }
+        let wrapped = wrap_pieces(&measure_runs(para, styles, m), max_w, 1.0);
+        let n = wrapped.len();
+        for (j, pieces) in wrapped.into_iter().enumerate() {
+            line_metas.push((pieces, j + 1 == n));
         }
     }
 
@@ -132,7 +162,7 @@ pub fn layout_text_area(
         0.0
     };
 
-    let block_h = line_texts.len() as f64 * line_h;
+    let block_h = line_metas.len() as f64 * line_h;
     let block_top = match (spec.height, spec.display_align) {
         (Some(h), DisplayAlign::Center) => spec.y + (h - block_h) / 2.0,
         (Some(h), DisplayAlign::After) => spec.y + (h - block_h),
@@ -154,7 +184,7 @@ pub fn layout_text_area(
 
     let mut lines = Vec::new();
     let mut dropped = false;
-    for (i, (text, is_final)) in line_texts.into_iter().enumerate() {
+    for (i, (pieces, is_final)) in line_metas.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
         if let Some(h) = spec.height {
             let box_top = baseline - baseline_offset;
@@ -163,6 +193,7 @@ pub fn layout_text_area(
                 continue; // outside the region in the block direction → not rendered
             }
         }
+        let (text, runs) = merge_pieces(pieces);
         // stretch full, non-paragraph-final, multi-word lines to the content width
         let justify_width = justify_w.filter(|_| !is_final && text.contains(' '));
         lines.push(PlacedLine {
@@ -170,6 +201,7 @@ pub fn layout_text_area(
             x: ax,
             baseline,
             justify_width,
+            runs,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {
@@ -365,6 +397,63 @@ mod tests {
         let out = layout_text_area("aa bb cc dd", &st, &s, &Mono(0.1));
         assert!(out.lines.iter().all(|l| l.justify_width.is_none()));
         assert_eq!(out.anchor, Anchor::Start);
+    }
+
+    #[test]
+    fn styled_runs_split_a_line_into_runs() {
+        let base = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let bold = TextStyle {
+            weight: "bold".into(),
+            size: 10.0,
+            ..Default::default()
+        };
+        let styles = [base, bold];
+        // "Ship " (base) + "fast" (bold) + " and safe" (base), wide box → one line
+        let segs = [
+            ("Ship ".to_string(), 0),
+            ("fast".to_string(), 1),
+            (" and safe".to_string(), 0),
+        ];
+        let out = layout_text_area_runs(&segs, &styles, &spec(Some(1000.0), None), &Mono(0.1));
+        assert_eq!(out.lines.len(), 1);
+        let line = &out.lines[0];
+        assert_eq!(line.text, "Ship fast and safe");
+        assert_eq!(
+            line.runs.iter().map(|r| r.style).collect::<Vec<_>>(),
+            vec![0, 1, 0]
+        );
+        assert!(line.runs[1].text.contains("fast"));
+    }
+
+    #[test]
+    fn styled_runs_handle_mid_word_boundaries() {
+        let styles = [
+            TextStyle {
+                size: 10.0,
+                ..Default::default()
+            },
+            TextStyle {
+                weight: "bold".into(),
+                size: 10.0,
+                ..Default::default()
+            },
+        ];
+        // "un" + bold "real", no space between → one word, two runs
+        let segs = [("un".to_string(), 0), ("real".to_string(), 1)];
+        let out = layout_text_area_runs(&segs, &styles, &spec(Some(1000.0), None), &Mono(0.1));
+        assert_eq!(out.lines.len(), 1);
+        assert_eq!(out.lines[0].text, "unreal");
+        assert_eq!(
+            out.lines[0]
+                .runs
+                .iter()
+                .map(|r| r.style)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[test]

@@ -3,10 +3,10 @@
 
 use super::{
     fit::fit_size,
-    measure::{measure_words, Measurer},
+    measure::{measure_words, Measured, Measurer, Piece},
     style::TextStyle,
     truncate::{apply_ellipsis, TextOverflow},
-    wrap::wrap,
+    wrap::wrap_pieces,
 };
 
 /// Horizontal alignment within the content box.
@@ -99,9 +99,21 @@ pub struct AreaSpec {
     pub text_overflow: TextOverflow,
 }
 
+/// A styled span within a placed line: contiguous text sharing one style, given as
+/// an index into the caller's style table (0 = the base paragraph style). A
+/// single-style line has exactly one run. The emitter maps the index back to paint
+/// attributes (fill, weight, …).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Run {
+    pub text: String,
+    pub style: usize,
+}
+
 /// One laid-out line: its text and the absolute coordinates of its anchor point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedLine {
+    /// Full line text (concatenation of `runs`) — kept for truncation and callers
+    /// that don't care about styling.
     pub text: String,
     pub x: f64,
     pub baseline: f64,
@@ -109,6 +121,26 @@ pub struct PlacedLine {
     /// (via SVG `textLength`/`lengthAdjust="spacing"`). Only full, non-final,
     /// multi-word lines get this; the rest stay at natural width.
     pub justify_width: Option<f64>,
+    /// The line split into styled runs (`<tspan>`s). One base run for plain text.
+    pub runs: Vec<Run>,
+}
+
+/// Merge a line's pieces into `(full_text, runs)`, coalescing adjacent same-style
+/// pieces so each style change is one run.
+pub(crate) fn merge_pieces(pieces: Vec<Piece>) -> (String, Vec<Run>) {
+    let mut text = String::new();
+    let mut runs: Vec<Run> = Vec::new();
+    for p in pieces {
+        text.push_str(&p.text);
+        match runs.last_mut() {
+            Some(last) if last.style == p.style => last.text.push_str(&p.text),
+            _ => runs.push(Run {
+                text: p.text,
+                style: p.style,
+            }),
+        }
+    }
+    (text, runs)
 }
 
 /// The result of laying text into an area.
@@ -122,15 +154,26 @@ pub struct AreaLayout {
 /// Lay `text` into `spec`'s box: shrink-to-fit (if requested), wrap to the content
 /// width, then align horizontally and vertically into positioned lines.
 pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measurer) -> AreaLayout {
+    layout_area_measured(&measure_words(text, style, m), style, spec, m)
+}
+
+/// Like [`layout_area`], but takes pre-[`measure`]d input so the caller can supply
+/// styled runs (via [`super::measure::measure_runs`]). `style` is the base
+/// paragraph style (its size / line-height / vertical metrics drive fit and
+/// placement); per-run styling rides on the pieces' style indices.
+pub fn layout_area_measured(
+    measured: &Measured,
+    style: &TextStyle,
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
     let cx = spec.x + spec.padding;
     let cy = spec.y + spec.padding;
     let cw = spec.width - 2.0 * spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
 
-    let measured = measure_words(text, style, m);
-
     let size = match spec.fit {
-        Fit::Shrink { min } => fit_size(&measured, style.size, style.line_height, cw, ch, min),
+        Fit::Shrink { min } => fit_size(measured, style.size, style.line_height, cw, ch, min),
         Fit::None => style.size,
     };
     // Guard the base-size divide: a zero/degenerate `style.size` must not produce
@@ -140,7 +183,7 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
     } else {
         0.0
     };
-    let line_texts = wrap(&measured, cw, scale);
+    let line_pieces = wrap_pieces(measured, cw, scale);
     let advance = size * style.line_height;
 
     let anchor = spec.align.anchor();
@@ -154,8 +197,8 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
     // the letterforms read as centred and Top/Bottom sit flush. Ascenders/accents
     // may peek above the cap; descenders hang into the reserved descent.
     let fm = m.font_metrics(style, size);
-    let lines = line_texts.len().max(1) as f64;
-    let band_h = fm.cap_height + fm.descent + (lines - 1.0) * advance;
+    let n = line_pieces.len().max(1) as f64;
+    let band_h = fm.cap_height + fm.descent + (n - 1.0) * advance;
     let band_top = match spec.valign {
         VAlign::Top => cy,
         VAlign::Middle => cy + (ch - band_h) / 2.0,
@@ -165,24 +208,26 @@ pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measu
 
     // A line is justified iff align=justify, it isn't the paragraph's last line, it
     // has something to stretch (>1 word), and the box has a positive content width.
-    let last = line_texts.len().saturating_sub(1);
+    let last = line_pieces.len().saturating_sub(1);
     let justify = spec.align == Align::Justify && cw > 0.0;
 
     let mut lines = Vec::new();
     let mut dropped = false;
-    for (i, text) in line_texts.into_iter().enumerate() {
+    for (i, pieces) in line_pieces.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * advance;
         // clip to the content height by the line's ink band [cap-top, descent]
         if baseline - fm.cap_height < cy - 1e-6 || baseline + fm.descent > cy + ch + 1e-6 {
             dropped = true;
             continue;
         }
+        let (text, runs) = merge_pieces(pieces);
         let justify_width = (justify && i < last && text.contains(' ')).then_some(cw);
         lines.push(PlacedLine {
             text,
             x: ax,
             baseline,
             justify_width,
+            runs,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {
@@ -208,14 +253,18 @@ pub fn layout_flow(
 ) -> Vec<PlacedLine> {
     let measured = measure_words(text, style, m);
     let advance = style.size * style.line_height;
-    wrap(&measured, max_width, 1.0)
+    wrap_pieces(&measured, max_width, 1.0)
         .into_iter()
         .enumerate()
-        .map(|(i, t)| PlacedLine {
-            text: t,
-            x,
-            baseline: y + i as f64 * advance,
-            justify_width: None,
+        .map(|(i, pieces)| {
+            let (text, runs) = merge_pieces(pieces);
+            PlacedLine {
+                text,
+                x,
+                baseline: y + i as f64 * advance,
+                justify_width: None,
+                runs,
+            }
         })
         .collect()
 }

@@ -90,7 +90,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **Per-range fill** (solid) | AI/PDF | C | ◑ | whole-element `fill` passes through; per-range runs need `<x:run>` (planned) |
+| **Per-range fill** (solid) | AI/PDF | C | ✅ | **shipped** — `<tspan fill=…>` runs inside flowed text (§6.11) |
 | **Per-range stroke** (color, width, dash, join/cap) | AI/PDF | C | ◑ | Vision item; PDF `Tr 1`; whole-element SVG stroke on `<text>` (v0 basic) |
 | **Fill + stroke together**, with paint order | AI/PDF | C | ◑ | PDF `Tr 2`; SVG `paint-order` (passthrough) |
 | **Gradient fill** on text (linear/radial), block-wide or per-glyph | AI | E | ◑ | gradient `fill` (whole text, passthrough); per-glyph needs outlining |
@@ -148,7 +148,8 @@ checklist that the high-level features above all have a precise low-level repres
 **Shipped today (✅):** point, rectangular, **and arbitrary-shape** area type (`<x:textbox in="#shape">`
 flows into a triangle/circle/polygon outline), shrink-to-fit, alignment (incl. **full-justify**),
 leading, named fonts, **tracking** (`letter-spacing` + `word-spacing`, layout-aware), **horizontal
-glyph scale** (`glyph-x-scale`), baseline shift, and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
+glyph scale** (`glyph-x-scale`), baseline shift, **styled runs** (per-run fill / weight / style / family
+via `<tspan>`), and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
 (`<tbreak/>`), overflow truncation (`text-overflow`), and real browser font metrics — see
 [Specification.md](Specification.md) Appendix A.
 

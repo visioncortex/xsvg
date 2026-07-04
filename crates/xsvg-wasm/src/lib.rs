@@ -14,9 +14,10 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area, layout_flow, layout_region, layout_text_area, line_advance, Align, AreaLayout,
-    AreaSpec, DisplayAlign, Fit, LineIncrement, Measurer, PlacedLine, RasterRegion, Rect,
-    RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
+    measure_runs, Align, AreaLayout, AreaSpec, DisplayAlign, Fit, LineIncrement, Measurer,
+    PlacedLine, RasterRegion, Rect, RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow,
+    TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -258,8 +259,9 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, m: &dyn Measur
     out.push_str("<text");
     copy_attrs(node, out, &["inline-size", "line-height"]);
     out.push('>');
+    let base = [EmitAttrs::default()];
     for line in &lines {
-        emit_tspan(out, line, &style, style.size, gx, m);
+        emit_line(out, line, &style, style.size, gx, m, &base);
     }
     out.push_str("</text>");
 }
@@ -280,11 +282,18 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // rect → reuse the rectangular path with the target's geometry (keeps fit/valign)
         if target.tag_name().name() == "rect" {
             let spec = textbox_area_spec(node, target);
-            let layout = layout_area(&collect_text(node), &style, &spec, ctx.m);
-            write_area_text(out, &layout, &style, fill, gx, ctx.m);
+            let (segments, styles, emits) = collect_runs(node, &style);
+            let layout = layout_area_measured(
+                &measure_runs(&segments, &styles, ctx.m),
+                &style,
+                &spec,
+                ctx.m,
+            );
+            write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits);
             return;
         }
         // any other shape → flow inside its filled outline via the raster region
+        // (styled runs are not supported in curved region flow in v0)
         let region = shape_to_path_d(target)
             .and_then(|d| ctx.shaper.rasterize(&d, (style.size / 3.0).max(1.0)));
         let Some(region) = region else {
@@ -298,13 +307,27 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
         };
         let layout = layout_region(&collect_text(node), &style, &region, &spec, ctx.m);
-        write_area_text(out, &layout, &style, fill, gx, ctx.m);
+        write_area_text(
+            out,
+            &layout,
+            &style,
+            fill,
+            gx,
+            ctx.m,
+            &[EmitAttrs::default()],
+        );
         return;
     }
 
     let spec = textbox_area_spec(node, node);
-    let layout = layout_area(&collect_text(node), &style, &spec, ctx.m);
-    write_area_text(out, &layout, &style, fill, gx, ctx.m);
+    let (segments, styles, emits) = collect_runs(node, &style);
+    let layout = layout_area_measured(
+        &measure_runs(&segments, &styles, ctx.m),
+        &style,
+        &spec,
+        ctx.m,
+    );
+    write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits);
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -411,7 +434,8 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
-    let layout = layout_text_area(&collect_text_with_breaks(node), &style, &spec, m);
+    let (segments, styles, emits) = collect_runs(node, &style);
+    let layout = layout_text_area_runs(&segments, &styles, &spec, m);
     write_area_text(
         out,
         &layout,
@@ -419,6 +443,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, m: &dyn Measurer) {
         node.attribute("fill").unwrap_or("#000"),
         gx,
         m,
+        &emits,
     );
 }
 
@@ -429,6 +454,7 @@ fn write_area_text(
     fill: &str,
     glyph_x_scale: f64,
     m: &dyn Measurer,
+    emits: &[EmitAttrs],
 ) {
     out.push_str(&format!(
         "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
@@ -445,19 +471,22 @@ fn write_area_text(
     }
     out.push('>');
     for line in &layout.lines {
-        emit_tspan(out, line, style, layout.font_size, glyph_x_scale, m);
+        emit_line(out, line, style, layout.font_size, glyph_x_scale, m, emits);
     }
     out.push_str("</text>");
 }
 
-/// Emit one `<tspan>`, scaling glyph widths via `textLength` when `glyph_x_scale != 1`.
-fn emit_tspan(
+/// Emit one line as an outer positioning `<tspan x y>` (carrying justify/glyph-scale
+/// `textLength`) whose children are the line's styled runs — a bare string for base
+/// runs, an inner `<tspan>` with the run's overrides for the rest.
+fn emit_line(
     out: &mut String,
     line: &PlacedLine,
     style: &TextStyle,
     size: f64,
     glyph_x_scale: f64,
     m: &dyn Measurer,
+    emits: &[EmitAttrs],
 ) {
     out.push_str(&format!(
         "<tspan x=\"{}\" y=\"{}\"",
@@ -481,8 +510,33 @@ fn emit_tspan(
         ));
     }
     out.push('>');
-    push_escaped(out, &line.text, false);
+    for run in &line.runs {
+        match emits.get(run.style) {
+            Some(a) if !a.is_empty() => {
+                out.push_str("<tspan");
+                emit_attr(out, "fill", &a.fill);
+                emit_attr(out, "font-weight", &a.weight);
+                emit_attr(out, "font-style", &a.style);
+                emit_attr(out, "font-family", &a.family);
+                out.push('>');
+                push_escaped(out, &run.text, false);
+                out.push_str("</tspan>");
+            }
+            _ => push_escaped(out, &run.text, false),
+        }
+    }
     out.push_str("</tspan>");
+}
+
+/// Emit ` name="value"` (escaped) when the override is present.
+fn emit_attr(out: &mut String, name: &str, value: &Option<String>) {
+    if let Some(v) = value {
+        out.push(' ');
+        out.push_str(name);
+        out.push_str("=\"");
+        push_escaped(out, v, true);
+        out.push('"');
+    }
 }
 
 fn fit_from(fit: Option<&str>, min: impl FnOnce() -> f64) -> Fit {
@@ -538,7 +592,8 @@ fn spacing_attr(node: roxmltree::Node, name: &str) -> f64 {
     }
 }
 
-/// Concatenate all descendant text content.
+/// Concatenate all descendant text content (styling flattened away). Used by the
+/// single-style paths: `<text inline-size>` and curved-shape region flow.
 fn collect_text(node: roxmltree::Node) -> String {
     let mut s = String::new();
     for d in node.descendants() {
@@ -551,20 +606,120 @@ fn collect_text(node: roxmltree::Node) -> String {
     s
 }
 
-/// Like [`collect_text`], but each `<tbreak/>` element becomes a `'\n'` (the
-/// SVG Tiny 1.2 forced line break). Document order is preserved.
-fn collect_text_with_breaks(node: roxmltree::Node) -> String {
-    let mut s = String::new();
-    for d in node.descendants() {
-        if d.is_text() {
-            if let Some(t) = d.text() {
-                s.push_str(t);
+/// Paint/style overrides a `<tspan>` run carries relative to the base `<text>`; only
+/// attributes present are emitted. `font-size` is intentionally not overridable in
+/// v0 (mixed sizes would perturb line-height/baseline).
+#[derive(Clone, Default, PartialEq)]
+struct EmitAttrs {
+    fill: Option<String>,
+    weight: Option<String>,
+    style: Option<String>,
+    family: Option<String>,
+}
+
+impl EmitAttrs {
+    fn is_empty(&self) -> bool {
+        self.fill.is_none()
+            && self.weight.is_none()
+            && self.style.is_none()
+            && self.family.is_none()
+    }
+}
+
+/// Walk a text container into styled segments for run layout: the `(text, style_id)`
+/// stream (with `'\n'` for `<tbreak/>`), the layout style table (`styles[0]` = base),
+/// and the parallel emit-attr table. `<tspan>` children introduce runs; nesting
+/// composes (inner wins). Plain text collapses to a single base run.
+fn collect_runs(
+    node: roxmltree::Node,
+    base: &TextStyle,
+) -> (Vec<(String, usize)>, Vec<TextStyle>, Vec<EmitAttrs>) {
+    let mut segments = Vec::new();
+    let mut styles = vec![base.clone()];
+    let mut emits = vec![EmitAttrs::default()];
+    walk_runs(
+        node,
+        &EmitAttrs::default(),
+        base,
+        &mut segments,
+        &mut styles,
+        &mut emits,
+    );
+    (segments, styles, emits)
+}
+
+fn walk_runs(
+    node: roxmltree::Node,
+    ctx: &EmitAttrs,
+    base: &TextStyle,
+    segments: &mut Vec<(String, usize)>,
+    styles: &mut Vec<TextStyle>,
+    emits: &mut Vec<EmitAttrs>,
+) {
+    for child in node.children() {
+        if child.is_text() {
+            if let Some(t) = child.text() {
+                if !t.is_empty() {
+                    let sid = intern_run(ctx, base, styles, emits);
+                    segments.push((t.to_string(), sid));
+                }
             }
-        } else if d.is_element() && d.tag_name().name() == "tbreak" {
-            s.push('\n');
+        } else if child.is_element() {
+            match child.tag_name().name() {
+                "tbreak" => segments.push(("\n".to_string(), 0)),
+                "tspan" => {
+                    let mut c = ctx.clone();
+                    let set = |slot: &mut Option<String>, v: Option<&str>| {
+                        if let Some(v) = v {
+                            *slot = Some(v.to_string());
+                        }
+                    };
+                    set(&mut c.fill, child.attribute("fill"));
+                    set(&mut c.weight, child.attribute("font-weight"));
+                    set(&mut c.style, child.attribute("font-style"));
+                    set(&mut c.family, child.attribute("font-family"));
+                    walk_runs(child, &c, base, segments, styles, emits);
+                }
+                _ => walk_runs(child, ctx, base, segments, styles, emits),
+            }
         }
     }
-    s
+}
+
+/// Intern the current override context into the style tables, returning its index
+/// (0 = base). Overrides equal to the base weight/style/family are dropped; an
+/// all-base context maps to the base run.
+fn intern_run(
+    ctx: &EmitAttrs,
+    base: &TextStyle,
+    styles: &mut Vec<TextStyle>,
+    emits: &mut Vec<EmitAttrs>,
+) -> usize {
+    let norm = EmitAttrs {
+        fill: ctx.fill.clone(),
+        weight: ctx.weight.clone().filter(|w| *w != base.weight),
+        style: ctx.style.clone().filter(|s| *s != base.style),
+        family: ctx.family.clone().filter(|f| *f != base.family),
+    };
+    if norm.is_empty() {
+        return 0;
+    }
+    if let Some(i) = emits.iter().position(|e| *e == norm) {
+        return i;
+    }
+    let mut ts = base.clone();
+    if let Some(w) = &norm.weight {
+        ts.weight = w.clone();
+    }
+    if let Some(s) = &norm.style {
+        ts.style = s.clone();
+    }
+    if let Some(f) = &norm.family {
+        ts.family = f.clone();
+    }
+    styles.push(ts);
+    emits.push(norm);
+    styles.len() - 1
 }
 
 /// Copy a node's attributes (skipping `x:`-namespaced ones and any in `skip`).
@@ -1060,6 +1215,26 @@ mod tests {
     fn negative_geometry_does_not_panic_or_leak_nan() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="-40" height="-20" padding="-5" fit="shrink" align="center" valign="middle" font-size="10">hi there friend</x:textbox></svg>"#;
         assert!(!compile_test(svg).contains("NaN"));
+    }
+
+    #[test]
+    fn styled_tspan_runs_emit_nested_tspans() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10" fill="#111">Ship <tspan font-weight="bold" fill="#e11">fast</tspan> today</textArea></svg>"##;
+        let out = compile_test(svg);
+        // base attrs live on the <text>; the bold run is a nested <tspan> with overrides
+        assert!(out.contains(r##"fill="#111""##), "base fill missing: {out}");
+        assert_eq!(out.matches("font-weight=\"bold\"").count(), 1, "{out}");
+        assert!(out.contains(r##"fill="#e11""##), "run fill missing: {out}");
+        assert!(out.contains("fast"), "{out}");
+        // base-styled parts stay bare text (not wrapped)
+        assert!(out.contains("Ship ") && out.contains("today"));
+    }
+
+    #[test]
+    fn plain_textarea_has_no_inner_tspans() {
+        // no runs → one outer <tspan> per line, nothing nested
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;
+        assert_eq!(compile_test(svg).matches("<tspan").count(), 1);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Overflow truncation shared by box text layouts (Specification.md §6.6).
 
-use super::area::PlacedLine;
+use super::area::{PlacedLine, Run};
 use super::measure::{line_advance, Measurer};
 use super::style::TextStyle;
 
@@ -51,6 +51,55 @@ pub fn ellipsize_line(
     Some(format!("{s}{ELLIPSIS}"))
 }
 
+/// Ellipsize a placed line in-place: truncate its text to fit `max_width` and
+/// rebuild its `runs` to match (dropping/trimming trailing runs, appending the
+/// marker to the last surviving run). Empties the line if nothing fits.
+pub(crate) fn ellipsize_placed(
+    line: &mut PlacedLine,
+    max_width: f64,
+    style: &TextStyle,
+    size: f64,
+    m: &dyn Measurer,
+) {
+    line.justify_width = None; // an ellipsized line renders at natural width
+    let truncated = ellipsize_line(&line.text, max_width, style, size, m).unwrap_or_default();
+    if truncated.is_empty() {
+        line.text.clear();
+        line.runs.clear();
+        return;
+    }
+    // `truncated` = <kept prefix of the line, trailing space trimmed><…>. Take that
+    // many body chars from the original runs (preserving each run's style), then
+    // append the marker to the last surviving run.
+    let body = truncated.strip_suffix(ELLIPSIS).unwrap_or(&truncated);
+    let keep = body.chars().count();
+    let mut new_runs: Vec<Run> = Vec::new();
+    let mut remaining = keep;
+    for run in &line.runs {
+        if remaining == 0 {
+            break;
+        }
+        let take = run.text.chars().count().min(remaining);
+        let s: String = run.text.chars().take(take).collect();
+        remaining -= take;
+        if !s.is_empty() {
+            new_runs.push(Run {
+                text: s,
+                style: run.style,
+            });
+        }
+    }
+    match new_runs.last_mut() {
+        Some(last) => last.text.push_str(ELLIPSIS),
+        None => new_runs.push(Run {
+            text: ELLIPSIS.to_string(),
+            style: 0,
+        }),
+    }
+    line.runs = new_runs;
+    line.text = truncated;
+}
+
 /// Mark already-clipped lines: ellipsize the last line if any were dropped
 /// (block overflow), and any line wider than `max_width` (inline overflow).
 /// Lines that can't fit even the ellipsis are removed.
@@ -66,16 +115,13 @@ pub fn apply_ellipsis(
         if !line.text.ends_with(ELLIPSIS)
             && line_advance(&line.text, style, size, m) > max_width + 1e-6
         {
-            line.text = ellipsize_line(&line.text, max_width, style, size, m).unwrap_or_default();
-            line.justify_width = None; // an ellipsized line renders at natural width
+            ellipsize_placed(line, max_width, style, size, m);
         }
     }
     if dropped {
         if let Some(last) = lines.last_mut() {
             if !last.text.ends_with(ELLIPSIS) {
-                last.text =
-                    ellipsize_line(&last.text, max_width, style, size, m).unwrap_or_default();
-                last.justify_width = None;
+                ellipsize_placed(last, max_width, style, size, m);
             }
         }
     }
