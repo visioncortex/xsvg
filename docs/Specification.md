@@ -102,11 +102,11 @@ Flowed text in a region, per the SVG Tiny 1.2 Recommendation.
 | `display-align` | `auto` \| `before` \| `center` \| `after` | `auto` (= `before`) | block alignment |
 | `line-increment` | `auto` \| `<number>` | `auto` | line-box height; `auto` = 1.1 × font-size |
 
-**Layout (line-box model).** Wrap to the width (or not, if `auto`). Each line occupies a line box of
-height `line-increment`; line boxes stack from the region's before-edge; a line's baseline sits at
-the font ascent for an assumed font-size = `line-increment`. `display-align` then positions the block
-(`before`=top, `center`=middle, `after`=bottom). With an explicit `height`, lines whose box falls
-outside the region are **not rendered** (clipped; see §6.6).
+**Layout.** Wrap to the width (or not, if `auto`). Baselines **step by `line-increment`** (the SVG Tiny
+1.2 line-box height). `display-align` then positions the **cap-height ink band** (§6.5) —
+`before`=cap-top at the top edge, `center`=band centred, `after`=band bottom at the bottom edge — so
+centred text is optically centred, not biased low by the em box. With an explicit `height`, lines whose
+ink band falls outside the region are **not rendered** (clipped; see §6.6).
 
 **`<tbreak/>`** [implemented] — a forced line break, per SVG Tiny 1.2. Each `<tbreak/>` child ends the
 current line and starts a new one; wrapping resumes independently on each side. Consecutive breaks
@@ -117,7 +117,8 @@ whitespace), `editable`.
 
 ### 6.4 `<x:textbox>` — Rung 3, xsvg box [implemented]
 
-Box text with diagram ergonomics. Distinct from `<textArea>` in vertical model (see §6.5).
+Box text with diagram ergonomics. Shares `<textArea>`'s cap-height vertical model, differing in line
+spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-align`); see §6.5.
 
 | Attr | Values | Default | Effect |
 |---|---|---|---|
@@ -130,15 +131,13 @@ Box text with diagram ergonomics. Distinct from `<textArea>` in vertical model (
 | `fit-min` | length | 6 | font-size floor for `shrink` |
 | `line-height` | number | 1.2 | line advance multiplier |
 
-### 6.5 Vertical alignment models (normative) [implemented]
+### 6.5 Vertical alignment model (normative) [implemented]
 
-The two box elements deliberately differ:
-
-- **`<textArea>`** uses the **line-box** model (§6.3): `display-align` over boxes of height
-  `line-increment`.
-- **`<x:textbox>`** uses **cap-height band** centering: the band runs from the first line's
-  **cap-top** to the last line's **baseline + descent**; `valign` positions that band. This centers
-  letterforms optically rather than the em box.
+Both box elements align on the **cap-height band** — the region from the first line's **cap-top** to
+the last line's **baseline + descent** — positioning it optically rather than centring the em box
+(which would sit low, since ascent > cap-height). They differ only in **line spacing** and the
+keyword: `<textArea>` steps by `line-increment` and takes `display-align` (`before`/`center`/`after`);
+`<x:textbox>` steps by `line-height · font-size` and takes `valign` (`top`/`middle`/`bottom`).
 
 **Baseline-stability invariant (both):** alignment reserves the *font's* descent (a constant), not
 the per-string ink. Therefore a descender-free and a descender-bearing label in the same box land on

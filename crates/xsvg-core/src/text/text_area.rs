@@ -155,20 +155,19 @@ pub fn layout_text_area_runs(
 
     let line_h = spec.line_increment.resolve(size);
     let fm = m.font_metrics(style, size);
-    // baseline sits at the font's ascent for an assumed font-size = line-increment
-    let baseline_offset = if size > 0.0 {
-        fm.ascent * line_h / size
-    } else {
-        0.0
-    };
 
-    let block_h = line_metas.len() as f64 * line_h;
+    // Align the cap-height ink band (first line's cap-top → last line's baseline +
+    // descent) optically, like <x:textbox> (§6.5) — not the em/line boxes, whose
+    // ascent/descent asymmetry biases centred text low. Lines still step by
+    // line-increment.
+    let n = line_metas.len().max(1) as f64;
+    let band_h = fm.cap_height + fm.descent + (n - 1.0) * line_h;
     let block_top = match (spec.height, spec.display_align) {
-        (Some(h), DisplayAlign::Center) => spec.y + (h - block_h) / 2.0,
-        (Some(h), DisplayAlign::After) => spec.y + (h - block_h),
+        (Some(h), DisplayAlign::Center) => spec.y + (h - band_h) / 2.0,
+        (Some(h), DisplayAlign::After) => spec.y + (h - band_h),
         _ => spec.y, // before, or auto height
     };
-    let first_baseline = block_top + baseline_offset;
+    let first_baseline = block_top + fm.cap_height;
 
     let ax = match (spec.text_align, spec.width) {
         (TextAlign::Center, Some(w)) => spec.x + w / 2.0,
@@ -186,9 +185,10 @@ pub fn layout_text_area_runs(
     let mut dropped = false;
     for (i, (pieces, is_final)) in line_metas.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
+        // clip by the line's ink band [cap-top, baseline + descent]
         if let Some(h) = spec.height {
-            let box_top = baseline - baseline_offset;
-            if box_top < spec.y - 1e-6 || box_top + line_h > spec.y + h + 1e-6 {
+            if baseline - fm.cap_height < spec.y - 1e-6 || baseline + fm.descent > spec.y + h + 1e-6
+            {
                 dropped = true;
                 continue; // outside the region in the block direction → not rendered
             }
@@ -266,10 +266,10 @@ mod tests {
         };
         let out = layout_text_area("aa bb", &st, &spec(Some(2.0), None), &Mono(0.1));
         assert_eq!(out.lines.len(), 2);
-        // auto line-increment = 1.1 * 10 = 11
+        // auto line-increment = 1.1 * 10 = 11 (baselines still step by it)
         assert!((out.lines[1].baseline - out.lines[0].baseline - 11.0).abs() < 1e-9);
-        // before-aligned baseline = ascent(0.8) * line_inc(11) / size(10) = 8.8
-        assert!((out.lines[0].baseline - 8.8).abs() < 1e-9);
+        // before-aligned: first cap-top at the top edge → baseline = cap_height (0.7·10)
+        assert!((out.lines[0].baseline - 7.0).abs() < 1e-9);
     }
 
     #[test]
@@ -308,19 +308,20 @@ mod tests {
             size: 10.0,
             ..Default::default()
         };
-        // single line, line_inc 11, baseline_offset 8.8, region height 100
+        // one line, cap-height band = cap(7) + descent(2) = 9, region height 100
         let mut s = spec(Some(50.0), Some(100.0));
         s.display_align = DisplayAlign::Before;
-        assert!((layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 8.8).abs() < 1e-9);
+        // cap-top at the top edge → baseline = cap_height = 7
+        assert!((layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 7.0).abs() < 1e-9);
         s.display_align = DisplayAlign::Center;
-        // block_top = (100-11)/2 = 44.5; baseline = 44.5 + 8.8 = 53.3
+        // band centred: top = (100-9)/2 = 45.5; baseline = 45.5 + cap(7) = 52.5
         assert!(
-            (layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 53.3).abs() < 1e-9
+            (layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 52.5).abs() < 1e-9
         );
         s.display_align = DisplayAlign::After;
-        // block_top = 100-11 = 89; baseline = 89 + 8.8 = 97.8
+        // band bottom at the edge: top = 100-9 = 91; baseline = 91 + cap(7) = 98
         assert!(
-            (layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 97.8).abs() < 1e-9
+            (layout_text_area("hi", &st, &s, &Mono(0.1)).lines[0].baseline - 98.0).abs() < 1e-9
         );
     }
 
