@@ -151,6 +151,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Geometry transforms — text on a path",
+    note: '<x:textpath in="#path"> — outline text and warp it onto a curve (§6.13).',
+    samples: [
+      {
+        file: "textpath.xsvg",
+        title: "Text on a path (skew)",
+        blurb: 'Outlined text warped onto a wave by the skew field — glyphs stay upright and shear, the baseline follows the curve',
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

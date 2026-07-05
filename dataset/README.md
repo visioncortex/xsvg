@@ -55,6 +55,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [outline.xsvg](outline.xsvg) | `font-family="-x-google-Anton"` provisions a Google font by name (live `<text>` via `FontFace`); one box drawn twice at identical geometry — live fill + an `outline="true"` keyline stroke on top — proves the traced `<path>` lands exactly on the live glyphs |
 
+## Geometry transforms — text on a path (§6.13)
+
+| File | Shows |
+|---|---|
+| [textpath.xsvg](textpath.xsvg) | `<x:textpath in="#wave" effect="skew">` outlines the run and warps it onto the curve via the displacement field — glyphs stay upright and shear, the baseline follows the path |
+
 ## Edge cases & invariants
 
 | File | Shows |

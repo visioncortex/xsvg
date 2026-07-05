@@ -133,11 +133,14 @@ impl Shaper for JsShaper<'_> {
     }
 }
 
-/// Browser-backed [`GlyphOutliner`]: `outline(text, family, weight, style, size, x,
-/// baseline) => d | ""` — a JS callback (opentype.js) returning an SVG path, or `""`
-/// when the font's bytes aren't available (→ fall back to live `<text>`).
+/// Browser-backed [`GlyphOutliner`]. `outline_run(text, family, weight, style, size, x,
+/// baseline) => d | ""` returns a glyph outline (opentype.js), or `""` when the font's
+/// bytes aren't available (→ fall back to live `<text>`). `outline_on_path(text, family,
+/// weight, style, size, pathD, effect) => d | ""` additionally warps the outline onto a
+/// path (§6.13 — the text-on-path specialization of the §7 geometry pipeline).
 struct JsOutliner<'a> {
-    outline: &'a js_sys::Function,
+    outline_run: &'a js_sys::Function,
+    outline_on_path: &'a js_sys::Function,
 }
 
 impl GlyphOutliner for JsOutliner<'_> {
@@ -158,7 +161,31 @@ impl GlyphOutliner for JsOutliner<'_> {
         args.push(&JsValue::from_f64(x));
         args.push(&JsValue::from_f64(baseline));
         let d = self
-            .outline
+            .outline_run
+            .apply(&JsValue::NULL, &args)
+            .ok()?
+            .as_string()?;
+        (!d.is_empty()).then_some(d)
+    }
+
+    fn outline_on_path(
+        &self,
+        text: &str,
+        style: &TextStyle,
+        size: f64,
+        path_d: &str,
+        effect: &str,
+    ) -> Option<String> {
+        let args = js_sys::Array::new();
+        args.push(&JsValue::from_str(text));
+        args.push(&JsValue::from_str(&style.family));
+        args.push(&JsValue::from_str(&style.weight));
+        args.push(&JsValue::from_str(&style.style));
+        args.push(&JsValue::from_f64(size));
+        args.push(&JsValue::from_str(path_d));
+        args.push(&JsValue::from_str(effect));
+        let d = self
+            .outline_on_path
             .apply(&JsValue::NULL, &args)
             .ok()?
             .as_string()?;
@@ -205,11 +232,15 @@ pub fn compile(
     measure: &js_sys::Function,
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
-    outline: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    outline_on_path: &js_sys::Function,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
     let shaper = JsShaper { rasterize };
-    let outliner = JsOutliner { outline };
+    let outliner = JsOutliner {
+        outline_run,
+        outline_on_path,
+    };
     compile_impl(input, quality, sourcemap, &m, &shaper, &outliner).map_err(|e| JsError::new(&e))
 }
 
@@ -260,6 +291,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     if node.tag_name().namespace() == Some(XSVG_NS) {
         match node.tag_name().name() {
             "textbox" => emit_textbox(node, out, ctx),
+            "textpath" => emit_textpath(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -432,6 +464,51 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         outline,
         ctx.outliner,
     );
+}
+
+/// `<x:textpath in="#path" effect="skew">` (§6.13): outline the run and warp it onto the
+/// referenced path via the [`GlyphOutliner::outline_on_path`] seam — the text-on-path
+/// specialization of the geometry-transform pipeline (§7). Emits `<g fill=… stroke=…>` +
+/// the warped `<path>`; falls back to a straight live `<text>` when no outline font is
+/// available, so the document never breaks.
+fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let style = style_from(node);
+    let fill = node.attribute("fill").unwrap_or("#000");
+    let stroke = outline_stroke_attrs(node);
+    let pos = pos_attr(node, ctx);
+    let effect = node.attribute("effect").unwrap_or("skew");
+    let text = collect_text(node);
+
+    let Some(reference) = node.attribute("in") else {
+        out.push_str("<!-- xsvg: <x:textpath> requires in=\"#path\" -->");
+        return;
+    };
+    let Some(path_d) = resolve_ref(node, reference).and_then(shape_to_path_d) else {
+        out.push_str("<!-- xsvg: <x:textpath in> target not found or not a path -->");
+        return;
+    };
+
+    if let Some(d) = ctx
+        .outliner
+        .outline_on_path(&text, &style, style.size, &path_d, effect)
+    {
+        out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
+        out.push_str("<path d=\"");
+        push_escaped(out, &d, true);
+        out.push_str("\"/></g>");
+        return;
+    }
+
+    // No outline font → straight live <text> at the element's x/y (graceful fallback).
+    let (x, y) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    out.push_str(&format!(
+        "<text font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\" x=\"{}\" y=\"{}\"",
+        style.family, fmt(style.size), style.weight, style.style, fill, fmt(x), fmt(y)
+    ));
+    out.push_str(&pos);
+    out.push('>');
+    push_escaped(out, &text, false);
+    out.push_str("</text>");
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -1056,6 +1133,18 @@ mod tests {
         fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
             Some(format!("M{x},{b} h1 v-1 h-1 Z"))
         }
+        /// Marker "warped" path whose numbers encode that the reference path + size
+        /// reached the seam — enough to prove the `<x:textpath>` emit wiring.
+        fn outline_on_path(
+            &self,
+            _t: &str,
+            _s: &TextStyle,
+            sz: f64,
+            path_d: &str,
+            _effect: &str,
+        ) -> Option<String> {
+            Some(format!("M0,0 L{},{} Z", path_d.len(), sz))
+        }
     }
 
     fn compile_test(svg: &str) -> String {
@@ -1489,6 +1578,44 @@ mod tests {
         let out = compile_test(svg); // NoOutliner
         assert!(
             out.contains("<text") && !out.contains("<path d=\""),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn textpath_emits_warped_path() {
+        // <x:textpath in="#p"> with a working warper → <g><path>, no <text> (§6.13)
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 C40,0 80,40 120,20" fill="none"/><x:textpath in="#p" effect="skew" font-size="20" fill="#111">wave</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("<g fill=\"#111\""), "{out}");
+        assert!(out.contains("<path d=\"M0,0 L"), "{out}");
+        assert!(!out.contains("<text"), "{out}");
+    }
+
+    #[test]
+    fn textpath_carries_stroke() {
+        // fill="none" + stroke → a keyline outline on the warped path
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" font-size="20" fill="none" stroke="#0af" stroke-width="1.5">wave</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("<g fill=\"none\""), "{out}");
+        assert!(out.contains("stroke=\"#0af\""), "{out}");
+    }
+
+    #[test]
+    fn textpath_falls_back_to_text_without_a_font() {
+        // no path-warping backend (NoOutliner → outline_on_path defaults to None) → live <text>
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" x="0" y="20" font-size="20">wave</x:textpath></svg>"##;
+        let out = compile_test(svg);
+        assert!(out.contains(">wave</text>"), "{out}");
+        assert!(!out.contains("<path d=\"M0,0 L"), "{out}");
+    }
+
+    #[test]
+    fn textpath_missing_target_is_a_comment() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textpath in="#nope" font-size="20">wave</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(
+            out.contains("<!-- xsvg: <x:textpath in> target not found"),
             "{out}"
         );
     }

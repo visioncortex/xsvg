@@ -361,16 +361,115 @@ effects of the remaining pillars (§7): geometry warp/envelope and mesh-fill app
 `glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing` (§6.8) do not apply to the traced path, and
 curved-shape region flow (§6.10) keeps its own per-line placement. Per-run outlining is future work.
 
-## 7. Roadmap — remaining pillars [planned]
+### 6.13 Text on a path — `<x:textpath>` [implemented: skew]
 
-Pillar 1 (typography, §6) **shipped in v1**, through create outlines (§6.12). The remaining pillars,
-sketched in [Plan.md](Plan.md) and grounded in [Research.md](Research.md):
+Bind a text run to an open path: the run is laid out on a straight baseline, **outlined** (§6.12), and
+its geometry **warped onto the path**. This is a **specialization of the geometry-transform pipeline
+(§7)** — the outlined run is the source geometry, and the reference path derives the **field** (§7.2)
+that the §7.1 bake applies — and it mirrors Illustrator's *Type on a Path* effects. The `effect`
+attribute just **selects the field**: **skew** = the *displacement* field (built first); **rainbow** =
+the *path-follow* field (planned).
 
-- **Non-affine, non-destructive geometry transforms** *(Pillar 2)* — perspective / warp / envelope on
-  vector geometry, which SVG's **affine-only** `transform` cannot express. A non-destructive effect
-  stack (source geometry + editable transforms) is **baked at compile time** by **flatten → map →
-  refit** (kurbo flatten tolerance = the quality knob); deformation models are FFD (lattice/cage),
-  moving-least-squares (handles), and homography (perspective). See [Research.md §7](Research.md).
+**Surface.**
+```xml
+<path id="wave" d="M0,40 C60,0 140,80 200,40" fill="none"/>
+<x:textpath in="#wave" effect="skew" font-family="-x-google-Anton" font-size="32" fill="#111">rides the wave</x:textpath>
+```
+- **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`). Like
+  `<x:textbox in="#shape">` and `clipPath`, only its **geometry** is used; its own paint is ignored.
+- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(planned; §6.13.2)*.
+- **`align`** — `start` *(default)* | `middle` | `end`: where the run sits within the path's x-extent.
+- **`start`** — horizontal offset (user units) at which the run begins along the path (default `0`).
+- Standard text attributes apply: `font-*`, `fill`, `stroke*` (the emitted outline carries them, §6.12),
+  `letter-spacing`, `word-spacing`.
+- **Single line only** — a path is a 1-D track, so `inline-size`/wrapping do not apply; a run longer than
+  the path's x-extent is clipped at the end.
+
+**Model (normative).** The run is shaped on a flat baseline (`y = 0`, advancing in `x` from `start`),
+producing glyph outlines (§6.12). Let **`f(x)`** be the reference path's **height profile** — its `y`
+at horizontal position `x`. The compiler samples `f` from the path; the path **SHOULD be single-valued
+in `x`**, and where it is not, the first (topmost) `y` at that `x` is used.
+
+**6.13.1 Skew — 1-D vertical displacement [implemented].** The §7.2 **displacement** field: every outline
+point maps
+
+> `(x, y) → (x, y + f(x))`
+
+so glyphs stay **upright**, vertical strokes stay vertical, and horizontal edges tilt by the local slope
+`f'(x)` — the vertical **shear** Illustrator calls *Skew*. There is **no arc-length reparameterization
+and no normal offset**, hence no generic path-offsetting — the cheapest field. It runs through the §7.1
+bake unchanged (flatten → displace → refit), emitted as one `<path>` per run inside a
+`<g fill=… stroke=…>` (exactly as §6.12); the flatten tolerance is the graded quality knob.
+
+**6.13.2 Rainbow — arc-length follow + deform [planned].** The §7.2 **path-follow** field:
+reparameterize by arc length (text-`x` → position `s` on the path) and map `(x, y) → P(s) + y·N(s)`
+(path point plus **normal** offset). This both rotates *and* deforms glyphs along the curve; it needs an
+arc-length lookup + Frenet frame + the normal offset (generic path-offsetting). A *non-deforming* follow
+MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent, no shape deformation).
+
+**Degradation.** `<x:textpath>` needs the glyph outliner (§6.12) to warp geometry. If it is unavailable
+(no font bytes), skew degrades to a **stepped baseline**: live `<text>` with a per-glyph vertical offset
+`f(x_glyph)` (Illustrator's *Stair Step*), or a straight `<text>` if even per-glyph placement is not
+possible — the document never breaks.
+
+**v0 limits.** Single line; base style per run (per-run `<tspan>` styling, `justify`, `glyph-x-scale`
+do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). Rainbow
+and the native-`<textPath>` follow are future work.
+
+## 7. Geometry transforms — a generic deformation pipeline [spec'd]
+
+Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,
+warp, and envelope distortions **cannot ride on vector geometry** — xsvg **bakes** them into deformed
+paths. The design is deliberately **generic**: one pipeline, a library of pluggable **fields**, and thin
+front-ends. Text on a path (§6.13) is *one* front-end; skew / rainbow are *just field functions*.
+Grounded in [Research.md §7](Research.md).
+
+### 7.1 The bake (normative) [spec'd]
+
+Every geometry transform is the same three steps, parameterized only by a field `D` and a tolerance:
+
+> **flatten → map → refit.** **Flatten** each source path to a polyline within a Hausdorff `tolerance`;
+> **map** every vertex through the field `D`; **refit** the mapped polyline to cubic `<path>` segments
+> (or emit the polyline directly at low quality).
+
+Bézier curves are affine-invariant, so *affine* `D` may be applied to control points directly — but a
+**non-affine `D` must go through flatten→map→refit** (mapping only control points is wrong; error grows
+with segment span × field nonlinearity). The **`tolerance` is the graded quality knob**: kurbo's flatten
+gives segment count ∝ `tolerance`⁻½, so tightening it trades path size for fidelity (adaptive,
+curvature-and-nonlinearity-aware subdivision is a refinement). This is the *only* approximation step;
+the emitted `<path>` is exact SVG.
+
+### 7.2 Deformation fields [skew shipped-first]
+
+A **field** is a pure map `D : ℝ² → ℝ²` (a point in source space → output space); a field may precompute
+state (e.g. an arc-length table) but exposes only per-point evaluation to the bake. The catalog — all
+interchangeable under §7.1:
+
+| Field | `D(x, y)` | Notes |
+|---|---|---|
+| **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
+| **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; needs arc-length LUT + Frenet frame |
+| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox |
+| **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors |
+| **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
+| **MLS** | weighted handle map (Schaefer et al.), `w_i = 1/\|p_i−v\|^{2α}` | move-a-few-handles warp |
+
+### 7.3 `<x:warp>` — generic front-end [spec'd]
+
+Wrap arbitrary child geometry (shapes, `<path>`, outlined text) and apply a field non-destructively;
+the children stay editable in the source, the compiler emits the baked `<path>`s.
+
+```xml
+<x:warp field="perspective" corners="0,0 200,10 190,120 5,110">   <!-- field + its params -->
+  <rect x="0" y="0" width="200" height="120" rx="8"/>
+  <x:textbox x="0" y="0" width="200" height="120" outline="true">tilted</x:textbox>
+</x:warp>
+```
+`field` selects the map (§7.2); remaining attributes configure it (e.g. `corners` for perspective,
+`mode`/`bend` for an envelope preset, `handles` for MLS). Nesting composes fields (each baked in order).
+
+### 7.4 Remaining pillars & deferred [planned]
+
 - **`<x:mesh>`** *(Pillar 3)* — Coons/tensor mesh gradients with **cracks / T-junctions** and
   **transparency (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
 - **Deferred** (valuable, but no longer headline pillars): **`<x:vstroke>`** variable-width strokes
@@ -400,6 +499,8 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:textbox in="#shape">` binding (rect box + region flow into curved outlines) | implemented |
 | Styled runs (`<tspan>` per-run fill / weight / style / family in flowed text) | implemented |
 | Create outlines (`outline="true"` → glyphs as `<path>` via the `GlyphOutliner` seam, live-text fallback) | implemented |
+| Text on a path — `<x:textpath>` **skew** variant (outline → vertical-displacement warp → `<path>`) | implemented |
+| Text on a path — `<x:textpath>` **rainbow** variant (arc-length follow + deform) / native `<textPath>` | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

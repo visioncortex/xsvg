@@ -120,7 +120,17 @@ export function rasterize(d: string, rowH: number): number[] {
 // "Create outlines" (`x:outline`/`outline="true"`) turns a text run into a <path>;
 // opentype.js needs the font *bytes*, keyed by family. A family with no registered
 // font returns "" → the compiler falls back to live <text>, so nothing ever breaks.
-type OtFont = { getPath(t: string, x: number, y: number, size: number): { toPathData(n?: number): string } };
+interface OtCmd {
+  type: "M" | "L" | "C" | "Q" | "Z";
+  x?: number;
+  y?: number;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+}
+type OtGlyphPath = { toPathData(fractionalDigits?: number): string; commands: OtCmd[] };
+type OtFont = { getPath(t: string, x: number, y: number, size: number): OtGlyphPath };
 const outlineFonts = new Map<string, OtFont>();
 
 // `font-family="-x-google-Anton"` sources the outline from Google Fonts by name. The
@@ -242,6 +252,149 @@ function outline(
   return font.getPath(text, x, baseline, size).toPathData(2);
 }
 
+// --- Text on a path (§6.13): the browser adapter for GlyphOutliner::outline_on_path.
+// Outline the run on a flat baseline (opentype's structured commands), flatten to a
+// tolerance, then push every vertex through a path-derived field — the §7 bake done in
+// JS (the pure-Rust kurbo path is the later native impl). v0 implements the *skew*
+// (displacement) field; rainbow returns "" so it falls back to live <text>.
+
+// Sample a reference path as a height field f(x) — its y at horizontal position x
+// (§6.13.1). Reuses the offscreen probe; assumes the path is single-valued in x.
+function pathHeightField(pathD: string): { x0: number; y(x: number): number } | null {
+  const p = probe();
+  p.setAttribute("d", pathD);
+  let len: number;
+  try {
+    len = p.getTotalLength();
+  } catch {
+    return null;
+  }
+  if (!(len > 0)) return null;
+  const K = 256;
+  const xs = new Float64Array(K + 1);
+  const ys = new Float64Array(K + 1);
+  for (let i = 0; i <= K; i++) {
+    const pt = p.getPointAtLength((i / K) * len);
+    xs[i] = pt.x;
+    ys[i] = pt.y;
+  }
+  return {
+    x0: xs[0],
+    y(x: number): number {
+      if (x <= xs[0]) return ys[0];
+      if (x >= xs[K]) return ys[K];
+      for (let i = 0; i < K; i++) {
+        const a = xs[i];
+        const b = xs[i + 1];
+        if ((x >= a && x <= b) || (x <= a && x >= b)) {
+          const t = b === a ? 0 : (x - a) / (b - a);
+          return ys[i] + t * (ys[i + 1] - ys[i]);
+        }
+      }
+      return ys[K];
+    },
+  };
+}
+
+// Flatten opentype glyph commands to closed contours (flat [x0,y0,x1,y1,…] arrays),
+// no sub-segment longer than `step` (the graded quality knob).
+function flattenGlyph(cmds: OtCmd[], step: number): number[][] {
+  const contours: number[][] = [];
+  let cur: number[] = [];
+  let cx = 0;
+  let cy = 0;
+  let sx = 0;
+  let sy = 0;
+  const lineTo = (x: number, y: number) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(x - cx, y - cy) / step));
+    for (let k = 1; k <= n; k++) cur.push(cx + ((x - cx) * k) / n, cy + ((y - cy) * k) / n);
+    cx = x;
+    cy = y;
+  };
+  for (const c of cmds) {
+    if (c.type === "M") {
+      if (cur.length) contours.push(cur);
+      cur = [c.x!, c.y!];
+      cx = sx = c.x!;
+      cy = sy = c.y!;
+    } else if (c.type === "L") {
+      lineTo(c.x!, c.y!);
+    } else if (c.type === "Q") {
+      const x0 = cx;
+      const y0 = cy;
+      const n = Math.max(
+        2,
+        Math.ceil((Math.hypot(c.x1! - x0, c.y1! - y0) + Math.hypot(c.x! - c.x1!, c.y! - c.y1!)) / step),
+      );
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        const u = 1 - t;
+        cur.push(
+          u * u * x0 + 2 * u * t * c.x1! + t * t * c.x!,
+          u * u * y0 + 2 * u * t * c.y1! + t * t * c.y!,
+        );
+      }
+      cx = c.x!;
+      cy = c.y!;
+    } else if (c.type === "C") {
+      const x0 = cx;
+      const y0 = cy;
+      const n = Math.max(
+        2,
+        Math.ceil(
+          (Math.hypot(c.x1! - x0, c.y1! - y0) +
+            Math.hypot(c.x2! - c.x1!, c.y2! - c.y1!) +
+            Math.hypot(c.x! - c.x2!, c.y! - c.y2!)) /
+            step,
+        ),
+      );
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        const u = 1 - t;
+        cur.push(
+          u * u * u * x0 + 3 * u * u * t * c.x1! + 3 * u * t * t * c.x2! + t * t * t * c.x!,
+          u * u * u * y0 + 3 * u * u * t * c.y1! + 3 * u * t * t * c.y2! + t * t * t * c.y!,
+        );
+      }
+      cx = c.x!;
+      cy = c.y!;
+    } else if (c.type === "Z") {
+      lineTo(sx, sy);
+    }
+  }
+  if (cur.length) contours.push(cur);
+  return contours;
+}
+
+function outlineOnPath(
+  text: string,
+  family: string,
+  _weight: string,
+  _style: string,
+  size: number,
+  pathD: string,
+  effect: string,
+): string {
+  const font = outlineFonts.get(firstFamily(family).toLowerCase());
+  if (!font) return ""; // no bytes → Rust falls back to live <text>
+  if (effect !== "skew") return ""; // rainbow etc. not built yet → graceful fallback
+  const field = pathHeightField(pathD);
+  if (!field) return "";
+  const step = Math.max(1, size / 12); // flatten tolerance, size-relative (quality knob)
+  const contours = flattenGlyph(font.getPath(text, 0, 0, size).commands, step);
+  const r = (n: number) => (Math.round(n * 100) / 100).toString();
+  let d = "";
+  for (const c of contours) {
+    for (let i = 0; i < c.length; i += 2) {
+      const x = field.x0 + c[i]; // run baseline begins at the path's start x
+      // skew field: (x, y) → (x, y + f(x)); c[i+1] is y relative to the baseline
+      d += (i === 0 ? "M" : "L") + r(x) + "," + r(field.y(x) + c[i + 1]);
+    }
+    d += "Z";
+  }
+  return d;
+}
+
 export interface CompileOptions {
   /** Quality profile string (default "balanced"). */
   quality?: string;
@@ -261,5 +414,5 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline);
+  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, outlineOnPath);
 }

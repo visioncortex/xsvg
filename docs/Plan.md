@@ -99,11 +99,11 @@ lowering boundary:
    AST                   faithful, namespaced syntax tree
      │  resolve          (cascade styles, units, defs/use, inheritance)
      ▼
-   HIR  ── "rich scene"  text runs, variable-stroke specs, mesh patches are FIRST-CLASS
+   HIR  ── "rich scene"  text runs, warp fields, mesh patches are FIRST-CLASS
      │
      │  LOWER  ◄──────── QualityProfile   ← the single approximation boundary
-     │   • text     → [FontProvider] measure/shape → <text> (v0, browser) | outline→<path> (skrifa, 2b)
-     │   • vstroke  → stroke-to-fill (kurbo)         → <path>
+     │   • text     → measure [Measurer] → <text> (browser) | outline [GlyphOutliner] → <path>  (§6.12)
+     │   • warp     → flatten → map(field) → refit  → <path>  (field: skew/rainbow/envelope/…; §7)
      │   • mesh     → subdivide/triangulate/raster   → <path>+ | <image>
      ▼
    LIR  ── "micro-xsvg"  strict, fully-resolved SVG subset (model: usvg::Tree)
@@ -113,9 +113,10 @@ lowering boundary:
 ```
 
 **Key decisions baked in:**
-- **kurbo `BezPath` is the universal geometry currency.** Stroke expansion (kurbo), glyph outlines
-  (skrifa → kurbo), and mesh edges all speak the same curve type, and `BezPath::to_svg` is the
-  emitter's path serializer. This is the single biggest simplifier the research surfaced.
+- **kurbo `BezPath` is the universal geometry currency.** The warp bake (§7), glyph outlines
+  (opentype.js in v1; skrifa → kurbo native), and mesh edges all speak the same curve type, and
+  `BezPath::to_svg` is the emitter's path serializer. This is the single biggest simplifier the
+  research surfaced.
 - **One lowering boundary, one quality knob.** Everything approximate happens in LOWER, parameterized
   by `QualityProfile`. The LIR below it is exact and trivially serializable.
 - **LIR is a strict SVG subset** (no variable strokes, no mesh, optionally no text) — so emission is
@@ -297,29 +298,64 @@ Attributes: `region` (flow into arbitrary polygon), `justify` (`greedy` | `knuth
 > and variable-width strokes applied to glyph outlines** ("text as vector art"), available once
 > Phase 2b can "create outlines."
 
-### 2.3 Pillar 2 — Non-affine, non-destructive geometry transforms
+### 2.3 Pillar 2 — Non-affine, non-destructive geometry transforms *(a generic pipeline)*
 
 SVG's `transform` is **affine-only**, so perspective, warp, and envelope distortions cannot ride on
-vector geometry — xsvg **bakes** them into deformed paths. A non-destructive effect wraps geometry that
-stays editable in the source; the compiler materializes deformed `<path>`s at a graded tolerance.
+vector geometry — xsvg **bakes** them. The design is deliberately **generic — three layers** (spec:
+[Specification.md §7](Specification.md)); nothing here is per-effect:
+
+1. **The bake (field-agnostic).** `bake(path, field, tol)` = **flatten → map → refit**: kurbo
+   `flatten` to a Hausdorff tolerance, map each vertex through the field, refit cubics. The *only*
+   approximation step; **tolerance is the quality knob** (segments ∝ tolerance^−½). Reuses the same
+   kurbo geometry currency as outlining. Raster `feDisplacementMap` is the last-resort fallback.
+2. **The field seam.** A **`Field`** is a pure `D: ℝ² → ℝ²` (may precompute state like an arc-length
+   LUT, but exposes only per-point eval) — the one thing each effect implements:
+   ```rust
+   pub trait Field { fn map(&self, p: Point) -> Point; }   // in xsvg-core, alongside GlyphOutliner
+   ```
+   Field library: **displacement** (skew), **path-follow** (rainbow), **envelope presets**
+   (arc/arch/flag/wave — Illustrator Envelope Distort), **homography** (perspective), **FFD**
+   (lattice/cage — Sederberg-Parry), **MLS** (handles — Schaefer et al.). *Skew/rainbow are just two
+   fields.*
+3. **Front-ends.** `<x:warp field="…" …params>` wraps arbitrary child geometry (shapes, outlined text)
+   and applies a field non-destructively; `<x:textpath>` (§2.3.1) is a **specialization** that outlines
+   text and derives a *path-field*. Both compile to baked `<path>`s.
 
 ```xml
-<x:warp kind="envelope" mode="arch" bend="0.4">     <!-- kind = envelope | perspective | mesh | mls -->
-  <text …>bent headline</text>
-  <path d="…"/>
+<x:warp field="perspective" corners="0,0 200,10 190,120 5,110">
+  <rect x="0" y="0" width="200" height="120" rx="8"/>
+  <x:textbox x="0" y="0" width="200" height="120" outline="true">tilted</x:textbox>
 </x:warp>
 ```
-Deformation models — all *space* deformations, so they apply to any child geometry: **FFD**
-(lattice/cage — Sederberg-Parry), **moving-least-squares** (handle-based — Schaefer et al.),
-**homography** (perspective), and analytic **warp presets** (arc/arch/flag/wave/…, à la Illustrator
-Envelope Distort). Lowering = **flatten → map samples → refit** (kurbo `flatten`; tolerance is the
-quality knob, segments ∝ tolerance^−½); a raster `feDisplacementMap` path is the last-resort fallback.
-Reuses the same kurbo geometry currency as outlining. See [Research.md §7](Research.md). *(Syntax
-provisional.)*
+See [Research.md §7](Research.md). *(Syntax provisional.)*
 
 > **Deferred — `<x:vstroke>` (variable-width strokes).** A skeleton path + a bézier width profile,
 > lowered via kurbo stroke-to-fill into one filled `<path>`. Valuable, but demoted from the pillar set;
 > the research and the reused stroke-expansion machinery are kept in [Research.md §1](Research.md).
+
+#### 2.3.1 First slice — text on a path (skew) *(spec'd; see [Specification.md §6.13](Specification.md))*
+
+`<x:textpath in="#p" effect="skew">` is the smallest buildable instance of the pillar — it exercises
+**all three layers** (§2.3) with the cheapest field: source = **create-outlines (§6.12)**, field = the
+**displacement `Field`**, run through the shared **`bake`** — landing the whole pipe before Rainbow (the
+path-follow field) adds the hard math. Chosen first for the same reason strokes were originally first:
+smallest surface, maximal plumbing exercised.
+
+- **The field:** `D(x, y) = (x, y + f(x))`, where `f(x)` is the reference path's height profile. Pure
+  vertical displacement — no arc-length, no normal offset, no generic path-offsetting. It *is* the shear.
+- **Reuses:** the `GlyphOutliner` seam for glyph geometry; a **height-field sampler** for `f(x)` — a new
+  seam method, satisfiable in v0 by the same offscreen-SVG probe the region-flow `Shaper` already uses
+  (sample the referenced path's `y` at `x` via `getPointAtLength` + search).
+- **Warp pass = flatten → displace → refit.** v0-simplest: the **browser adapter warps opentype's
+  structured glyph path** (displace each point by `f`, it already has commands + can sample the path)
+  before serializing `d`; the pure-Rust path (kurbo `flatten`/refit) is the later native impl. Either
+  way the **flatten tolerance is the QualityProfile knob** (§1.3), shared with all §7 warps.
+- **Fallback (no outliner):** the layout pass knows each glyph's `x`, so emit a **stepped `<text>`** with
+  per-glyph `dy = f(x_glyph)` (Illustrator *Stair Step*), or straight `<text>` — never a broken doc.
+- **Phasing:** skew (this slice) → **rainbow** (reuses the same warp scaffold with an arc-length + Frenet
+  + normal-offset map) → optional native **`<textPath>`** follow (a separate live-`<text>` lowering).
+- **Risks:** height-field sampling of arbitrary paths (single-valued-in-`x` assumption; steep/vertical
+  segments); refit segment-budget vs fidelity; joining/oriented contours of warped glyph outlines.
 
 ### 2.4 Pillar 3 — Mesh gradients (Coons / tensor patches)
 

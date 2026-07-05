@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 260" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="260" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">text on a path — skew: glyphs stay upright and shear onto the curve</text>
+
+  <!-- the reference baseline curve (shown faintly as a guide) -->
+  <path id="wave" d="M40,165 C160,85 260,85 360,165 C460,245 560,245 680,165" fill="none" stroke="#334155" stroke-width="2"/>
+
+  <!-- text outlined and warped onto #wave by the displacement field -->
+  <x:textpath in="#wave" effect="skew" font-family="-x-google-Anton" font-size="62" fill="#38bdf8">RIDING THE WAVE</x:textpath>
+</svg>
