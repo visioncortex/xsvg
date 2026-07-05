@@ -14,6 +14,7 @@
 pub mod area;
 pub mod fit;
 pub mod measure;
+pub mod outline;
 pub mod region;
 pub mod style;
 pub mod text_area;
@@ -26,6 +27,7 @@ pub mod wrap;
 // directly by `area`, so it has no public surface to re-export.)
 pub use area::*;
 pub use measure::*;
+pub use outline::*;
 pub use region::*;
 pub use style::*;
 pub use text_area::*;

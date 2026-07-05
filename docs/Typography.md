@@ -102,7 +102,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | **Effects**: drop shadow, outer/inner glow, blur | AI | E | ◑ | SVG filters (passthrough); some work on `<text>` |
 | **Text as clip / mask** (image-through-text) | AI/PDF | E | ◑ | PDF render modes `Tr 4–7` (add to clip); SVG `clipPath`/`<text>` |
 | **Knockout / reverse text** | AI | S | ◑ | compositing |
-| **Create Outlines** (text → editable vector paths) | AI | C | ❌ | the Phase 2b capability; prerequisite for ★ rows above |
+| **Create Outlines** (text → editable vector paths) | AI | C | ✅ | **shipped** — `outline="true"` traces glyphs to `<path>` via the `GlyphOutliner` seam (opentype.js), live-text fallback (§6.12); prerequisite for ★ rows above |
 | **Invisible text** (present but not painted, for selection/extraction) | PDF | S | ✅ | PDF `Tr 3`; SVG opacity 0 / aria (passthrough) |
 
 ## E. Distortion & path effects
@@ -149,8 +149,9 @@ checklist that the high-level features above all have a precise low-level repres
 flows into a triangle/circle/polygon outline), shrink-to-fit, alignment (incl. **full-justify**),
 leading, named fonts, **tracking** (`letter-spacing` + `word-spacing`, layout-aware), **horizontal
 glyph scale** (`glyph-x-scale`), baseline shift, **styled runs** (per-run fill / weight / style / family
-via `<tspan>`), and selectable / Unicode-round-trip text. Alongside these the compiler also ships forced breaks
-(`<tbreak/>`), overflow truncation (`text-overflow`), and real browser font metrics — see
+via `<tspan>`), **create outlines** (`outline="true"` → glyphs as `<path>` via the `GlyphOutliner` seam,
+with live-text fallback), and selectable / Unicode-round-trip text. Alongside these the compiler also ships
+forced breaks (`<tbreak/>`), overflow truncation (`text-overflow`), and real browser font metrics — see
 [Specification.md](Specification.md) Appendix A.
 
 **Passthrough / partial (◑):** variable-font axes, metric kerning, OpenType features & ligatures,
@@ -165,6 +166,8 @@ limits, hyphenation, optical margin alignment, the **★ mesh-gradient fill** an
 stroke** on glyphs, pattern fills, envelope/warp distortion, precise/optical kerning, true small caps,
 glyph-by-GID access, and deterministic cross-browser layout.
 
-The dividing line is exactly **"Create Outlines"**: everything the browser can render as live
-`<text>` is v0; everything that treats a glyph as an editable vector path is Phase 2b — which is also
-the gateway to xsvg's signature trick of pouring mesh gradients and variable strokes *into letters*.
+The historical dividing line was **"Create Outlines"**: everything the browser can render as live
+`<text>` is v0; everything that treats a glyph as an editable vector path was Phase 2b. That gate is
+now **open** — `outline="true"` (§6.12) lowers glyphs to `<path>`, so the remaining ❌ rows are the
+*effects on top of* an outline (mesh gradients, variable strokes, warps *into letters*) rather than the
+outlining itself.

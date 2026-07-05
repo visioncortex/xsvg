@@ -49,6 +49,12 @@ Realistic composites that combine several features into one artifact.
 | [tbreak-and-glyph-scale.xsvg](tbreak-and-glyph-scale.xsvg) | `<tbreak/>` forced breaks + `x:glyph-x-scale` condensed/regular/extended widths |
 | [styled-runs.xsvg](styled-runs.xsvg) | `<tspan>` runs: per-run fill / weight / style flowing and wrapping inline, incl. under justify |
 
+## Vector output — create outlines (§6.12)
+
+| File | Shows |
+|---|---|
+| [outline.xsvg](outline.xsvg) | `font-family="-x-google-Anton"` provisions a Google font by name (live `<text>` via `FontFace`); one box drawn twice at identical geometry — live fill + an `outline="true"` keyline stroke on top — proves the traced `<path>` lands exactly on the live glyphs |
+
 ## Edge cases & invariants
 
 | File | Shows |

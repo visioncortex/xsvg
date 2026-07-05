@@ -15,9 +15,9 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
-    measure_runs, Align, AreaLayout, AreaSpec, DisplayAlign, Fit, LineIncrement, Measurer,
-    PlacedLine, RasterRegion, Rect, RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow,
-    TextStyle, VAlign,
+    measure_runs, Align, Anchor, AreaLayout, AreaSpec, DisplayAlign, Fit, GlyphOutliner,
+    LineIncrement, Measurer, PlacedLine, RasterRegion, Rect, RegionSpec, Shaper, TextAlign,
+    TextAreaSpec, TextOverflow, TextStyle, VAlign,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -133,11 +133,45 @@ impl Shaper for JsShaper<'_> {
     }
 }
 
-/// Everything a lowering pass needs from the platform: font metrics + shape raster,
-/// plus whether to emit source-position attributes (`data-xsvg-pos`).
+/// Browser-backed [`GlyphOutliner`]: `outline(text, family, weight, style, size, x,
+/// baseline) => d | ""` — a JS callback (opentype.js) returning an SVG path, or `""`
+/// when the font's bytes aren't available (→ fall back to live `<text>`).
+struct JsOutliner<'a> {
+    outline: &'a js_sys::Function,
+}
+
+impl GlyphOutliner for JsOutliner<'_> {
+    fn outline(
+        &self,
+        text: &str,
+        style: &TextStyle,
+        size: f64,
+        x: f64,
+        baseline: f64,
+    ) -> Option<String> {
+        let args = js_sys::Array::new();
+        args.push(&JsValue::from_str(text));
+        args.push(&JsValue::from_str(&style.family));
+        args.push(&JsValue::from_str(&style.weight));
+        args.push(&JsValue::from_str(&style.style));
+        args.push(&JsValue::from_f64(size));
+        args.push(&JsValue::from_f64(x));
+        args.push(&JsValue::from_f64(baseline));
+        let d = self
+            .outline
+            .apply(&JsValue::NULL, &args)
+            .ok()?
+            .as_string()?;
+        (!d.is_empty()).then_some(d)
+    }
+}
+
+/// Everything a lowering pass needs from the platform: font metrics + shape raster +
+/// glyph outliner, plus whether to emit source-position attributes (`data-xsvg-pos`).
 struct Ctx<'a> {
     m: &'a dyn Measurer,
     shaper: &'a dyn Shaper,
+    outliner: &'a dyn GlyphOutliner,
     sourcemap: bool,
 }
 
@@ -171,10 +205,12 @@ pub fn compile(
     measure: &js_sys::Function,
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
+    outline: &js_sys::Function,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
     let shaper = JsShaper { rasterize };
-    compile_impl(input, quality, sourcemap, &m, &shaper).map_err(|e| JsError::new(&e))
+    let outliner = JsOutliner { outline };
+    compile_impl(input, quality, sourcemap, &m, &shaper, &outliner).map_err(|e| JsError::new(&e))
 }
 
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
@@ -184,6 +220,7 @@ pub fn compile_impl(
     sourcemap: bool,
     m: &dyn Measurer,
     shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
     let q = xsvg_core::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
@@ -201,6 +238,7 @@ pub fn compile_impl(
         &Ctx {
             m,
             shaper,
+            outliner,
             sourcemap,
         },
     );
@@ -308,6 +346,8 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
+    let outline = node.attribute("outline") == Some("true");
+    let stroke = outline_stroke_attrs(node);
     let pos = pos_attr(node, ctx);
 
     if let Some(reference) = node.attribute("in") {
@@ -325,7 +365,19 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 &spec,
                 ctx.m,
             );
-            write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits, &pos);
+            write_area_text(
+                out,
+                &layout,
+                &style,
+                fill,
+                &stroke,
+                gx,
+                ctx.m,
+                &emits,
+                &pos,
+                outline,
+                ctx.outliner,
+            );
             return;
         }
         // any other shape → flow inside its filled outline via the raster region
@@ -348,10 +400,13 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             &layout,
             &style,
             fill,
+            &stroke,
             gx,
             ctx.m,
             &[EmitAttrs::default()],
             &pos,
+            outline,
+            ctx.outliner,
         );
         return;
     }
@@ -364,7 +419,19 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &spec,
         ctx.m,
     );
-    write_area_text(out, &layout, &style, fill, gx, ctx.m, &emits, &pos);
+    write_area_text(
+        out,
+        &layout,
+        &style,
+        fill,
+        &stroke,
+        gx,
+        ctx.m,
+        &emits,
+        &pos,
+        outline,
+        ctx.outliner,
+    );
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -472,6 +539,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
+    let outline = node.attribute((XSVG_NS, "outline")) == Some("true");
     let (segments, styles, emits) = collect_runs(node, &style);
     let layout = layout_text_area_runs(&segments, &styles, &spec, m);
     write_area_text(
@@ -479,23 +547,90 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &layout,
         &style,
         node.attribute("fill").unwrap_or("#000"),
+        &outline_stroke_attrs(node),
         gx,
         m,
         &emits,
         &pos_attr(node, ctx),
+        outline,
+        ctx.outliner,
     );
 }
 
+/// Paint attributes carried onto an outlined `<g>` beyond `fill` — stroke and
+/// paint-order — so create-outlines can render a stroked / keyline outline. Empty
+/// for the common fill-only case; only meaningful when `outline="true"`.
+fn outline_stroke_attrs(node: roxmltree::Node) -> String {
+    let mut s = String::new();
+    for name in [
+        "stroke",
+        "stroke-width",
+        "stroke-linejoin",
+        "stroke-linecap",
+        "stroke-dasharray",
+        "stroke-opacity",
+        "paint-order",
+    ] {
+        if let Some(v) = node.attribute(name) {
+            s.push_str(&format!(" {name}=\"{v}\""));
+        }
+    }
+    s
+}
+
+#[allow(clippy::too_many_arguments)]
 fn write_area_text(
     out: &mut String,
     layout: &AreaLayout,
     style: &TextStyle,
     fill: &str,
+    stroke: &str,
     glyph_x_scale: f64,
     m: &dyn Measurer,
     emits: &[EmitAttrs],
     pos: &str,
+    outline: bool,
+    outliner: &dyn GlyphOutliner,
 ) {
+    // Create-outlines (§6.12): emit each line as a <path> tracing its glyphs instead
+    // of live <text>. All-or-nothing — if the outliner can't do any line (font bytes
+    // unavailable) we fall through to live text. v0 uses the base style per line
+    // (per-run styling / justify / glyph-x-scale don't apply) and anchors via the
+    // measured line width.
+    if outline {
+        let mut paths = Vec::new();
+        let mut ok = true;
+        for line in &layout.lines {
+            if line.text.is_empty() {
+                continue; // blank line (e.g. from <tbreak/>) → nothing to trace
+            }
+            let w = m.measure(&line.text, style, layout.font_size);
+            let start_x = match layout.anchor {
+                Anchor::Start => line.x,
+                Anchor::Middle => line.x - w / 2.0,
+                Anchor::End => line.x - w,
+            };
+            match outliner.outline(&line.text, style, layout.font_size, start_x, line.baseline) {
+                Some(d) => paths.push(d),
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
+            for d in &paths {
+                out.push_str("<path d=\"");
+                push_escaped(out, d, true);
+                out.push_str("\"/>");
+            }
+            out.push_str("</g>");
+            return;
+        }
+        // else: outliner unavailable → fall through to live <text> below
+    }
+
     out.push_str(&format!(
         "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
         layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
@@ -906,18 +1041,40 @@ mod tests {
         }
     }
 
+    /// No glyph outliner (the default for tests not exercising `outline`).
+    struct NoOutliner;
+    impl GlyphOutliner for NoOutliner {
+        fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, _x: f64, _b: f64) -> Option<String> {
+            None
+        }
+    }
+
+    /// Stub outliner: a deterministic 1×1 box path at the run origin, so the outline
+    /// emit path can be exercised without a real font.
+    struct BoxOutliner;
+    impl GlyphOutliner for BoxOutliner {
+        fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
+            Some(format!("M{x},{b} h1 v-1 h-1 Z"))
+        }
+    }
+
     fn compile_test(svg: &str) -> String {
-        compile_impl(svg, "balanced", false, &Mono, &NoShaper).unwrap()
+        compile_impl(svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap()
     }
 
     /// Compile with the 60×60 `BoxShaper`, for `<x:textbox in>` region-flow tests.
     fn compile_shaped(svg: &str) -> String {
-        compile_impl(svg, "balanced", false, &Mono, &BoxShaper).unwrap()
+        compile_impl(svg, "balanced", false, &Mono, &BoxShaper, &NoOutliner).unwrap()
+    }
+
+    /// Compile with the stub `BoxOutliner`, for `outline` (create-outlines) tests.
+    fn compile_outlined(svg: &str) -> String {
+        compile_impl(svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap()
     }
 
     /// Compile with the source map on (`data-xsvg-pos` attributes emitted).
     fn compile_mapped(svg: &str) -> String {
-        compile_impl(svg, "balanced", true, &Mono, &NoShaper).unwrap()
+        compile_impl(svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap()
     }
 
     #[test]
@@ -958,9 +1115,15 @@ mod tests {
 
     #[test]
     fn malformed_errors() {
-        assert!(
-            compile_impl("<svg><unclosed></svg>", "balanced", false, &Mono, &NoShaper).is_err()
-        );
+        assert!(compile_impl(
+            "<svg><unclosed></svg>",
+            "balanced",
+            false,
+            &Mono,
+            &NoShaper,
+            &NoOutliner
+        )
+        .is_err());
     }
 
     #[test]
@@ -1213,7 +1376,7 @@ mod tests {
             "<g>".repeat(5000),
             "</g>".repeat(5000)
         );
-        let err = compile_impl(&svg, "balanced", false, &Mono, &NoShaper).unwrap_err();
+        let err = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap_err();
         assert!(err.contains("nesting depth"), "{err}");
     }
 
@@ -1225,14 +1388,14 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}</svg>",
             "<rect/>".repeat(3000)
         );
-        assert!(compile_impl(&svg, "balanced", false, &Mono, &NoShaper).is_ok());
+        assert!(compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).is_ok());
         // and modest legitimate nesting is fine
         let nested = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\">{}{}</svg>",
             "<g>".repeat(64),
             "</g>".repeat(64)
         );
-        assert!(compile_impl(&nested, "balanced", false, &Mono, &NoShaper).is_ok());
+        assert!(compile_impl(&nested, "balanced", false, &Mono, &NoShaper, &NoOutliner).is_ok());
     }
 
     #[test]
@@ -1242,7 +1405,7 @@ mod tests {
             let svg = format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:x=\"https://xsvg.visioncortex.org\"><textArea x=\"0\" y=\"10\" font-size=\"10\" x:glyph-x-scale=\"{v}\">hello</textArea></svg>"
             );
-            let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper).unwrap();
+            let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap();
             assert!(out.contains("<text") && !out.contains("<textArea"));
             assert!(
                 !out.contains("textLength"),
@@ -1283,6 +1446,51 @@ mod tests {
         // no runs → one outer <tspan> per line, nothing nested
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;
         assert_eq!(compile_test(svg).matches("<tspan").count(), 1);
+    }
+
+    #[test]
+    fn outline_emits_paths_not_text() {
+        // outline="true" with a working outliner → <g><path>, no <text>
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="40" font-size="10" outline="true" fill="#111">Hi</x:textbox></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("<g fill=\"#111\""), "{out}");
+        assert!(out.contains("<path d=\""), "{out}");
+        assert!(!out.contains("<text") && !out.contains("<x:textbox"));
+    }
+
+    #[test]
+    fn textarea_x_outline_emits_paths() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="200" font-size="10" x:outline="true">one two</textArea></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(
+            out.contains("<path d=\"") && !out.contains("<text"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn outline_carries_stroke_onto_the_group() {
+        // stroke/stroke-width on an outlined box propagate to the outline <g> (a
+        // keyline outline), and fill="none" is honored — the live <text> branch is
+        // unaffected (it has no stroke path).
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="40" font-size="10" outline="true" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round">Hi</x:textbox></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("<g fill=\"none\""), "{out}");
+        assert!(out.contains("stroke=\"#fff\""), "{out}");
+        assert!(out.contains("stroke-width=\"1.5\""), "{out}");
+        assert!(out.contains("stroke-linejoin=\"round\""), "{out}");
+        assert!(out.contains("<path d=\""), "{out}");
+    }
+
+    #[test]
+    fn outline_falls_back_to_text_without_a_font() {
+        // outline requested but the outliner has no font (returns None) → live <text>
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="40" font-size="10" outline="true">Hi</x:textbox></svg>"##;
+        let out = compile_test(svg); // NoOutliner
+        assert!(
+            out.contains("<text") && !out.contains("<path d=\""),
+            "{out}"
+        );
     }
 
     #[test]

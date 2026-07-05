@@ -116,6 +116,132 @@ export function rasterize(d: string, rowH: number): number[] {
   return out;
 }
 
+// Glyph outliner — the browser implementation of the core's `GlyphOutliner` seam.
+// "Create outlines" (`x:outline`/`outline="true"`) turns a text run into a <path>;
+// opentype.js needs the font *bytes*, keyed by family. A family with no registered
+// font returns "" → the compiler falls back to live <text>, so nothing ever breaks.
+type OtFont = { getPath(t: string, x: number, y: number, size: number): { toPathData(n?: number): string } };
+const outlineFonts = new Map<string, OtFont>();
+
+// `font-family="-x-google-Anton"` sources the outline from Google Fonts by name. The
+// marker is stripped before compile (stripGooglePrefix) so layout, live <text>, and
+// the outline lookup all see the bare family ("Anton").
+const GOOGLE_PREFIX = "-x-google-";
+
+// opentype.js parses ttf/otf/woff directly but *rejects* woff2 (the format Google's
+// css2 API serves) — decompress woff2 → sfnt(ttf) first; anything else passes through.
+const WOFF2_SIG = 0x774f4632; // 'wOF2'
+async function toSfnt(buf: ArrayBuffer): Promise<ArrayBuffer> {
+  if (buf.byteLength < 4 || new DataView(buf).getUint32(0) !== WOFF2_SIG) return buf;
+  const { decompress } = await import("../vendor/woff2");
+  const out = await decompress(new Uint8Array(buf));
+  const u8 = out instanceof Uint8Array ? out : new Uint8Array(out);
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+}
+
+/** Register a font (by CSS family) for create-outlines, loaded from `url` (ttf/otf/woff/woff2). */
+export async function registerOutlineFont(family: string, url: string): Promise<void> {
+  const { parse } = await import("opentype.js");
+  const bytes = await toSfnt(await (await fetch(url)).arrayBuffer());
+  outlineFonts.set(family.toLowerCase(), parse(bytes) as OtFont);
+  // Expose the same bytes as a live web font so plain <text> in this family renders
+  // correctly too — not just the outlined <path>. Reuses the fetched bytes (no extra
+  // request); a failure just leaves live text to fall back.
+  await registerWebFont(family, bytes);
+}
+
+// Add `family` to the document's font set from raw sfnt bytes, so the browser can
+// paint live <text font-family> and canvas `measureText` reports its real metrics.
+// Loaded before compile (via ensureGoogleFont) so measurement sees the true font.
+async function registerWebFont(family: string, sfnt: ArrayBuffer): Promise<void> {
+  if (typeof FontFace === "undefined" || typeof document === "undefined") return;
+  try {
+    const face = new FontFace(family, sfnt);
+    await face.load();
+    document.fonts.add(face);
+  } catch {
+    /* live <text> falls back; the outlined <path> still carries the true face */
+  }
+}
+
+// One in-flight registration per family, so concurrent/repeat compiles fetch once.
+const pending = new Map<string, Promise<void>>();
+
+// Resolve a Google-Fonts family to its outline. Idempotent and failure-tolerant: a
+// network/parse failure is swallowed (the family stays unregistered → live <text>).
+function ensureGoogleFont(family: string): Promise<void> {
+  const key = family.toLowerCase();
+  if (outlineFonts.has(key)) return Promise.resolve();
+  let p = pending.get(key);
+  if (!p) {
+    p = (async () => {
+      const css = await (
+        await fetch(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}`)
+      ).text();
+      const url = pickLatinWoff2(css);
+      if (!url) throw new Error("no usable @font-face in css2 response");
+      await registerOutlineFont(family, url);
+    })().catch((e) => {
+      console.warn(`xsvg: Google font "${family}" could not be outlined —`, e);
+    });
+    pending.set(key, p);
+  }
+  return p;
+}
+
+// css2 returns one @font-face per unicode subset; pick the block covering Basic Latin
+// (unicode-range U+0000-00FF), else the first woff2 url as a fallback.
+function pickLatinWoff2(css: string): string | undefined {
+  let first: string | undefined;
+  for (const block of css.split("@font-face")) {
+    const url = block.match(/url\((https:\/\/[^)]+\.woff2)\)/)?.[1];
+    if (!url) continue;
+    first ??= url;
+    if (/U\+0000/.test(block)) return url;
+  }
+  return first;
+}
+
+// The distinct `-x-google-<Name>` families named by a source's font-family attributes.
+function googleFamilies(source: string): string[] {
+  const names = new Set<string>();
+  for (const m of source.matchAll(/font-family\s*=\s*"([^"]*)"/g)) {
+    for (const fam of m[1].split(",")) {
+      const t = fam.trim().replace(/^['"]|['"]$/g, "");
+      if (t.startsWith(GOOGLE_PREFIX)) names.add(t.slice(GOOGLE_PREFIX.length).trim());
+    }
+  }
+  return [...names];
+}
+
+// Strip the marker inside font-family values so downstream sees the bare family.
+function stripGooglePrefix(source: string): string {
+  return source.replace(
+    /font-family\s*=\s*"([^"]*)"/g,
+    (_, v: string) => `font-family="${v.split(GOOGLE_PREFIX).join("")}"`,
+  );
+}
+
+// The core hands us the resolved family verbatim (possibly a comma list) — key the
+// outline lookup on the first family token.
+function firstFamily(family: string): string {
+  return family.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+}
+
+function outline(
+  text: string,
+  family: string,
+  _weight: string,
+  _style: string,
+  size: number,
+  x: number,
+  baseline: number,
+): string {
+  const font = outlineFonts.get(firstFamily(family).toLowerCase());
+  if (!font) return ""; // no bytes for this family → Rust keeps live <text>
+  return font.getPath(text, x, baseline, size).toPathData(2);
+}
+
 export interface CompileOptions {
   /** Quality profile string (default "balanced"). */
   quality?: string;
@@ -130,6 +256,10 @@ export interface CompileOptions {
 /** Compile an xsvg source string to a plain-SVG string (runs entirely client-side). */
 export async function compileXsvg(source: string, opts: CompileOptions = {}): Promise<string> {
   await ensureReady();
+  // Resolve any `-x-google-<Name>` outline fonts up front (a miss is swallowed), then
+  // strip the marker so the compiler only ever sees bare family names.
+  await Promise.all(googleFamilies(source).map(ensureGoogleFont));
+  source = stripGooglePrefix(source);
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(source, quality, sourcemap, measure, metrics, rasterize);
+  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline);
 }

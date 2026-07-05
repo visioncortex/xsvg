@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 250" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="250" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">create outlines — the &lt;path&gt; traces the live glyphs at the same position</text>
+  <text x="28" y="58" font-size="12" fill="#94a3b8">one -x-google-Anton box drawn twice at identical geometry: live &lt;text&gt; fill + outline="true" keyline on top</text>
+
+  <!-- Live text (filled), rendered by the browser from the real Anton web font. -->
+  <x:textbox x="28" y="80" width="664" height="150" valign="middle"
+             font-family="-x-google-Anton" font-size="104" fill="#38bdf8">OUTLINE</x:textbox>
+
+  <!-- Same box, outline="true": glyphs traced to a <path>, stroked as a thin keyline
+       and left unfilled — it lands exactly on the live fill, proving outlining does
+       not move the glyphs. -->
+  <x:textbox x="28" y="80" width="664" height="150" valign="middle"
+             font-family="-x-google-Anton" font-size="104"
+             fill="none" stroke="#fbbf24" stroke-width="1.25" stroke-linejoin="round" outline="true">OUTLINE</x:textbox>
+</svg>

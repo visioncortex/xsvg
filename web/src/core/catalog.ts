@@ -140,6 +140,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Vector output — create outlines",
+    note: 'outline="true" — lower glyphs to <path> geometry (§6.12).',
+    samples: [
+      {
+        file: "outline.xsvg",
+        title: "Create outlines",
+        blurb: 'font-family="-x-google-Anton" provisions a Google font by name; outline="true" also bakes its glyphs into <path>',
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

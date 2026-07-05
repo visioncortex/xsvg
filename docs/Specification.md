@@ -322,6 +322,45 @@ emits exactly as before (no nested spans). Ellipsis truncates from the last run 
 `in="#rect"`); curved-shape region flow (§6.10) and `<text inline-size>` flatten runs to the base
 style. Per-run `stroke` and `font-size` are future work.
 
+### 6.12 Create outlines — `outline="true"` [implemented]
+
+Turn a text element's glyphs into vector `<path>` geometry at compile time ("Create Outlines" in
+Illustrator terms). Set `outline="true"` on `<x:textbox>`, or the prefixed `x:outline="true"` on the
+reused `<textArea>` (§2). Layout is unchanged — outlining is a purely **emit-time** transform applied
+after wrapping, fitting, and alignment have run.
+
+**Model (normative).** Each laid-out line is traced from its text at the element's **base style** and
+emitted as a `<path>` inside a single `<g>` that carries the element's paint — `fill` plus any
+`stroke*` / `paint-order` (so an outline can be filled, stroked as a keyline, or both). Outlining is
+**all-or-nothing per element with graceful fallback**: if the backend cannot outline *every* line
+(e.g. the font's bytes are unavailable), the element falls back to live `<text>` unchanged — so an
+outline request never breaks a drawing, it only upgrades it when the font is present. Lines are
+anchored by their measured width (`text-anchor` start/middle/end resolved to an `x` origin), matching
+the live-text placement.
+
+**The seam.** Outlines come from a platform `GlyphOutliner` (parallel to the `Measurer`/`Shaper`
+seams of §4): given a run, its style, size, and baseline origin, it returns a path `d` or `None`. The
+browser adapter backs it with [opentype.js](https://opentype.js.org) and therefore needs the font's
+**bytes** — the host application registers fonts by family (a family with no registered font ⇒ live
+`<text>`). Arbitrary installed system fonts are not outlinable this way.
+
+**Fonts by name (reference app).** So a source needn't ship font bytes, the web app resolves a
+`font-family="-x-google-<Name>"` marker by fetching that family from Google Fonts once (css2 →
+woff2 → decompressed to sfnt by a vendored decoder), then (a) registering it with the outliner and
+(b) adding it to the document via `FontFace` so **live `<text>` and canvas metrics** use the real face
+too — not only the outlined `<path>`. The marker is stripped to the bare family before compile, so a
+resolution failure degrades to the normal live-`<text>` fallback. This is app-level font provisioning,
+not part of the interchange format.
+
+**Why.** The drawing then carries the **true display face as geometry** — it renders identically
+anywhere, with no font install or `@font-face` embed, at the cost of selectable text (a hidden `<text>`
+layer for searchability is future work, §G). This is also the prerequisite for the *text-as-vector-art*
+effects sketched in §7 (variable-width stroke, mesh fill, envelope warp, booleans on glyphs).
+
+**v0 limits.** Outline mode uses the base style per line: per-run styling (§6.11), `justify` (§6.9),
+`glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing` (§6.8) do not apply to the traced path, and
+curved-shape region flow (§6.10) keeps its own per-line placement. Per-run outlining is future work.
+
 ## 7. Other pillars [planned]
 
 Sketched in [Plan.md §2](Plan.md); not yet implemented.
@@ -333,8 +372,8 @@ Sketched in [Plan.md §2](Plan.md); not yet implemented.
 ## 8. Lowering target [implemented]
 
 Output is the **static SVG subset** (resvg's scope): no script, animation, events, or `meshgradient`.
-Text lowers to `<text>`/`<tspan>` in v0 (browser-shaped) or outlined `<path>` later. The concrete
-allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
+Text lowers to `<text>`/`<tspan>` in v0 (browser-shaped), or to outlined `<path>` on demand (§6.12).
+The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 
 ## Appendix A — Feature status
 
@@ -353,6 +392,7 @@ allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
 | `text-align="justify"` / `align="justify"` (greedy full-justify via `textLength`) | implemented |
 | `<x:textbox in="#shape">` binding (rect box + region flow into curved outlines) | implemented |
 | Styled runs (`<tspan>` per-run fill / weight / style / family in flowed text) | implemented |
+| Create outlines (`outline="true"` → glyphs as `<path>` via the `GlyphOutliner` seam, live-text fallback) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
-| Outlined-text backend; concrete SVG-subset list; WebGPU renderer | planned |
+| Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |
