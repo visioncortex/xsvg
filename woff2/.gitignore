@@ -1,0 +1,4 @@
+# Intermediate emcc output. The installed artifacts live in
+# web/src/vendor/woff2/ (committed); this is just the Docker link scratch dir.
+/build
+/build.log

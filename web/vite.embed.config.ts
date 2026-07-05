@@ -12,19 +12,32 @@ const here = dirname(fileURLToPath(import.meta.url)); // the web/ directory
 // and never calls the async default `init()`, so leaving that reference in would
 // make Vite emit or inline a *second* copy of the wasm. `enforce: "pre"` runs it
 // before Vite's own import-meta-url asset handling.
+//
+// The woff2 decoder (web/src/vendor/woff2) is reached from the compile path (Google
+// fonts → outline). Its glue loads the wasm through `locateFile(url)` where url comes
+// from `import "./decompress.wasm?url"`; here we resolve that `?url` import to an
+// emscripten-style data URI instead of an emitted asset, so `isDataURI()` decodes it
+// in-process and the embed stays single-file. `data:application/octet-stream;base64,`
+// is the exact prefix emscripten's `isDataURI` recognizes.
 function inlineWasm(): Plugin {
   const id = "virtual:xsvg-wasm";
   const resolved = "\0" + id;
+  const woff2WasmId = "\0woff2-decompress-wasm-url";
   return {
     name: "xsvg-inline-wasm",
     enforce: "pre",
     resolveId(source) {
       if (source === id) return resolved;
+      if (source.endsWith("decompress.wasm?url")) return woff2WasmId;
     },
     load(thisId) {
       if (thisId === resolved) {
         const wasm = readFileSync(resolve(here, "pkg/xsvg_wasm_bg.wasm"));
         return `export default ${JSON.stringify(wasm.toString("base64"))};`;
+      }
+      if (thisId === woff2WasmId) {
+        const wasm = readFileSync(resolve(here, "src/vendor/woff2/decompress.wasm"));
+        return `export default "data:application/octet-stream;base64,${wasm.toString("base64")}";`;
       }
     },
     transform(code, thisId) {
