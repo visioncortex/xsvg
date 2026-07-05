@@ -446,7 +446,7 @@ run width used by `align` matches the geometry being placed: the outline advance
 letter/word-spacing, §6.12), the spacing-inclusive advance for the stepped fallback. The
 native-`<textPath>` non-deforming follow is future work.
 
-## 7. Geometry transforms — a generic deformation pipeline [spec'd]
+## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,
 warp, and envelope distortions **cannot ride on vector geometry** — xsvg **bakes** them into deformed
@@ -455,7 +455,7 @@ front-ends. Text on a path (§6.13) is *one* front-end; skew / rainbow are *just
 Grounded in [Research.md §7](Research.md); the capability catalog (Illustrator parity: warp presets,
 perspective, envelopes) and build order are in [Transform.md](Transform.md).
 
-### 7.1 The bake (normative) [spec'd]
+### 7.1 The bake (normative) [implemented: flatten → map; refit planned]
 
 Every geometry transform is the same three steps, parameterized only by a field `D` and a tolerance:
 
@@ -466,9 +466,15 @@ Every geometry transform is the same three steps, parameterized only by a field 
 Bézier curves are affine-invariant, so *affine* `D` may be applied to control points directly — but a
 **non-affine `D` must go through flatten→map→refit** (mapping only control points is wrong; error grows
 with segment span × field nonlinearity). The **`tolerance` is the graded quality knob**: kurbo's flatten
-gives segment count ∝ `tolerance`⁻½, so tightening it trades path size for fidelity (adaptive,
-curvature-and-nonlinearity-aware subdivision is a refinement). This is the *only* approximation step;
-the emitted `<path>` is exact SVG.
+gives segment count ∝ `tolerance`⁻½, so tightening it trades path size for fidelity. This is the *only*
+approximation step; the emitted `<path>` is exact SVG.
+
+**The v1 implementation** (kurbo-backed, in `xsvg-core`, natively tested) emits the mapped polyline
+directly (`M`/`L`/`Z`); cubic **refit is the planned upgrade** for `balanced`/`highest`. Chords —
+including straight source segments and implicit closing edges — are **subdivided adaptively**: a
+segment splits while its mapped midpoint deviates from the mapped chord by more than `tolerance`
+(depth-capped), so long straight edges curve smoothly under a nonlinear field. Tolerance per profile:
+`fast` 1.0 · `balanced` 0.25 · `highest` 0.05 user units.
 
 ### 7.2 Deformation fields [skew shipped-first]
 
@@ -480,24 +486,48 @@ interchangeable under §7.1:
 |---|---|---|
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
 | **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
-| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox |
+| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **arch / flag / rise / wave shipped** (§7.3); full catalog in [Transform.md §B](Transform.md) |
 | **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
 | **MLS** | weighted handle map (Schaefer et al.), `w_i = 1/\|p_i−v\|^{2α}` | move-a-few-handles warp |
 
-### 7.3 `<x:warp>` — generic front-end [spec'd]
+### 7.3 `<x:warp>` — generic front-end [implemented: displacement presets]
 
 Wrap arbitrary child geometry (shapes, `<path>`, outlined text) and apply a field non-destructively;
-the children stay editable in the source, the compiler emits the baked `<path>`s.
+the children stay editable in the source, the compiler emits the baked `<path>`s inside a `<g>`
+carrying the element's paint and `transform` (affine, so it composes after the bake for free).
 
 ```xml
-<x:warp field="perspective" corners="0,0 200,10 190,120 5,110">   <!-- field + its params -->
-  <rect x="0" y="0" width="200" height="120" rx="8"/>
-  <x:textbox x="0" y="0" width="200" height="120" outline="true">tilted</x:textbox>
+<x:warp field="flag" bend="60">
+  <rect x="0" y="0" width="240" height="80" fill="#14532d"/>
+  <x:textbox x="0" y="0" width="240" height="80" align="center" valign="middle" outline="true">WAVING</x:textbox>
 </x:warp>
 ```
-`field` selects the map (§7.2); remaining attributes configure it (e.g. `corners` for perspective,
-`mode`/`bend` for an envelope preset, `handles` for MLS). Nesting composes fields (each baked in order).
+
+| Attr | Values | Initial | Effect |
+|---|---|---|---|
+| `field` | `arch` \| `flag` \| `rise` \| `wave` *(more fields per §7.2 follow)* | — | selects the field |
+| `bend` | number, −100…100 (%) | `0` | strength; clamped; positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
+| `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical) |
+
+**Model (normative).** Children first lower to pure `<path>` geometry: basic shapes convert (sharp
+`<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, and `<path>` as-is); xsvg text elements
+participate through their **outlined** form (`outline="true"`, §6.12; `<x:textpath>` output); nested
+`<x:warp>`s bake **innermost-first**. The **pre-warp union bbox** of that geometry is the envelope
+frame: it normalizes points to `(u, v) ∈ [−1, 1]²` (`u` along the bend axis) and sets the amplitude
+**`A = bend · L/4`** (`L` = the frame's bend-axis extent), so a preset scales with the art it warps.
+The preset profiles: **arch** `Δ = A(1−u²)` · **flag** `Δ = A·sin(πu)` · **rise** `Δ = A·u` ·
+**wave** `Δ = A·sin(πu − (π/4)(v+1))`. Every path then runs the §7.1 bake at the profile tolerance.
+
+**Degradation (normative).** A child that cannot become path geometry (live `<text>`, rounded
+`<rect>`, `<line>`, `<image>`, `<use>`) is **skipped with a marker comment** — a warp MUST NOT
+silently emit unwarped content. An unknown or absent `field`, or no usable geometry, emits the
+children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
+non-finite coordinates never reach the output (§4).
+
+**v1 limits.** Displacement presets only (perspective and the scale/radial families follow —
+[Transform.md](Transform.md)); polyline output (no cubic refit, §7.1); a `<g>` child whose subtree
+still contains non-path geometry is skipped whole; text must be outlined to participate.
 
 ### 7.4 Remaining pillars & deferred [planned]
 
@@ -536,6 +566,9 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
+| `<x:warp>` front-end — displacement presets (arch/flag/rise/wave) over shapes, paths, outlined text | implemented |
+| Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
+| Geometry bake — cubic refit of warped polylines | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

@@ -63,6 +63,12 @@ Realistic composites that combine several features into one artifact.
 | [textpath-rainbow.xsvg](textpath-rainbow.xsvg) | `effect="rainbow"` follows the arc — glyphs rotate and deform along the curve; `baseline-shift` offsets runs along the local normal (one run floats above, a second hangs beneath the same path) |
 | [textpath-align.xsvg](textpath-align.xsvg) | `align="start\|middle\|end"` + `start` place the run within the path's extent (arc length under rainbow, x-extent under skew); `effect="stair"` steps live, selectable `<text>` glyph-by-glyph along the height profile — no font bytes needed (it is also skew's no-font degradation) |
 
+## Geometry transforms — warp (§7.3)
+
+| File | Shows |
+|---|---|
+| [warp-presets.xsvg](warp-presets.xsvg) | `<x:warp field="arch\|flag\|rise\|wave" bend="60">` bakes an envelope-preset field into plain `<path>`s — a rect and `outline="true"` text warp together through the same flatten → map pipeline; dashed boxes show the unwarped source |
+
 ## Edge cases & invariants
 
 | File | Shows |

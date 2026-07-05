@@ -4,8 +4,14 @@
 //! identically for native and `wasm32` targets (see Plan.md §1, "Core invariant").
 
 pub mod text;
+pub mod warp;
 
 pub use text::*;
+pub use warp::*;
+
+// Geometry re-export: kurbo is the crate-wide geometry currency (Plan.md §1), so
+// downstream crates use the same types without a direct dependency.
+pub use kurbo;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QualityProfile {
@@ -36,6 +42,17 @@ impl QualityProfile {
             Self::Balanced => "balanced",
             Self::Highest => "highest",
             Self::Raster => "raster",
+        }
+    }
+
+    /// The geometry-bake tolerance (§7.1) in user units: the Hausdorff bound for
+    /// curve flattening and for the adaptive subdivision of mapped segments. The
+    /// single graded quality knob of the transform pipeline.
+    pub fn tolerance(self) -> f64 {
+        match self {
+            Self::Fast => 1.0,
+            Self::Balanced => 0.25,
+            Self::Highest | Self::Raster => 0.05,
         }
     }
 }

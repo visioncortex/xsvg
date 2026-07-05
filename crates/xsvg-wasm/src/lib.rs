@@ -17,9 +17,10 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
-    measure_runs, Align, Anchor, AreaLayout, AreaSpec, DisplayAlign, Fit, GlyphOutliner,
-    LineIncrement, Measurer, PathEffect, PlacedLine, RasterRegion, Rect, RegionSpec, Shaper,
-    TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    measure_runs, svg_path_bbox, warp_svg_path, Align, Anchor, AreaLayout, AreaSpec, DisplayAlign,
+    EnvelopePreset, Fit, GlyphOutliner, LineIncrement, Measurer, PathEffect, PlacedLine,
+    QualityProfile, RasterRegion, Rect, RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow,
+    TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -233,11 +234,13 @@ impl GlyphOutliner for JsOutliner<'_> {
 }
 
 /// Everything a lowering pass needs from the platform: font metrics + shape raster +
-/// glyph outliner, plus whether to emit source-position attributes (`data-xsvg-pos`).
+/// glyph outliner, the quality profile (bake tolerances, §7.1), plus whether to emit
+/// source-position attributes (`data-xsvg-pos`).
 struct Ctx<'a> {
     m: &'a dyn Measurer,
     shaper: &'a dyn Shaper,
     outliner: &'a dyn GlyphOutliner,
+    quality: QualityProfile,
     sourcemap: bool,
 }
 
@@ -313,6 +316,7 @@ pub fn compile_impl(
             m,
             shaper,
             outliner,
+            quality: q,
             sourcemap,
         },
     );
@@ -335,6 +339,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         match node.tag_name().name() {
             "textbox" => emit_textbox(node, out, ctx),
             "textpath" => emit_textpath(node, out, ctx),
+            "warp" => emit_warp(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -628,6 +633,133 @@ fn stepped_text(
     push_escaped(out, text, false);
     out.push_str("</text>");
     true
+}
+
+/// `<x:warp field="…" bend="…" axis="h|v">` (§7.3): the generic geometry-warp
+/// front-end. Children lower to pure `<path>` geometry, their union bbox builds the
+/// field's envelope frame, and every path bakes through the §7.1 pipeline at the
+/// quality tolerance. Children that cannot become path geometry (live text, rounded
+/// rects, lines, images) are skipped with a marker — a warp never *silently* emits
+/// unwarped content; an unknown/absent field or empty geometry emits the children
+/// unwarped behind a marker. The element's own paint / `transform` ride on the
+/// emitted `<g>` (an affine `transform` composes after the bake for free).
+fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let mut inner = String::new();
+    for child in node.children().filter(|c| c.is_element()) {
+        match warp_child_markup(child, ctx) {
+            Ok(s) => inner.push_str(&s),
+            Err(why) => inner.push_str(&format!(
+                "<!-- xsvg: <x:warp> skipped <{}>: {why} -->",
+                child.tag_name().name()
+            )),
+        }
+    }
+
+    // the pre-warp union bbox of all path geometry = the envelope frame (§7.2)
+    let ranges = find_path_d_ranges(&inner);
+    let bbox = ranges
+        .iter()
+        .fold(None, |acc: Option<xsvg_core::kurbo::Rect>, &(a, b)| match (
+            acc,
+            svg_path_bbox(&inner[a..b]),
+        ) {
+            (Some(r), Some(n)) => Some(r.union(n)),
+            (acc, n) => acc.or(n),
+        });
+
+    let field_name = node.attribute("field").unwrap_or("");
+    let bend = attr_num(node, "bend", 0.0) / 100.0; // authored as −100…100 %
+    let axis = WarpAxis::parse(node.attribute("axis").unwrap_or("h"));
+    let field = bbox.and_then(|b| EnvelopePreset::new(field_name, bend, axis, b));
+
+    out.push_str("<g");
+    copy_attrs(node, out, &["field", "bend", "axis"]);
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    match field {
+        Some(f) => {
+            let tol = ctx.quality.tolerance();
+            let mut last = 0;
+            for (a, b) in ranges {
+                out.push_str(&inner[last..a]);
+                // a path that fails to bake keeps its original geometry (§4 totality)
+                match warp_svg_path(&inner[a..b], &f, tol) {
+                    Some(d) => out.push_str(&d),
+                    None => out.push_str(&inner[a..b]),
+                }
+                last = b;
+            }
+            out.push_str(&inner[last..]);
+        }
+        None => {
+            out.push_str(&format!(
+                "<!-- xsvg: <x:warp field=\"{field_name}\"> unknown field or no geometry — children unwarped -->"
+            ));
+            out.push_str(&inner);
+        }
+    }
+    out.push_str("</g>");
+}
+
+/// Lower one `<x:warp>` child to pre-warp markup whose geometry is all `<path d>`:
+/// basic shapes convert directly (the sharp-`rect` pass and `shape_to_path_d`),
+/// everything else runs through the normal pipeline (so `outline="true"` text and
+/// nested `<x:warp>`s compose). `Err(reason)` when the result still contains
+/// geometry the bake cannot warp.
+fn warp_child_markup(child: roxmltree::Node, ctx: &Ctx) -> Result<String, String> {
+    let name = child.tag_name().name();
+    if child.tag_name().namespace() != Some(XSVG_NS)
+        && matches!(name, "circle" | "ellipse" | "polygon" | "polyline")
+    {
+        let d = shape_to_path_d(child).ok_or("degenerate shape")?;
+        let mut s = String::from("<path");
+        copy_attrs(child, &mut s, &["cx", "cy", "r", "rx", "ry", "points"]);
+        s.push_str(&pos_attr(child, ctx));
+        s.push_str(&format!(" d=\"{d}\"/>"));
+        return Ok(s);
+    }
+    let mut buf = String::new();
+    serialize(child, &mut buf, false, ctx);
+    for tag in [
+        "text", "rect", "circle", "ellipse", "line", "image", "use", "polygon", "polyline",
+    ] {
+        if has_tag(&buf, tag) {
+            return Err(format!("lowers to <{tag}> — needs path/outline form"));
+        }
+    }
+    Ok(buf)
+}
+
+/// Whether `s` contains an opening `<tag …>` element (tag-boundary-aware, so
+/// `"text"` does not match `<textArea>` and `"line"` not `<linearGradient>`).
+fn has_tag(s: &str, tag: &str) -> bool {
+    let needle = format!("<{tag}");
+    let mut i = 0;
+    while let Some(pos) = s[i..].find(&needle) {
+        let after = i + pos + needle.len();
+        match s.as_bytes().get(after) {
+            Some(b' ') | Some(b'>') | Some(b'/') | None => return true,
+            _ => i = after,
+        }
+    }
+    false
+}
+
+/// Byte ranges of every ` d="…"` attribute value in `s`. Sound on compiler output:
+/// attribute values are quote-escaped, and text-bearing children are rejected before
+/// this scan, so a raw `"` cannot appear inside a match.
+fn find_path_d_ranges(s: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(pos) = s[i..].find(" d=\"") {
+        let start = i + pos + 4;
+        let Some(len) = s[start..].find('"') else {
+            break;
+        };
+        out.push((start, start + len));
+        i = start + len + 1;
+    }
+    out
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -1889,6 +2021,117 @@ mod tests {
         // a target with no fillable geometry (<line>) → comment marker, no panic
         let line = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><line id="p" x1="0" y1="20" x2="120" y2="20"/><x:textpath in="#p" effect="rainbow" font-size="20">hi</x:textpath></svg>"##;
         assert!(compile_outlined(line).contains("not found or not a path"));
+    }
+
+    // ---- <x:warp> (§7.3) ----
+
+    const XW: &str =
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
+
+    #[test]
+    fn warp_arch_bends_a_rect() {
+        // bbox 100×40, bend 100% → A = 25: the top edge's center maps to (50, −25),
+        // the corners stay pinned (u = ±1 → Δ = 0), and the rect is now a polyline.
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="100" height="40" fill="#f00"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<g"), "{out}");
+        assert!(!out.contains("<rect"), "{out}");
+        assert!(out.contains(r##"fill="#f00""##), "{out}");
+        assert!(out.contains("M0,0"), "{out}");
+        assert!(out.contains("50,-25"), "apex missing: {out}");
+        assert!(out.matches('L').count() > 8, "no subdivision: {out}");
+    }
+
+    #[test]
+    fn warp_skips_live_text_child_with_a_marker() {
+        // no outline font → the textbox lowers to live <text>, which a warp must
+        // not silently emit unwarped
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="50"><x:textbox x="0" y="0" width="80" height="20" font-size="10">hi</x:textbox></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<x:warp> skipped <textbox>"), "{out}");
+        assert!(!out.contains("<text "), "{out}");
+    }
+
+    #[test]
+    fn warp_warps_outlined_text_child() {
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="50"><x:textbox x="0" y="0" width="80" height="20" font-size="10" outline="true">hi</x:textbox></x:warp></svg>"##
+        );
+        let out = compile_outlined(&svg);
+        assert!(!out.contains("<text"), "{out}");
+        assert!(!out.contains("skipped"), "{out}");
+        assert!(out.contains("<path d=\"M"), "{out}");
+    }
+
+    #[test]
+    fn warp_circle_child_becomes_a_warped_path() {
+        let svg = format!(
+            r##"{XW}<x:warp field="flag" bend="60"><circle cx="50" cy="50" r="40" fill="#0af"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("<circle"), "{out}");
+        assert!(out.contains(r##"fill="#0af""##), "{out}");
+        assert!(out.contains("<path"), "{out}");
+    }
+
+    #[test]
+    fn warp_unknown_field_marks_and_passes_through() {
+        let svg = format!(
+            r##"{XW}<x:warp field="bogus" bend="50"><rect x="0" y="0" width="100" height="40"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("unknown field or no geometry"), "{out}");
+        assert!(out.contains("h100"), "child not passed through: {out}");
+    }
+
+    #[test]
+    fn warp_quality_grades_segment_count() {
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="200" height="60"/></x:warp></svg>"##
+        );
+        let fast = compile_impl(&svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap();
+        let hi = compile_impl(&svg, "highest", false, &Mono, &NoShaper, &NoOutliner).unwrap();
+        assert!(
+            hi.matches('L').count() > fast.matches('L').count(),
+            "highest ({}) !> fast ({})",
+            hi.matches('L').count(),
+            fast.matches('L').count()
+        );
+    }
+
+    #[test]
+    fn warp_nested_composes() {
+        // the inner warp bakes first (recursive serialize), the outer re-bakes its
+        // emitted paths — nesting composes innermost-first
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="40"><x:warp field="flag" bend="40"><rect x="0" y="0" width="100" height="30"/></x:warp></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.matches("<g").count() >= 2, "{out}");
+        assert!(out.contains("<path"), "{out}");
+        assert!(!out.contains("skipped"), "{out}");
+    }
+
+    #[test]
+    fn warp_degenerate_input_never_panics() {
+        // no children / no geometry / garbage bend / rounded rect (unwarpable)
+        for svg in [
+            format!(r##"{XW}<x:warp field="arch" bend="50"></x:warp></svg>"##),
+            format!(
+                r##"{XW}<x:warp field="arch" bend="garbage"><rect x="0" y="0" width="10" height="10"/></x:warp></svg>"##
+            ),
+            format!(
+                r##"{XW}<x:warp field="wave" bend="100"><rect x="0" y="0" width="10" height="10" rx="3"/></x:warp></svg>"##
+            ),
+            format!(r##"{XW}<x:warp><rect x="0" y="0" width="10" height="10"/></x:warp></svg>"##),
+        ] {
+            let out = compile_test(&svg);
+            assert!(!out.contains("NaN"), "{out}");
+        }
     }
 
     #[test]

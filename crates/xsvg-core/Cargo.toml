@@ -6,6 +6,7 @@ description = "xsvg shared types (pure Rust, no platform deps)."
 publish = false
 
 [dependencies]
+kurbo = "0.13.1"
 
 [dev-dependencies]
 # test-only (does not affect the library or the wasm build)

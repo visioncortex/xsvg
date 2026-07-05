@@ -172,6 +172,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Geometry transforms — warp",
+    note: '<x:warp field="…"> — bake an envelope-preset field into plain path geometry (§7.3).',
+    samples: [
+      {
+        file: "warp-presets.xsvg",
+        title: "Envelope presets",
+        blurb: "arch / flag / rise / wave displacement fields over a rect + outlined text; the quality profile grades the bake tolerance",
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

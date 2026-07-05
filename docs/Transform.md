@@ -39,13 +39,13 @@ catalog: [Typography.md](Typography.md) (Pillar 1).
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **The bake**: flatten → map → refit (§7.1) | §7 | C | ◑ | flatten + map **shipped** in the browser adapter (opentype glyph commands → polyline → displaced vertices); **refit is missing** — output is `M/L/Z` polylines. Native kurbo bake (parse `d` → `flatten` → map → refit → `to_svg`) is the planned home |
-| **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ○ | today the one field lives hardcoded in the JS adapter (`pathHeightField` + displace); the trait + a field registry land with `<x:warp>` |
-| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ◑ | `QualityProfile` parses but the tolerance is hardcoded (`size/12`); wire `fast`/`balanced`/`highest` → tolerance, and polyline-vs-refit emit |
-| **`<x:warp>` generic front-end** (§7.3) | AI Envelope | C | ○ | wrap arbitrary children, `field=` selects, attrs configure; unknown `x:` elements today emit a skip marker |
-| **Warp arbitrary geometry** (basic shapes, `<path>`, `<g>` subtrees) | AI | C | ○ | today only outlined text runs reach the bake; arbitrary sources need `d`-parsing + flattening (kurbo) — the trigger to move the bake into Rust |
-| **Warp outlined text** | AI (after Create Outlines) | C | ◑ | shipped for a single `<x:textpath>` run; `<x:warp>` around an `outline="true"` textbox is the general form |
-| **Field composition** — nested `<x:warp>` | AI effect stack / Inkscape LPE | E | ○ | bake innermost-first, in document order; each stage feeds the next's source polylines |
+| **The bake**: flatten → map → refit (§7.1) | §7 | C | ◑ | **native kurbo bake shipped** in `xsvg-core` for `<x:warp>` — flatten → map with *adaptive chord subdivision* (mapped-midpoint error ≤ tolerance), natively unit-tested; the §6.13 glyph bake still lives in the browser adapter; **refit is missing** — output is `M/L/Z` polylines |
+| **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ✅ | **shipped** — `Field` trait + the `EnvelopePreset` family over a normalized envelope frame; the §6.13 fields stay adapter-side until the glyph bake moves native |
+| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ◑ | **wired for `<x:warp>`**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units; the §6.13 adapter still hardcodes `size/12` |
+| **`<x:warp>` generic front-end** (§7.3) | AI Envelope | C | ✅ | **shipped** — displacement presets over wrapped children; unknown/absent fields degrade behind a marker, unwarpable children skip with a marker |
+| **Warp arbitrary geometry** (basic shapes, `<path>`, `<g>` subtrees) | AI | C | ✅ | **shipped** — shapes convert to path geometry and bake; live text / rounded rects / lines / images are skipped with a marker (never silently unwarped) |
+| **Warp outlined text** | AI (after Create Outlines) | C | ✅ | **shipped** — `outline="true"` boxes and `<x:textpath>` output warp like any path inside `<x:warp>` |
+| **Field composition** — nested `<x:warp>` | AI effect stack / Inkscape LPE | E | ✅ | **shipped** — nesting bakes innermost-first through the recursive serializer |
 | **Non-destructive authoring** (originals stay editable in source) | AI Envelope / Inkscape LPE | C | ✅ | by construction — the xsvg document *is* the live state; every compile re-bakes from it |
 | **Raster fallback** (`feDisplacementMap`) | Research §7 | S | ❌ | last resort for pathological path explosion; rasterizes, so off the default path |
 
@@ -71,23 +71,24 @@ field maps normalized points, and the result maps back to user units.
 ```
 
 **Field families** (drive implementation order — every family is closed-form per-point, so every
-preset is ○ on the shipped bake): **displacement** = `(u, v + f(u))`, the shipped §6.13 skew field
-with an analytic profile instead of a sampled path — cheapest, ships first; **scale** = one axis
-scaled by a profile of the other; **polar** / **radial** / **rotational** = true 2-D fields.
+remaining preset is one formula away on the native bake): **displacement** = `(u, v + f(u))`, the
+§6.13 skew field with an analytic profile instead of a sampled path — **shipped first (§7.3)**;
+**scale** = one axis scaled by a profile of the other; **polar** / **radial** / **rotational** =
+true 2-D fields.
 
 | Preset | Family | Tier | Status | xsvg note (field sketch, `axis="h"`, bend `b`) |
 |---|---|---|---|---|
 | **Arc** | polar | C | ○ | the box bends into an annular sector spanning `b·π`: verticals → radii, horizontals → concentric arcs |
 | **Arc Lower** | scale | E | ○ | top edge fixed; height scales by the parabolic profile `1 + b·(1−u²)` so the bottom edge arcs |
 | **Arc Upper** | scale | E | ○ | mirror of Arc Lower (bottom fixed, top arcs) |
-| **Arch** | displacement | C | ○ | `v += b·(1−u²)` — both edges ride the same parabola; *identical machinery to shipped skew with `f(x) = parabola`* |
+| **Arch** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·(1−u²)`, both edges ride the same parabola |
 | **Bulge** | scale | C | ○ | height scales about the midline by `1 + b·(1−u²)` — both edges bow outward symmetrically |
 | **Shell Lower** | scale | E | ○ | one-sided bulge: bottom edge bows, opposite curvature to Arc Lower (flared corners) |
 | **Shell Upper** | scale | E | ○ | mirror of Shell Lower |
-| **Flag** | displacement | C | ○ | `v += b·sin(π·u)` uniform in `v` — glyph columns ride the wave rigidly |
-| **Wave** | displacement | C | ○ | Flag whose profile varies through the height (edges out of step); exact profile pinned by visual match to AI at ship time |
+| **Flag** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·sin(πu)` uniform in `v`, glyph columns ride the wave rigidly |
+| **Wave** | displacement | C | ✅ | **shipped** (§7.3) — Flag with phase advancing π/2 through the height: `Δ = A·sin(πu − (π/4)(v+1))` |
 | **Fish** | scale | E | ○ | midline bulge with a pinched tail — asymmetric taper × bulge |
-| **Rise** | displacement | C | ○ | `v += b·u` — a linear ramp; the baseline climbs left→right (pure shear profile) |
+| **Rise** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·u`, a linear ramp; the art climbs left→right (pure shear profile) |
 | **Fisheye** | radial | E | ○ | radial magnification about the bbox center, `r′ = r·(1 + b·(1−r²))` — barrel / pincushion by sign |
 | **Inflate** | radial | E | ○ | axis-aligned inflate — both edge pairs bow outward from the center |
 | **Squeeze** | scale | E | ○ | horizontal pinch: width scales by a profile of `v` (waist at mid-height); negative = barrel |
@@ -161,23 +162,27 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 
 ## Status summary
 
-**Shipped today (✅):** the text-on-a-path front-end with both fields — **skew**
-(`<x:textpath in="#p" effect="skew">`, §6.13.1: sample the path as a height field, displace) and
-**rainbow** (`effect="rainbow"`, §6.13.2: arc-length LUT + normal offset, straight extrapolation past
-the ends), plus **`baseline-shift`** (offset the run along the local normal — stack runs above and
-below one path). Both run flatten → map → emit through the `GlyphOutliner::outline_on_path` seam and
-ship with spec, native tests, and dataset samples ([textpath.xsvg](../dataset/textpath.xsvg),
-[textpath-rainbow.xsvg](../dataset/textpath-rainbow.xsvg)). Non-destructive authoring holds by
+**Shipped today (✅):** two front-ends.
+**`<x:warp>`** (§7.3) — the generic pipeline: `Field` trait + native kurbo bake in `xsvg-core`
+(flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), the
+four **displacement presets** (arch / flag / rise / wave) over shapes, paths, and outlined text, with
+innermost-first nesting and marker-based degradation
+([warp-presets.xsvg](../dataset/warp-presets.xsvg)).
+**`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
+extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
+via the `GlyphOutliner::outline_on_path` browser seam
+([textpath.xsvg](../dataset/textpath.xsvg), [textpath-rainbow.xsvg](../dataset/textpath-rainbow.xsvg),
+[textpath-align.xsvg](../dataset/textpath-align.xsvg)). Non-destructive authoring holds by
 construction.
 
-**Partial (◑):** the bake itself — browser-adapter-only, polyline output (**no cubic refit**),
-flatten tolerance hardcoded rather than driven by `QualityProfile`; `<x:textpath>`'s `align`/`start`
-options are spec'd but unread; warped sources are limited to a single text run.
+**Partial (◑):** the bake emits polylines (**no cubic refit** yet — the `balanced`/`highest`
+upgrade); the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance, so the
+text-on-path fields aren't natively tested the way `<x:warp>`'s are.
 
-**Planned, field-only (○):** all **15 warp presets** (§B — closed-form fields over the normalized
-envelope frame), **perspective** and **free distort** (§C — a corner-solved homography / bilinear
-field), the distortion sliders, stair-step and gravity type effects, and the composition rules of
-§G. These need the `<x:warp>` front-end + `Field` trait, then each is a formula.
+**Planned, field-only (○):** the remaining **11 warp presets** (§B — closed-form fields over the
+now-shipped envelope frame), **perspective** and **free distort** (§C — a corner-solved homography /
+bilinear field), the distortion sliders, and gravity/3D-ribbon type effects. Each is now one pure
+function plus its attribute plumbing.
 
 **Needs pipeline work (❌):** **bend-along-path** (the rainbow field generalized to arbitrary
 geometry — waits on the `<x:warp>` native bake), **envelope mesh** (FFD lattice), **top-object
@@ -187,9 +192,9 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
 **Build order** (each slice = spec § + tests + dataset sample):
 
 1. ~~**Skew** — the pipeline's first slice~~ ✅ *(shipped)*
-2. **`<x:warp>` + native bake** — `Field` trait in `xsvg-core`, kurbo-backed flatten of arbitrary
+2. ~~**`<x:warp>` + native bake** — `Field` trait in `xsvg-core`, kurbo-backed flatten of arbitrary
    `d`/shapes, `QualityProfile` → tolerance wiring; first fields: the four **displacement presets**
-   (arch, flag, rise, wave) on arbitrary geometry + outlined text.
+   (arch, flag, rise, wave) on arbitrary geometry + outlined text.~~ ✅ *(shipped)*
 3. **Perspective** — homography field + `corners` solver; `distort-h`/`distort-v` sliders; free
    distort rides along.
 4. **Remaining analytic presets** — scale family (arc-lower/upper, bulge, shell ×2, fish, squeeze),
@@ -203,5 +208,7 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
    effects, raster fallback.
 
 The dividing line mirrors Typography's "Create Outlines" gate: there the gate was *getting glyph
-geometry*; here it is **`<x:warp>` + the native bake** (slice 2). Once any geometry can run
-flatten → map → refit in the core, every remaining ○ row is one pure function away.
+geometry*; here it was **`<x:warp>` + the native bake** (slice 2) — and that gate is now **open**.
+Any geometry runs flatten → map in the core, so every remaining ○ row is one pure function away;
+the outstanding machinery (❌) is refit, arc-length for arbitrary geometry, and the lattice/handle
+warps.
