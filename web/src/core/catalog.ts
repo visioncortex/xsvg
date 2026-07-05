@@ -164,6 +164,11 @@ export const CATALOG: Category[] = [
         title: "Text on a path (rainbow)",
         blurb: "The arc-length follow field — glyphs rotate and bend along the curve; baseline-shift floats runs above or below the path",
       },
+      {
+        file: "textpath-align.xsvg",
+        title: "Placement & stair-step",
+        blurb: 'align start/middle/end and a start offset place the run along the path; effect="stair" steps live selectable glyphs (also skew\'s no-font fallback)',
+      },
     ],
   },
   {

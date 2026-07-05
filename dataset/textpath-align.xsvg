@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 430" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="430" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">type on a path — align / start place the run; effect="stair" steps live glyphs</text>
+
+  <!-- align distributes the run's slack within the path's extent -->
+  <text x="28" y="66" font-size="11" fill="#94a3b8">align="start"</text>
+  <path id="al-s" d="M28,150 C90,100 170,100 232,150" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#al-s" effect="rainbow" font-family="-x-google-Anton" font-size="24" fill="#38bdf8">TIP</x:textpath>
+
+  <text x="268" y="66" font-size="11" fill="#94a3b8">align="middle"</text>
+  <path id="al-m" d="M268,150 C330,100 410,100 472,150" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#al-m" effect="rainbow" align="middle" font-family="-x-google-Anton" font-size="24" fill="#38bdf8">TOP</x:textpath>
+
+  <text x="508" y="66" font-size="11" fill="#94a3b8">align="end"</text>
+  <path id="al-e" d="M508,150 C570,100 650,100 712,150" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#al-e" effect="rainbow" align="end" font-family="-x-google-Anton" font-size="24" fill="#38bdf8">END</x:textpath>
+
+  <!-- start: an absolute head-start along the path (arc length under rainbow) -->
+  <text x="28" y="204" font-size="11" fill="#94a3b8">start="130" — an arc-length head start</text>
+  <path id="st" d="M28,282 C230,214 490,214 692,282" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#st" effect="rainbow" start="130" font-family="-x-google-Anton" font-size="28" fill="#a78bfa">PUSHED ALONG</x:textpath>
+
+  <!-- stair: the authorable stepped baseline — live, selectable, no font bytes needed
+       (it is also what skew degrades to when a family has no outline bytes) -->
+  <text x="28" y="330" font-size="11" fill="#94a3b8">effect="stair" — per-glyph steps on live text (still selectable)</text>
+  <path id="stair" d="M28,390 C230,336 490,420 692,372" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#stair" effect="stair" baseline-shift="6" font-size="22" fill="#4ade80">stepping stone letters</x:textpath>
+</svg>

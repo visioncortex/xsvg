@@ -130,7 +130,10 @@ interface OtCmd {
   y2?: number;
 }
 type OtGlyphPath = { toPathData(fractionalDigits?: number): string; commands: OtCmd[] };
-type OtFont = { getPath(t: string, x: number, y: number, size: number): OtGlyphPath };
+type OtFont = {
+  getPath(t: string, x: number, y: number, size: number): OtGlyphPath;
+  getAdvanceWidth(t: string, size: number): number;
+};
 const outlineFonts = new Map<string, OtFont>();
 
 // `font-family="-x-google-Anton"` sources the outline from Google Fonts by name. The
@@ -266,7 +269,10 @@ function outline(
 
 // Sample a reference path as a height field f(x) — its y at horizontal position x
 // (§6.13.1). Reuses the offscreen probe; assumes the path is single-valued in x.
-function pathHeightField(pathD: string): { x0: number; y(x: number): number } | null {
+// `x0`/`x1` are the path's start/end x — its extent for run placement (§6.13).
+function pathHeightField(
+  pathD: string,
+): { x0: number; x1: number; y(x: number): number } | null {
   const p = probe();
   p.setAttribute("d", pathD);
   let len: number;
@@ -286,6 +292,7 @@ function pathHeightField(pathD: string): { x0: number; y(x: number): number } | 
   }
   return {
     x0: xs[0],
+    x1: xs[K],
     y(x: number): number {
       if (x <= xs[0]) return ys[0];
       if (x >= xs[K]) return ys[K];
@@ -302,13 +309,16 @@ function pathHeightField(pathD: string): { x0: number; y(x: number): number } | 
   };
 }
 
-// Sample a reference path as an arc-length frame (§6.13.2): returns a map
-// (s, off) → the point `off` units along the local normal from the path point at arc
-// length `s`. The normal is the tangent rotated +90° in y-down coords — for a
-// left→right path it points down, so negative glyph y (ascenders) rises above the
-// curve. Beyond either end the frame extends straight along the end tangent, so a run
-// longer than the path continues rather than bunching up. Reuses the offscreen probe.
-function pathArcFrame(pathD: string): ((s: number, off: number) => [number, number]) | null {
+// Sample a reference path as an arc-length frame (§6.13.2): `at(s, off)` is the point
+// `off` units along the local normal from the path point at arc length `s`; `len` is
+// the total arc length (the run-placement extent, §6.13). The normal is the tangent
+// rotated +90° in y-down coords — for a left→right path it points down, so negative
+// glyph y (ascenders) rises above the curve. Beyond either end the frame extends
+// straight along the end tangent, so a run longer than the path continues rather than
+// bunching up. Reuses the offscreen probe.
+function pathArcFrame(
+  pathD: string,
+): { len: number; at(s: number, off: number): [number, number] } | null {
   const p = probe();
   p.setAttribute("d", pathD);
   let len: number;
@@ -333,7 +343,7 @@ function pathArcFrame(pathD: string): ((s: number, off: number) => [number, numb
     const d = Math.hypot(dx, dy);
     return d > 0 ? [dx / d, dy / d] : [1, 0];
   };
-  return (s, off) => {
+  const at = (s: number, off: number): [number, number] => {
     const sc = Math.min(Math.max(s, 0), len); // clamped arc position
     const over = s - sc; // straight-line overshoot past the path's ends
     const t = (sc / len) * K;
@@ -344,6 +354,15 @@ function pathArcFrame(pathD: string): ((s: number, off: number) => [number, numb
     const py = ys[i] + frac * (ys[i + 1] - ys[i]);
     return [px + over * tx - off * ty, py + over * ty + off * tx];
   };
+  return { len, at };
+}
+
+// Where a run of width `w` begins within a path extent `E` (§6.13): `align`
+// distributes the slack, `start` adds an absolute head-start. Slack may be negative
+// (run longer than the path) — middle/end then shift before the start, symmetric with
+// the past-the-end overshoot.
+function runOffset(E: number, w: number, align: string, start: number): number {
+  return start + (align === "middle" ? (E - w) / 2 : align === "end" ? E - w : 0);
 }
 
 // Flatten opentype glyph commands to closed contours (flat [x0,y0,x1,y1,…] arrays),
@@ -425,25 +444,31 @@ function outlineOnPath(
   pathD: string,
   effect: string,
   baselineShift: number,
+  align: string,
+  start: number,
 ): string {
   const font = lookupFont(family);
   if (!font) return ""; // no bytes → Rust falls back to live <text>
+  const w = font.getAdvanceWidth(text, size); // run width for align (outline geometry
+  // carries no letter/word-spacing, §6.12 — the extent slack must match it)
   // Per-effect vertex map — a §7.2 field. (gx, gy) are outline coords on the flat run
   // baseline (gy negative above it); baseline-shift lifts the run off the path.
   let map: (gx: number, gy: number) => [number, number];
   if (effect === "skew") {
     const field = pathHeightField(pathD);
     if (!field) return "";
-    // skew field: (x, y) → (x, y + f(x)); the run begins at the path's start x
+    // skew field: (x, y) → (x, y + f(x)); align/start place the run in the x-extent
+    const base = field.x0 + runOffset(field.x1 - field.x0, w, align, start);
     map = (gx, gy) => {
-      const x = field.x0 + gx;
+      const x = base + gx;
       return [x, field.y(x) + gy - baselineShift];
     };
   } else if (effect === "rainbow") {
     const frame = pathArcFrame(pathD);
     if (!frame) return "";
-    // path-follow field: (x, y) → P(s) + y·N(s), s = arc length from the path start
-    map = (gx, gy) => frame(gx, gy - baselineShift);
+    // path-follow field: (x, y) → P(s) + y·N(s); align/start place s in the arc length
+    const base = runOffset(frame.len, w, align, start);
+    map = (gx, gy) => frame.at(base + gx, gy - baselineShift);
   } else {
     return ""; // unknown effect → graceful live-<text> fallback
   }
@@ -462,6 +487,31 @@ function outlineOnPath(
     d += "Z";
   }
   return d;
+}
+
+// Stepped-baseline sampler (§6.13.1 degradation) — the browser adapter for
+// Shaper::baseline_samples. `advances` holds each glyph's x-offset from the run
+// origin plus a final total-width entry; returns [runStartX, y0 … y(n-1)] with the
+// run placed by align/start in the path's x-extent, or an empty array on failure
+// (→ straight-text fallback). Non-finite samples abort — never leak NaN (§4).
+function steppedBaseline(
+  pathD: string,
+  advances: Float64Array,
+  align: string,
+  start: number,
+): Float64Array {
+  const n = advances.length - 1;
+  const field = n >= 1 ? pathHeightField(pathD) : null;
+  if (!field) return new Float64Array(0);
+  const x0 = field.x0 + runOffset(field.x1 - field.x0, advances[n], align, start);
+  const out = new Float64Array(n + 1);
+  out[0] = x0;
+  for (let i = 0; i < n; i++) {
+    const y = field.y(x0 + advances[i]);
+    if (!Number.isFinite(y)) return new Float64Array(0);
+    out[i + 1] = y;
+  }
+  return out;
 }
 
 export interface CompileOptions {
@@ -483,5 +533,15 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, outlineOnPath);
+  return compile(
+    source,
+    quality,
+    sourcemap,
+    measure,
+    metrics,
+    rasterize,
+    steppedBaseline,
+    outline,
+    outlineOnPath,
+  );
 }

@@ -96,6 +96,22 @@ pub trait Shaper {
     /// Coarsely rasterize the filled path `path_d` (an SVG `d` string) into rows of
     /// height ≈ `row_h`. `None` if the shape is degenerate or can't be rasterized.
     fn rasterize(&self, path_d: &str, row_h: f64) -> Option<RasterRegion>;
+
+    /// Sample `path_d`'s height profile for a stepped-baseline fallback (§6.13
+    /// degradation): `advances` holds each glyph's x-offset from the run's origin
+    /// plus one final entry for the run's total width; `align`/`start` place the run
+    /// within the path's x-extent. Returns the absolute x where the run begins and
+    /// the path's y at each glyph position (`advances.len() - 1` values). Default:
+    /// `None` (no sampler → straight-text fallback).
+    fn baseline_samples(
+        &self,
+        _path_d: &str,
+        _advances: &[f64],
+        _align: &str,
+        _start: f64,
+    ) -> Option<(f64, Vec<f64>)> {
+        None
+    }
 }
 
 /// Flow options for [`layout_region`]. `padding` insets the region on all sides;

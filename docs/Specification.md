@@ -369,7 +369,8 @@ its geometry **warped onto the path**. This is a **specialization of the geometr
 (§7)** — the outlined run is the source geometry, and the reference path derives the **field** (§7.2)
 that the §7.1 bake applies — and it mirrors Illustrator's *Type on a Path* effects. The `effect`
 attribute just **selects the field**: **skew** = the *displacement* field (§6.13.1); **rainbow** =
-the *path-follow* field (§6.13.2).
+the *path-follow* field (§6.13.2); **stair** = the displacement field applied **per-glyph** instead
+of per-point, on live `<text>` (§6.13.3).
 
 **Surface.**
 ```xml
@@ -378,13 +379,17 @@ the *path-follow* field (§6.13.2).
 ```
 - **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`). Like
   `<x:textbox in="#shape">` and `clipPath`, only its **geometry** is used; its own paint is ignored.
-- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)*.
+- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)* | `stair` *(§6.13.3)*.
 - **`baseline-shift`** — length, default `0`: offsets the run's baseline from the path along the
   **local normal** — positive lifts the text above the path, matching SVG `baseline-shift`
   semantics. Applies to every effect (under skew, where the normal is not computed, it is a plain
   vertical lift). Two runs on the same path with opposite shifts sit above and below it.
-- **`align`** — `start` *(default)* | `middle` | `end`: where the run sits within the path's x-extent.
-- **`start`** — horizontal offset (user units) at which the run begins along the path (default `0`).
+- **`align`** — `start` *(default)* | `middle` | `end`: where the run sits within the path's
+  **extent** — its x-extent under skew, its **arc length** under rainbow. The slack
+  (`extent − run width`) may be negative (a run longer than the path); `middle`/`end` then shift
+  before the path's start, symmetric with the past-the-end overshoot.
+- **`start`** — an absolute head-start (user units) added after `align`: x units under skew, arc
+  length under rainbow (default `0`).
 - Standard text attributes apply: `font-*`, `fill`, `stroke*` (the emitted outline carries them, §6.12),
   `letter-spacing`, `word-spacing`.
 - **Single line only** — a path is a 1-D track, so `inline-size`/wrapping do not apply; a run longer than
@@ -423,14 +428,22 @@ runs the standard §7.1 bake; LUT resolution and flatten tolerance are the quali
 *non-deforming* follow MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent,
 no shape deformation) — future work.
 
-**Degradation.** `<x:textpath>` needs the glyph outliner (§6.12) to warp geometry. If it is unavailable
-(no font bytes), skew degrades to a **stepped baseline**: live `<text>` with a per-glyph vertical offset
-`f(x_glyph)` (Illustrator's *Stair Step*), or a straight `<text>` if even per-glyph placement is not
-possible — the document never breaks.
+**6.13.3 Stair Step — per-glyph steps, live text [implemented].** The authorable stepped baseline:
+glyphs stay upright and **undeformed**; each is absolutely positioned via per-glyph `x`/`y` lists —
+`x` from kerned prefix advances plus the §6.8 spacing gaps (honoring `align`/`start`), `y =
+f(x_glyph) − baseline-shift` sampled through the *shaper* seam's height profiler. Because it lowers
+to live `<text>` (never the outliner), it **needs no font bytes**, stays selectable, and uses the
+live face — the one path effect available everywhere.
+
+**Degradation [implemented].** The warping effects need the glyph outliner (§6.12). If it is
+unavailable (no font bytes), **skew degrades to the stair-step lowering** (§6.13.3) — same field,
+per-glyph instead of per-point. Rainbow, or a run whose height profile can't be sampled, degrades to
+a straight `<text>` at the element's `x`/`y` — the document never breaks.
 
 **v0 limits.** Single line; base style per run (per-run `<tspan>` styling, `justify`, `glyph-x-scale`
 do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). The
-`align`/`start` placement options are **not yet wired** (every run begins at the path's start); the
+run width used by `align` matches the geometry being placed: the outline advance for warped runs (no
+letter/word-spacing, §6.12), the spacing-inclusive advance for the stepped fallback. The
 native-`<textPath>` non-deforming follow is future work.
 
 ## 7. Geometry transforms — a generic deformation pipeline [spec'd]
@@ -520,7 +533,9 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `<x:textpath>` **skew** variant (outline → vertical-displacement warp → `<path>`) | implemented |
 | Text on a path — `<x:textpath>` **rainbow** variant (arc-length follow + deform) | implemented |
 | Text on a path — `baseline-shift` (offset the run along the local normal) | implemented |
-| Text on a path — `align`/`start` placement; native `<textPath>` non-deforming follow | planned |
+| Text on a path — `align` / `start` run placement | implemented |
+| Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
+| Text on a path — native `<textPath>` non-deforming follow | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

@@ -4,6 +4,20 @@
 
 use super::style::TextStyle;
 
+/// How a text-on-path run is warped and placed (§6.13): the field-selecting `effect`
+/// (`"skew"` | `"rainbow"`), the offset of the run's baseline from the path along the
+/// local normal (positive = above, SVG `baseline-shift` semantics), and where the run
+/// begins within the path's extent — `align` distributes the slack (`"start"` |
+/// `"middle"` | `"end"`), `start` adds an absolute head-start (x units under skew,
+/// arc length under rainbow).
+#[derive(Clone, Copy, Debug)]
+pub struct PathEffect<'a> {
+    pub effect: &'a str,
+    pub baseline_shift: f64,
+    pub align: &'a str,
+    pub start: f64,
+}
+
 /// Source of glyph outlines. Given a text run, its style, and a baseline origin
 /// `(x, baseline)` (the left end of the baseline), returns an SVG path `d` in user
 /// units tracing the glyphs. `None` when the backend can't outline the run (e.g. the
@@ -20,20 +34,17 @@ pub trait GlyphOutliner {
 
     /// Outline `text` and **warp it onto a path** (the text-on-path specialization of the
     /// geometry-transform pipeline): the run is shaped on a flat baseline, then every
-    /// outline point is mapped by the field selected by `effect` — `"skew"` (1-D vertical
-    /// displacement by the path's height profile) or `"rainbow"` (arc-length follow +
-    /// normal offset). `path_d` is the reference path's SVG `d`; `baseline_shift` offsets
-    /// the run's baseline from the path along the local normal (positive = above the
-    /// path, SVG `baseline-shift` semantics). Returns the warped path `d`, or `None` to
-    /// fall back to live `<text>`. Default: `None` (no path-warping backend).
+    /// outline point is mapped by the field [`PathEffect::effect`] selects, offset and
+    /// placed per the rest of `fx`. `path_d` is the reference path's SVG `d`. Returns the
+    /// warped path `d`, or `None` to fall back to live `<text>`. Default: `None` (no
+    /// path-warping backend).
     fn outline_on_path(
         &self,
         _text: &str,
         _style: &TextStyle,
         _size: f64,
         _path_d: &str,
-        _effect: &str,
-        _baseline_shift: f64,
+        _fx: &PathEffect,
     ) -> Option<String> {
         None
     }

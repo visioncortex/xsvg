@@ -125,10 +125,10 @@ Catalogued from Illustrator's five *Type on a Path* effects.
 | **Skew** (vertical displacement by height profile) | AI | C | ✅ | **shipped** — `<x:textpath in="#p" effect="skew">`: glyphs stay upright, verticals stay vertical (§6.13.1) |
 | **Rainbow** (arc-length follow + normal offset) | AI | C | ✅ | **shipped** — `effect="rainbow"`: uniform arc-length LUT + normal offset, straight extrapolation past the path's ends (§6.13.2) |
 | **Baseline shift** (offset the run from the path) | AI baseline shift / SVG | C | ✅ | **shipped** — `baseline-shift` offsets along the local normal (positive = above the path); applies to skew + rainbow; opposite shifts stack two runs on one path |
-| **Stair Step** (per-glyph vertical steps, no deformation) | AI | E | ○ | live `<text>` with per-glyph `dy = f(x_glyph)` — no outliner needed; doubles as skew's spec'd degradation path (currently falls back to straight text instead) |
+| **Stair Step** (per-glyph vertical steps, no deformation) | AI | E | ✅ | **shipped** — authorable `effect="stair"` (§6.13.3): live `<text>` with per-glyph positions on the height profile — selectable, no font bytes needed, honors align/start/shift; also serves as skew's no-font degradation |
 | **Gravity** (glyphs rotate toward a center) | AI | S | ○ | per-glyph rotation field about the path's bbox center |
 | **3D Ribbon** (horizontals follow, verticals stay) | AI | S | ○ | the complement of skew — horizontal shear from the profile |
-| **`align` / `start` placement options** | AI | C | ◑ | spec'd in §6.13 (`align="start\|middle\|end"`, `start` offset) but not yet read by the compiler |
+| **`align` / `start` placement options** | AI | C | ✅ | **shipped** — `align` distributes slack within the path's extent (x-extent under skew, arc length under rainbow); `start` adds an absolute head-start; both honored by warped runs *and* the stepped fallback |
 | **Non-deforming follow** via native `<textPath>` | SVG | E | ○ | live-text lowering for quality `fast` / no-font cases; font-dependent, no shape deformation |
 
 ## F. Distort & Transform effects — *Illustrator's Effect menu*
@@ -195,7 +195,8 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
 4. **Remaining analytic presets** — scale family (arc-lower/upper, bulge, shell ×2, fish, squeeze),
    polar (arc), radial (fisheye, inflate), rotational (twist). Full Make-with-Warp parity.
 5. **Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
-   `highest` = refit at graded tolerance); `<x:textpath>` `align`/`start`; stair-step degradation.
+   `highest` = refit at graded tolerance). *(The `align`/`start` and stair-step items originally
+   here shipped early, alongside rainbow.)*
 6. ~~**Rainbow** — arc-length + normal machinery~~ ✅ *(shipped early with `baseline-shift`, riding
    the §6.13 adapter seam ahead of the native bake; bend-along-path §D still waits on slice 2)*
 7. **Later** — envelope mesh (with Pillar 3's patch vocabulary), top object, MLS, anchor-aware
