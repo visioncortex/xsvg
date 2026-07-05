@@ -10,9 +10,23 @@ The headline: **almost the entire stack can be reused, and it clusters around th
 resvg/usvg. The novel engineering is the *language*, the *lowering passes*, and the
 *quality-graded approximation* — not the low-level geometry, shaping, or rasterization.
 
+> **Roadmap update (v1).** The [Vision](Vision.md) has since evolved. **v1 shipped Pillar 1
+> (typography), including create-outlines** (text → `<path>`, incl. Google-fonts-by-name and
+> stroked outlines). The **old Pillar 2 — variable-width strokes (§1) — is deferred**: it is
+> replaced as a headline pillar by a **non-affine, non-destructive geometry-transform pipeline**,
+> researched in the new **[§7](#7-non-affine-non-destructive-geometry-transforms-v1-pillar-2)**.
+> Pillar 3 (mesh gradients, §3) is refined to **cracks/T-junctions + feathering** and is being
+> designed/implemented directly. Sources for §7 are in [Citations.json](Citations.json) under
+> `addenda` (single-pass, primary-sourced; not adversarially re-voted like §§1–6).
+
 ---
 
 ## 1. Variable-width strokes
+
+> **Status: deferred (not a v1 pillar).** The vision replaced this pillar with non-affine geometry
+> transforms (**§7**). The research below stays as valid prior art — variable-width stroke may return
+> as an optional feature, and its kurbo/stroke-expansion machinery is reused by outlining and by the
+> geometry-transform bake (both flatten/subdivide via kurbo).
 
 **Leading approach.** Raph Levien's Euler-spiral-based **stroke expansion** is the state of
 the art for both constant- and variable-width stroke-to-fill conversion. The 2024 paper
@@ -196,6 +210,59 @@ study directly.
 
 ---
 
+## 7. Non-affine, non-destructive geometry transforms *(v1 Pillar 2)*
+
+**Why it's a pillar.** SVG's `transform` is **affine-only** — `matrix(a,b,c,d,e,f)` carries an implicit
+bottom row `[0 0 1]` (6 DOF), so it **cannot express perspective/projective (homography)** or freeform
+**warp** on vector geometry
+([MDN](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/transform)). Like mesh
+gradients, xsvg therefore can't pass these through — it must **bake** them into plain-SVG geometry.
+
+**Leading approach: a non-destructive effect stack, baked at compile time.** Keep the source geometry
+plus an ordered, editable transform stack, and materialize deformed `<path>`s only when compiling —
+exactly Illustrator **Envelope Distort** (Make with Warp = 15 presets: Arc/Arch/Bulge/Flag/Wave/Fish/
+Rise/Fisheye/Inflate/Squeeze/Twist…; Make with Mesh; Make with Top Object; `Edit Contents` / `Release`
+/ `Expand` = edit / revert / bake — [logosbynick](https://logosbynick.com/envelope-distort-in-illustrator/))
+and Inkscape **Live Path Effects** (Perspective/Envelope, Bend, Lattice Deformation; stacked effects
+"auto-adjust" on source change; `Object to Path` = bake —
+[Inkscape manual](https://inkscape-manuals.readthedocs.io/en/latest/live-path-effects.html)).
+"Expand" / "Object to Path" *is* xsvg's compiler bake step.
+
+**The deformation models** (all are *space* deformations — they map any point, so they apply uniformly
+to sampled path points):
+- **Free-Form Deformation** (Sederberg & Parry, SIGGRAPH 1986): embed geometry in a lattice's local
+  coordinates and deform via a trivariate tensor-product Bézier over moved control points — the
+  canonical **cage / lattice** warp
+  ([WPI notes](https://web.cs.wpi.edu/~matt/courses/cs563/talks/smartin/ffdeform.html)).
+- **Moving Least Squares** (Schaefer, McPhail & Warren, SIGGRAPH 2006): closed-form **handle-based**
+  warps in affine / similarity / rigid classes, weight `w_i = 1/|p_i − v|^(2α)`; per-point and
+  real-time ([paper](https://people.engr.tamu.edu/schaefer/research/mls.pdf)).
+- **Homography** for perspective (8 DOF).
+
+**Lowering to SVG = subdivide → map → refit.** Béziers are **affine-invariant** (partition-of-unity
+Bernstein basis), so affine maps *can* be applied to control points — but **non-affine maps cannot**
+(error grows ~ nonlinearity × segment²)
+([Bézier](https://en.wikipedia.org/wiki/B%C3%A9zier_curve)). So the fidelity-preserving bake is:
+**flatten** each path to a tolerance, **map** the samples through the deformation, **refit** cubics.
+kurbo's [`flatten`](https://docs.rs/kurbo/latest/kurbo/fn.flatten.html) bounds the Hausdorff distance
+and *"the number of segments tends to scale as the inverse square root of tolerance"* — the clean
+**graded quality knob** (halve error ≈ double segments). Reserve the raster path
+([`feDisplacementMap`](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/feDisplacementMap),
+pixel-shift `P'(x,y) = P(x + scale·(XC−½), y + scale·(YC−½))`) as a last resort — it rasterizes,
+losing scalability and editability.
+
+**Best Rust building blocks.** `kurbo` (tolerance-bounded flatten/subdivide + cubic refit) +
+[`rust_mls`](https://github.com/mpizenberg/rust_mls) (MLS on *arbitrary 2D points*, not just images)
+cover a WASM-friendly bake; FFD and homography are simple to evaluate over kurbo samples. This reuses
+the **same kurbo geometry currency** as stroking and glyph outlines.
+
+**Hard / open parts.** Correct **cubic refitting** after warp (segment budget vs fidelity); **join /
+self-intersection** artifacts under strong deformation; and defining the **non-destructive stack**
+semantics in the language — effect order, and how a warp composes with booleans, mesh-fills, and text
+outlines.
+
+---
+
 ## Caveats & time-sensitivity
 
 - **Text ecosystem moves fast.** Parley switched swash → HarfRust + ICU4X only in Oct 2025 (v0.4);
@@ -207,8 +274,13 @@ study directly.
 
 ## Open questions carried into the plan
 
-1. Correct **variable-width join/cap** geometry (miter/round/bevel) — unsolved by sources.
-2. **WASM bundle size & latency** for Parley/HarfRust/Skrifa vs cosmic-text — needs a spike.
-3. **Text-in-arbitrary-polygon** + Knuth-Plass + drop caps + per-glyph scaling — likely custom on
-   top of the chosen text stack.
-4. Concrete **SVG-subset allow/deny list** + **mesh-with-cracks** (tearing) semantics.
+1. **Non-affine warp bake** (§7): cubic **refitting** after deformation (segment budget vs fidelity),
+   **join / self-intersection** artifacts under strong warp, and the **non-destructive effect-stack**
+   semantics (order; composition with booleans, mesh-fill, and text outlines).
+2. **WASM bundle size & latency** for Parley/HarfRust/Skrifa vs cosmic-text — needs a spike (only if
+   a pure-Rust text backend is pursued; v1 ships browser + opentype.js outlining).
+3. Concrete **SVG-subset allow/deny list** for the emitted output.
+4. **Mesh cracks/T-junctions + feathering** — refined into a concrete design + implementation
+   (owner-driven); no longer an open research question.
+5. **Variable-width join/cap** geometry (miter/round/bevel) — still unsolved by sources, but
+   **deferred** with the pillar (§1).

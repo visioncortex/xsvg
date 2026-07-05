@@ -355,19 +355,26 @@ not part of the interchange format.
 **Why.** The drawing then carries the **true display face as geometry** — it renders identically
 anywhere, with no font install or `@font-face` embed, at the cost of selectable text (a hidden `<text>`
 layer for searchability is future work, §G). This is also the prerequisite for the *text-as-vector-art*
-effects sketched in §7 (variable-width stroke, mesh fill, envelope warp, booleans on glyphs).
+effects of the remaining pillars (§7): geometry warp/envelope and mesh-fill applied to glyph outlines.
 
 **v0 limits.** Outline mode uses the base style per line: per-run styling (§6.11), `justify` (§6.9),
 `glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing` (§6.8) do not apply to the traced path, and
 curved-shape region flow (§6.10) keeps its own per-line placement. Per-run outlining is future work.
 
-## 7. Other pillars [planned]
+## 7. Roadmap — remaining pillars [planned]
 
-Sketched in [Plan.md §2](Plan.md); not yet implemented.
+Pillar 1 (typography, §6) **shipped in v1**, through create outlines (§6.12). The remaining pillars,
+sketched in [Plan.md](Plan.md) and grounded in [Research.md](Research.md):
 
-- **`<x:vstroke>`** — variable-width strokes (skeleton path + width profile), lowered to a filled `<path>`.
-- **`<x:mesh>`** — Coons/tensor mesh gradients with transparency, lowered to flat patches / triangles / raster.
-- **`<x:boolean op="…">`** — live boolean shape operators (union/intersect/subtract/exclude), lowered to one resolved `<path>`.
+- **Non-affine, non-destructive geometry transforms** *(Pillar 2)* — perspective / warp / envelope on
+  vector geometry, which SVG's **affine-only** `transform` cannot express. A non-destructive effect
+  stack (source geometry + editable transforms) is **baked at compile time** by **flatten → map →
+  refit** (kurbo flatten tolerance = the quality knob); deformation models are FFD (lattice/cage),
+  moving-least-squares (handles), and homography (perspective). See [Research.md §7](Research.md).
+- **`<x:mesh>`** *(Pillar 3)* — Coons/tensor mesh gradients with **cracks / T-junctions** and
+  **transparency (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
+- **Deferred** (valuable, but no longer headline pillars): **`<x:vstroke>`** variable-width strokes
+  (research retained in [Research.md §1](Research.md)) and **`<x:boolean>`** live path algebra.
 
 ## 8. Lowering target [implemented]
 

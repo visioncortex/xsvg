@@ -7,6 +7,20 @@ optional WebGPU reference renderer.
 This plan is grounded in [Research.md](Research.md) and realizes the [Vision](Vision.md). Read the
 research digest for citations behind every library and algorithm choice referenced here.
 
+> **Status — v1 shipped (2026).** This plan predates the first release; read it as architecture +
+> original sequencing, revised as follows:
+> - **Pillar 1 (typography) shipped.** The full ladder (`inline-size` → `<textArea>` → `<x:textbox>`),
+>   region flow into shapes, alignment / justification, styled runs, and **create outlines**
+>   (text → `<path>`, §6.12). The outlining backend that actually shipped is **client-side
+>   opentype.js + a vendored woff2 decoder**, with **Google-fonts-by-name**
+>   (`font-family="-x-google-<Name>"`) and **stroked outlines** — *not* the originally-planned
+>   in-WASM skrifa path (still the native/CLI option). Normative surface: [Specification.md](Specification.md).
+> - **Pillar set revised** (per [Vision](Vision.md)): **(1) typography ✓ · (2) non-affine &
+>   non-destructive geometry transforms · (3) mesh gradients with cracks/T-junctions + feathering.**
+>   **Variable-width strokes (old Pillar 2) and live booleans are deferred** — no longer headline
+>   pillars. So the "variable strokes first" ordering in §3 is superseded (see the §3 note); §2.3 below
+>   now describes the geometry-transform pillar.
+
 **Guiding principle (from the research): reuse, don't reinvent.** Geometry, shaping, rasterization,
 and the normalized-IR pattern all exist as mature Rust crates clustered around the
 [Linebender](https://linebender.org) ecosystem. xsvg's *original* work is three things:
@@ -283,21 +297,35 @@ Attributes: `region` (flow into arbitrary polygon), `justify` (`greedy` | `knuth
 > and variable-width strokes applied to glyph outlines** ("text as vector art"), available once
 > Phase 2b can "create outlines."
 
-### 2.3 Pillar 2 — Variable-width strokes
+### 2.3 Pillar 2 — Non-affine, non-destructive geometry transforms
 
-A skeleton path + a width profile (itself an interpolated/bézier curve along the parameter):
+SVG's `transform` is **affine-only**, so perspective, warp, and envelope distortions cannot ride on
+vector geometry — xsvg **bakes** them into deformed paths. A non-destructive effect wraps geometry that
+stays editable in the source; the compiler materializes deformed `<path>`s at a graded tolerance.
 
 ```xml
-<x:vstroke d="M0,0 C40,0 40,80 80,80" fill="#222"
-           width-profile="0:1  0.5:8  1:2"   <!-- (t : width) control points -->
-           cap="round" join="round" taper="0.1"/>
+<x:warp kind="envelope" mode="arch" bend="0.4">     <!-- kind = envelope | perspective | mesh | mls -->
+  <text …>bent headline</text>
+  <path d="…"/>
+</x:warp>
 ```
-Lowers via kurbo stroke-to-fill into a single filled `<path>`. (See the open join/cap risk below.)
+Deformation models — all *space* deformations, so they apply to any child geometry: **FFD**
+(lattice/cage — Sederberg-Parry), **moving-least-squares** (handle-based — Schaefer et al.),
+**homography** (perspective), and analytic **warp presets** (arc/arch/flag/wave/…, à la Illustrator
+Envelope Distort). Lowering = **flatten → map samples → refit** (kurbo `flatten`; tolerance is the
+quality knob, segments ∝ tolerance^−½); a raster `feDisplacementMap` path is the last-resort fallback.
+Reuses the same kurbo geometry currency as outlining. See [Research.md §7](Research.md). *(Syntax
+provisional.)*
+
+> **Deferred — `<x:vstroke>` (variable-width strokes).** A skeleton path + a bézier width profile,
+> lowered via kurbo stroke-to-fill into one filled `<path>`. Valuable, but demoted from the pillar set;
+> the research and the reused stroke-expansion machinery are kept in [Research.md §1](Research.md).
 
 ### 2.4 Pillar 3 — Mesh gradients (Coons / tensor patches)
 
-A grid of patches with corner colors + edge control points + **per-corner alpha** (transparency).
-Adjacency is explicit, enabling intentional "cracks" (torn patches):
+A grid of patches with corner colors + edge control points + **per-corner alpha** (transparency /
+**feathering** for soft fades). Adjacency is explicit, enabling intentional **cracks / T-junctions**
+(torn or non-conforming patches):
 
 ```xml
 <x:mesh id="sky" x="0" y="0">
@@ -372,6 +400,11 @@ Sequencing rationale: **core engine first**, then pillars ordered by *dependency
 de-risking value* — strokes (smallest surface, exercises the geometry core + quality machinery),
 then typography (hardest, highest demand), then mesh (most novel lowering), then the optional GPU
 renderer.
+
+> **Revised (v1).** In practice **typography (Phase 2) shipped first** — via the browser + opentype.js
+> outlining path, not the Phase-2b skrifa spike — and **variable-width strokes (Phase 1) are deferred**
+> with the pillar. Remaining order: **non-affine geometry transforms (§2.3) → mesh (§2.4) → optional
+> GPU renderer.** The phase text below is retained for its architecture and de-risking notes.
 
 ### Phase 0 — Foundations *(the first milestone; see §4)*
 Workspace, CI, WASM target. Minimal `core → syntax → hir → lir → emit` pipeline for basic shapes +

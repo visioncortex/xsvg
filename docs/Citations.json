@@ -2633,5 +2633,70 @@
     }
   ],
   "totalTokens": 1642645,
-  "totalToolCalls": 628
+  "totalToolCalls": 628,
+  "addenda": [
+    {
+      "topic": "Non-affine, non-destructive geometry transforms (v1 roadmap Pillar 2)",
+      "date": "2026-07",
+      "agents": 1,
+      "note": "Single-pass, primary-source research added when the Vision replaced the 'variable-width strokes' pillar with a non-affine, non-destructive geometry-transform pipeline. Sourced but NOT adversarially re-voted like the original run — treat confidence as source-grounded, not consensus-verified.",
+      "summary": "Model non-affine warp as a non-destructive effect stack over source geometry (Illustrator Envelope Distort; Inkscape Live Path Effects), materialized to plain SVG only at compile time (Illustrator 'Expand' / Inkscape 'Object to Path' == the bake step). Warps are space deformations: FFD (Sederberg-Parry 1986, trivariate Bezier lattice/cage), MLS (Schaefer 2006, closed-form affine/similarity/rigid handle warps), and homography for perspective. Lower them by flattening paths to a tolerance (kurbo: Hausdorff-bounded, segments proportional to tolerance^-1/2), mapping the samples through the deformation, and optionally refitting cubics -- tolerance is the graded quality knob. kurbo + rust_mls cover most of it in WASM. Hard parts: SVG transform is strictly affine (matrix 6-DOF, [0 0 1] row) so perspective/warp cannot ride on vectors and must be baked; mapping only control points is exact for affine (Bezier affine-invariance) but wrong under warp (error ~ nonlinearity * segment^2); feDisplacementMap is raster-only.",
+      "findings": [
+        {
+          "claim": "Adobe Illustrator's Envelope Distort is a non-destructive warp with three modes -- Make with Warp (15 parametric presets), Make with Mesh (editable grid), and Make with Top Object -- with the source recoverable via Edit Contents/Release and baked via Expand.",
+          "confidence": "high",
+          "sources": ["https://logosbynick.com/envelope-distort-in-illustrator/"],
+          "evidence": "The 15 Warp presets (Arc, Arch, Bulge, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze, Twist, ...) are driven by Bend plus horizontal/vertical Distortion sliders. Non-destructive management is explicit: Edit Contents modifies the source retroactively, Release reverts to the original, and Expand finalizes to a permanent vector object. This is the source+stack+bake model xsvg needs -- presets are cheap analytic warps, Mesh/Top-Object are cage warps, and 'Expand' is the compiler bake step."
+        },
+        {
+          "claim": "Free-Form Deformation (Sederberg & Parry, SIGGRAPH 1986) embeds geometry in local coordinates of a lattice and deforms it by evaluating a trivariate tensor-product Bernstein/Bezier polynomial over moved lattice control points, working on any primitive globally or locally.",
+          "confidence": "high",
+          "sources": ["https://web.cs.wpi.edu/~matt/courses/cs563/talks/smartin/ffdeform.html"],
+          "evidence": "FFD is based on trivariate Bernstein polynomials: a point is parameterized in the lattice's local space, then recomputed as the tensor-product Bezier sum weighted by repositioned control points P_ijk. It deforms the embedding space, so any curve/point warps under the same cage. For xsvg, 2D bivariate FFD gives an editable grid whose bake is 'evaluate each sampled path point through the lattice.'"
+        },
+        {
+          "claim": "Moving Least Squares deformation (Schaefer, McPhail & Warren, SIGGRAPH 2006) gives closed-form handle-based warps in affine/similarity/rigid classes via a weighted least-squares fit per output point with weights w_i = 1/|p_i - v|^(2*alpha).",
+          "confidence": "high",
+          "sources": ["https://people.engr.tamu.edu/schaefer/research/mls.pdf"],
+          "evidence": "Handles p_i map to q_i via weighted centroids and weight w_i = 1/|p_i - v|^(2 alpha); restricting to similarity and rigid transforms minimizes scaling/shearing distortion, and it runs real-time on tens of thousands of vertices. MLS is defined per output point, so xsvg can evaluate it at each flattened path sample with no raster step -- the natural 'move a few handles' warp."
+        },
+        {
+          "claim": "SVG's transform is affine-only -- matrix(a,b,c,d,e,f) carries an implicit bottom row [0 0 1] (6 DOF) -- so it cannot express perspective/projective (homography) maps, which need 8 DOF and a non-trivial perspective row.",
+          "confidence": "high",
+          "sources": ["https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/transform"],
+          "evidence": "MDN lists only matrix/translate/scale/rotate/skewX/skewY; matrix() computes x' = a*x + c*y + e, y' = b*x + d*y + f with no perspective divide. A homography needs 8 DOF and a perspective row, so vector geometry cannot carry it -- exactly why xsvg must BAKE non-affine warps into geometry rather than emit a transform attribute."
+        },
+        {
+          "claim": "Bezier curves are affine-invariant (Bernstein basis is a partition of unity), so affine maps may be applied to control points -- but this identity fails for non-affine maps, making cheap control-point-only remapping incorrect under warp.",
+          "confidence": "high",
+          "sources": ["https://en.wikipedia.org/wiki/B%C3%A9zier_curve"],
+          "evidence": "B(t) = sum b_{i,n}(t) P_i with the basis summing to 1, so affine transforms distribute over the control points and equal transforming the curve. Non-affine deformations do not distribute over this convex combination, so a warped control polygon no longer traces the true warped curve; error grows with segment span and deformation curvature (~ nonlinearity * h^2). This justifies xsvg's subdivide-then-sample strategy over cheap control-point remapping."
+        },
+        {
+          "claim": "The vector-fidelity way to bake a non-affine warp to plain SVG is flatten-to-tolerance, map the samples through the deformation, then refit -- with flattening tolerance the accuracy knob (segment count scales ~ tolerance^-1/2).",
+          "confidence": "high",
+          "sources": ["https://docs.rs/kurbo/latest/kurbo/fn.flatten.html"],
+          "evidence": "kurbo's flatten bounds the Hausdorff distance between curve and polyline by a tolerance (~0.25px recommended for antialiased rendering) and 'the number of segments tends to scale as the inverse square root of tolerance.' Halving allowed error roughly doubles segment count -- a principled graded quality knob. Sampling then mapping through FFD/MLS/homography (optionally refitting cubics) keeps output as editable <path> vectors, not raster."
+        },
+        {
+          "claim": "SVG's only native warp primitive, feDisplacementMap, is a raster/pixel operation -- P'(x,y) = P(x + scale*(XC-0.5), y + scale*(YC-0.5)) -- that rasterizes vectors and loses scalability/editability.",
+          "confidence": "high",
+          "sources": ["https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/feDisplacementMap"],
+          "evidence": "MDN gives the exact formula and confirms it is a per-pixel operation in linearRGB driven by channel selectors and a scale (max displacement), with the map usually produced by feImage/feTurbulence. For a vector compiler it is a poor primary path (resolution-locked, non-editable, historical feImage cross-browser gaps) -- only a last-resort fallback when a warp cannot be represented as deformed vector paths."
+        },
+        {
+          "claim": "Inkscape Live Path Effects implement the non-destructive stack model directly: Perspective/Envelope (4 corner handles), Bend (along a path), and Lattice Deformation warp without altering the source, auto-reapply on upstream change, and bake via Object to Path.",
+          "confidence": "high",
+          "sources": ["https://inkscape-manuals.readthedocs.io/en/latest/live-path-effects.html"],
+          "evidence": "The manual states LPEs 'create new objects from paths without destroying the original paths', and editing the source makes 'all stacked effects automatically adjust.' This is a source + ordered editable effect-stack + on-demand bake -- the exact architecture for xsvg: keep source geometry and a re-bakeable transform stack, materializing deformed <path>s only at compile time."
+        },
+        {
+          "claim": "Rust prior art covers the pipeline: kurbo supplies tolerance-bounded flattening/subdivision, and the rust_mls (moving-least-squares) crate implements Schaefer 2006 MLS on arbitrary 2D point sets -- not just images -- so it can deform vector sample/control points directly.",
+          "confidence": "high",
+          "sources": ["https://github.com/mpizenberg/rust_mls", "https://docs.rs/kurbo/latest/kurbo/fn.flatten.html"],
+          "evidence": "rust_mls splits into moving-least-squares (core, operating on arbitrary 2D control-point pairs, e.g. deform_affine), moving-least-squares-image, and a demo; the core is not image-bound. Paired with kurbo's flatten, xsvg has both halves of a WASM-friendly bake: subdivide with kurbo, warp points with MLS/FFD/homography, re-emit paths."
+        }
+      ]
+    }
+  ]
 }
