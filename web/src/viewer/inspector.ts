@@ -1,18 +1,24 @@
-// Element inspector for the interactive viewer. Hovering an element in the rendered
-// SVG outlines it; clicking pins it, fills the info panel (tag / attributes / bbox),
-// and projects it back onto the xsvg source in the read-only editor pane.
+// Element inspector for the interactive viewer — bi-directional link between the
+// rendered SVG and the xsvg source:
+//   • canvas → source: hover outlines an element, click pins it, fills the info
+//     panel (tag / attributes / bbox), and highlights its originating source.
+//   • source → canvas: clicking in the source pane pins the element whose
+//     `data-xsvg-pos` range is under the cursor (see main.ts for the wiring).
 //
 // The compiler tags emitted elements with `data-xsvg-pos` byte ranges; we resolve
 // the hovered leaf to its nearest tagged ancestor (see core/sourcemap). Highlight
 // rectangles live *inside* the SVG (user space) with a non-scaling stroke, so they
 // track pan/zoom for free without recomputing on every transform change.
-import { ByteIndex, nearestSource } from "../core/sourcemap";
+import { ByteIndex, nearestSource, posAttr, type SourceRange } from "../core/sourcemap";
 import type { EditorHandle } from "../core/editor";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 export interface Inspector {
   clear(): void;
+  /** Source → canvas: pin the innermost element whose source range contains the
+   *  given editor offset (UTF-16). No-op if the offset is outside every element. */
+  selectAtSourceOffset(offset: number): void;
   destroy(): void;
 }
 
@@ -48,6 +54,22 @@ export function createInspector({ svgRoot, panel, source, editor }: InspectorOpt
     rect.style.display = "";
   };
 
+  // Pin an element (both directions funnel through here): outline it on the canvas,
+  // fill the panel, and highlight its source range in the editor.
+  const selectElement = (el: SVGGraphicsElement, range: SourceRange) => {
+    place(pinRect, el);
+    fillPanel(panel, el);
+    editor.highlight(bytes.toStr(range.start), bytes.toStr(range.end));
+  };
+
+  // Tagged elements with their source ranges as UTF-16 char offsets, for the
+  // source → canvas lookup (smallest range containing the cursor wins).
+  const items: { el: SVGGraphicsElement; range: SourceRange; from: number; to: number }[] = [];
+  for (const el of Array.from(svgRoot.querySelectorAll<SVGGraphicsElement>("[data-xsvg-pos]"))) {
+    const range = posAttr(el);
+    if (range) items.push({ el, range, from: bytes.toStr(range.start), to: bytes.toStr(range.end) });
+  }
+
   const onMove = (e: MouseEvent) => {
     const hit = nearestSource(e.target as Element, svgRoot);
     const el = asGraphics(hit?.el ?? null);
@@ -63,11 +85,17 @@ export function createInspector({ svgRoot, panel, source, editor }: InspectorOpt
     const hit = nearestSource(e.target as Element, svgRoot);
     const el = asGraphics(hit?.el ?? null);
     if (!hit || !el || el === svgRoot) return;
-    place(pinRect, el);
-    const from = bytes.toStr(hit.range.start);
-    const to = bytes.toStr(hit.range.end);
-    fillPanel(panel, el, source.slice(from, to));
-    editor.highlight(from, to);
+    selectElement(el, hit.range);
+  };
+
+  const selectAtSourceOffset = (offset: number) => {
+    let best: (typeof items)[number] | null = null;
+    for (const it of items) {
+      if (offset >= it.from && offset <= it.to && (!best || it.to - it.from < best.to - best.from)) {
+        best = it;
+      }
+    }
+    if (best) selectElement(best.el, best.range);
   };
 
   svgRoot.addEventListener("mousemove", onMove);
@@ -84,6 +112,7 @@ export function createInspector({ svgRoot, panel, source, editor }: InspectorOpt
 
   return {
     clear,
+    selectAtSourceOffset,
     destroy: () => {
       svgRoot.removeEventListener("mousemove", onMove);
       svgRoot.removeEventListener("mouseleave", onLeave);
@@ -140,17 +169,15 @@ const escapeHtml = (s: string) =>
   s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
 function emptyPanel(): string {
-  return `<p class="hint">Click an element in the canvas to inspect it and locate its xsvg source.</p>`;
+  return `<p class="hint">Click an element on the canvas — or click in the source — to link the two.</p>`;
 }
 
-function fillPanel(panel: HTMLElement, el: SVGGraphicsElement, snippet: string): void {
-  const attrs = Array.from(el.attributes)
+function fillPanel(panel: HTMLElement, el: SVGGraphicsElement): void {
+  const rows = Array.from(el.attributes)
     .filter((a) => a.name !== "data-xsvg-pos")
     .map(
       (a) =>
-        `<div class="attr"><span class="k">${escapeHtml(a.name)}</span><span class="v">${escapeHtml(
-          a.value,
-        )}</span></div>`,
+        `<tr><th scope="row">${escapeHtml(a.name)}</th><td>${escapeHtml(a.value)}</td></tr>`,
     )
     .join("");
 
@@ -164,14 +191,10 @@ function fillPanel(panel: HTMLElement, el: SVGGraphicsElement, snippet: string):
     /* non-rendered element */
   }
 
-  const trimmed = snippet.length > 400 ? snippet.slice(0, 400) + "…" : snippet;
-
   panel.innerHTML = `
     <div class="row"><span class="tag">&lt;${escapeHtml(el.tagName)}&gt;</span></div>
     ${bboxLine}
-    <div class="attrs">${attrs || '<span class="hint">no attributes</span>'}</div>
-    <div class="row"><span class="label">xsvg source</span></div>
-    <pre class="snippet">${escapeHtml(trimmed)}</pre>`;
+    ${rows ? `<table class="attrs">${rows}</table>` : '<span class="hint">no attributes</span>'}`;
 }
 
 function fmt(n: number): string {

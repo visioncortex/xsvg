@@ -203,10 +203,13 @@
   border-bottom: 1px solid #e2e8f0;
 }
 .inspector-pane {
-  flex: 0 0 auto;
-  max-height: 45%;
+  /* fixed at ~1/3 so a varying attribute list scrolls inside it instead of
+     resizing the pane and shoving the source view around */
+  flex: 0 0 34%;
 }
 .panel {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 10px 12px;
   font-size: 13px;
@@ -226,23 +229,28 @@
   color: #64748b;
   margin-right: 6px;
 }
-.panel .attrs {
+.panel table.attrs {
   margin: 6px 0;
-  display: grid;
-  gap: 2px;
-}
-.panel .attr {
-  display: grid;
-  grid-template-columns: minmax(70px, auto) 1fr;
-  gap: 8px;
+  width: 100%;
+  table-layout: fixed; /* value column absorbs all remaining width */
+  border-collapse: collapse;
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.panel .attr .k {
+.panel table.attrs th,
+.panel table.attrs td {
+  text-align: left;
+  vertical-align: top;
+  padding: 1px 0;
+  word-break: break-word;
+}
+.panel table.attrs th {
+  width: 92px;
+  padding-right: 8px;
+  font-weight: normal;
   color: #7c3aed;
 }
-.panel .attr .v {
+.panel table.attrs td {
   color: #0f172a;
-  word-break: break-all;
 }
 .panel .snippet {
   margin: 4px 0 0;

@@ -34,6 +34,13 @@ let panzoom: PanZoom | null = null;
 let inspector: Inspector | null = null;
 let fitted = true; // whether the view is currently fit-to-screen (vs 1:1)
 
+// Source → canvas: a click in the read-only source pane pins the element whose
+// xsvg range is under the pointer. posAtCoords maps the click to a doc offset.
+editor.view.dom.addEventListener("mousedown", (e) => {
+  const pos = editor.view.posAtCoords({ x: e.clientX, y: e.clientY });
+  if (pos != null) inspector?.selectAtSourceOffset(pos);
+});
+
 const iconFit = byId("fit-btn").querySelector<SVGElement>(".icon-fit")!;
 const iconOneOne = byId("fit-btn").querySelector<SVGElement>(".icon-oneone")!;
 
