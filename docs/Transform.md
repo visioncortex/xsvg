@@ -89,10 +89,10 @@ true 2-D fields.
 | **Wave** | displacement | C | ✅ | **shipped** (§7.3) — Flag with phase advancing π/2 through the height: `Δ = A·sin(πu − (π/4)(v+1))` |
 | **Fish** | scale | E | ○ | midline bulge with a pinched tail — asymmetric taper × bulge |
 | **Rise** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·u`, a linear ramp; the art climbs left→right (pure shear profile) |
-| **Fisheye** | radial | E | ✅ | **shipped** (§7.3) — `s = 1 + b·(1−r̂²)` about the frame center (`r̂` = corner-normalized radius); corners pinned; negative bend = pincushion |
+| **Fisheye** | radial | E | ✅ | **shipped** (§7.3) — `s = 1 + b·(1−r̂²)²` about the frame center (`r̂` = corner-normalized radius); corners pinned; negative bend = pincushion; eased profile stays radially monotone (fold-free) at every bend |
 | **Inflate** | radial | E | ✅ | **shipped** (§7.3) — per-axis bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)`; corners pinned |
 | **Squeeze** | scale | E | ✅ | **shipped** (§7.3) — `u′ = u·(1−(b/2)(1−v²))`: waist pinch at mid-height, negative = barrel; `axis` transposes |
-| **Twist** | rotational | E | ✅ | **shipped** (§7.3) — angle-true swirl `θ = b·90°·(1−r̂)`: center rotates most, corners pinned; same math as Effect ▸ Twist (§F) |
+| **Twist** | rotational | E | ✅ | **shipped** (§7.3) — angle-true swirl `θ = b·90°·(1−r̂²)²`: center rotates most, corners pinned; the eased falloff keeps edges from self-crossing at the corners; same math as Effect ▸ Twist (§F) |
 
 > **Fidelity note.** Illustrator's exact preset curves are unpublished. Each preset's normative
 > formula is pinned in [Specification.md §7.2](Specification.md) when it ships, chosen to visually

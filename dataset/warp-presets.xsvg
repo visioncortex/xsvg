@@ -67,9 +67,9 @@
   </x:warp>
 
   <!-- twist: swirl — the center rotates most, corners stay pinned -->
-  <text x="420" y="726" font-size="11" fill="#94a3b8">field="twist" bend="80"</text>
+  <text x="420" y="726" font-size="11" fill="#94a3b8">field="twist" bend="60"</text>
   <rect x="420" y="770" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
-  <x:warp field="twist" bend="80">
+  <x:warp field="twist" bend="60">
     <rect x="420" y="770" width="240" height="80" fill="#831843"/>
     <x:textbox x="420" y="770" width="240" height="80" align="center" valign="middle" outline="true"
                font-family="-x-google-Anton" font-size="40" fill="#f9a8d4">TWIST</x:textbox>

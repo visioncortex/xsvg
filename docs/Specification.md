@@ -521,9 +521,11 @@ frame: it normalizes points to `(u, v) ∈ [−1, 1]²` (`u` along the bend axis
 The **displacement** profiles: **arch** `Δ = A(1−u²)` · **flag** `Δ = A·sin(πu)` · **rise** `Δ = A·u`
 · **wave** `Δ = A·sin(πu − (π/4)(v+1))`. The **2-D families** evaluate over the whole frame, with
 `r̂ = √((nx²+ny²)/2)` the corner-normalized radius (1 at the corners, so **corners stay pinned**):
-**fisheye** radial magnify `s = 1 + b(1−r̂²)` (negative bend = pincushion) · **inflate** per-axis
+**fisheye** radial magnify `s = 1 + b(1−r̂²)²` (negative bend = pincushion) · **inflate** per-axis
 bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)` · **squeeze** waist pinch
-`u′ = u·(1−(b/2)(1−v²))` (negative = barrel) · **twist** angle-true swirl `θ = b·(π/2)·(1−r̂)`.
+`u′ = u·(1−(b/2)(1−v²))` (negative = barrel) · **twist** angle-true swirl `θ = b·(π/2)·(1−r̂²)²`.
+The fisheye/twist profiles are **eased** (squared, so the gradient also vanishes at the pinned
+corners): the fields are fold-free at every bend — outlines never self-cross into corner slivers.
 Every path then runs the §7.1 bake at the profile tolerance.
 
 **Corner-driven fields.** `field="perspective"` solves the **8-DOF homography** taking the envelope

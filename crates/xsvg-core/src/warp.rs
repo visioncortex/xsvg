@@ -47,8 +47,10 @@ enum Profile {
     /// displacement — Flag whose phase advances by π/2 through the height:
     /// `Δ = A·sin(π·u − (π/4)·(v + 1))`
     Wave,
-    /// radial — magnify about the center: `s = 1 + b·(1 − r̂²)` (barrel; negative
-    /// bend = pincushion); corners fixed
+    /// radial — magnify about the center: `s = 1 + b·(1 − r̂²)²` (barrel; negative
+    /// bend = pincushion); corners fixed. The squared profile keeps `r·s(r)`
+    /// monotone for every `|b| ≤ 1`, so the field never folds the outer ring
+    /// back over itself
     Fisheye,
     /// radial, axis-separable — each axis bulges by the other's parabola:
     /// `sx = 1 + (b/2)(1 − ny²)`, `sy = 1 + (b/2)(1 − nx²)`; corners fixed
@@ -56,8 +58,11 @@ enum Profile {
     /// scale — the bend axis pinches by a profile of `v` (waist at mid-height):
     /// `u′ = u·(1 − (b/2)(1 − v²))`; negative bend = barrel
     Squeeze,
-    /// rotational — swirl about the center: `θ = b·(π/2)·(1 − r̂)`, center rotates
-    /// most, corners fixed; angle-true (rotates the absolute offset)
+    /// rotational — swirl about the center: `θ = b·(π/2)·(1 − r̂²)²`, center rotates
+    /// most, corners fixed; angle-true (rotates the absolute offset). The eased
+    /// falloff has zero angular gradient at the pinned corners (edges sweep smoothly
+    /// into them instead of self-crossing in slivers) yet stays broad mid-frame, so
+    /// glyphs rotate as wholes rather than shearing apart
     Twist,
 }
 
@@ -144,7 +149,8 @@ impl Field for EnvelopePreset {
             }
             Profile::Fisheye => {
                 let r2 = (nx * nx + ny * ny) / 2.0; // r̂² — 1 at the corners
-                let s = 1.0 + b * (1.0 - r2.min(1.0));
+                let t = 1.0 - r2.min(1.0);
+                let s = 1.0 + b * t * t;
                 Point::new(cx + nx * s * hw, cy + ny * s * hh)
             }
             Profile::Inflate => {
@@ -160,8 +166,9 @@ impl Field for EnvelopePreset {
                 }
             }
             Profile::Twist => {
-                let r = ((nx * nx + ny * ny) / 2.0).sqrt(); // r̂ — 1 at the corners
-                let theta = b * std::f64::consts::FRAC_PI_2 * (1.0 - r.min(1.0));
+                let r2 = ((nx * nx + ny * ny) / 2.0).min(1.0); // r̂² — 1 at the corners
+                let t = 1.0 - r2;
+                let theta = b * std::f64::consts::FRAC_PI_2 * t * t;
                 let (sin, cos) = theta.sin_cos();
                 let (dx, dy) = (p.x - cx, p.y - cy);
                 Point::new(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
@@ -652,15 +659,48 @@ mod tests {
     #[test]
     fn fisheye_magnifies_the_center_and_pins_the_corners() {
         let f = preset("fisheye", 1.0);
-        // nx = 0.2, ny = 0 → r̂² = 0.02 → s = 1.98 → x: 10 → 19.8
+        // nx = 0.2, ny = 0 → r̂² = 0.02 → s = 1 + 0.98² = 1.9604 → x: 10 → 19.604
         let m = f.map(Point::new(10.0, 0.0));
-        assert!((m.x - 19.8).abs() < 1e-9 && m.y.abs() < 1e-9, "{m:?}");
+        assert!((m.x - 19.604).abs() < 1e-9 && m.y.abs() < 1e-9, "{m:?}");
         // corners are at r̂ = 1 → fixed
         let c = f.map(Point::new(50.0, 20.0));
         assert!(
             (c.x - 50.0).abs() < 1e-9 && (c.y - 20.0).abs() < 1e-9,
             "{c:?}"
         );
+    }
+
+    #[test]
+    fn fisheye_is_radially_monotone_at_full_bend() {
+        // the eased profile keeps r·s(r) strictly increasing — the outer ring never
+        // folds back over the interior (regression: the linear profile folded past
+        // bend = 50%)
+        for bend in [1.0, -1.0] {
+            let f = preset("fisheye", bend);
+            let mut prev = -1.0;
+            for i in 0..=100 {
+                let x = 50.0 * i as f64 / 100.0; // a center→corner ray
+                let y = 20.0 * i as f64 / 100.0;
+                let d = f.map(Point::new(x, y)).distance(Point::ZERO);
+                assert!(d > prev, "fold at step {i} (bend {bend}): {d} <= {prev}");
+                prev = d;
+            }
+        }
+    }
+
+    #[test]
+    fn twist_never_self_crosses_at_the_pinned_corners() {
+        // near a pinned corner the eased falloff moves edge points much less than
+        // their distance to the corner, so the outline cannot double back into a
+        // sliver (regression: the linear falloff swept ~66% of the corner distance)
+        let f = preset("twist", 1.0);
+        let corner = Point::new(50.0, -20.0);
+        for d in [1.0, 2.0, 5.0, 10.0] {
+            let p = Point::new(50.0 - d, -20.0); // on the top edge, d from the corner
+            let moved = f.map(p).distance(p);
+            assert!(moved < 0.5 * d, "edge point {d} from corner moved {moved}");
+        }
+        assert!(f.map(corner).distance(corner) < 1e-9);
     }
 
     #[test]
