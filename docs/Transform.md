@@ -89,10 +89,10 @@ true 2-D fields.
 | **Wave** | displacement | C | ✅ | **shipped** (§7.3) — Flag with phase advancing π/2 through the height: `Δ = A·sin(πu − (π/4)(v+1))` |
 | **Fish** | scale | E | ○ | midline bulge with a pinched tail — asymmetric taper × bulge |
 | **Rise** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·u`, a linear ramp; the art climbs left→right (pure shear profile) |
-| **Fisheye** | radial | E | ○ | radial magnification about the bbox center, `r′ = r·(1 + b·(1−r²))` — barrel / pincushion by sign |
-| **Inflate** | radial | E | ○ | axis-aligned inflate — both edge pairs bow outward from the center |
-| **Squeeze** | scale | E | ○ | horizontal pinch: width scales by a profile of `v` (waist at mid-height); negative = barrel |
-| **Twist** | rotational | E | ○ | progressive rotation across the envelope (swirl); shares math with Effect ▸ Twist (§F) |
+| **Fisheye** | radial | E | ✅ | **shipped** (§7.3) — `s = 1 + b·(1−r̂²)` about the frame center (`r̂` = corner-normalized radius); corners pinned; negative bend = pincushion |
+| **Inflate** | radial | E | ✅ | **shipped** (§7.3) — per-axis bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)`; corners pinned |
+| **Squeeze** | scale | E | ✅ | **shipped** (§7.3) — `u′ = u·(1−(b/2)(1−v²))`: waist pinch at mid-height, negative = barrel; `axis` transposes |
+| **Twist** | rotational | E | ✅ | **shipped** (§7.3) — angle-true swirl `θ = b·90°·(1−r̂)`: center rotates most, corners pinned; same math as Effect ▸ Twist (§F) |
 
 > **Fidelity note.** Illustrator's exact preset curves are unpublished. Each preset's normative
 > formula is pinned in [Specification.md §7.2](Specification.md) when it ships, chosen to visually
@@ -139,7 +139,7 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **Twist** (swirl, rotation ∝ radius) | AI Effect | E | ○ | pure space field — same as §B Twist |
+| **Twist** (swirl, rotation ∝ radius) | AI Effect | E | ✅ | **shipped** — `field="twist"` (§B) |
 | **Roughen** (jittered edge displacement) | AI Effect | S | ○ | seeded deterministic noise as a displacement field over the flattened polyline (size/detail params); *seeded* so compiles are reproducible |
 | **Pucker & Bloat** | AI Effect | S | ❌ | anchors stay, segment midpoints pull toward/away from center — anchor-aware, not a space field |
 | **Zig Zag** | AI Effect | S | ❌ | per-segment ridges/waves between anchors — anchor-aware |
@@ -164,10 +164,10 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 
 **Shipped today (✅):** two front-ends.
 **`<x:warp>`** (§7.3) — the generic pipeline: `Field` trait + native kurbo bake in `xsvg-core`
-(flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), the
-four **displacement presets** (arch / flag / rise / wave) over shapes, paths, and outlined text, with
-innermost-first nesting and marker-based degradation
-([warp-presets.xsvg](../dataset/warp-presets.xsvg)).
+(flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), and
+**eight presets** — displacement (arch / flag / rise / wave), radial (fisheye / inflate), scale
+(squeeze), rotational (twist) — over shapes, paths, and outlined text, with innermost-first nesting
+and marker-based degradation ([warp-presets.xsvg](../dataset/warp-presets.xsvg)).
 **`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
 extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
 via the `GlyphOutliner::outline_on_path` browser seam
@@ -179,10 +179,10 @@ construction.
 upgrade); the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance, so the
 text-on-path fields aren't natively tested the way `<x:warp>`'s are.
 
-**Planned, field-only (○):** the remaining **11 warp presets** (§B — closed-form fields over the
-now-shipped envelope frame), **perspective** and **free distort** (§C — a corner-solved homography /
-bilinear field), the distortion sliders, and gravity/3D-ribbon type effects. Each is now one pure
-function plus its attribute plumbing.
+**Planned, field-only (○):** the remaining **7 warp presets** (§B — the arc/shell/fish scale family,
+all closed-form over the shipped envelope frame), **perspective** and **free distort** (§C — a
+corner-solved homography / bilinear field), the distortion sliders, and gravity/3D-ribbon type
+effects. Each is now one pure function plus its attribute plumbing.
 
 **Needs pipeline work (❌):** **bend-along-path** (the rainbow field generalized to arbitrary
 geometry — waits on the `<x:warp>` native bake), **envelope mesh** (FFD lattice), **top-object
@@ -197,8 +197,9 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
    (arch, flag, rise, wave) on arbitrary geometry + outlined text.~~ ✅ *(shipped)*
 3. **Perspective** — homography field + `corners` solver; `distort-h`/`distort-v` sliders; free
    distort rides along.
-4. **Remaining analytic presets** — scale family (arc-lower/upper, bulge, shell ×2, fish, squeeze),
-   polar (arc), radial (fisheye, inflate), rotational (twist). Full Make-with-Warp parity.
+4. **Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
+   polar (arc). ~~Radial (fisheye, inflate), rotational (twist), squeeze~~ ✅ *(shipped early)*.
+   Full Make-with-Warp parity when done.
 5. **Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
    `highest` = refit at graded tolerance). *(The `align`/`start` and stair-step items originally
    here shipped early, alongside rainbow.)*

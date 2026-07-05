@@ -2079,6 +2079,19 @@ mod tests {
     }
 
     #[test]
+    fn warp_radial_and_rotational_presets_parse() {
+        for name in ["fisheye", "inflate", "squeeze", "twist"] {
+            let svg = format!(
+                r##"{XW}<x:warp field="{name}" bend="80"><rect x="0" y="0" width="100" height="40" fill="#0af"/></x:warp></svg>"##
+            );
+            let out = compile_test(&svg);
+            assert!(!out.contains("unknown field"), "{name}: {out}");
+            assert!(out.contains("<path"), "{name}: {out}");
+            assert!(!out.contains("NaN"), "{name}: {out}");
+        }
+    }
+
+    #[test]
     fn warp_unknown_field_marks_and_passes_through() {
         let svg = format!(
             r##"{XW}<x:warp field="bogus" bend="50"><rect x="0" y="0" width="100" height="40"/></x:warp></svg>"##

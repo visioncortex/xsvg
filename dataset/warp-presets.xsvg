@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 720 480" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="720" height="480" fill="#0f172a"/>
+     viewBox="0 0 720 920" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="920" fill="#0f172a"/>
   <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:warp — envelope presets baked to plain paths (dashed = unwarped source box)</text>
 
   <!-- arch: both edges ride one parabola -->
@@ -37,5 +37,41 @@
     <rect x="420" y="330" width="240" height="80" fill="#3b0764"/>
     <x:textbox x="420" y="330" width="240" height="80" align="center" valign="middle" outline="true"
                font-family="-x-google-Anton" font-size="44" fill="#d8b4fe">WAVE</x:textbox>
+  </x:warp>
+
+  <!-- fisheye: radial magnification about the center; corners pinned -->
+  <text x="48" y="506" font-size="11" fill="#94a3b8">field="fisheye" bend="60"</text>
+  <rect x="48" y="550" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="fisheye" bend="60">
+    <rect x="48" y="550" width="240" height="80" fill="#7f1d1d"/>
+    <x:textbox x="48" y="550" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#fca5a5">FISHEYE</x:textbox>
+  </x:warp>
+
+  <!-- inflate: every edge bulges outward; corners pinned -->
+  <text x="420" y="506" font-size="11" fill="#94a3b8">field="inflate" bend="80"</text>
+  <rect x="420" y="550" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="inflate" bend="80">
+    <rect x="420" y="550" width="240" height="80" fill="#164e63"/>
+    <x:textbox x="420" y="550" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#67e8f9">INFLATE</x:textbox>
+  </x:warp>
+
+  <!-- squeeze: the width pinches at the waist; negative bend barrels -->
+  <text x="48" y="726" font-size="11" fill="#94a3b8">field="squeeze" bend="60"</text>
+  <rect x="48" y="770" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="squeeze" bend="60">
+    <rect x="48" y="770" width="240" height="80" fill="#713f12"/>
+    <x:textbox x="48" y="770" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#fde047">SQUEEZE</x:textbox>
+  </x:warp>
+
+  <!-- twist: swirl — the center rotates most, corners stay pinned -->
+  <text x="420" y="726" font-size="11" fill="#94a3b8">field="twist" bend="80"</text>
+  <rect x="420" y="770" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="twist" bend="80">
+    <rect x="420" y="770" width="240" height="80" fill="#831843"/>
+    <x:textbox x="420" y="770" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#f9a8d4">TWIST</x:textbox>
   </x:warp>
 </svg>

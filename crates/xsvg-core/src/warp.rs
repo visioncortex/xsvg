@@ -31,27 +31,44 @@ impl WarpAxis {
     }
 }
 
-/// The displacement-family Envelope-Distort presets (§7.2, Transform.md §B): a 1-D
-/// profile swept across the bend axis of a normalized envelope frame.
+/// The Envelope-Distort presets (§7.2, Transform.md §B), grouped by field family.
+/// Displacement presets sweep a 1-D profile across the bend axis; the 2-D families
+/// (scale / radial / rotational) evaluate over the whole normalized frame. `r̂` below
+/// is the corner-normalized radius `√((nx² + ny²)/2)` — 1 at the frame's corners, so
+/// every radial/rotational preset pins the corners.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Profile {
-    /// both edges ride one parabola: `Δ = A·(1 − u²)`
+    /// displacement — both edges ride one parabola: `Δ = A·(1 − u²)`
     Arch,
-    /// one full sine, uniform through the height: `Δ = A·sin(π·u)`
+    /// displacement — one full sine, uniform through the height: `Δ = A·sin(π·u)`
     Flag,
-    /// linear ramp (pure shear profile): `Δ = A·u`
+    /// displacement — linear ramp (pure shear profile): `Δ = A·u`
     Rise,
-    /// Flag whose phase advances by π/2 from the leading to the trailing edge:
+    /// displacement — Flag whose phase advances by π/2 through the height:
     /// `Δ = A·sin(π·u − (π/4)·(v + 1))`
     Wave,
+    /// radial — magnify about the center: `s = 1 + b·(1 − r̂²)` (barrel; negative
+    /// bend = pincushion); corners fixed
+    Fisheye,
+    /// radial, axis-separable — each axis bulges by the other's parabola:
+    /// `sx = 1 + (b/2)(1 − ny²)`, `sy = 1 + (b/2)(1 − nx²)`; corners fixed
+    Inflate,
+    /// scale — the bend axis pinches by a profile of `v` (waist at mid-height):
+    /// `u′ = u·(1 − (b/2)(1 − v²))`; negative bend = barrel
+    Squeeze,
+    /// rotational — swirl about the center: `θ = b·(π/2)·(1 − r̂)`, center rotates
+    /// most, corners fixed; angle-true (rotates the absolute offset)
+    Twist,
 }
 
 /// An envelope-preset field over a source bounding box. The box normalizes points to
-/// `(u, v) ∈ [−1, 1]²` (`u` along the bend axis); the amplitude is `A = bend · L/4`
-/// with `L` the bend-axis extent, so a preset scales with the art it warps. Positive
-/// bend displaces **up** (−y) for `axis="h"` and **right** (+x) for `axis="v"`.
-/// `bend` is clamped to `[−1, 1]` (authored as −100…100 %); non-finite collapses to
-/// 0 (the identity), so a degenerate box or bend can never emit NaN.
+/// `(u, v) ∈ [−1, 1]²` (`u` along the bend axis). Displacement presets scale by the
+/// amplitude `A = bend · L/4` (`L` = the bend-axis extent), so they grow with the
+/// art they warp; positive bend displaces **up** (−y) for `axis="h"` and **right**
+/// (+x) for `axis="v"`. The 2-D families (fisheye / inflate / squeeze / twist) use
+/// dimensionless factors of `bend` — see each [`Profile`] variant. `bend` is clamped
+/// to `[−1, 1]` (authored as −100…100 %); non-finite collapses to 0 (the identity),
+/// so a degenerate box or bend can never emit NaN.
 #[derive(Clone, Copy, Debug)]
 pub struct EnvelopePreset {
     profile: Profile,
@@ -61,14 +78,21 @@ pub struct EnvelopePreset {
 }
 
 impl EnvelopePreset {
-    /// Build a preset field by name (`arch` | `flag` | `rise` | `wave`) over the
-    /// pre-warp union bbox of the geometry it will map. `None` for unknown names.
+    /// Build a preset field by name (`arch` | `flag` | `rise` | `wave` | `fisheye` |
+    /// `inflate` | `squeeze` | `twist`) over the pre-warp union bbox of the geometry
+    /// it will map. `None` for unknown names. `axis` selects the bend axis for the
+    /// displacement family and `squeeze`; the radial/rotational presets are
+    /// symmetric and ignore it.
     pub fn new(name: &str, bend: f64, axis: WarpAxis, bbox: Rect) -> Option<Self> {
         let profile = match name {
             "arch" => Profile::Arch,
             "flag" => Profile::Flag,
             "rise" => Profile::Rise,
             "wave" => Profile::Wave,
+            "fisheye" => Profile::Fisheye,
+            "inflate" => Profile::Inflate,
+            "squeeze" => Profile::Squeeze,
+            "twist" => Profile::Twist,
             _ => return None,
         };
         let bend = if bend.is_finite() {
@@ -89,25 +113,59 @@ impl Field for EnvelopePreset {
     fn map(&self, p: Point) -> Point {
         let (cx, cy) = (self.bbox.center().x, self.bbox.center().y);
         let (hw, hh) = (self.bbox.width() / 2.0, self.bbox.height() / 2.0);
-        // normalized coords along the bend axis (u) and across it (v); a collapsed
-        // extent normalizes to 0 rather than dividing by it
+        // normalized frame coords; a collapsed extent normalizes to 0 rather than
+        // dividing by it
         let norm = |d: f64, half: f64| if half > 0.0 { d / half } else { 0.0 };
+        let nx = norm(p.x - cx, hw);
+        let ny = norm(p.y - cy, hh);
+        // (u, v): u along the bend axis, v across it
         let (u, v, half_l) = match self.axis {
-            WarpAxis::H => (norm(p.x - cx, hw), norm(p.y - cy, hh), hw),
-            WarpAxis::V => (norm(p.y - cy, hh), norm(p.x - cx, hw), hh),
+            WarpAxis::H => (nx, ny, hw),
+            WarpAxis::V => (ny, nx, hh),
         };
-        let a = self.bend * half_l / 2.0; // A = bend · L/4
-        let d = match self.profile {
-            Profile::Arch => a * (1.0 - u * u),
-            Profile::Flag => a * (std::f64::consts::PI * u).sin(),
-            Profile::Rise => a * u,
-            Profile::Wave => {
-                a * (std::f64::consts::PI * u - std::f64::consts::FRAC_PI_4 * (v + 1.0)).sin()
+        let b = self.bend;
+        match self.profile {
+            // displacement family: a 1-D profile Δ(u, v) pushed across the bend axis
+            Profile::Arch | Profile::Flag | Profile::Rise | Profile::Wave => {
+                let a = b * half_l / 2.0; // A = bend · L/4
+                let d = match self.profile {
+                    Profile::Arch => a * (1.0 - u * u),
+                    Profile::Flag => a * (std::f64::consts::PI * u).sin(),
+                    Profile::Rise => a * u,
+                    _ => {
+                        a * (std::f64::consts::PI * u - std::f64::consts::FRAC_PI_4 * (v + 1.0))
+                            .sin()
+                    }
+                };
+                match self.axis {
+                    WarpAxis::H => Point::new(p.x, p.y - d),
+                    WarpAxis::V => Point::new(p.x + d, p.y),
+                }
             }
-        };
-        match self.axis {
-            WarpAxis::H => Point::new(p.x, p.y - d),
-            WarpAxis::V => Point::new(p.x + d, p.y),
+            Profile::Fisheye => {
+                let r2 = (nx * nx + ny * ny) / 2.0; // r̂² — 1 at the corners
+                let s = 1.0 + b * (1.0 - r2.min(1.0));
+                Point::new(cx + nx * s * hw, cy + ny * s * hh)
+            }
+            Profile::Inflate => {
+                let sx = 1.0 + b / 2.0 * (1.0 - ny * ny);
+                let sy = 1.0 + b / 2.0 * (1.0 - nx * nx);
+                Point::new(cx + nx * sx * hw, cy + ny * sy * hh)
+            }
+            Profile::Squeeze => {
+                let s = 1.0 - b / 2.0 * (1.0 - v * v);
+                match self.axis {
+                    WarpAxis::H => Point::new(cx + u * s * hw, p.y),
+                    WarpAxis::V => Point::new(p.x, cy + u * s * hh),
+                }
+            }
+            Profile::Twist => {
+                let r = ((nx * nx + ny * ny) / 2.0).sqrt(); // r̂ — 1 at the corners
+                let theta = b * std::f64::consts::FRAC_PI_2 * (1.0 - r.min(1.0));
+                let (sin, cos) = theta.sin_cos();
+                let (dx, dy) = (p.x - cx, p.y - cy);
+                Point::new(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+            }
         }
     }
 }
@@ -377,18 +435,98 @@ mod tests {
         assert_eq!(baked.elements().last(), Some(&PathEl::ClosePath));
     }
 
+    /// All preset names, across every field family.
+    const PRESETS: [&str; 8] = [
+        "arch", "flag", "rise", "wave", "fisheye", "inflate", "squeeze", "twist",
+    ];
+
     #[test]
     fn degenerate_bbox_and_bend_never_leak_nan() {
         let path = rect_path();
-        for bbox in [Rect::ZERO, Rect::new(5.0, 5.0, 5.0, 5.0)] {
-            for bend in [0.0, 1.0, -1.0, f64::NAN, f64::INFINITY] {
-                let f = EnvelopePreset::new("flag", bend, WarpAxis::H, bbox).unwrap();
-                let baked = bake(&path, &f, 0.25);
-                assert!(vertices(&baked)
-                    .iter()
-                    .all(|p| p.x.is_finite() && p.y.is_finite()));
+        for name in PRESETS {
+            for bbox in [Rect::ZERO, Rect::new(5.0, 5.0, 5.0, 5.0)] {
+                for bend in [0.0, 1.0, -1.0, f64::NAN, f64::INFINITY] {
+                    let f = EnvelopePreset::new(name, bend, WarpAxis::H, bbox).unwrap();
+                    let baked = bake(&path, &f, 0.25);
+                    assert!(
+                        vertices(&baked)
+                            .iter()
+                            .all(|p| p.x.is_finite() && p.y.is_finite()),
+                        "{name} bend={bend} bbox={bbox:?}"
+                    );
+                }
             }
         }
+    }
+
+    /// The centered frame used by the 2-D family tests: 100×40 about the origin.
+    fn centered() -> Rect {
+        Rect::new(-50.0, -20.0, 50.0, 20.0)
+    }
+
+    fn preset(name: &str, bend: f64) -> EnvelopePreset {
+        EnvelopePreset::new(name, bend, WarpAxis::H, centered()).unwrap()
+    }
+
+    #[test]
+    fn fisheye_magnifies_the_center_and_pins_the_corners() {
+        let f = preset("fisheye", 1.0);
+        // nx = 0.2, ny = 0 → r̂² = 0.02 → s = 1.98 → x: 10 → 19.8
+        let m = f.map(Point::new(10.0, 0.0));
+        assert!((m.x - 19.8).abs() < 1e-9 && m.y.abs() < 1e-9, "{m:?}");
+        // corners are at r̂ = 1 → fixed
+        let c = f.map(Point::new(50.0, 20.0));
+        assert!(
+            (c.x - 50.0).abs() < 1e-9 && (c.y - 20.0).abs() < 1e-9,
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn inflate_bulges_mid_edges_and_pins_the_corners() {
+        let f = preset("inflate", 1.0);
+        // right-edge midpoint (nx=1, ny=0): sx = 1.5 → x: 50 → 75, y untouched
+        let m = f.map(Point::new(50.0, 0.0));
+        assert!((m.x - 75.0).abs() < 1e-9 && m.y.abs() < 1e-9, "{m:?}");
+        // top-edge midpoint (nx=0, ny=−1): sy = 1.5 → y: −20 → −30
+        let t = f.map(Point::new(0.0, -20.0));
+        assert!(t.x.abs() < 1e-9 && (t.y + 30.0).abs() < 1e-9, "{t:?}");
+        let c = f.map(Point::new(-50.0, 20.0));
+        assert!(
+            (c.x + 50.0).abs() < 1e-9 && (c.y - 20.0).abs() < 1e-9,
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn squeeze_pinches_the_waist_and_pins_the_top_and_bottom() {
+        let f = preset("squeeze", 1.0);
+        // right-edge midpoint (u=1, v=0): s = 0.5 → x: 50 → 25
+        let m = f.map(Point::new(50.0, 0.0));
+        assert!((m.x - 25.0).abs() < 1e-9 && m.y.abs() < 1e-9, "{m:?}");
+        // corners (v = ±1) stay put
+        let c = f.map(Point::new(50.0, -20.0));
+        assert!(
+            (c.x - 50.0).abs() < 1e-9 && (c.y + 20.0).abs() < 1e-9,
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn twist_swirls_the_center_and_pins_the_corners() {
+        let f = preset("twist", 1.0);
+        // near the center θ → 90°: (ε, 0) rotates to ≈ (0, ε)
+        let m = f.map(Point::new(0.5, 0.0));
+        assert!(m.x.abs() < 0.02 && (m.y - 0.5).abs() < 0.02, "{m:?}");
+        // corners are at r̂ = 1 → θ = 0 → fixed
+        let c = f.map(Point::new(50.0, 20.0));
+        assert!(
+            (c.x - 50.0).abs() < 1e-9 && (c.y - 20.0).abs() < 1e-9,
+            "{c:?}"
+        );
+        // the swirl is angle-true: distance from the center is preserved
+        let p = Point::new(20.0, 5.0);
+        assert!((f.map(p).distance(Point::ZERO) - p.distance(Point::ZERO)).abs() < 1e-9);
     }
 
     #[test]

@@ -178,7 +178,7 @@ export const CATALOG: Category[] = [
       {
         file: "warp-presets.xsvg",
         title: "Envelope presets",
-        blurb: "arch / flag / rise / wave displacement fields over a rect + outlined text; the quality profile grades the bake tolerance",
+        blurb: "eight presets — arch/flag/rise/wave + fisheye/inflate/squeeze/twist — over a rect + outlined text; the quality profile grades the bake tolerance",
       },
     ],
   },

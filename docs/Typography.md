@@ -110,7 +110,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
 | **Type on a path** | AI | E | ◑ | (also in §A) |
-| **Envelope distort — warp presets** (arc, arch, bulge, flag, wave, fisheye, inflate, squeeze, twist, rise, shell, fish, stair) | AI | S | ◑ | first four (**arch/flag/rise/wave**) shipped — `<x:warp>` (§7.3) bakes outlined glyphs + shapes through the kurbo pipeline; catalog in [Transform.md §B](Transform.md) |
+| **Envelope distort — warp presets** (arc, arch, bulge, flag, wave, fisheye, inflate, squeeze, twist, rise, shell, fish, stair) | AI | S | ◑ | eight shipped (**arch/flag/rise/wave + fisheye/inflate/squeeze/twist**) — `<x:warp>` (§7.3) bakes outlined glyphs + shapes through the kurbo pipeline; catalog in [Transform.md §B](Transform.md) |
 | **Envelope distort — mesh** (free mesh warp) | AI | S | ❌ | ties into the mesh primitive (Pillar 3) |
 | **Envelope distort — top object** (fit text to a shape) | AI | S | ❌ | conform geometry to an enclosing path |
 

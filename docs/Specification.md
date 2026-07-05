@@ -486,7 +486,7 @@ interchangeable under §7.1:
 |---|---|---|
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
 | **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
-| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **arch / flag / rise / wave shipped** (§7.3); full catalog in [Transform.md §B](Transform.md) |
+| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **8 of 15 shipped** (§7.3): arch / flag / rise / wave / fisheye / inflate / squeeze / twist; full catalog in [Transform.md §B](Transform.md) |
 | **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
 | **MLS** | weighted handle map (Schaefer et al.), `w_i = 1/\|p_i−v\|^{2α}` | move-a-few-handles warp |
@@ -506,9 +506,9 @@ carrying the element's paint and `transform` (affine, so it composes after the b
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
-| `field` | `arch` \| `flag` \| `rise` \| `wave` *(more fields per §7.2 follow)* | — | selects the field |
-| `bend` | number, −100…100 (%) | `0` | strength; clamped; positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
-| `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical) |
+| `field` | `arch` \| `flag` \| `rise` \| `wave` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` *(more per §7.2 follow)* | — | selects the field |
+| `bend` | number, −100…100 (%) | `0` | strength; clamped; for displacement presets positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
+| `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical); applies to the displacement family and `squeeze` — the radial/rotational presets are symmetric and ignore it |
 
 **Model (normative).** Children first lower to pure `<path>` geometry: basic shapes convert (sharp
 `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, and `<path>` as-is); xsvg text elements
@@ -516,8 +516,13 @@ participate through their **outlined** form (`outline="true"`, §6.12; `<x:textp
 `<x:warp>`s bake **innermost-first**. The **pre-warp union bbox** of that geometry is the envelope
 frame: it normalizes points to `(u, v) ∈ [−1, 1]²` (`u` along the bend axis) and sets the amplitude
 **`A = bend · L/4`** (`L` = the frame's bend-axis extent), so a preset scales with the art it warps.
-The preset profiles: **arch** `Δ = A(1−u²)` · **flag** `Δ = A·sin(πu)` · **rise** `Δ = A·u` ·
-**wave** `Δ = A·sin(πu − (π/4)(v+1))`. Every path then runs the §7.1 bake at the profile tolerance.
+The **displacement** profiles: **arch** `Δ = A(1−u²)` · **flag** `Δ = A·sin(πu)` · **rise** `Δ = A·u`
+· **wave** `Δ = A·sin(πu − (π/4)(v+1))`. The **2-D families** evaluate over the whole frame, with
+`r̂ = √((nx²+ny²)/2)` the corner-normalized radius (1 at the corners, so **corners stay pinned**):
+**fisheye** radial magnify `s = 1 + b(1−r̂²)` (negative bend = pincushion) · **inflate** per-axis
+bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)` · **squeeze** waist pinch
+`u′ = u·(1−(b/2)(1−v²))` (negative = barrel) · **twist** angle-true swirl `θ = b·(π/2)·(1−r̂)`.
+Every path then runs the §7.1 bake at the profile tolerance.
 
 **Degradation (normative).** A child that cannot become path geometry (live `<text>`, rounded
 `<rect>`, `<line>`, `<image>`, `<use>`) is **skipped with a marker comment** — a warp MUST NOT
@@ -525,7 +530,7 @@ silently emit unwarped content. An unknown or absent `field`, or no usable geome
 children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
 non-finite coordinates never reach the output (§4).
 
-**v1 limits.** Displacement presets only (perspective and the scale/radial families follow —
+**v1 limits.** Eight presets (perspective and the arc/shell scale family follow —
 [Transform.md](Transform.md)); polyline output (no cubic refit, §7.1); a `<g>` child whose subtree
 still contains non-path geometry is skipped whole; text must be outlined to participate.
 
@@ -566,7 +571,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
-| `<x:warp>` front-end — displacement presets (arch/flag/rise/wave) over shapes, paths, outlined text | implemented |
+| `<x:warp>` front-end — 8 presets (displacement arch/flag/rise/wave · radial fisheye/inflate · scale squeeze · rotational twist) over shapes, paths, outlined text | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit of warped polylines | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |

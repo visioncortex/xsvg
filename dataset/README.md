@@ -67,7 +67,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [warp-presets.xsvg](warp-presets.xsvg) | `<x:warp field="arch\|flag\|rise\|wave" bend="60">` bakes an envelope-preset field into plain `<path>`s — a rect and `outline="true"` text warp together through the same flatten → map pipeline; dashed boxes show the unwarped source |
+| [warp-presets.xsvg](warp-presets.xsvg) | `<x:warp field="…" bend="…">` bakes an envelope-preset field into plain `<path>`s — eight presets (arch/flag/rise/wave + fisheye/inflate/squeeze/twist); a rect and `outline="true"` text warp together through the same flatten → map pipeline; dashed boxes show the unwarped source |
 
 ## Edge cases & invariants
 
