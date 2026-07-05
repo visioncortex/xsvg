@@ -260,8 +260,9 @@ function outline(
 // --- Text on a path (§6.13): the browser adapter for GlyphOutliner::outline_on_path.
 // Outline the run on a flat baseline (opentype's structured commands), flatten to a
 // tolerance, then push every vertex through a path-derived field — the §7 bake done in
-// JS (the pure-Rust kurbo path is the later native impl). v0 implements the *skew*
-// (displacement) field; rainbow returns "" so it falls back to live <text>.
+// JS (the pure-Rust kurbo path is the later native impl). Fields: skew (§6.13.1 —
+// vertical displacement by the path's height profile) and rainbow (§6.13.2 — arc-length
+// follow + normal offset); baseline-shift offsets the run along the local normal.
 
 // Sample a reference path as a height field f(x) — its y at horizontal position x
 // (§6.13.1). Reuses the offscreen probe; assumes the path is single-valued in x.
@@ -298,6 +299,50 @@ function pathHeightField(pathD: string): { x0: number; y(x: number): number } | 
       }
       return ys[K];
     },
+  };
+}
+
+// Sample a reference path as an arc-length frame (§6.13.2): returns a map
+// (s, off) → the point `off` units along the local normal from the path point at arc
+// length `s`. The normal is the tangent rotated +90° in y-down coords — for a
+// left→right path it points down, so negative glyph y (ascenders) rises above the
+// curve. Beyond either end the frame extends straight along the end tangent, so a run
+// longer than the path continues rather than bunching up. Reuses the offscreen probe.
+function pathArcFrame(pathD: string): ((s: number, off: number) => [number, number]) | null {
+  const p = probe();
+  p.setAttribute("d", pathD);
+  let len: number;
+  try {
+    len = p.getTotalLength();
+  } catch {
+    return null;
+  }
+  if (!(len > 0)) return null;
+  const K = 512;
+  const xs = new Float64Array(K + 1);
+  const ys = new Float64Array(K + 1);
+  for (let i = 0; i <= K; i++) {
+    const pt = p.getPointAtLength((i / K) * len);
+    xs[i] = pt.x;
+    ys[i] = pt.y;
+  }
+  // unit tangent of the LUT segment starting at sample i (degenerate → +x)
+  const tangent = (i: number): [number, number] => {
+    const dx = xs[i + 1] - xs[i];
+    const dy = ys[i + 1] - ys[i];
+    const d = Math.hypot(dx, dy);
+    return d > 0 ? [dx / d, dy / d] : [1, 0];
+  };
+  return (s, off) => {
+    const sc = Math.min(Math.max(s, 0), len); // clamped arc position
+    const over = s - sc; // straight-line overshoot past the path's ends
+    const t = (sc / len) * K;
+    const i = Math.min(K - 1, Math.floor(t));
+    const frac = t - i;
+    const [tx, ty] = tangent(i);
+    const px = xs[i] + frac * (xs[i + 1] - xs[i]);
+    const py = ys[i] + frac * (ys[i + 1] - ys[i]);
+    return [px + over * tx - off * ty, py + over * ty + off * tx];
   };
 }
 
@@ -379,21 +424,40 @@ function outlineOnPath(
   size: number,
   pathD: string,
   effect: string,
+  baselineShift: number,
 ): string {
   const font = lookupFont(family);
   if (!font) return ""; // no bytes → Rust falls back to live <text>
-  if (effect !== "skew") return ""; // rainbow etc. not built yet → graceful fallback
-  const field = pathHeightField(pathD);
-  if (!field) return "";
+  // Per-effect vertex map — a §7.2 field. (gx, gy) are outline coords on the flat run
+  // baseline (gy negative above it); baseline-shift lifts the run off the path.
+  let map: (gx: number, gy: number) => [number, number];
+  if (effect === "skew") {
+    const field = pathHeightField(pathD);
+    if (!field) return "";
+    // skew field: (x, y) → (x, y + f(x)); the run begins at the path's start x
+    map = (gx, gy) => {
+      const x = field.x0 + gx;
+      return [x, field.y(x) + gy - baselineShift];
+    };
+  } else if (effect === "rainbow") {
+    const frame = pathArcFrame(pathD);
+    if (!frame) return "";
+    // path-follow field: (x, y) → P(s) + y·N(s), s = arc length from the path start
+    map = (gx, gy) => frame(gx, gy - baselineShift);
+  } else {
+    return ""; // unknown effect → graceful live-<text> fallback
+  }
   const step = Math.max(1, size / 12); // flatten tolerance, size-relative (quality knob)
   const contours = flattenGlyph(font.getPath(text, 0, 0, size).commands, step);
   const r = (n: number) => (Math.round(n * 100) / 100).toString();
   let d = "";
   for (const c of contours) {
     for (let i = 0; i < c.length; i += 2) {
-      const x = field.x0 + c[i]; // run baseline begins at the path's start x
-      // skew field: (x, y) → (x, y + f(x)); c[i+1] is y relative to the baseline
-      d += (i === 0 ? "M" : "L") + r(x) + "," + r(field.y(x) + c[i + 1]);
+      const [x, y] = map(c[i], c[i + 1]);
+      // totality (§4): a degenerate path/field must never leak NaN/inf coordinates —
+      // abandon the warp and let Rust fall back to live <text>
+      if (!(Number.isFinite(x) && Number.isFinite(y))) return "";
+      d += (i === 0 ? "M" : "L") + r(x) + "," + r(y);
     }
     d += "Z";
   }

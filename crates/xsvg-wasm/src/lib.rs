@@ -6,7 +6,7 @@
 //!   • `<x:textbox>` → wrapped + aligned + shrink-to-fit text, incl. `in="#shape"` region
 //!     flow and cap-height centering (§6.4–6.5, 6.10)
 //!   • styled `<tspan>` runs (§6.11); create outlines `outline="true"` → `<path>` (§6.12);
-//!     text on a path `<x:textpath>` skew (§6.13)
+//!     text on a path `<x:textpath>` skew + rainbow, with `baseline-shift` (§6.13)
 //! Other `x:` extensions are recognized and skipped with a marker.
 //!
 //! **Platform seams.** Everything platform-specific is a trait the core calls, backed here
@@ -147,8 +147,9 @@ fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
 /// Browser-backed [`GlyphOutliner`]. `outline_run(text, family, weight, style, size, x,
 /// baseline) => d | ""` returns a glyph outline (opentype.js), or `""` when the font's
 /// bytes aren't available (→ fall back to live `<text>`). `outline_on_path(text, family,
-/// weight, style, size, pathD, effect) => d | ""` additionally warps the outline onto a
-/// path (§6.13 — the text-on-path specialization of the §7 geometry pipeline).
+/// weight, style, size, pathD, effect, baselineShift) => d | ""` additionally warps the
+/// outline onto a path (§6.13 — the text-on-path specialization of the §7 geometry
+/// pipeline).
 struct JsOutliner<'a> {
     outline_run: &'a js_sys::Function,
     outline_on_path: &'a js_sys::Function,
@@ -183,12 +184,14 @@ impl GlyphOutliner for JsOutliner<'_> {
         size: f64,
         path_d: &str,
         effect: &str,
+        baseline_shift: f64,
     ) -> Option<String> {
         let args = js_sys::Array::new();
         args.push(&JsValue::from_str(text));
         push_style_args(&args, style, size);
         args.push(&JsValue::from_str(path_d));
         args.push(&JsValue::from_str(effect));
+        args.push(&JsValue::from_f64(baseline_shift));
         let d = self
             .outline_on_path
             .apply(&JsValue::NULL, &args)
@@ -471,17 +474,19 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
 }
 
-/// `<x:textpath in="#path" effect="skew">` (§6.13): outline the run and warp it onto the
-/// referenced path via the [`GlyphOutliner::outline_on_path`] seam — the text-on-path
-/// specialization of the geometry-transform pipeline (§7). Emits `<g fill=… stroke=…>` +
-/// the warped `<path>`; falls back to a straight live `<text>` when no outline font is
-/// available, so the document never breaks.
+/// `<x:textpath in="#path" effect="skew|rainbow">` (§6.13): outline the run and warp it
+/// onto the referenced path via the [`GlyphOutliner::outline_on_path`] seam — the
+/// text-on-path specialization of the geometry-transform pipeline (§7). `baseline-shift`
+/// offsets the run from the path along the local normal (positive = above). Emits
+/// `<g fill=… stroke=…>` + the warped `<path>`; falls back to a straight live `<text>`
+/// when no outline font is available, so the document never breaks.
 fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
     let stroke = outline_stroke_attrs(node);
     let pos = pos_attr(node, ctx);
     let effect = node.attribute("effect").unwrap_or("skew");
+    let baseline_shift = attr_num(node, "baseline-shift", 0.0);
     let text = collect_text(node);
 
     let Some(reference) = node.attribute("in") else {
@@ -493,9 +498,9 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         return;
     };
 
-    if let Some(d) = ctx
-        .outliner
-        .outline_on_path(&text, &style, style.size, &path_d, effect)
+    if let Some(d) =
+        ctx.outliner
+            .outline_on_path(&text, &style, style.size, &path_d, effect, baseline_shift)
     {
         push_outline_group(out, fill, &stroke, &pos, &[d]);
         return;
@@ -1153,17 +1158,22 @@ mod tests {
         fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
             Some(format!("M{x},{b} h1 v-1 h-1 Z"))
         }
-        /// Marker "warped" path whose numbers encode that the reference path + size
-        /// reached the seam — enough to prove the `<x:textpath>` emit wiring.
+        /// Marker "warped" path encoding that the reference path, size, effect, and
+        /// baseline shift reached the seam — enough to prove the `<x:textpath>` wiring.
         fn outline_on_path(
             &self,
             _t: &str,
             _s: &TextStyle,
             sz: f64,
             path_d: &str,
-            _effect: &str,
+            effect: &str,
+            baseline_shift: f64,
         ) -> Option<String> {
-            Some(format!("M0,0 L{},{} Z", path_d.len(), sz))
+            Some(format!(
+                "M0,0 L{},{} Z {effect} {baseline_shift}",
+                path_d.len(),
+                sz
+            ))
         }
     }
 
@@ -1638,6 +1648,53 @@ mod tests {
             out.contains("<!-- xsvg: <x:textpath in> target not found"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn textpath_forwards_effect_and_baseline_shift() {
+        // effect="rainbow" + baseline-shift reach the outliner seam (§6.13.2)
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,60 A60,60 0 0 1 120,60" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="8" font-size="20" fill="#111">arc</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("rainbow 8"), "{out}");
+    }
+
+    #[test]
+    fn textpath_defaults_to_skew_with_zero_shift() {
+        // no effect / baseline-shift attributes → skew, shift 0 at the seam
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" font-size="20" fill="#111">wave</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("skew 0"), "{out}");
+    }
+
+    #[test]
+    fn textpath_degenerate_input_never_panics_or_leaks_nan() {
+        // Degenerate baseline-shift values (garbage, ±inf, NaN, unit suffix) collapse
+        // to a finite number at the seam — never NaN (§4 totality).
+        for bad in ["garbage", "1e999", "-1e999", "NaN", "inf"] {
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="{bad}" font-size="20">wave</x:textpath></svg>"##
+            );
+            let out = compile_outlined(&svg);
+            assert!(out.contains("rainbow 0"), "shift={bad}: {out}");
+            assert!(!out.contains("NaN"), "shift={bad}: {out}");
+        }
+        // A unit suffix parses its numeric prefix (13px → 13), like every length attr.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="13px" font-size="20">wave</x:textpath></svg>"##;
+        assert!(compile_outlined(svg).contains("rainbow 13"));
+    }
+
+    #[test]
+    fn textpath_empty_and_degenerate_targets_do_not_panic() {
+        // empty run → still total (the stub warps ""; a real backend may fall back)
+        let empty = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" font-size="20"></x:textpath></svg>"##;
+        compile_outlined(empty);
+        // zero-length path data still reaches the seam verbatim (degeneracy is the
+        // backend's to detect — it returns None and the element falls back)
+        let point = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M5,5 L5,5" fill="none"/><x:textpath in="#p" effect="rainbow" font-size="20">dot</x:textpath></svg>"##;
+        compile_outlined(point);
+        // a target with no fillable geometry (<line>) → comment marker, no panic
+        let line = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><line id="p" x1="0" y1="20" x2="120" y2="20"/><x:textpath in="#p" effect="rainbow" font-size="20">hi</x:textpath></svg>"##;
+        assert!(compile_outlined(line).contains("not found or not a path"));
     }
 
     #[test]

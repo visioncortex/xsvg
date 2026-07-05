@@ -3,7 +3,8 @@
 > **Status: draft, best-effort, evolving.** This is the normative reference for the xsvg language and
 > how the compiler lowers it to a static SVG subset. It grows as features land. Companion docs:
 > [Syntax.md](Syntax.md) (design narrative & examples), [Plan.md](Plan.md) (architecture & roadmap),
-> [Typography.md](Typography.md) (capability catalog), [Research.md](Research.md) (prior art).
+> [Typography.md](Typography.md) (typesetting capability catalog), [Transform.md](Transform.md)
+> (geometry-transform capability catalog), [Research.md](Research.md) (prior art).
 >
 > Conformance keywords **MUST / SHOULD / MAY** are used in the RFC 2119 sense, loosely. Each section
 > is tagged **[implemented]**, **[spec'd]** (rules defined, not yet built), or **[planned]** (sketch
@@ -361,14 +362,14 @@ effects of the remaining pillars (§7): geometry warp/envelope and mesh-fill app
 `glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing` (§6.8) do not apply to the traced path, and
 curved-shape region flow (§6.10) keeps its own per-line placement. Per-run outlining is future work.
 
-### 6.13 Text on a path — `<x:textpath>` [implemented: skew]
+### 6.13 Text on a path — `<x:textpath>` [implemented: skew, rainbow]
 
 Bind a text run to an open path: the run is laid out on a straight baseline, **outlined** (§6.12), and
 its geometry **warped onto the path**. This is a **specialization of the geometry-transform pipeline
 (§7)** — the outlined run is the source geometry, and the reference path derives the **field** (§7.2)
 that the §7.1 bake applies — and it mirrors Illustrator's *Type on a Path* effects. The `effect`
-attribute just **selects the field**: **skew** = the *displacement* field (built first); **rainbow** =
-the *path-follow* field (planned).
+attribute just **selects the field**: **skew** = the *displacement* field (§6.13.1); **rainbow** =
+the *path-follow* field (§6.13.2).
 
 **Surface.**
 ```xml
@@ -377,7 +378,11 @@ the *path-follow* field (planned).
 ```
 - **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`). Like
   `<x:textbox in="#shape">` and `clipPath`, only its **geometry** is used; its own paint is ignored.
-- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(planned; §6.13.2)*.
+- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)*.
+- **`baseline-shift`** — length, default `0`: offsets the run's baseline from the path along the
+  **local normal** — positive lifts the text above the path, matching SVG `baseline-shift`
+  semantics. Applies to every effect (under skew, where the normal is not computed, it is a plain
+  vertical lift). Two runs on the same path with opposite shifts sit above and below it.
 - **`align`** — `start` *(default)* | `middle` | `end`: where the run sits within the path's x-extent.
 - **`start`** — horizontal offset (user units) at which the run begins along the path (default `0`).
 - Standard text attributes apply: `font-*`, `fill`, `stroke*` (the emitted outline carries them, §6.12),
@@ -393,7 +398,7 @@ in `x`**, and where it is not, the first (topmost) `y` at that `x` is used.
 **6.13.1 Skew — 1-D vertical displacement [implemented].** The §7.2 **displacement** field: every outline
 point maps
 
-> `(x, y) → (x, y + f(x))`
+> `(x, y) → (x, y + f(x) − baseline-shift)`
 
 so glyphs stay **upright**, vertical strokes stay vertical, and horizontal edges tilt by the local slope
 `f'(x)` — the vertical **shear** Illustrator calls *Skew*. There is **no arc-length reparameterization
@@ -401,11 +406,22 @@ and no normal offset**, hence no generic path-offsetting — the cheapest field.
 bake unchanged (flatten → displace → refit), emitted as one `<path>` per run inside a
 `<g fill=… stroke=…>` (exactly as §6.12); the flatten tolerance is the graded quality knob.
 
-**6.13.2 Rainbow — arc-length follow + deform [planned].** The §7.2 **path-follow** field:
-reparameterize by arc length (text-`x` → position `s` on the path) and map `(x, y) → P(s) + y·N(s)`
-(path point plus **normal** offset). This both rotates *and* deforms glyphs along the curve; it needs an
-arc-length lookup + Frenet frame + the normal offset (generic path-offsetting). A *non-deforming* follow
-MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent, no shape deformation).
+**6.13.2 Rainbow — arc-length follow + deform [implemented].** The §7.2 **path-follow** field:
+reparameterize by arc length (text-`x` → distance `s` along the path) and map every outline point
+
+> `(x, y) → P(s) + (y − baseline-shift)·N(s)`,  `s = x`
+
+where `P(s)` is the path point at arc length `s` and **`N(s)` is the unit normal — the tangent rotated
++90° in the y-down coordinate system** (for a left→right path `N` points down, so ascenders rise above
+the curve and positive `baseline-shift` lifts the run off it). This both rotates *and* deforms glyphs
+along the curve: each point is mapped independently, so strokes compress on the inside of a bend and
+stretch on the outside. Unlike skew there is **no single-valued-in-`x` restriction** — loops and
+vertical segments are fine. **Beyond either end** of the path the frame extends **straight along the
+end tangent**, so a run longer than the path continues rather than bunching at the endpoint. The v0
+adapter samples a uniform arc-length LUT from the reference path (tangents from adjacent samples) and
+runs the standard §7.1 bake; LUT resolution and flatten tolerance are the quality knobs. A
+*non-deforming* follow MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent,
+no shape deformation) — future work.
 
 **Degradation.** `<x:textpath>` needs the glyph outliner (§6.12) to warp geometry. If it is unavailable
 (no font bytes), skew degrades to a **stepped baseline**: live `<text>` with a per-glyph vertical offset
@@ -413,8 +429,9 @@ MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent, n
 possible — the document never breaks.
 
 **v0 limits.** Single line; base style per run (per-run `<tspan>` styling, `justify`, `glyph-x-scale`
-do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). Rainbow
-and the native-`<textPath>` follow are future work.
+do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). The
+`align`/`start` placement options are **not yet wired** (every run begins at the path's start); the
+native-`<textPath>` non-deforming follow is future work.
 
 ## 7. Geometry transforms — a generic deformation pipeline [spec'd]
 
@@ -422,7 +439,8 @@ Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1
 warp, and envelope distortions **cannot ride on vector geometry** — xsvg **bakes** them into deformed
 paths. The design is deliberately **generic**: one pipeline, a library of pluggable **fields**, and thin
 front-ends. Text on a path (§6.13) is *one* front-end; skew / rainbow are *just field functions*.
-Grounded in [Research.md §7](Research.md).
+Grounded in [Research.md §7](Research.md); the capability catalog (Illustrator parity: warp presets,
+perspective, envelopes) and build order are in [Transform.md](Transform.md).
 
 ### 7.1 The bake (normative) [spec'd]
 
@@ -448,7 +466,7 @@ interchangeable under §7.1:
 | Field | `D(x, y)` | Notes |
 |---|---|---|
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
-| **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; needs arc-length LUT + Frenet frame |
+| **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
 | **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox |
 | **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
@@ -500,7 +518,9 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Styled runs (`<tspan>` per-run fill / weight / style / family in flowed text) | implemented |
 | Create outlines (`outline="true"` → glyphs as `<path>` via the `GlyphOutliner` seam, live-text fallback) | implemented |
 | Text on a path — `<x:textpath>` **skew** variant (outline → vertical-displacement warp → `<path>`) | implemented |
-| Text on a path — `<x:textpath>` **rainbow** variant (arc-length follow + deform) / native `<textPath>` | planned |
+| Text on a path — `<x:textpath>` **rainbow** variant (arc-length follow + deform) | implemented |
+| Text on a path — `baseline-shift` (offset the run along the local normal) | implemented |
+| Text on a path — `align`/`start` placement; native `<textPath>` non-deforming follow | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

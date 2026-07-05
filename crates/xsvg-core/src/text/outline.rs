@@ -20,10 +20,12 @@ pub trait GlyphOutliner {
 
     /// Outline `text` and **warp it onto a path** (the text-on-path specialization of the
     /// geometry-transform pipeline): the run is shaped on a flat baseline, then every
-    /// outline point is displaced by the field selected by `effect` — `"skew"` (1-D
-    /// vertical displacement by the path's height profile) or `"rainbow"` (arc-length
-    /// follow). `path_d` is the reference path's SVG `d`. Returns the warped path `d`, or
-    /// `None` to fall back to live `<text>`. Default: `None` (no path-warping backend).
+    /// outline point is mapped by the field selected by `effect` — `"skew"` (1-D vertical
+    /// displacement by the path's height profile) or `"rainbow"` (arc-length follow +
+    /// normal offset). `path_d` is the reference path's SVG `d`; `baseline_shift` offsets
+    /// the run's baseline from the path along the local normal (positive = above the
+    /// path, SVG `baseline-shift` semantics). Returns the warped path `d`, or `None` to
+    /// fall back to live `<text>`. Default: `None` (no path-warping backend).
     fn outline_on_path(
         &self,
         _text: &str,
@@ -31,6 +33,7 @@ pub trait GlyphOutliner {
         _size: f64,
         _path_d: &str,
         _effect: &str,
+        _baseline_shift: f64,
     ) -> Option<String> {
         None
     }

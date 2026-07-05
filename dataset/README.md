@@ -60,12 +60,13 @@ Realistic composites that combine several features into one artifact.
 | File | Shows |
 |---|---|
 | [textpath.xsvg](textpath.xsvg) | `<x:textpath in="#wave" effect="skew">` outlines the run and warps it onto the curve via the displacement field — glyphs stay upright and shear, the baseline follows the path |
+| [textpath-rainbow.xsvg](textpath-rainbow.xsvg) | `effect="rainbow"` follows the arc — glyphs rotate and deform along the curve; `baseline-shift` offsets runs along the local normal (one run floats above, a second hangs beneath the same path) |
 
 ## Edge cases & invariants
 
 | File | Shows |
 |---|---|
-| [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word |
+| [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word, degenerate `<x:textpath>` targets (zero-length path → live-text fallback; vertical path under skew; rainbow run outliving its path) |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |
 
 ## Viewing them

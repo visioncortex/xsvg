@@ -159,6 +159,11 @@ export const CATALOG: Category[] = [
         title: "Text on a path (skew)",
         blurb: 'Outlined text warped onto a wave by the skew field — glyphs stay upright and shear, the baseline follows the curve',
       },
+      {
+        file: "textpath-rainbow.xsvg",
+        title: "Text on a path (rainbow)",
+        blurb: "The arc-length follow field — glyphs rotate and bend along the curve; baseline-shift floats runs above or below the path",
+      },
     ],
   },
   {
@@ -167,7 +172,7 @@ export const CATALOG: Category[] = [
       {
         file: "degenerate.xsvg",
         title: "Degenerate input",
-        blurb: "empty text, inline-size=0, font-size=0, shrink floors, oversized words",
+        blurb: "empty text, inline-size=0, font-size=0, shrink floors, oversized words, degenerate textpath targets",
       },
       {
         file: "descenders.xsvg",

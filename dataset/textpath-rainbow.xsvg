@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 300" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="300" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">text on a path — rainbow: glyphs rotate and bend along the arc; baseline-shift floats runs off it</text>
+
+  <!-- the reference arc (shown faintly as a guide) -->
+  <path id="arc" d="M70,240 C210,90 510,90 650,240" fill="none" stroke="#334155" stroke-width="2"/>
+
+  <!-- arc-length follow: verticals align to the local normal; baseline-shift lifts the run above the path -->
+  <x:textpath in="#arc" effect="rainbow" baseline-shift="10" font-family="-x-google-Anton" font-size="52" fill="#fbbf24">OVER THE RAINBOW</x:textpath>
+
+  <!-- a negative shift hangs a second run beneath the same arc -->
+  <x:textpath in="#arc" effect="rainbow" baseline-shift="-26" font-family="-x-google-Anton" font-size="20" fill="#94a3b8">a negative baseline-shift hangs beneath the same path</x:textpath>
+</svg>
