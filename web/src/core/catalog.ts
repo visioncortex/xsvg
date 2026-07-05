@@ -180,6 +180,11 @@ export const CATALOG: Category[] = [
         title: "Envelope presets",
         blurb: "eight presets — arch/flag/rise/wave + fisheye/inflate/squeeze/twist — over a rect + outlined text; the quality profile grades the bake tolerance",
       },
+      {
+        file: "warp-perspective.xsvg",
+        title: "Perspective & free distort",
+        blurb: "corners-solved homography (straight lines stay straight), bilinear free distort, and the distort-h/v sliders composing after a preset",
+      },
     ],
   },
   {

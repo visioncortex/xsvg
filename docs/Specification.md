@@ -487,11 +487,11 @@ interchangeable under §7.1:
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
 | **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
 | **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **8 of 15 shipped** (§7.3): arch / flag / rise / wave / fisheye / inflate / squeeze / twist; full catalog in [Transform.md §B](Transform.md) |
-| **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors |
+| **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors. **Shipped** (§7.3, `corners`-solved), plus **free** (bilinear) and the distortion-slider taper |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
 | **MLS** | weighted handle map (Schaefer et al.), `w_i = 1/\|p_i−v\|^{2α}` | move-a-few-handles warp |
 
-### 7.3 `<x:warp>` — generic front-end [implemented: displacement presets]
+### 7.3 `<x:warp>` — generic front-end [implemented: presets + perspective]
 
 Wrap arbitrary child geometry (shapes, `<path>`, outlined text) and apply a field non-destructively;
 the children stay editable in the source, the compiler emits the baked `<path>`s inside a `<g>`
@@ -506,9 +506,11 @@ carrying the element's paint and `transform` (affine, so it composes after the b
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
-| `field` | `arch` \| `flag` \| `rise` \| `wave` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` *(more per §7.2 follow)* | — | selects the field |
-| `bend` | number, −100…100 (%) | `0` | strength; clamped; for displacement presets positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
+| `field` | `arch` \| `flag` \| `rise` \| `wave` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` \| `perspective` \| `free` *(more per §7.2 follow)* | — | selects the field |
+| `bend` | number, −100…100 (%) | `0` | preset strength; clamped; for displacement presets positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
 | `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical); applies to the displacement family and `squeeze` — the radial/rotational presets are symmetric and ignore it |
+| `corners` | 8 numbers `"x0,y0 x1,y1 x2,y2 x3,y3"` | — | the target corners — **TL TR BR BL** — for `perspective` / `free`; required by both |
+| `distort-h`, `distort-v` | number, −100…100 (%) | `0` | Illustrator's Distortion sliders: a projective **taper composed after** the field |
 
 **Model (normative).** Children first lower to pure `<path>` geometry: basic shapes convert (sharp
 `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, and `<path>` as-is); xsvg text elements
@@ -524,15 +526,27 @@ bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)` · **squeeze** waist pi
 `u′ = u·(1−(b/2)(1−v²))` (negative = barrel) · **twist** angle-true swirl `θ = b·(π/2)·(1−r̂)`.
 Every path then runs the §7.1 bake at the profile tolerance.
 
+**Corner-driven fields.** `field="perspective"` solves the **8-DOF homography** taking the envelope
+frame's corners to the authored `corners` (a Gauss-eliminated DLT over the normalized frame;
+precomputed once). Straight lines stay straight — and because the bake's error metric is distance to
+the mapped **chord segment**, already-straight output is *not* subdivided. A singular corner
+configuration (e.g. collinear targets) degrades like an unknown field. Near the map's horizon line
+the denominator is clamped, so extreme quads stay bounded (§4). `field="free"` is the cheaper
+4-corner **bilinear blend** (AI Free Distort): edges shear rather than converge, no straightness
+promise. **`distort-h` / `distort-v`** compose a center-anchored projective taper *after* any field:
+offsets from the frame center divide by `w = 1 − (dh/2)·nx − (dv/2)·ny` (clamped away from zero) —
+positive `distort-h` grows the right side, positive `distort-v` the bottom.
+
 **Degradation (normative).** A child that cannot become path geometry (live `<text>`, rounded
 `<rect>`, `<line>`, `<image>`, `<use>`) is **skipped with a marker comment** — a warp MUST NOT
 silently emit unwarped content. An unknown or absent `field`, or no usable geometry, emits the
 children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
 non-finite coordinates never reach the output (§4).
 
-**v1 limits.** Eight presets (perspective and the arc/shell scale family follow —
-[Transform.md](Transform.md)); polyline output (no cubic refit, §7.1); a `<g>` child whose subtree
-still contains non-path geometry is skipped whole; text must be outlined to participate.
+**v1 limits.** Eight presets + perspective/free (the arc/shell scale family follows —
+[Transform.md](Transform.md)); polyline output for curved fields (no cubic refit, §7.1); a `<g>`
+child whose subtree still contains non-path geometry is skipped whole; text must be outlined to
+participate.
 
 ### 7.4 Remaining pillars & deferred [planned]
 
@@ -572,6 +586,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — 8 presets (displacement arch/flag/rise/wave · radial fisheye/inflate · scale squeeze · rotational twist) over shapes, paths, outlined text | implemented |
+| `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit of warped polylines | planned |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |

@@ -170,6 +170,173 @@ impl Field for EnvelopePreset {
     }
 }
 
+/// Fields composed in order — the output of one feeds the next (§7.3, e.g. an
+/// envelope preset followed by the distortion-slider taper).
+pub struct Chain(pub Vec<Box<dyn Field>>);
+
+impl Field for Chain {
+    fn map(&self, p: Point) -> Point {
+        self.0.iter().fold(p, |q, f| f.map(q))
+    }
+}
+
+/// An 8-DOF projective map (§7.2 *perspective*): the envelope's corners go to four
+/// authored target points; straight lines stay straight. Solved once (DLT over the
+/// normalized frame for conditioning); evaluation is two dot products and a divide.
+pub struct Homography {
+    bbox: Rect,
+    m: [f64; 8], // a b c d e f g h — bottom-right of the 3×3 fixed at 1
+}
+
+impl Homography {
+    /// Solve the map taking the bbox corners — **TL, TR, BR, BL** — to `targets`.
+    /// `None` for a degenerate bbox, non-finite targets, or a singular system
+    /// (e.g. three collinear targets).
+    pub fn new(bbox: Rect, targets: [Point; 4]) -> Option<Self> {
+        if !(bbox.width() > 0.0 && bbox.height() > 0.0) {
+            return None;
+        }
+        if targets
+            .iter()
+            .any(|t| !(t.x.is_finite() && t.y.is_finite()))
+        {
+            return None;
+        }
+        // sources are the corners of the normalized frame
+        let src = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+        let mut a = [[0.0f64; 9]; 8];
+        for i in 0..4 {
+            let (x, y) = src[i];
+            let (tx, ty) = (targets[i].x, targets[i].y);
+            a[2 * i] = [x, y, 1.0, 0.0, 0.0, 0.0, -x * tx, -y * tx, tx];
+            a[2 * i + 1] = [0.0, 0.0, 0.0, x, y, 1.0, -x * ty, -y * ty, ty];
+        }
+        Some(Self {
+            bbox,
+            m: solve8(&mut a)?,
+        })
+    }
+}
+
+/// Gauss–Jordan elimination with partial pivoting on an 8×9 augmented system.
+/// `None` when a pivot collapses (singular — degenerate corner configuration).
+fn solve8(a: &mut [[f64; 9]; 8]) -> Option<[f64; 8]> {
+    for col in 0..8 {
+        let piv = (col..8).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;
+        if a[piv][col].abs() < 1e-9 {
+            return None;
+        }
+        a.swap(col, piv);
+        for row in 0..8 {
+            if row != col {
+                let f = a[row][col] / a[col][col];
+                for k in col..9 {
+                    a[row][k] -= f * a[col][k];
+                }
+            }
+        }
+    }
+    let mut out = [0.0; 8];
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = a[i][8] / a[i][i];
+        if !o.is_finite() {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+impl Field for Homography {
+    fn map(&self, p: Point) -> Point {
+        let nx = (p.x - self.bbox.center().x) / (self.bbox.width() / 2.0);
+        let ny = (p.y - self.bbox.center().y) / (self.bbox.height() / 2.0);
+        let [a, b, c, d, e, f, g, h] = self.m;
+        // points nearing the horizon line blow up; clamp the denominator so extreme
+        // corner configurations stay large-but-bounded (never NaN/inf)
+        let mut w = g * nx + h * ny + 1.0;
+        if w.abs() < 0.05 {
+            w = if w < 0.0 { -0.05 } else { 0.05 };
+        }
+        Point::new((a * nx + b * ny + c) / w, (d * nx + e * ny + f) / w)
+    }
+}
+
+/// A 4-corner **bilinear** distort (§7.2 *free distort* / AI Free Distort): the
+/// normalized frame blends the four target corners. Cheaper than a homography and
+/// makes no straight-line promise (edges shear rather than converge).
+pub struct FreeDistort {
+    bbox: Rect,
+    targets: [Point; 4], // TL, TR, BR, BL
+}
+
+impl FreeDistort {
+    pub fn new(bbox: Rect, targets: [Point; 4]) -> Option<Self> {
+        if targets
+            .iter()
+            .any(|t| !(t.x.is_finite() && t.y.is_finite()))
+        {
+            return None;
+        }
+        Some(Self { bbox, targets })
+    }
+}
+
+impl Field for FreeDistort {
+    fn map(&self, p: Point) -> Point {
+        let norm = |d: f64, half: f64| if half > 0.0 { d / half } else { 0.0 };
+        let nx = norm(p.x - self.bbox.center().x, self.bbox.width() / 2.0);
+        let ny = norm(p.y - self.bbox.center().y, self.bbox.height() / 2.0);
+        let [tl, tr, br, bl] = self.targets;
+        let (wtl, wtr) = ((1.0 - nx) * (1.0 - ny) / 4.0, (1.0 + nx) * (1.0 - ny) / 4.0);
+        let (wbr, wbl) = ((1.0 + nx) * (1.0 + ny) / 4.0, (1.0 - nx) * (1.0 + ny) / 4.0);
+        Point::new(
+            tl.x * wtl + tr.x * wtr + br.x * wbr + bl.x * wbl,
+            tl.y * wtl + tr.y * wtr + br.y * wbr + bl.y * wbl,
+        )
+    }
+}
+
+/// The Warp-Options **distortion sliders** (§7.3 `distort-h`/`distort-v`): a
+/// center-anchored projective taper composed after a preset. Every point's offset
+/// from the frame center divides by `w = 1 − (dh/2)·nx − (dv/2)·ny`, clamped away
+/// from zero — a constrained homography whose horizon stays outside the frame for
+/// moderate slider values. Positive `dh` grows the **right** side (and shrinks the
+/// left); positive `dv` grows the **bottom**. Inputs clamp to `[−1, 1]`; non-finite
+/// collapses to 0.
+pub struct Taper {
+    bbox: Rect,
+    dh: f64,
+    dv: f64,
+}
+
+impl Taper {
+    pub fn new(bbox: Rect, dh: f64, dv: f64) -> Self {
+        let clamp = |v: f64| {
+            if v.is_finite() {
+                v.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            bbox,
+            dh: clamp(dh),
+            dv: clamp(dv),
+        }
+    }
+}
+
+impl Field for Taper {
+    fn map(&self, p: Point) -> Point {
+        let (cx, cy) = (self.bbox.center().x, self.bbox.center().y);
+        let norm = |d: f64, half: f64| if half > 0.0 { d / half } else { 0.0 };
+        let nx = norm(p.x - cx, self.bbox.width() / 2.0);
+        let ny = norm(p.y - cy, self.bbox.height() / 2.0);
+        let w = (1.0 - self.dh / 2.0 * nx - self.dv / 2.0 * ny).max(0.05);
+        Point::new(cx + (p.x - cx) / w, cy + (p.y - cy) / w)
+    }
+}
+
 /// How many times a mapped segment may halve during adaptive subdivision (2^10 ≈
 /// 1000 pieces per input segment) — a hard cap so a pathological field terminates.
 const MAX_SPLIT_DEPTH: u8 = 10;
@@ -238,13 +405,15 @@ fn subdivide(
         if depth > 0 {
             let m = a.midpoint(b);
             let fm = field.map(m);
-            // probe the quarter points as well as the midpoint: an antisymmetric
-            // profile (flag's full sine) passes exactly through the chord at the
-            // midpoint, so a lone midpoint test would never split it
-            let err = fm
-                .distance(fa.midpoint(fb))
-                .max(field.map(a.lerp(b, 0.25)).distance(fa.lerp(fb, 0.25)))
-                .max(field.map(a.lerp(b, 0.75)).distance(fa.lerp(fb, 0.75)));
+            // Geometric (Hausdorff-style) error: distance from mapped probes to the
+            // mapped chord segment. Probing the quarter points as well as the
+            // midpoint catches antisymmetric profiles (flag's sine passes through
+            // the chord at the midpoint); measuring against the segment — not the
+            // chord's midpoint — keeps line-preserving fields (perspective) from
+            // subdividing geometry that is already exactly straight.
+            let err = seg_dist(fm, fa, fb)
+                .max(seg_dist(field.map(a.lerp(b, 0.25)), fa, fb))
+                .max(seg_dist(field.map(a.lerp(b, 0.75)), fa, fb));
             if err > tol {
                 rec(out, field, a, m, fa, fm, tol, depth - 1);
                 rec(out, field, m, b, fm, fb, tol, depth - 1);
@@ -254,6 +423,18 @@ fn subdivide(
         out.line_to(fb);
     }
     rec(out, field, a, b, fa, fb, tol, MAX_SPLIT_DEPTH);
+}
+
+/// Distance from `p` to the segment `[a, b]`.
+fn seg_dist(p: Point, a: Point, b: Point) -> f64 {
+    let ab = b - a;
+    let len2 = ab.hypot2();
+    let t = if len2 > 0.0 {
+        ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    p.distance(a + ab * t)
 }
 
 /// Tight bounding box of an SVG path `d` string, or `None` if it doesn't parse or
@@ -527,6 +708,115 @@ mod tests {
         // the swirl is angle-true: distance from the center is preserved
         let p = Point::new(20.0, 5.0);
         assert!((f.map(p).distance(Point::ZERO) - p.distance(Point::ZERO)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn homography_maps_corners_exactly_and_keeps_lines_straight() {
+        let bbox = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let targets = [
+            Point::new(10.0, 5.0),
+            Point::new(90.0, 0.0),
+            Point::new(100.0, 45.0),
+            Point::new(-5.0, 40.0),
+        ];
+        let h = Homography::new(bbox, targets).unwrap();
+        for (src, t) in [
+            (Point::new(0.0, 0.0), targets[0]),
+            (Point::new(100.0, 0.0), targets[1]),
+            (Point::new(100.0, 40.0), targets[2]),
+            (Point::new(0.0, 40.0), targets[3]),
+        ] {
+            assert!(h.map(src).distance(t) < 1e-6, "{src:?} → {:?}", h.map(src));
+        }
+        // projective maps preserve straightness: the mapped top edge is collinear
+        let (a, m, b) = (
+            h.map(Point::new(0.0, 0.0)),
+            h.map(Point::new(37.0, 0.0)),
+            h.map(Point::new(100.0, 0.0)),
+        );
+        let cross = (m - a).cross(b - a);
+        assert!(cross.abs() < 1e-6, "not collinear: {cross}");
+        // …and the bake therefore does NOT subdivide a straight edge
+        let line = BezPath::from_svg("M0,0 L100,0").unwrap();
+        assert_eq!(vertices(&bake(&line, &h, 0.25)).len(), 2);
+    }
+
+    #[test]
+    fn homography_identity_and_degenerate_inputs() {
+        let bbox = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let corners = [
+            Point::new(0.0, 0.0),
+            Point::new(100.0, 0.0),
+            Point::new(100.0, 40.0),
+            Point::new(0.0, 40.0),
+        ];
+        let h = Homography::new(bbox, corners).unwrap();
+        let p = Point::new(33.0, 17.0);
+        assert!(h.map(p).distance(p) < 1e-9);
+        // degenerate bbox / non-finite targets → None
+        assert!(Homography::new(Rect::ZERO, corners).is_none());
+        let mut bad = corners;
+        bad[2] = Point::new(f64::NAN, 0.0);
+        assert!(Homography::new(bbox, bad).is_none());
+        // coincident targets: either rejected as singular, or total (never NaN)
+        if let Some(h) = Homography::new(bbox, [Point::new(5.0, 5.0); 4]) {
+            let m = h.map(Point::new(50.0, 20.0));
+            assert!(m.x.is_finite() && m.y.is_finite());
+        }
+    }
+
+    #[test]
+    fn free_distort_blends_corners() {
+        let bbox = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let targets = [
+            Point::new(0.0, 10.0),
+            Point::new(100.0, -10.0),
+            Point::new(110.0, 50.0),
+            Point::new(-10.0, 30.0),
+        ];
+        let f = FreeDistort::new(bbox, targets).unwrap();
+        assert!(f.map(Point::new(0.0, 0.0)).distance(targets[0]) < 1e-9);
+        assert!(f.map(Point::new(100.0, 40.0)).distance(targets[2]) < 1e-9);
+        // the center blends all four corners equally
+        let c = f.map(Point::new(50.0, 20.0));
+        assert!((c.x - 50.0).abs() < 1e-9 && (c.y - 20.0).abs() < 1e-9);
+        assert!(FreeDistort::new(bbox, [Point::new(f64::INFINITY, 0.0); 4]).is_none());
+    }
+
+    #[test]
+    fn taper_tapers_and_never_divides_by_zero() {
+        let t = Taper::new(centered(), 1.0, 0.0);
+        // positive dh: the right side (nx = 1) grows (w = 0.5), the left shrinks
+        let r = t.map(Point::new(50.0, 20.0));
+        assert!((r.x - 100.0).abs() < 1e-9 && (r.y - 40.0).abs() < 1e-9);
+        let l = t.map(Point::new(-50.0, 20.0));
+        assert!((l.x + 50.0 / 1.5).abs() < 1e-9 && (l.y - 20.0 / 1.5).abs() < 1e-9);
+        // extreme sliders + far-outside points stay finite (clamped denominator)
+        let x = Taper::new(centered(), -1.0, -1.0);
+        let m = x.map(Point::new(500.0, 500.0));
+        assert!(m.x.is_finite() && m.y.is_finite());
+        // garbage sliders collapse to the identity
+        let id = Taper::new(centered(), f64::NAN, f64::INFINITY);
+        assert!(
+            id.map(Point::new(30.0, 10.0))
+                .distance(Point::new(30.0, 10.0))
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn chain_composes_in_order() {
+        let bbox = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let chain = Chain(vec![
+            Box::new(EnvelopePreset::new("rise", 1.0, WarpAxis::H, bbox).unwrap()),
+            Box::new(Taper::new(bbox, 1.0, 0.0)),
+        ]);
+        let p = Point::new(100.0, 20.0);
+        let step1 = EnvelopePreset::new("rise", 1.0, WarpAxis::H, bbox)
+            .unwrap()
+            .map(p);
+        let expect = Taper::new(bbox, 1.0, 0.0).map(step1);
+        assert!(chain.map(p).distance(expect) < 1e-12);
     }
 
     #[test]

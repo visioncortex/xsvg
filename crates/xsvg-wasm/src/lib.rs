@@ -17,10 +17,10 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
-    measure_runs, svg_path_bbox, warp_svg_path, Align, Anchor, AreaLayout, AreaSpec, DisplayAlign,
-    EnvelopePreset, Fit, GlyphOutliner, LineIncrement, Measurer, PathEffect, PlacedLine,
-    QualityProfile, RasterRegion, Rect, RegionSpec, Shaper, TextAlign, TextAreaSpec, TextOverflow,
-    TextStyle, VAlign, WarpAxis,
+    measure_runs, svg_path_bbox, warp_svg_path, Align, Anchor, AreaLayout, AreaSpec, Chain,
+    DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography,
+    LineIncrement, Measurer, PathEffect, PlacedLine, QualityProfile, RasterRegion, Rect,
+    RegionSpec, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -670,10 +670,32 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let field_name = node.attribute("field").unwrap_or("");
     let bend = attr_num(node, "bend", 0.0) / 100.0; // authored as −100…100 %
     let axis = WarpAxis::parse(node.attribute("axis").unwrap_or("h"));
-    let field = bbox.and_then(|b| EnvelopePreset::new(field_name, bend, axis, b));
+    // the base field: an envelope preset, or a corner-driven map (§7.3)
+    let base: Option<Box<dyn Field>> = bbox.and_then(|b| match field_name {
+        "perspective" => parse_corners(node)
+            .and_then(|t| Homography::new(b, t))
+            .map(|h| Box::new(h) as Box<dyn Field>),
+        "free" => parse_corners(node)
+            .and_then(|t| FreeDistort::new(b, t))
+            .map(|f| Box::new(f) as Box<dyn Field>),
+        name => EnvelopePreset::new(name, bend, axis, b).map(|p| Box::new(p) as Box<dyn Field>),
+    });
+    // the Warp-Options distortion sliders compose a projective taper after the field
+    let dh = attr_num(node, "distort-h", 0.0) / 100.0;
+    let dv = attr_num(node, "distort-v", 0.0) / 100.0;
+    let field: Option<Box<dyn Field>> = match (base, bbox) {
+        (Some(f), Some(b)) if dh != 0.0 || dv != 0.0 => {
+            Some(Box::new(Chain(vec![f, Box::new(Taper::new(b, dh, dv))])))
+        }
+        (f, _) => f,
+    };
 
     out.push_str("<g");
-    copy_attrs(node, out, &["field", "bend", "axis"]);
+    copy_attrs(
+        node,
+        out,
+        &["field", "bend", "axis", "corners", "distort-h", "distort-v"],
+    );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     match field {
@@ -683,7 +705,7 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             for (a, b) in ranges {
                 out.push_str(&inner[last..a]);
                 // a path that fails to bake keeps its original geometry (§4 totality)
-                match warp_svg_path(&inner[a..b], &f, tol) {
+                match warp_svg_path(&inner[a..b], f.as_ref(), tol) {
                     Some(d) => out.push_str(&d),
                     None => out.push_str(&inner[a..b]),
                 }
@@ -693,12 +715,28 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         }
         None => {
             out.push_str(&format!(
-                "<!-- xsvg: <x:warp field=\"{field_name}\"> unknown field or no geometry — children unwarped -->"
+                "<!-- xsvg: <x:warp field=\"{field_name}\"> unknown field, bad corners, or no geometry — children unwarped -->"
             ));
             out.push_str(&inner);
         }
     }
     out.push_str("</g>");
+}
+
+/// `corners="x0,y0 x1,y1 x2,y2 x3,y3"` — the four target corners (**TL TR BR BL**)
+/// for `field="perspective"` / `"free"`. `None` unless exactly 8 finite numbers.
+fn parse_corners(node: roxmltree::Node) -> Option<[xsvg_core::kurbo::Point; 4]> {
+    let nums: Vec<f64> = node
+        .attribute("corners")?
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .filter_map(parse_num)
+        .collect();
+    if nums.len() != 8 {
+        return None;
+    }
+    let p = |i: usize| xsvg_core::kurbo::Point::new(nums[2 * i], nums[2 * i + 1]);
+    Some([p(0), p(1), p(2), p(3)])
 }
 
 /// Lower one `<x:warp>` child to pre-warp markup whose geometry is all `<path d>`:
@@ -2092,12 +2130,69 @@ mod tests {
     }
 
     #[test]
+    fn warp_perspective_pins_authored_corners_without_subdividing() {
+        // bbox (0,0)-(200,120) → authored quad; projective keeps edges straight, so
+        // the rect bakes to exactly its 4 corner vertices (M + 4 L, incl. the
+        // explicit closing edge) — no wasted subdivision
+        let svg = format!(
+            r##"{XW}<x:warp field="perspective" corners="20,10 180,10 200,120 0,120"><rect x="0" y="0" width="200" height="120" fill="#f0f"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("M20,10"), "{out}");
+        assert!(out.contains("180,10"), "{out}");
+        assert!(out.contains("0,120"), "{out}");
+        let d = out
+            .split(" d=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert_eq!(d.matches('L').count(), 4, "{d}");
+    }
+
+    #[test]
+    fn warp_perspective_without_corners_degrades_with_a_marker() {
+        let svg = format!(
+            r##"{XW}<x:warp field="perspective"><rect x="0" y="0" width="100" height="40"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("bad corners"), "{out}");
+        assert!(out.contains("h100"), "child not passed through: {out}");
+    }
+
+    #[test]
+    fn warp_free_distort_parses_and_bakes() {
+        let svg = format!(
+            r##"{XW}<x:warp field="free" corners="0,20 100,-10 110,50 -10,30"><rect x="0" y="0" width="100" height="40" fill="#0f0"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("unknown field"), "{out}");
+        assert!(out.contains("M0,20"), "{out}");
+    }
+
+    #[test]
+    fn warp_distortion_sliders_compose_after_the_preset() {
+        let plain = format!(
+            r##"{XW}<x:warp field="arch" bend="60"><rect x="0" y="0" width="200" height="80"/></x:warp></svg>"##
+        );
+        let tapered = format!(
+            r##"{XW}<x:warp field="arch" bend="60" distort-h="60"><rect x="0" y="0" width="200" height="80"/></x:warp></svg>"##
+        );
+        let a = compile_test(&plain);
+        let b = compile_test(&tapered);
+        assert_ne!(a, b);
+        assert!(!b.contains("distort-h"), "slider attr leaked onto <g>: {b}");
+        assert!(!b.contains("NaN"), "{b}");
+    }
+
+    #[test]
     fn warp_unknown_field_marks_and_passes_through() {
         let svg = format!(
             r##"{XW}<x:warp field="bogus" bend="50"><rect x="0" y="0" width="100" height="40"/></x:warp></svg>"##
         );
         let out = compile_test(&svg);
-        assert!(out.contains("unknown field or no geometry"), "{out}");
+        assert!(out.contains("unknown field"), "{out}");
         assert!(out.contains("h100"), "child not passed through: {out}");
     }
 

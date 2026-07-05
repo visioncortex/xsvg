@@ -102,9 +102,9 @@ true 2-D fields.
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **Perspective transform** (homography) | AI Free Transform ▸ Perspective Distort | C | ○ | 8-DOF projective `D(x,y) = ((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))`; authored as `corners="x0,y0 x1,y1 x2,y2 x3,y3"` (bbox corners → targets), solved by a small 8×8 linear system precomputed as field state. *The headline field for `<x:warp>` v1* |
-| **Free Distort** (4-corner, non-projective) | AI Free Transform / Effect ▸ Free Distort | E | ○ | bilinear interpolation of the 4 corner displacements — same `corners` surface, `field="free"`; cheaper, no straight-line preservation |
-| **Distortion sliders** (`distort-h` / `distort-v`) | AI Warp Options | C | ○ | one-axis corner taper = a constrained homography composed after any preset (§B) |
+| **Perspective transform** (homography) | AI Free Transform ▸ Perspective Distort | C | ✅ | **shipped** (§7.3) — `field="perspective" corners="…"` (TL TR BR BL): 8-DOF projective solved from the envelope corners by a precomputed DLT; straight lines stay straight, and the segment-distance error metric means they are **not** needlessly subdivided; horizon-clamped, singular quads degrade with a marker |
+| **Free Distort** (4-corner, non-projective) | AI Free Transform / Effect ▸ Free Distort | E | ✅ | **shipped** (§7.3) — `field="free"`, same `corners` surface: bilinear corner blend; edges shear rather than converge |
+| **Distortion sliders** (`distort-h` / `distort-v`) | AI Warp Options | C | ✅ | **shipped** (§7.3) — a center-anchored projective taper (`w = 1 − (dh/2)nx − (dv/2)ny`, clamped; positive grows right / bottom) composed **after** any field via the `Chain` combinator |
 | **Axonometric / iso projections** (convenience) | xsvg | S | ○ | *affine* — expressible as SVG `transform` today; a named convenience (`field="iso"`) only |
 
 ## D. Envelope & handle warps — *freeform deformation*
@@ -166,8 +166,11 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 **`<x:warp>`** (§7.3) — the generic pipeline: `Field` trait + native kurbo bake in `xsvg-core`
 (flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), and
 **eight presets** — displacement (arch / flag / rise / wave), radial (fisheye / inflate), scale
-(squeeze), rotational (twist) — over shapes, paths, and outlined text, with innermost-first nesting
-and marker-based degradation ([warp-presets.xsvg](../dataset/warp-presets.xsvg)).
+(squeeze), rotational (twist) — plus **perspective** (`corners`-solved homography), **free distort**
+(bilinear), and the **distortion sliders** (a `Chain`-composed projective taper), over shapes,
+paths, and outlined text, with innermost-first nesting and marker-based degradation
+([warp-presets.xsvg](../dataset/warp-presets.xsvg),
+[warp-perspective.xsvg](../dataset/warp-perspective.xsvg)).
 **`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
 extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
 via the `GlyphOutliner::outline_on_path` browser seam
@@ -180,9 +183,8 @@ upgrade); the §6.13 glyph bake still lives in the browser adapter with a hardco
 text-on-path fields aren't natively tested the way `<x:warp>`'s are.
 
 **Planned, field-only (○):** the remaining **7 warp presets** (§B — the arc/shell/fish scale family,
-all closed-form over the shipped envelope frame), **perspective** and **free distort** (§C — a
-corner-solved homography / bilinear field), the distortion sliders, and gravity/3D-ribbon type
-effects. Each is now one pure function plus its attribute plumbing.
+all closed-form over the shipped envelope frame) and the gravity/3D-ribbon type effects. Each is one
+pure function plus its attribute plumbing.
 
 **Needs pipeline work (❌):** **bend-along-path** (the rainbow field generalized to arbitrary
 geometry — waits on the `<x:warp>` native bake), **envelope mesh** (FFD lattice), **top-object
@@ -195,8 +197,8 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
 2. ~~**`<x:warp>` + native bake** — `Field` trait in `xsvg-core`, kurbo-backed flatten of arbitrary
    `d`/shapes, `QualityProfile` → tolerance wiring; first fields: the four **displacement presets**
    (arch, flag, rise, wave) on arbitrary geometry + outlined text.~~ ✅ *(shipped)*
-3. **Perspective** — homography field + `corners` solver; `distort-h`/`distort-v` sliders; free
-   distort rides along.
+3. ~~**Perspective** — homography field + `corners` solver; `distort-h`/`distort-v` sliders; free
+   distort rides along.~~ ✅ *(shipped)*
 4. **Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
    polar (arc). ~~Radial (fisheye, inflate), rotational (twist), squeeze~~ ✅ *(shipped early)*.
    Full Make-with-Warp parity when done.
