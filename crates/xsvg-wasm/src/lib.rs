@@ -1,16 +1,18 @@
-//! WASM entry point for xsvg: `compile(input, quality, measure) -> svg`.
-//!
-//! v0 scope (Plan.md §4 + the typography POC): parse the xsvg/SVG input, run
-//! lowering passes, and emit a plain-SVG-subset string. Passes wired so far:
+//! WASM entry point for xsvg: parse the xsvg/SVG input, run lowering passes, and emit a
+//! plain-SVG-subset string. Passes wired so far:
 //!   • `<rect>` (sharp-cornered) → `<path>`
-//!   • `<text inline-size>` → wrapped `<tspan>` lines (Syntax.md Rung 1)
-//!   • `<x:textbox>` → wrapped + aligned + shrink-to-fit text (Syntax.md Rung 3)
+//!   • `<text inline-size>` → wrapped `<tspan>` lines (§6.2)
+//!   • `<textArea>` → flowed text: align / display-align / line-increment / auto sizing (§6.3)
+//!   • `<x:textbox>` → wrapped + aligned + shrink-to-fit text, incl. `in="#shape"` region
+//!     flow and cap-height centering (§6.4–6.5, 6.10)
+//!   • styled `<tspan>` runs (§6.11); create outlines `outline="true"` → `<path>` (§6.12);
+//!     text on a path `<x:textpath>` skew (§6.13)
 //! Other `x:` extensions are recognized and skipped with a marker.
 //!
-//! Text layout needs font metrics, which v0 borrows from the browser: `compile`
-//! takes a JS `measure(text, fontCss) -> number` callback (canvas `measureText`).
-//! That callback is the browser implementation of the pure `Measurer` seam — the
-//! core layout logic lives in `xsvg-core` and stays platform-free.
+//! **Platform seams.** Everything platform-specific is a trait the core calls, backed here
+//! by JS callbacks: `Measurer` (canvas `measureText` + font metrics), `Shaper` (path
+//! rasterize for region flow), and `GlyphOutliner` (opentype.js glyph outlines, incl.
+//! path-warping). The core layout logic lives in `xsvg-core` and stays platform-free.
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
@@ -133,6 +135,15 @@ impl Shaper for JsShaper<'_> {
     }
 }
 
+/// Push the run's style as the shared `(family, weight, style, size)` callback arguments
+/// onto `args` — the common prefix of the `outline_run` / `outline_on_path` JS calls.
+fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
+    args.push(&JsValue::from_str(&style.family));
+    args.push(&JsValue::from_str(&style.weight));
+    args.push(&JsValue::from_str(&style.style));
+    args.push(&JsValue::from_f64(size));
+}
+
 /// Browser-backed [`GlyphOutliner`]. `outline_run(text, family, weight, style, size, x,
 /// baseline) => d | ""` returns a glyph outline (opentype.js), or `""` when the font's
 /// bytes aren't available (→ fall back to live `<text>`). `outline_on_path(text, family,
@@ -154,10 +165,7 @@ impl GlyphOutliner for JsOutliner<'_> {
     ) -> Option<String> {
         let args = js_sys::Array::new();
         args.push(&JsValue::from_str(text));
-        args.push(&JsValue::from_str(&style.family));
-        args.push(&JsValue::from_str(&style.weight));
-        args.push(&JsValue::from_str(&style.style));
-        args.push(&JsValue::from_f64(size));
+        push_style_args(&args, style, size);
         args.push(&JsValue::from_f64(x));
         args.push(&JsValue::from_f64(baseline));
         let d = self
@@ -178,10 +186,7 @@ impl GlyphOutliner for JsOutliner<'_> {
     ) -> Option<String> {
         let args = js_sys::Array::new();
         args.push(&JsValue::from_str(text));
-        args.push(&JsValue::from_str(&style.family));
-        args.push(&JsValue::from_str(&style.weight));
-        args.push(&JsValue::from_str(&style.style));
-        args.push(&JsValue::from_f64(size));
+        push_style_args(&args, style, size);
         args.push(&JsValue::from_str(path_d));
         args.push(&JsValue::from_str(effect));
         let d = self
@@ -492,19 +497,15 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .outliner
         .outline_on_path(&text, &style, style.size, &path_d, effect)
     {
-        out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
-        out.push_str("<path d=\"");
-        push_escaped(out, &d, true);
-        out.push_str("\"/></g>");
+        push_outline_group(out, fill, &stroke, &pos, &[d]);
         return;
     }
 
     // No outline font → straight live <text> at the element's x/y (graceful fallback).
     let (x, y) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
-    out.push_str(&format!(
-        "<text font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\" x=\"{}\" y=\"{}\"",
-        style.family, fmt(style.size), style.weight, style.style, fill, fmt(x), fmt(y)
-    ));
+    out.push_str("<text");
+    push_font_attrs(out, &style, style.size, fill);
+    out.push_str(&format!(" x=\"{}\" y=\"{}\"", fmt(x), fmt(y)));
     out.push_str(&pos);
     out.push('>');
     push_escaped(out, &text, false);
@@ -655,6 +656,33 @@ fn outline_stroke_attrs(node: roxmltree::Node) -> String {
     s
 }
 
+/// Emit an outlined text group: `<g fill=… stroke=…><path d="…"/>…</g>` — the shared
+/// output of create-outlines (§6.12) and text-on-path (§6.13). `paths` are the glyph
+/// path `d` strings (one per line for a box, one for a warped run).
+fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, paths: &[String]) {
+    out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
+    for d in paths {
+        out.push_str("<path d=\"");
+        push_escaped(out, d, true);
+        out.push_str("\"/>");
+    }
+    out.push_str("</g>");
+}
+
+/// Push the shared live-`<text>` paint/style attributes: ` font-family="…" font-size="…"
+/// font-weight="…" font-style="…" fill="…"` (leads with a space). Callers add their own
+/// prefix (e.g. `text-anchor`) and any suffix (`x`/`y`, `letter-spacing`).
+fn push_font_attrs(out: &mut String, style: &TextStyle, size: f64, fill: &str) {
+    out.push_str(&format!(
+        " font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
+        style.family,
+        fmt(size),
+        style.weight,
+        style.style,
+        fill
+    ));
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_area_text(
     out: &mut String,
@@ -696,22 +724,14 @@ fn write_area_text(
             }
         }
         if ok {
-            out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
-            for d in &paths {
-                out.push_str("<path d=\"");
-                push_escaped(out, d, true);
-                out.push_str("\"/>");
-            }
-            out.push_str("</g>");
+            push_outline_group(out, fill, stroke, pos, &paths);
             return;
         }
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    out.push_str(&format!(
-        "<text text-anchor=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
-        layout.anchor.svg(), style.family, fmt(layout.font_size), style.weight, style.style, fill
-    ));
+    out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
+    push_font_attrs(out, style, layout.font_size, fill);
     out.push_str(pos);
     if style.letter_spacing != 0.0 {
         out.push_str(&format!(

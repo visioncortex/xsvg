@@ -238,6 +238,11 @@ function firstFamily(family: string): string {
   return family.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
 }
 
+// A registered outline font for a (possibly comma-listed) CSS family, or undefined.
+function lookupFont(family: string): OtFont | undefined {
+  return outlineFonts.get(firstFamily(family).toLowerCase());
+}
+
 function outline(
   text: string,
   family: string,
@@ -247,7 +252,7 @@ function outline(
   x: number,
   baseline: number,
 ): string {
-  const font = outlineFonts.get(firstFamily(family).toLowerCase());
+  const font = lookupFont(family);
   if (!font) return ""; // no bytes for this family → Rust keeps live <text>
   return font.getPath(text, x, baseline, size).toPathData(2);
 }
@@ -375,7 +380,7 @@ function outlineOnPath(
   pathD: string,
   effect: string,
 ): string {
-  const font = outlineFonts.get(firstFamily(family).toLowerCase());
+  const font = lookupFont(family);
   if (!font) return ""; // no bytes → Rust falls back to live <text>
   if (effect !== "skew") return ""; // rainbow etc. not built yet → graceful fallback
   const field = pathHeightField(pathD);
