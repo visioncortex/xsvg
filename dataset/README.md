@@ -68,6 +68,7 @@ Realistic composites that combine several features into one artifact.
 | File | Shows |
 |---|---|
 | [warp-presets.xsvg](warp-presets.xsvg) | `<x:warp field="…" bend="…">` bakes an envelope-preset field into plain `<path>`s — eight presets (arch/flag/rise/wave + fisheye/inflate/squeeze/twist); a rect and `outline="true"` text warp together through the same flatten → map pipeline; dashed boxes show the unwarped source |
+| [warp-presets-arc.xsvg](warp-presets-arc.xsvg) | The arc & shell families — `arc` wraps the box into an annular sector (midline length preserved; negative bend arcs down), `arc-lower/upper` pin one edge and arc the other, `bulge`/`fish` scale about the midline, `shell-lower/upper` flare the corners. Make-with-Warp parity: **15/15 presets** |
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
 
 ## Edge cases & invariants

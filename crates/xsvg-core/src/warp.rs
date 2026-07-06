@@ -58,6 +58,29 @@ enum Profile {
     /// scale — the bend axis pinches by a profile of `v` (waist at mid-height):
     /// `u′ = u·(1 − (b/2)(1 − v²))`; negative bend = barrel
     Squeeze,
+    /// polar — the box bends into an annular sector spanning `Θ = b·π` (a semicircle
+    /// at 100%): the midline maps to an arc of radius `R = L/Θ` (its length is
+    /// preserved), perpendicular lines become radii. The whole envelope relocates —
+    /// no pinned corners
+    Arc,
+    /// scale — the top edge stays fixed and the height scales by the parabola
+    /// `s = 1 + (b/2)(1 − u²)`, so the bottom edge arcs outward (down) at the center
+    ArcLower,
+    /// scale — mirror of ArcLower: bottom fixed, top arcs outward (up)
+    ArcUpper,
+    /// scale — the height scales about the midline by `s = 1 + (b/2)(1 − u²)`:
+    /// both edges bow outward symmetrically
+    Bulge,
+    /// scale — the top edge stays fixed and the height scales by the *inverted*
+    /// parabola `s = 1 + (b/2)·u²`: the bottom center is pinned and the corners
+    /// flare outward (down)
+    ShellLower,
+    /// scale — mirror of ShellLower: bottom fixed, top corners flare outward (up)
+    ShellUpper,
+    /// scale — a fish silhouette about the midline: `s = 1 + (b/2)·g(u)` with
+    /// `g(u) = 1 − u² − (1+u)²/4` — the nose (u = −1) is neutral, the body bulges
+    /// (peak near u ≈ −0.2), and the tail (u = 1) pinches to `1 − b/2`
+    Fish,
     /// rotational — swirl about the center: `θ = b·(π/2)·(1 − r̂²)²`, center rotates
     /// most, corners fixed; angle-true (rotates the absolute offset). The eased
     /// falloff has zero angular gradient at the pinned corners (edges sweep smoothly
@@ -83,11 +106,10 @@ pub struct EnvelopePreset {
 }
 
 impl EnvelopePreset {
-    /// Build a preset field by name (`arch` | `flag` | `rise` | `wave` | `fisheye` |
-    /// `inflate` | `squeeze` | `twist`) over the pre-warp union bbox of the geometry
-    /// it will map. `None` for unknown names. `axis` selects the bend axis for the
-    /// displacement family and `squeeze`; the radial/rotational presets are
-    /// symmetric and ignore it.
+    /// Build a preset field by name — all 15 Make-with-Warp styles (see [`Profile`])
+    /// — over the pre-warp union bbox of the geometry it will map. `None` for
+    /// unknown names. `axis` selects the bend axis for the displacement, scale, and
+    /// polar families; the radial/rotational presets are symmetric and ignore it.
     pub fn new(name: &str, bend: f64, axis: WarpAxis, bbox: Rect) -> Option<Self> {
         let profile = match name {
             "arch" => Profile::Arch,
@@ -98,6 +120,13 @@ impl EnvelopePreset {
             "inflate" => Profile::Inflate,
             "squeeze" => Profile::Squeeze,
             "twist" => Profile::Twist,
+            "arc" => Profile::Arc,
+            "arc-lower" => Profile::ArcLower,
+            "arc-upper" => Profile::ArcUpper,
+            "bulge" => Profile::Bulge,
+            "shell-lower" => Profile::ShellLower,
+            "shell-upper" => Profile::ShellUpper,
+            "fish" => Profile::Fish,
             _ => return None,
         };
         let bend = if bend.is_finite() {
@@ -163,6 +192,51 @@ impl Field for EnvelopePreset {
                 match self.axis {
                     WarpAxis::H => Point::new(cx + u * s * hw, p.y),
                     WarpAxis::V => Point::new(p.x, cy + u * s * hh),
+                }
+            }
+            // scale family: the cross-axis coordinate rescales by a profile of u,
+            // about an anchor — the midline, or one pinned edge
+            Profile::ArcLower
+            | Profile::ArcUpper
+            | Profile::Bulge
+            | Profile::ShellLower
+            | Profile::ShellUpper
+            | Profile::Fish => {
+                let profile = match self.profile {
+                    Profile::ArcLower | Profile::ArcUpper | Profile::Bulge => 1.0 - u * u,
+                    Profile::ShellLower | Profile::ShellUpper => u * u,
+                    _ => 1.0 - u * u - (1.0 + u) * (1.0 + u) / 4.0, // Fish
+                };
+                let s = 1.0 + b / 2.0 * profile;
+                let v2 = match self.profile {
+                    // "lower": the top edge (v = −1) is the pinned anchor
+                    Profile::ArcLower | Profile::ShellLower => -1.0 + (v + 1.0) * s,
+                    // "upper": the bottom edge (v = 1) is the pinned anchor
+                    Profile::ArcUpper | Profile::ShellUpper => 1.0 - (1.0 - v) * s,
+                    _ => v * s, // midline-anchored (Bulge, Fish)
+                };
+                match self.axis {
+                    WarpAxis::H => Point::new(p.x, cy + v2 * hh),
+                    WarpAxis::V => Point::new(cx + v2 * hw, p.y),
+                }
+            }
+            Profile::Arc => {
+                let theta = b * std::f64::consts::PI; // total sweep; semicircle at 100%
+                if theta.abs() < 1e-4 || half_l <= 0.0 {
+                    return p; // vanishing bend or degenerate frame → identity
+                }
+                // the midline keeps its length: it becomes an arc of radius R = L/Θ
+                let r = 2.0 * half_l / theta;
+                // (t, w): position along the bend axis / offset toward the bulge side
+                let (t, w) = match self.axis {
+                    WarpAxis::H => (p.x - cx, cy - p.y),
+                    WarpAxis::V => (p.y - cy, p.x - cx),
+                };
+                let phi = t / half_l * (theta / 2.0);
+                let (t2, w2) = ((r + w) * phi.sin(), (r + w) * phi.cos() - r);
+                match self.axis {
+                    WarpAxis::H => Point::new(cx + t2, cy - w2),
+                    WarpAxis::V => Point::new(cx + w2, cy + t2),
                 }
             }
             Profile::Twist => {
@@ -624,8 +698,22 @@ mod tests {
     }
 
     /// All preset names, across every field family.
-    const PRESETS: [&str; 8] = [
-        "arch", "flag", "rise", "wave", "fisheye", "inflate", "squeeze", "twist",
+    const PRESETS: [&str; 15] = [
+        "arch",
+        "flag",
+        "rise",
+        "wave",
+        "fisheye",
+        "inflate",
+        "squeeze",
+        "twist",
+        "arc",
+        "arc-lower",
+        "arc-upper",
+        "bulge",
+        "shell-lower",
+        "shell-upper",
+        "fish",
     ];
 
     #[test]
@@ -686,6 +774,87 @@ mod tests {
                 prev = d;
             }
         }
+    }
+
+    #[test]
+    fn arc_preserves_the_midline_and_wraps_a_semicircle_at_full_bend() {
+        // bend 100% → Θ = π; the centered() midline (length 100) → R = 100/π
+        let f = preset("arc", 1.0);
+        // the midline's center is invariant
+        assert!(f.map(Point::ZERO).distance(Point::ZERO) < 1e-9);
+        // its endpoints land at (±R, R): φ = ±90° on the circle centered at (0, R)
+        let r = 100.0 / std::f64::consts::PI;
+        let e = f.map(Point::new(50.0, 0.0));
+        assert!((e.x - r).abs() < 1e-9 && (e.y - r).abs() < 1e-9, "{e:?}");
+        let w = f.map(Point::new(-50.0, 0.0));
+        assert!((w.x + r).abs() < 1e-9 && (w.y - r).abs() < 1e-9, "{w:?}");
+        // a point above the midline sits on a larger radius (center at (0, R))
+        let top = f.map(Point::new(0.0, -20.0));
+        assert!((top.distance(Point::new(0.0, r)) - (r + 20.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn arc_vanishing_bend_is_the_identity() {
+        let p = Point::new(37.0, 11.0);
+        assert!(preset("arc", 0.0).map(p).distance(p) < 1e-9);
+        assert!(preset("arc", 1e-9).map(p).distance(p) < 1e-6);
+    }
+
+    #[test]
+    fn arc_lower_pins_the_top_and_arcs_the_bottom_center() {
+        let f = preset("arc-lower", 1.0);
+        for x in [-50.0, 0.0, 30.0] {
+            let p = Point::new(x, -20.0); // the whole top edge is the anchor
+            assert!(f.map(p).distance(p) < 1e-9, "{p:?}");
+        }
+        // bottom center pushed a half-height further down: s = 1.5 → y: 20 → 40
+        let m = f.map(Point::new(0.0, 20.0));
+        assert!((m.y - 40.0).abs() < 1e-9 && m.x.abs() < 1e-9, "{m:?}");
+        // bottom corners unchanged (s = 1 at u = ±1)
+        assert!(
+            f.map(Point::new(50.0, 20.0))
+                .distance(Point::new(50.0, 20.0))
+                < 1e-9
+        );
+        // arc-upper mirrors: bottom pinned, top center pushed up
+        let up = preset("arc-upper", 1.0);
+        assert!(
+            up.map(Point::new(0.0, 20.0))
+                .distance(Point::new(0.0, 20.0))
+                < 1e-9
+        );
+        assert!((up.map(Point::new(0.0, -20.0)).y + 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn shell_lower_pins_the_bottom_center_and_flares_the_corners() {
+        let f = preset("shell-lower", 1.0);
+        // bottom center pinned (s = 1 at u = 0), top edge is the anchor
+        assert!(f.map(Point::new(0.0, 20.0)).distance(Point::new(0.0, 20.0)) < 1e-9);
+        assert!(
+            f.map(Point::new(50.0, -20.0))
+                .distance(Point::new(50.0, -20.0))
+                < 1e-9
+        );
+        // bottom corners flare down: s = 1.5 at u = ±1 → y: 20 → 40
+        assert!((f.map(Point::new(50.0, 20.0)).y - 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bulge_bows_both_edges_and_fish_pinches_the_tail() {
+        let bulge = preset("bulge", 1.0);
+        assert!((bulge.map(Point::new(0.0, -20.0)).y + 30.0).abs() < 1e-9);
+        assert!((bulge.map(Point::new(0.0, 20.0)).y - 30.0).abs() < 1e-9);
+
+        let fish = preset("fish", 1.0);
+        // nose (u = −1) neutral; tail (u = 1) pinches to half height; body bulges
+        assert!(
+            fish.map(Point::new(-50.0, 20.0))
+                .distance(Point::new(-50.0, 20.0))
+                < 1e-9
+        );
+        assert!((fish.map(Point::new(50.0, 20.0)).y - 10.0).abs() < 1e-9);
+        assert!(fish.map(Point::new(-10.0, 20.0)).y > 20.0);
     }
 
     #[test]

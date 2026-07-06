@@ -78,16 +78,16 @@ true 2-D fields.
 
 | Preset | Family | Tier | Status | xsvg note (field sketch, `axis="h"`, bend `b`) |
 |---|---|---|---|---|
-| **Arc** | polar | C | ○ | the box bends into an annular sector spanning `b·π`: verticals → radii, horizontals → concentric arcs |
-| **Arc Lower** | scale | E | ○ | top edge fixed; height scales by the parabolic profile `1 + b·(1−u²)` so the bottom edge arcs |
-| **Arc Upper** | scale | E | ○ | mirror of Arc Lower (bottom fixed, top arcs) |
+| **Arc** | polar | C | ✅ | **shipped** (§7.3) — annular sector spanning `Θ = b·π` (semicircle at 100%): the midline becomes an arc of radius `R = L/Θ` (length preserved), perpendiculars become radii; the envelope relocates (no pinned corners) |
+| **Arc Lower** | scale | E | ✅ | **shipped** (§7.3) — top edge pinned; height scales by `1 + (b/2)(1−u²)` so the bottom edge arcs at its center |
+| **Arc Upper** | scale | E | ✅ | **shipped** (§7.3) — mirror of Arc Lower (bottom pinned, top arcs) |
 | **Arch** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·(1−u²)`, both edges ride the same parabola |
-| **Bulge** | scale | C | ○ | height scales about the midline by `1 + b·(1−u²)` — both edges bow outward symmetrically |
-| **Shell Lower** | scale | E | ○ | one-sided bulge: bottom edge bows, opposite curvature to Arc Lower (flared corners) |
-| **Shell Upper** | scale | E | ○ | mirror of Shell Lower |
+| **Bulge** | scale | C | ✅ | **shipped** (§7.3) — height scales about the midline by `1 + (b/2)(1−u²)`: both edges bow outward symmetrically |
+| **Shell Lower** | scale | E | ✅ | **shipped** (§7.3) — top pinned, inverted profile `1 + (b/2)u²`: the bottom center stays and the corners flare |
+| **Shell Upper** | scale | E | ✅ | **shipped** (§7.3) — mirror of Shell Lower |
 | **Flag** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·sin(πu)` uniform in `v`, glyph columns ride the wave rigidly |
 | **Wave** | displacement | C | ✅ | **shipped** (§7.3) — Flag with phase advancing π/2 through the height: `Δ = A·sin(πu − (π/4)(v+1))` |
-| **Fish** | scale | E | ○ | midline bulge with a pinched tail — asymmetric taper × bulge |
+| **Fish** | scale | E | ✅ | **shipped** (§7.3) — `s = 1 + (b/2)(1−u²−(1+u)²/4)` about the midline: neutral nose, bulged body (peak ≈ u=−0.2), tail pinched to `1−b/2` |
 | **Rise** | displacement | C | ✅ | **shipped** (§7.3) — `Δ = A·u`, a linear ramp; the art climbs left→right (pure shear profile) |
 | **Fisheye** | radial | E | ✅ | **shipped** (§7.3) — `s = 1 + b·(1−r̂²)²` about the frame center (`r̂` = corner-normalized radius); corners pinned; negative bend = pincushion; eased profile stays radially monotone (fold-free) at every bend |
 | **Inflate** | radial | E | ✅ | **shipped** (§7.3) — per-axis bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)`; corners pinned |
@@ -165,11 +165,12 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 **Shipped today (✅):** two front-ends.
 **`<x:warp>`** (§7.3) — the generic pipeline: `Field` trait + native kurbo bake in `xsvg-core`
 (flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), and
-**eight presets** — displacement (arch / flag / rise / wave), radial (fisheye / inflate), scale
-(squeeze), rotational (twist) — plus **perspective** (`corners`-solved homography), **free distort**
+**all 15 Make-with-Warp presets** across the five field families (displacement · scale · polar ·
+radial · rotational), plus **perspective** (`corners`-solved homography), **free distort**
 (bilinear), and the **distortion sliders** (a `Chain`-composed projective taper), over shapes,
 paths, and outlined text, with innermost-first nesting and marker-based degradation
 ([warp-presets.xsvg](../dataset/warp-presets.xsvg),
+[warp-presets-arc.xsvg](../dataset/warp-presets-arc.xsvg),
 [warp-perspective.xsvg](../dataset/warp-perspective.xsvg)).
 **`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
 extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
@@ -182,9 +183,8 @@ construction.
 upgrade); the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance, so the
 text-on-path fields aren't natively tested the way `<x:warp>`'s are.
 
-**Planned, field-only (○):** the remaining **7 warp presets** (§B — the arc/shell/fish scale family,
-all closed-form over the shipped envelope frame) and the gravity/3D-ribbon type effects. Each is one
-pure function plus its attribute plumbing.
+**Planned, field-only (○):** only the gravity/3D-ribbon type effects remain in this bucket — every
+§B preset has shipped. Each is one pure function plus its attribute plumbing.
 
 **Needs pipeline work (❌):** **bend-along-path** (the rainbow field generalized to arbitrary
 geometry — waits on the `<x:warp>` native bake), **envelope mesh** (FFD lattice), **top-object
@@ -199,9 +199,9 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
    (arch, flag, rise, wave) on arbitrary geometry + outlined text.~~ ✅ *(shipped)*
 3. ~~**Perspective** — homography field + `corners` solver; `distort-h`/`distort-v` sliders; free
    distort rides along.~~ ✅ *(shipped)*
-4. **Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
-   polar (arc). ~~Radial (fisheye, inflate), rotational (twist), squeeze~~ ✅ *(shipped early)*.
-   Full Make-with-Warp parity when done.
+4. ~~**Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
+   polar (arc); radial (fisheye, inflate), rotational (twist), squeeze.~~ ✅ *(shipped — **full
+   Make-with-Warp parity, 15/15**)*
 5. **Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
    `highest` = refit at graded tolerance). *(The `align`/`start` and stair-step items originally
    here shipped early, alongside rainbow.)*

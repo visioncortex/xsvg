@@ -486,7 +486,7 @@ interchangeable under §7.1:
 |---|---|---|
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
 | **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
-| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **8 of 15 shipped** (§7.3): arch / flag / rise / wave / fisheye / inflate / squeeze / twist; full catalog in [Transform.md §B](Transform.md) |
+| **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **All 15 shipped** (§7.3); full catalog in [Transform.md §B](Transform.md) |
 | **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors. **Shipped** (§7.3, `corners`-solved), plus **free** (bilinear) and the distortion-slider taper |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
 | **MLS** | weighted handle map (Schaefer et al.), `w_i = 1/\|p_i−v\|^{2α}` | move-a-few-handles warp |
@@ -506,7 +506,7 @@ carrying the element's paint and `transform` (affine, so it composes after the b
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
-| `field` | `arch` \| `flag` \| `rise` \| `wave` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` \| `perspective` \| `free` *(more per §7.2 follow)* | — | selects the field |
+| `field` | all 15 Make-with-Warp presets — `arc` \| `arc-lower` \| `arc-upper` \| `arch` \| `bulge` \| `shell-lower` \| `shell-upper` \| `flag` \| `wave` \| `fish` \| `rise` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` — plus `perspective` \| `free` | — | selects the field |
 | `bend` | number, −100…100 (%) | `0` | preset strength; clamped; for displacement presets positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
 | `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical); applies to the displacement family and `squeeze` — the radial/rotational presets are symmetric and ignore it |
 | `corners` | 8 numbers `"x0,y0 x1,y1 x2,y2 x3,y3"` | — | the target corners — **TL TR BR BL** — for `perspective` / `free`; required by both |
@@ -526,6 +526,14 @@ bulge `sx = 1+(b/2)(1−ny²)`, `sy = 1+(b/2)(1−nx²)` · **squeeze** waist pi
 `u′ = u·(1−(b/2)(1−v²))` (negative = barrel) · **twist** angle-true swirl `θ = b·(π/2)·(1−r̂²)²`.
 The fisheye/twist profiles are **eased** (squared, so the gradient also vanishes at the pinned
 corners): the fields are fold-free at every bend — outlines never self-cross into corner slivers.
+The **scale family** rescales the cross-axis coordinate by a profile of `u` about an anchor:
+**bulge** `v′ = v·s`, `s = 1+(b/2)(1−u²)` (midline) · **arc-lower / arc-upper** pin one edge and
+apply the same `s` from it (the free edge arcs at its center) · **shell-lower / shell-upper** pin
+one edge with the *inverted* profile `s = 1+(b/2)u²` (the free edge's corners flare, its center
+stays) · **fish** `v′ = v·s`, `s = 1+(b/2)(1−u²−(1+u)²/4)` (neutral nose, bulged body, tail pinched
+to `1−b/2`). **Arc** is the one polar field: the box bends into an annular sector spanning
+`Θ = bend·π` (a semicircle at 100%) — the midline becomes an arc of radius `R = L/Θ` (its length is
+preserved), perpendicular lines become radii, and the envelope relocates (no pinned corners).
 Every path then runs the §7.1 bake at the profile tolerance.
 
 **Corner-driven fields.** `field="perspective"` solves the **8-DOF homography** taking the envelope
@@ -545,10 +553,8 @@ silently emit unwarped content. An unknown or absent `field`, or no usable geome
 children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
 non-finite coordinates never reach the output (§4).
 
-**v1 limits.** Eight presets + perspective/free (the arc/shell scale family follows —
-[Transform.md](Transform.md)); polyline output for curved fields (no cubic refit, §7.1); a `<g>`
-child whose subtree still contains non-path geometry is skipped whole; text must be outlined to
-participate.
+**v1 limits.** Polyline output for curved fields (no cubic refit, §7.1); a `<g>` child whose
+subtree still contains non-path geometry is skipped whole; text must be outlined to participate.
 
 ### 7.4 Remaining pillars & deferred [planned]
 
@@ -587,7 +593,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
-| `<x:warp>` front-end — 8 presets (displacement arch/flag/rise/wave · radial fisheye/inflate · scale squeeze · rotational twist) over shapes, paths, outlined text | implemented |
+| `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit of warped polylines | planned |

@@ -2118,7 +2118,19 @@ mod tests {
 
     #[test]
     fn warp_radial_and_rotational_presets_parse() {
-        for name in ["fisheye", "inflate", "squeeze", "twist"] {
+        for name in [
+            "fisheye",
+            "inflate",
+            "squeeze",
+            "twist",
+            "arc",
+            "arc-lower",
+            "arc-upper",
+            "bulge",
+            "shell-lower",
+            "shell-upper",
+            "fish",
+        ] {
             let svg = format!(
                 r##"{XW}<x:warp field="{name}" bend="80"><rect x="0" y="0" width="100" height="40" fill="#0af"/></x:warp></svg>"##
             );

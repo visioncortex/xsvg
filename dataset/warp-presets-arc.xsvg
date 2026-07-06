@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 920" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="920" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:warp — the arc &amp; shell families complete Make-with-Warp (dashed = source box)</text>
+
+  <!-- arc: the box wraps into an annular sector; the midline keeps its length -->
+  <text x="48" y="64" font-size="11" fill="#94a3b8">field="arc" bend="60"</text>
+  <rect x="48" y="110" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="arc" bend="60">
+    <rect x="48" y="110" width="240" height="80" fill="#172554"/>
+    <x:textbox x="48" y="110" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#7dd3fc">ARC</x:textbox>
+  </x:warp>
+
+  <!-- negative bend arcs the other way -->
+  <text x="420" y="64" font-size="11" fill="#94a3b8">field="arc" bend="-40"</text>
+  <rect x="420" y="110" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="arc" bend="-40">
+    <rect x="420" y="110" width="240" height="80" fill="#134e4a"/>
+    <x:textbox x="420" y="110" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="40" fill="#5eead4">ARC DOWN</x:textbox>
+  </x:warp>
+
+  <!-- arc-lower / arc-upper: one edge pinned, the other arcs at its center -->
+  <text x="48" y="286" font-size="11" fill="#94a3b8">field="arc-lower" bend="60"</text>
+  <rect x="48" y="330" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="arc-lower" bend="60">
+    <rect x="48" y="330" width="240" height="80" fill="#14532d"/>
+    <x:textbox x="48" y="330" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="36" fill="#86efac">ARC LOWER</x:textbox>
+  </x:warp>
+
+  <text x="420" y="286" font-size="11" fill="#94a3b8">field="arc-upper" bend="60"</text>
+  <rect x="420" y="330" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="arc-upper" bend="60">
+    <rect x="420" y="330" width="240" height="80" fill="#451a03"/>
+    <x:textbox x="420" y="330" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="36" fill="#fdba74">ARC UPPER</x:textbox>
+  </x:warp>
+
+  <!-- bulge: both edges bow outward about the midline -->
+  <text x="48" y="506" font-size="11" fill="#94a3b8">field="bulge" bend="60"</text>
+  <rect x="48" y="550" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="bulge" bend="60">
+    <rect x="48" y="550" width="240" height="80" fill="#3b0764"/>
+    <x:textbox x="48" y="550" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="36" fill="#d8b4fe">BULGE</x:textbox>
+  </x:warp>
+
+  <!-- fish: body bulge, pinched tail -->
+  <text x="420" y="506" font-size="11" fill="#94a3b8">field="fish" bend="80"</text>
+  <rect x="420" y="550" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="fish" bend="80">
+    <rect x="420" y="550" width="240" height="80" fill="#7f1d1d"/>
+    <x:textbox x="420" y="550" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="36" fill="#fca5a5">FISH</x:textbox>
+  </x:warp>
+
+  <!-- shell-lower / shell-upper: the free edge's corners flare, its center stays -->
+  <text x="48" y="726" font-size="11" fill="#94a3b8">field="shell-lower" bend="60"</text>
+  <rect x="48" y="770" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="shell-lower" bend="60">
+    <rect x="48" y="770" width="240" height="80" fill="#713f12"/>
+    <x:textbox x="48" y="770" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="32" fill="#fde047">SHELL LOWER</x:textbox>
+  </x:warp>
+
+  <text x="420" y="726" font-size="11" fill="#94a3b8">field="shell-upper" bend="60"</text>
+  <rect x="420" y="770" width="240" height="80" fill="none" stroke="#334155" stroke-dasharray="4 3"/>
+  <x:warp field="shell-upper" bend="60">
+    <rect x="420" y="770" width="240" height="80" fill="#164e63"/>
+    <x:textbox x="420" y="770" width="240" height="80" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="32" fill="#67e8f9">SHELL UPPER</x:textbox>
+  </x:warp>
+</svg>
