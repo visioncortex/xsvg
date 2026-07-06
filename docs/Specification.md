@@ -426,8 +426,8 @@ vertical segments are fine. **Beyond either end** of the path the frame extends 
 end tangent**, so a run longer than the path continues rather than bunching at the endpoint. **The
 bake is native** (§7.1, in `xsvg-core`): the reference path flattens into an arc-length frame, and
 the outlined run — the browser supplies only the glyph geometry and its advance width — runs the
-standard pipeline with the quality-graded tolerance, adaptive subdivision, and cubic refit above
-`fast`. For a *non-deforming* follow, use `effect="follow"` (§6.13.5).
+standard pipeline with the quality-graded tolerance and adaptive subdivision. For a
+*non-deforming* follow, use `effect="follow"` (§6.13.5).
 
 **6.13.3 Stair Step — per-glyph steps, live text [implemented].** The authorable stepped baseline:
 glyphs stay upright and **undeformed**; each is absolutely positioned via per-glyph `x`/`y` lists —
@@ -445,6 +445,14 @@ instead of straight up —
 with `N(x)` the profile's unit normal. Vertical strokes tilt perpendicular to the path while
 horizontal strokes stay parallel to it — the twisting-ribbon look. Like skew (and unlike rainbow)
 there is no arc-length reparameterization; the path is read as a height field, single-valued in `x`.
+
+**How the three warping effects relate** — same skeleton, two independent choices:
+
+| effect | glyph advance measured… | glyph "up" points… | consequence |
+|---|---|---|---|
+| skew | along **x** | straight up | upright letters; x-extent preserved |
+| ribbon | along **x** | along the **normal** | letters lean with the slope; x-extent preserved, but glyphs stretch by `√(1+f′²)` along steep sections |
+| rainbow | along **arc length** | along the **normal** | letters rotate rigidly, constant width/spacing on any curve; the run consumes arc length, not x |
 
 **6.13.5 Follow — SVG's native `<textPath>` [implemented].** The *non-deforming* follow: lowers to
 live `<text><textPath href="#id">`, so glyphs stay undeformed and the text stays **selectable** —
@@ -493,11 +501,12 @@ Chords — including straight source segments and implicit closing edges — are
 adaptively**: a segment splits while any mapped probe (mid + quarter points) deviates from the
 mapped chord *segment* by more than `tolerance` (depth-capped), so long straight edges curve
 smoothly under a nonlinear field while line-preserving fields (perspective) emit zero waste. The
-**refit** then fits the polyline back to cubics via kurbo's corner-aware, error-bounded simplify
-(angle threshold ≈ 14° separates subdivision joins from real corners; the optimizing fit level —
-the default subdivision fitter degrades on reversed runs). Output form per profile: `fast` = the
-raw polyline (`M`/`L`/`Z`) · `balanced`/`highest` = refit cubics, at tolerances 1.0 / 0.25 / 0.05
-user units. Both forms stay within the same tolerance of the true mapped geometry.
+**refit** step is implemented at the API level (kurbo's corner-aware simplify, natively tested)
+but **disabled in the lowering**: on dense, quantized glyph outlines kurbo 0.13's fitter overshoots
+— producing notched edges and hairline slivers — and its optimizing level dominates compile time
+(its subdivision level degrades badly on reversed runs). Until a robust fitter lands, **every
+profile emits the tolerance-graded polyline** (`M`/`L`/`Z`) at 1.0 / 0.25 / 0.05 user units, which
+stays within tolerance of the true mapped geometry by construction.
 
 ### 7.2 Deformation fields [skew shipped-first]
 
@@ -627,7 +636,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `baseline-shift` (offset the run along the local normal) | implemented |
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
-| Text on a path — **native bake** (kurbo arc-length frame; §7.1 tolerance + refit; browser supplies only glyphs + advance) | implemented |
+| Text on a path — **native bake** (kurbo arc-length frame; §7.1 graded tolerance; browser supplies only glyphs + advance) | implemented |
 | Text on a path — `ribbon` (normal-offset heights) and `follow` (native `<textPath>`, live + selectable) | implemented |
 | `<x:warp field="bend" in="#spine">` — flow arbitrary geometry along a path (align/start placement) | implemented |
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
@@ -635,7 +644,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
-| Geometry bake — cubic refit (`balanced`/`highest`; `fast` keeps the polyline) | implemented |
+| Geometry bake — cubic refit | implemented at the API, **disabled in lowering** (kurbo fitter overshoots on glyph-density input) |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

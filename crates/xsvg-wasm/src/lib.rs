@@ -531,9 +531,12 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
         let advance = ctx.outliner.advance_width(&text, &style, style.size);
         if let (Some(flat), Some(advance)) = (flat, advance) {
-            let refit = ctx.quality != QualityProfile::Fast;
+            // Refit is DISABLED (see §7.1): kurbo's fitter overshoots on dense
+            // quantized glyph outlines (notches + hairline smears) and its Optimize
+            // level dominates compile time. Polyline output at the graded tolerance
+            // is the shipped form until a robust fitter lands.
             if let Some(d) =
-                warp_text_on_path(&flat, &path_d, &fx, advance, ctx.quality.tolerance(), refit)
+                warp_text_on_path(&flat, &path_d, &fx, advance, ctx.quality.tolerance(), false)
             {
                 push_outline_group(out, fill, &stroke, &pos, &[d]);
                 return;
@@ -721,13 +724,13 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     match field {
         Some(f) => {
             let tol = ctx.quality.tolerance();
-            // `fast` emits the raw polyline; better profiles refit to cubics (§7.1)
-            let refit = ctx.quality != QualityProfile::Fast;
             let mut last = 0;
             for (a, b) in ranges {
                 out.push_str(&inner[last..a]);
-                // a path that fails to bake keeps its original geometry (§4 totality)
-                match warp_svg_path(&inner[a..b], f.as_ref(), tol, refit) {
+                // a path that fails to bake keeps its original geometry (§4
+                // totality). Refit is DISABLED (see §7.1): kurbo's fitter
+                // overshoots on dense glyph outlines and dominates compile time.
+                match warp_svg_path(&inner[a..b], f.as_ref(), tol, false) {
                     Some(d) => out.push_str(&d),
                     None => out.push_str(&inner[a..b]),
                 }
@@ -2278,17 +2281,20 @@ mod tests {
 
     #[test]
     fn warp_quality_grades_output_form() {
-        // fast = raw polyline (no cubics, many segments); balanced/highest = the
-        // refit — a handful of cubics even at a 20× tighter tolerance
+        // every profile emits the tolerance-graded polyline (refit is disabled —
+        // §7.1): tighter tolerance → more segments, and never any cubics
         let svg = format!(
             r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="200" height="60"/></x:warp></svg>"##
         );
         let fast = compile_impl(&svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap();
         let hi = compile_impl(&svg, "highest", false, &Mono, &NoShaper, &NoOutliner).unwrap();
-        assert!(!fast.contains('C'), "{fast}");
-        assert!(fast.matches('L').count() > 8, "{fast}");
-        assert!(hi.contains('C'), "{hi}");
-        assert!(hi.matches('C').count() < 25, "{hi}");
+        assert!(!fast.contains('C') && !hi.contains('C'), "{hi}");
+        assert!(
+            hi.matches('L').count() > fast.matches('L').count(),
+            "highest ({}) !> fast ({})",
+            hi.matches('L').count(),
+            fast.matches('L').count()
+        );
     }
 
     #[test]

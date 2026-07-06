@@ -39,9 +39,9 @@ catalog: [Typography.md](Typography.md) (Pillar 1).
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **The bake**: flatten → map → refit (§7.1) | §7 | C | ✅ | **all three steps shipped** in `xsvg-core`, for `<x:warp>` *and* `<x:textpath>`: flatten → map with adaptive chord subdivision → corner-aware **cubic refit** (`fast` keeps the polyline), natively unit-tested end to end |
+| **The bake**: flatten → map → refit (§7.1) | §7 | C | ◑ | flatten → map with adaptive chord subdivision **shipped** in `xsvg-core` for `<x:warp>` *and* `<x:textpath>`, natively tested; **refit exists at the API but is disabled in the lowering** — kurbo 0.13's fitter overshoots on dense glyph outlines (notches, hairline slivers) and dominates compile time; all profiles emit tolerance-graded polylines |
 | **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ✅ | **shipped** — `Field` trait with the `EnvelopePreset` family, corner-driven maps, *and* the §6.13 `SkewField`/`RainbowField` over a shared native `PathFrame`; one field library, one bake |
-| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ✅ | **fully wired**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units and polyline-vs-refit output form, for both `<x:warp>` and `<x:textpath>` |
+| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ✅ | **fully wired**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units, for both `<x:warp>` and `<x:textpath>` |
 | **`<x:warp>` generic front-end** (§7.3) | AI Envelope | C | ✅ | **shipped** — displacement presets over wrapped children; unknown/absent fields degrade behind a marker, unwarpable children skip with a marker |
 | **Warp arbitrary geometry** (basic shapes, `<path>`, `<g>` subtrees) | AI | C | ✅ | **shipped** — shapes convert to path geometry and bake; live text / rounded rects / lines / images are skipped with a marker (never silently unwarped) |
 | **Warp outlined text** | AI (after Create Outlines) | C | ✅ | **shipped** — `outline="true"` boxes and `<x:textpath>` output warp like any path inside `<x:warp>` |
@@ -198,10 +198,10 @@ the **native §7.1 bake** (the browser supplies only glyph outlines + advance wi
 [textpath-effects.xsvg](../dataset/textpath-effects.xsvg)). Non-destructive authoring holds by
 construction.
 
-**Partial (◑):** nothing — the §6.13 glyph bake now runs on the native pipeline (the browser
-supplies only glyph outlines and advance widths), so every shipped row is natively tested,
-quality-graded, and refit. The stair fallback also went native: it needs only the measurer, no
-extra browser seam.
+**Partial (◑):** the **refit** — implemented and natively tested at the API, but disabled in the
+lowering after visible glyph regressions (kurbo 0.13's fitter overshoots on dense quantized
+outlines: notched edges, hairline slivers) and heavy compile cost. Output is the tolerance-graded
+polyline everywhere; re-enable behind a robust fitter.
 
 **Planned, field-only (○):** empty — every ○ row in the catalog has shipped. What remains is ❌
 machinery: the lattice/handle warps (§D), the anchor-aware Effect-menu distortions (§F), gravity
@@ -223,9 +223,10 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
 4. ~~**Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
    polar (arc); radial (fisheye, inflate), rotational (twist), squeeze.~~ ✅ *(shipped — **full
    Make-with-Warp parity, 15/15**)*
-5. ~~**Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
-   `highest` = refit at graded tolerance).~~ ✅ *(shipped; the `align`/`start` and stair-step items
-   originally here shipped early, alongside rainbow)*
+5. **Refit** — polyline → cubic fitting behind the quality knob. *Shipped, then **disabled** after
+   glyph-quality regressions (kurbo's fitter overshoots on dense quantized outlines — smears and
+   fractured edges — and its Optimize level is slow); the API + tests remain, pending a robust
+   fitter.* *(The `align`/`start` and stair-step items originally here shipped early.)*
 6. ~~**Rainbow** — arc-length + normal machinery~~ ✅ *(shipped early with `baseline-shift`, riding
    the §6.13 adapter seam ahead of the native bake — since ported onto it; bend-along-path §D is
    now field-only plumbing)*

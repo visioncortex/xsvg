@@ -442,7 +442,8 @@ pub fn run_offset(extent: f64, w: f64, align: &str, start: f64) -> f64 {
 /// Only the first subpath is used. `None` for unparsable or zero-length paths.
 pub struct PathFrame {
     pts: Vec<Point>,
-    cum: Vec<f64>, // cumulative arc length per vertex; cum[0] = 0
+    cum: Vec<f64>,         // cumulative arc length per vertex; cum[0] = 0
+    tans: Vec<(f64, f64)>, // smoothed per-vertex unit tangents (see `new`)
 }
 
 impl PathFrame {
@@ -479,7 +480,34 @@ impl PathFrame {
             acc += w[0].distance(w[1]);
             cum.push(acc);
         }
-        (acc > 1e-9).then_some(Self { pts, cum })
+        if acc <= 1e-9 {
+            return None;
+        }
+        // Smoothed per-vertex tangents (adjacent segment directions averaged).
+        // Normal offsets amplify tangent error by the offset distance: with raw
+        // per-segment tangents a few degrees of turn at each polyline vertex kicks
+        // a ±cap-height offset sideways by whole units — visible notches and
+        // slivers on warped glyphs. Interpolating vertex tangents makes the normal
+        // field C1-smooth along the frame.
+        let seg_dir = |i: usize| -> (f64, f64) {
+            let d = pts[i + 1] - pts[i];
+            let l = d.hypot();
+            if l > 0.0 {
+                (d.x / l, d.y / l)
+            } else {
+                (1.0, 0.0)
+            }
+        };
+        let n = pts.len();
+        let mut tans = Vec::with_capacity(n);
+        for i in 0..n {
+            let a = seg_dir(if i > 0 { i - 1 } else { 0 });
+            let b = seg_dir(if i + 1 < n { i } else { n - 2 });
+            let (sx, sy) = (a.0 + b.0, a.1 + b.1);
+            let l = sx.hypot(sy);
+            tans.push(if l > 1e-9 { (sx / l, sy / l) } else { b });
+        }
+        Some(Self { pts, cum, tans })
     }
 
     /// Total arc length — the run-placement extent under rainbow.
@@ -495,19 +523,10 @@ impl PathFrame {
         self.pts[self.pts.len() - 1].x
     }
 
-    /// Unit tangent of the polyline segment starting at vertex `i` (degenerate → +x).
-    fn tangent(&self, i: usize) -> (f64, f64) {
-        let d = self.pts[i + 1] - self.pts[i];
-        let len = d.hypot();
-        if len > 0.0 {
-            (d.x / len, d.y / len)
-        } else {
-            (1.0, 0.0)
-        }
-    }
-
     /// Point `off` units along the local normal from the path point at arc length
-    /// `s`; straight extrapolation past the ends.
+    /// `s`; straight extrapolation past the ends. The normal comes from the
+    /// smoothed, per-vertex-interpolated tangent, so it turns continuously along
+    /// the frame instead of jumping at polyline vertices.
     pub fn at(&self, s: f64, off: f64) -> Point {
         let len = self.len();
         let sc = s.clamp(0.0, len);
@@ -523,13 +542,27 @@ impl PathFrame {
         } else {
             0.0
         };
-        let (tx, ty) = self.tangent(if over < 0.0 {
-            0
+        let (mut tx, mut ty) = if over < 0.0 {
+            self.tans[0]
         } else if over > 0.0 {
-            self.pts.len() - 2
+            self.tans[self.tans.len() - 1]
         } else {
-            i
-        });
+            let a = self.tans[i];
+            let b = self.tans[i + 1];
+            let (lx, ly) = (a.0 + (b.0 - a.0) * frac, a.1 + (b.1 - a.1) * frac);
+            let l = lx.hypot(ly);
+            if l > 1e-9 {
+                (lx / l, ly / l)
+            } else {
+                a
+            }
+        };
+        // keep the frame total: tangents are unit by construction
+        let tl = tx.hypot(ty);
+        if tl > 0.0 {
+            tx /= tl;
+            ty /= tl;
+        }
         let p = self.pts[i].lerp(self.pts[i + 1], frac);
         Point::new(p.x + over * tx - off * ty, p.y + over * ty + off * tx)
     }
@@ -553,7 +586,7 @@ impl PathFrame {
             let y = if first.x <= last.x { last.y } else { first.y };
             return (y, (1.0, 0.0));
         }
-        for w in self.pts.windows(2) {
+        for (i, w) in self.pts.windows(2).enumerate() {
             let (a, b) = (w[0], w[1]);
             if (x >= a.x && x <= b.x) || (x <= a.x && x >= b.x) {
                 let t = if b.x != a.x {
@@ -561,13 +594,16 @@ impl PathFrame {
                 } else {
                     0.0
                 };
-                let (mut dx, mut dy) = (b.x - a.x, b.y - a.y);
+                // smoothed, interpolated tangent (as in `at`), oriented +x
+                let ta = self.tans[i];
+                let tb = self.tans[i + 1];
+                let (mut dx, mut dy) = (ta.0 + (tb.0 - ta.0) * t, ta.1 + (tb.1 - ta.1) * t);
                 if dx < 0.0 {
                     dx = -dx;
-                    dy = -dy; // orient +x
+                    dy = -dy;
                 }
                 let len = dx.hypot(dy);
-                let dir = if len > 0.0 {
+                let dir = if len > 1e-9 {
                     (dx / len, dy / len)
                 } else {
                     (1.0, 0.0)
@@ -734,6 +770,10 @@ pub fn warp_text_on_path(
     if !advance.is_finite() {
         return None;
     }
+    // Glyphs are judged at reading distance: chords the shape tolerance allows are
+    // visibly faceted on letterforms, so text bakes 10× tighter (fast/balanced/
+    // highest → 0.1/0.025/0.005). The frame flattens finer still (tol/2 inside).
+    let tolerance = (tolerance / 10.0).max(1e-3);
     let frame = PathFrame::new(ref_path_d, tolerance)?;
     match fx.effect {
         "skew" => {
