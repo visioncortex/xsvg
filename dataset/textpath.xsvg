@@ -1,11 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 720 260" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="720" height="260" fill="#0f172a"/>
-  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">text on a path — skew: glyphs stay upright and shear onto the curve</text>
+     viewBox="0 0 720 560" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="560" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">text on a path — skew shears upright glyphs onto the curve; rainbow rotates and bends them</text>
 
-  <!-- the reference baseline curve (shown faintly as a guide) -->
-  <path id="wave" d="M40,165 C160,85 260,85 360,165 C460,245 560,245 680,165" fill="none" stroke="#334155" stroke-width="2"/>
-
-  <!-- text outlined and warped onto #wave by the displacement field -->
+  <!-- skew: glyphs stay upright, the baseline rides the wave -->
+  <text x="28" y="64" font-size="11" fill="#94a3b8">effect="skew" — verticals stay vertical, the baseline follows the wave</text>
+  <path id="wave" d="M40,205 C160,125 260,125 360,205 C460,285 560,285 680,205" fill="none" stroke="#334155" stroke-width="2"/>
   <x:textpath in="#wave" effect="skew" font-family="-x-google-Anton" font-size="62" fill="#38bdf8">RIDING THE WAVE</x:textpath>
+
+  <!-- rainbow: arc-length follow; baseline-shift floats runs off the same path -->
+  <text x="28" y="316" font-size="11" fill="#94a3b8">effect="rainbow" — glyphs rotate and bend along the arc; baseline-shift floats runs off it</text>
+  <path id="arc" d="M70,505 C210,355 510,355 650,505" fill="none" stroke="#334155" stroke-width="2"/>
+  <x:textpath in="#arc" effect="rainbow" baseline-shift="10" font-family="-x-google-Anton" font-size="52" fill="#fbbf24">OVER THE RAINBOW</x:textpath>
+  <x:textpath in="#arc" effect="rainbow" baseline-shift="-26" font-family="-x-google-Anton" font-size="20" fill="#94a3b8">a negative baseline-shift hangs beneath the same path</x:textpath>
 </svg>

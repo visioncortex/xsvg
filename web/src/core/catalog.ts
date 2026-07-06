@@ -156,13 +156,8 @@ export const CATALOG: Category[] = [
     samples: [
       {
         file: "textpath.xsvg",
-        title: "Text on a path (skew)",
-        blurb: 'Outlined text warped onto a wave by the skew field — glyphs stay upright and shear, the baseline follows the curve',
-      },
-      {
-        file: "textpath-rainbow.xsvg",
-        title: "Text on a path (rainbow)",
-        blurb: "The arc-length follow field — glyphs rotate and bend along the curve; baseline-shift floats runs above or below the path",
+        title: "Text on a path (skew & rainbow)",
+        blurb: "skew shears upright glyphs onto a wave; rainbow rotates and bends them along an arc, with baseline-shift floating runs above and below the same path",
       },
       {
         file: "textpath-align.xsvg",

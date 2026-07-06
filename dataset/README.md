@@ -59,8 +59,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [textpath.xsvg](textpath.xsvg) | `<x:textpath in="#wave" effect="skew">` outlines the run and warps it onto the curve via the displacement field — glyphs stay upright and shear, the baseline follows the path |
-| [textpath-rainbow.xsvg](textpath-rainbow.xsvg) | `effect="rainbow"` follows the arc — glyphs rotate and deform along the curve; `baseline-shift` offsets runs along the local normal (one run floats above, a second hangs beneath the same path) |
+| [textpath.xsvg](textpath.xsvg) | `effect="skew"` warps upright glyphs onto a wave (the displacement field); `effect="rainbow"` rotates and bends them along an arc, with `baseline-shift` floating one run above and hanging another beneath the same path |
 | [textpath-align.xsvg](textpath-align.xsvg) | `align="start\|middle\|end"` + `start` place the run within the path's extent (arc length under rainbow, x-extent under skew); `effect="stair"` steps live, selectable `<text>` glyph-by-glyph along the height profile — no font bytes needed (it is also skew's no-font degradation) |
 | [textpath-effects.xsvg](textpath-effects.xsvg) | `effect="ribbon"` — skew's complement: heights offset along the profile *normal*, so verticals tilt with the curve; `effect="follow"` lowers to SVG's native `<textPath>` — live, selectable, undeformed (align/start → `startOffset`) |
 

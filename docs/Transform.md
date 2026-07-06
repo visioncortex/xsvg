@@ -193,8 +193,7 @@ text, with innermost-first nesting and marker-based degradation
 extrapolation past the ends), **ribbon** (normal-offset heights), authorable **stair**, native
 **follow** (`<textPath>`, live + selectable), `baseline-shift`, and `align`/`start` placement, on
 the **native §7.1 bake** (the browser supplies only glyph outlines + advance widths)
-([textpath.xsvg](../dataset/textpath.xsvg), [textpath-rainbow.xsvg](../dataset/textpath-rainbow.xsvg),
-[textpath-align.xsvg](../dataset/textpath-align.xsvg),
+([textpath.xsvg](../dataset/textpath.xsvg), [textpath-align.xsvg](../dataset/textpath-align.xsvg),
 [textpath-effects.xsvg](../dataset/textpath-effects.xsvg)). Non-destructive authoring holds by
 construction.
 
