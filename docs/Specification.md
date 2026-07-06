@@ -379,7 +379,8 @@ of per-point, on live `<text>` (§6.13.3).
 ```
 - **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`). Like
   `<x:textbox in="#shape">` and `clipPath`, only its **geometry** is used; its own paint is ignored.
-- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)* | `stair` *(§6.13.3)*.
+- **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)* | `stair` *(§6.13.3)* |
+  `ribbon` *(§6.13.4)* | `follow` *(§6.13.5)*.
 - **`baseline-shift`** — length, default `0`: offsets the run's baseline from the path along the
   **local normal** — positive lifts the text above the path, matching SVG `baseline-shift`
   semantics. Applies to every effect (under skew, where the normal is not computed, it is a plain
@@ -426,8 +427,7 @@ end tangent**, so a run longer than the path continues rather than bunching at t
 bake is native** (§7.1, in `xsvg-core`): the reference path flattens into an arc-length frame, and
 the outlined run — the browser supplies only the glyph geometry and its advance width — runs the
 standard pipeline with the quality-graded tolerance, adaptive subdivision, and cubic refit above
-`fast`. A *non-deforming* follow MAY instead lower to SVG's native `<textPath>` (live `<text>`,
-font-dependent, no shape deformation) — future work.
+`fast`. For a *non-deforming* follow, use `effect="follow"` (§6.13.5).
 
 **6.13.3 Stair Step — per-glyph steps, live text [implemented].** The authorable stepped baseline:
 glyphs stay upright and **undeformed**; each is absolutely positioned via per-glyph `x`/`y` lists —
@@ -436,10 +436,28 @@ f(x_glyph) − baseline-shift` sampled from the **native height profile**. Becau
 `<text>` (never the outliner), it **needs no font bytes**, stays selectable, and uses the live
 face — the one path effect available everywhere (only the *measurer* is required).
 
+**6.13.4 3D Ribbon — normal-offset heights [implemented].** Skew's complement: the baseline rides
+the height profile exactly as §6.13.1, but glyph heights offset along the profile's **normal**
+instead of straight up —
+
+> `(x, y) → (x, f(x)) + (y − baseline-shift)·N(x)`
+
+with `N(x)` the profile's unit normal. Vertical strokes tilt perpendicular to the path while
+horizontal strokes stay parallel to it — the twisting-ribbon look. Like skew (and unlike rainbow)
+there is no arc-length reparameterization; the path is read as a height field, single-valued in `x`.
+
+**6.13.5 Follow — SVG's native `<textPath>` [implemented].** The *non-deforming* follow: lowers to
+live `<text><textPath href="#id">`, so glyphs stay undeformed and the text stays **selectable** —
+the renderer does the following. `align`/`start` compile to `startOffset` (resolved against the
+path's arc length and the measured run width); `baseline-shift` is forwarded as the presentation
+attribute. Needs no font bytes; the trade-off is renderer-dependent glyph placement and no §7
+warping — it is the one effect whose output uses `<textPath>` rather than baked geometry.
+
 **Degradation [implemented].** The warping effects need the glyph outliner (§6.12). If it is
-unavailable (no font bytes), **skew degrades to the stair-step lowering** (§6.13.3) — same field,
-per-glyph instead of per-point. Rainbow, or a run whose height profile can't be sampled, degrades to
-a straight `<text>` at the element's `x`/`y` — the document never breaks.
+unavailable (no font bytes), the **height-profile effects (skew, ribbon) degrade to the stair-step
+lowering** (§6.13.3) — same field, per-glyph instead of per-point. Rainbow, or a run whose height
+profile can't be sampled, degrades to a straight `<text>` at the element's `x`/`y` — the document
+never breaks.
 
 **v0 limits.** Single line; base style per run (per-run `<tspan>` styling, `justify`, `glyph-x-scale`
 do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). The
@@ -511,11 +529,14 @@ carrying the element's paint and `transform` (affine, so it composes after the b
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
-| `field` | all 15 Make-with-Warp presets — `arc` \| `arc-lower` \| `arc-upper` \| `arch` \| `bulge` \| `shell-lower` \| `shell-upper` \| `flag` \| `wave` \| `fish` \| `rise` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` — plus `perspective` \| `free` | — | selects the field |
+| `field` | all 15 Make-with-Warp presets — `arc` \| `arc-lower` \| `arc-upper` \| `arch` \| `bulge` \| `shell-lower` \| `shell-upper` \| `flag` \| `wave` \| `fish` \| `rise` \| `fisheye` \| `inflate` \| `squeeze` \| `twist` — plus `perspective` \| `free` \| `bend` \| `roughen` | — | selects the field |
 | `bend` | number, −100…100 (%) | `0` | preset strength; clamped; for displacement presets positive bows **up** (`axis="h"`) / **right** (`axis="v"`) |
 | `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical); applies to the displacement family and `squeeze` — the radial/rotational presets are symmetric and ignore it |
 | `corners` | 8 numbers `"x0,y0 x1,y1 x2,y2 x3,y3"` | — | the target corners — **TL TR BR BL** — for `perspective` / `free`; required by both |
 | `distort-h`, `distort-v` | number, −100…100 (%) | `0` | Illustrator's Distortion sliders: a projective **taper composed after** the field |
+| `in` | `#id` | — | the spine path for `bend`; required by it (like `<x:textpath in>`, only its geometry is used) |
+| `align`, `start` | as §6.13 | `start`, `0` | place the `bend` envelope along the spine's arc length |
+| `detail` | number > 0 | `10` | `roughen` ridge frequency — ridges per 100 user units |
 
 **Model (normative).** Children first lower to pure `<path>` geometry: basic shapes convert (sharp
 `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, and `<path>` as-is); xsvg text elements
@@ -540,6 +561,15 @@ to `1−b/2`). **Arc** is the one polar field: the box bends into an annular sec
 `Θ = bend·π` (a semicircle at 100%) — the midline becomes an arc of radius `R = L/Θ` (its length is
 preserved), perpendicular lines become radii, and the envelope relocates (no pinned corners).
 Every path then runs the §7.1 bake at the profile tolerance.
+
+**Spine and noise fields.** `field="bend"` (Inkscape's *LPE Bend*) flows the children along a
+referenced spine: the envelope's bend-axis extent maps to arc length (placed by `align`/`start`,
+exactly the §6.13 semantics), and its cross axis to a normal offset — the envelope's vertical
+midline rides the spine; past either end the spine extends straight. It is the §6.13.2 path-follow
+field generalized to arbitrary geometry. `field="roughen"` (Illustrator Effect ▸ Roughen) jitters
+every outline point by smooth 2-D value noise: amplitude `|bend| · min(hw, hh)/4` at 100%,
+wavelength `100/detail`. The noise lattice is **seeded deterministically** — the same input always
+compiles to the same output (§4).
 
 **Corner-driven fields.** `field="perspective"` solves the **8-DOF homography** taking the envelope
 frame's corners to the authored `corners` (a Gauss-eliminated DLT over the normalized frame;
@@ -598,6 +628,9 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
 | Text on a path — **native bake** (kurbo arc-length frame; §7.1 tolerance + refit; browser supplies only glyphs + advance) | implemented |
+| Text on a path — `ribbon` (normal-offset heights) and `follow` (native `<textPath>`, live + selectable) | implemented |
+| `<x:warp field="bend" in="#spine">` — flow arbitrary geometry along a path (align/start placement) | implemented |
+| `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

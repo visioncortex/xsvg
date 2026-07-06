@@ -18,10 +18,10 @@ use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
     measure_runs, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor,
-    AreaLayout, AreaSpec, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
+    AreaLayout, AreaSpec, BendField, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
     GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine,
-    QualityProfile, RasterRegion, Rect, RegionSpec, Shaper, Taper, TextAlign, TextAreaSpec,
-    TextOverflow, TextStyle, VAlign, WarpAxis,
+    QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper, TextAlign,
+    TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -499,8 +499,35 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         return;
     };
 
-    // "stair" is live <text> by design (§6.13.3) — it never consults the outliner.
-    if fx.effect != "stair" {
+    // "follow" (§6.13.5) lowers to SVG's own <textPath> — live, selectable text
+    // that follows the curve without deforming; no font bytes needed, only the
+    // path's arc length for align placement.
+    if fx.effect == "follow" {
+        if let Some(frame) = PathFrame::new(&path_d, ctx.quality.tolerance()) {
+            let advance = line_advance(&text, &style, style.size, ctx.m);
+            let offset = run_offset(frame.len(), advance, fx.align, fx.start);
+            out.push_str("<text");
+            push_font_attrs(out, &style, style.size, fill);
+            out.push_str(&pos);
+            out.push_str("><textPath href=\"#");
+            push_escaped(out, reference.strip_prefix('#').unwrap_or(reference), true);
+            out.push('"');
+            if offset != 0.0 {
+                out.push_str(&format!(" startOffset=\"{}\"", fmt(offset)));
+            }
+            if fx.baseline_shift != 0.0 {
+                out.push_str(&format!(" baseline-shift=\"{}\"", fmt(fx.baseline_shift)));
+            }
+            out.push('>');
+            push_escaped(out, &text, false);
+            out.push_str("</textPath></text>");
+            return;
+        }
+        // degenerate path → the straight fallback below
+    }
+
+    // "stair"/"follow" are live <text> by design — they never consult the outliner.
+    if !matches!(fx.effect, "stair" | "follow") {
         let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
         let advance = ctx.outliner.advance_width(&text, &style, style.size);
         if let (Some(flat), Some(advance)) = (flat, advance) {
@@ -514,10 +541,10 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         }
     }
 
-    // Stair Step — authored (§6.13.3), or as skew's degradation without an outline
-    // font (§6.13.1) — when the height profile can be sampled; anything else →
-    // straight <text> at the element's x/y.
-    if matches!(fx.effect, "stair" | "skew")
+    // Stair Step — authored (§6.13.3), or as the degradation of the height-profile
+    // effects (skew, ribbon) without an outline font — when the profile can be
+    // sampled; anything else → straight <text> at the element's x/y.
+    if matches!(fx.effect, "stair" | "skew" | "ribbon")
         && stepped_text(out, &text, &style, &fx, &path_d, fill, &pos, ctx)
     {
         return;
@@ -630,7 +657,8 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let field_name = node.attribute("field").unwrap_or("");
     let bend = attr_num(node, "bend", 0.0) / 100.0; // authored as −100…100 %
     let axis = WarpAxis::parse(node.attribute("axis").unwrap_or("h"));
-    // the base field: an envelope preset, or a corner-driven map (§7.3)
+    // the base field: an envelope preset, a corner-driven map, a spine follow, or
+    // seeded noise (§7.3)
     let base: Option<Box<dyn Field>> = bbox.and_then(|b| match field_name {
         "perspective" => parse_corners(node)
             .and_then(|t| Homography::new(b, t))
@@ -638,6 +666,27 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         "free" => parse_corners(node)
             .and_then(|t| FreeDistort::new(b, t))
             .map(|f| Box::new(f) as Box<dyn Field>),
+        "bend" => {
+            // flow the children along a referenced spine (Inkscape's LPE Bend): the
+            // envelope's left edge starts on the spine (placed by align/start) and
+            // its vertical midline rides it
+            let frame = node
+                .attribute("in")
+                .and_then(|r| resolve_ref(node, r))
+                .and_then(shape_to_path_d)
+                .and_then(|d| PathFrame::new(&d, ctx.quality.tolerance()))?;
+            let s0 = run_offset(
+                frame.len(),
+                b.width(),
+                node.attribute("align").unwrap_or("start"),
+                attr_num(node, "start", 0.0),
+            );
+            let anchor = xsvg_core::kurbo::Point::new(b.min_x(), b.center().y);
+            Some(Box::new(BendField { frame, s0, anchor }) as Box<dyn Field>)
+        }
+        "roughen" => Some(
+            Box::new(RoughenField::new(bend, attr_num(node, "detail", 10.0), b)) as Box<dyn Field>,
+        ),
         name => EnvelopePreset::new(name, bend, axis, b).map(|p| Box::new(p) as Box<dyn Field>),
     });
     // the Warp-Options distortion sliders compose a projective taper after the field
@@ -654,7 +703,18 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     copy_attrs(
         node,
         out,
-        &["field", "bend", "axis", "corners", "distort-h", "distort-v"],
+        &[
+            "field",
+            "bend",
+            "axis",
+            "corners",
+            "distort-h",
+            "distort-v",
+            "in",
+            "detail",
+            "align",
+            "start",
+        ],
     );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
@@ -2134,6 +2194,76 @@ mod tests {
         assert_ne!(a, b);
         assert!(!b.contains("distort-h"), "slider attr leaked onto <g>: {b}");
         assert!(!b.contains("NaN"), "{b}");
+    }
+
+    #[test]
+    fn warp_bend_flows_children_along_a_spine() {
+        // envelope (0,0)-(100,40), flat spine at y = 100: the envelope midline
+        // (y = 20) rides the spine, so the rect maps to a band y = 80…120 starting
+        // at the spine's start
+        let svg = format!(
+            r##"{XW}<path id="spine" d="M0,100 L300,100" fill="none"/><x:warp field="bend" in="#spine"><rect x="0" y="0" width="100" height="40" fill="#0af"/></x:warp></svg>"##
+        );
+        let out = compile_fast(&svg);
+        assert!(out.contains("M0,80"), "{out}");
+        assert!(out.contains("100,120"), "{out}");
+        // a vertical spine rotates the band onto it
+        let svg = format!(
+            r##"{XW}<path id="spine" d="M50,0 L50,300" fill="none"/><x:warp field="bend" in="#spine"><rect x="0" y="0" width="100" height="40" fill="#0af"/></x:warp></svg>"##
+        );
+        let out = compile_fast(&svg);
+        assert!(out.contains("M70,0"), "{out}"); // top edge (20 above mid) → x = 50+20
+        assert!(!out.contains("NaN"), "{out}");
+        // missing/degenerate spine degrades behind the usual marker
+        let svg = format!(
+            r##"{XW}<x:warp field="bend" in="#nope"><rect x="0" y="0" width="100" height="40"/></x:warp></svg>"##
+        );
+        let out = compile_fast(&svg);
+        assert!(out.contains("unknown field"), "{out}");
+        assert!(out.contains("h100"), "{out}");
+    }
+
+    #[test]
+    fn warp_roughen_is_deterministic_and_bounded() {
+        let svg = format!(
+            r##"{XW}<x:warp field="roughen" bend="60" detail="12"><rect x="0" y="0" width="200" height="80" fill="#f00"/></x:warp></svg>"##
+        );
+        let a = compile_fast(&svg);
+        let b = compile_fast(&svg);
+        assert_eq!(a, b, "roughen must be deterministic");
+        assert!(a.contains("<path"), "{a}");
+        assert!(!a.contains("NaN"), "{a}");
+        // it actually roughens: the output differs from the unwarped rect
+        assert!(!a.contains("h200"), "{a}");
+    }
+
+    #[test]
+    fn textpath_ribbon_warps_and_degrades_like_skew() {
+        // flat path → ribbon behaves like skew: baseline lands on y = 20
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="ribbon" font-size="20" fill="#111">wave</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains("<path d=\"M0,20"), "{out}");
+        // without a font it degrades to the stepped baseline, like skew
+        let out = compile_test(svg);
+        assert!(out.contains(r#"x="0 10 20 30""#), "{out}");
+        assert!(out.contains(r#"y="20 20 20 20""#), "{out}");
+    }
+
+    #[test]
+    fn textpath_follow_lowers_to_native_textpath() {
+        // live SVG <textPath> — no font needed; align=middle places startOffset at
+        // (arclen 120 − advance 40)/2 = 40; baseline-shift rides along
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="wavy" d="M0,20 L120,20" fill="none"/><x:textpath in="#wavy" effect="follow" align="middle" baseline-shift="5" font-size="20" fill="#111">wave</x:textpath></svg>"##;
+        let out = compile_test(svg);
+        assert!(out.contains("<textPath href=\"#wavy\""), "{out}");
+        assert!(out.contains("startOffset=\"40\""), "{out}");
+        assert!(out.contains("baseline-shift=\"5\""), "{out}");
+        assert!(out.contains(">wave</textPath></text>"), "{out}");
+        // a degenerate path → straight fallback, no <textPath>
+        let degen = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M5,5 L5,5" fill="none"/><x:textpath in="#p" effect="follow" font-size="20">hi</x:textpath></svg>"##;
+        let out = compile_test(degen);
+        assert!(!out.contains("<textPath"), "{out}");
+        assert!(out.contains(">hi</text>"), "{out}");
     }
 
     #[test]

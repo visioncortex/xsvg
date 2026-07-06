@@ -114,7 +114,7 @@ true 2-D fields.
 | **Envelope mesh** (m×n lattice, movable points) | AI Make with Mesh | E | ❌ | bivariate Bézier / FFD lattice (Sederberg–Parry); needs lattice syntax + basis evaluation; shares patch vocabulary with `<x:mesh>` (Pillar 3) |
 | **Envelope — top object** (conform to an arbitrary shape) | AI Make with Top Object | S | ❌ | parameterize the target outline into a warped quad domain — the hardest envelope; needs shape parameterization machinery |
 | **MLS handle warp** (move-a-few-points) | Schaefer et al. / xsvg | S | ❌ | `handles="x,y→x′,y′ …"`; affine/similarity/rigid classes; `rust_mls` or in-house — new dependency, so not field-only |
-| **Bend along a path** (whole group follows a spine) | Inkscape LPE Bend | E | ○ | the §6.13.2 path-follow field applied to arbitrary geometry — `PathFrame` + `RainbowField` are now **native in core**, so this is front-end plumbing: an `in="#path"` reference on `<x:warp>` + mapping the envelope's bend axis to arc length |
+| **Bend along a path** (whole group follows a spine) | Inkscape LPE Bend | E | ✅ | **shipped** (§7.3) — `<x:warp field="bend" in="#spine">`: the envelope's midline rides the spine, its extent maps to arc length, `align`/`start` place it (§6.13 semantics); straight extrapolation past the ends |
 
 ## E. Type on a path — *the text front-end (§6.13)*
 
@@ -127,10 +127,10 @@ Catalogued from Illustrator's five *Type on a Path* effects.
 | **Rainbow** (arc-length follow + normal offset) | AI | C | ✅ | **shipped** — `effect="rainbow"`: uniform arc-length LUT + normal offset, straight extrapolation past the path's ends (§6.13.2) |
 | **Baseline shift** (offset the run from the path) | AI baseline shift / SVG | C | ✅ | **shipped** — `baseline-shift` offsets along the local normal (positive = above the path); applies to skew + rainbow; opposite shifts stack two runs on one path |
 | **Stair Step** (per-glyph vertical steps, no deformation) | AI | E | ✅ | **shipped** — authorable `effect="stair"` (§6.13.3): live `<text>` with per-glyph positions on the height profile — selectable, no font bytes needed, honors align/start/shift; also serves as skew's no-font degradation |
-| **Gravity** (glyphs rotate toward a center) | AI | S | ○ | per-glyph rotation field about the path's bbox center |
-| **3D Ribbon** (horizontals follow, verticals stay) | AI | S | ○ | the complement of skew — horizontal shear from the profile |
+| **Gravity** (glyphs rotate toward a center) | AI | S | ❌ | *reclassified* — per-**glyph** rotation is not a pure space field: it needs per-glyph outline decomposition the run-level pipeline doesn't have |
+| **3D Ribbon** (verticals tilt with the path, horizontals stay parallel to it) | AI | S | ✅ | **shipped** (§6.13.4) — `effect="ribbon"`: heights offset along the profile **normal** (skew's complement); degrades to stair-step like skew |
 | **`align` / `start` placement options** | AI | C | ✅ | **shipped** — `align` distributes slack within the path's extent (x-extent under skew, arc length under rainbow); `start` adds an absolute head-start; both honored by warped runs *and* the stepped fallback |
-| **Non-deforming follow** via native `<textPath>` | SVG | E | ○ | live-text lowering for quality `fast` / no-font cases; font-dependent, no shape deformation |
+| **Non-deforming follow** via native `<textPath>` | SVG | E | ✅ | **shipped** (§6.13.5) — `effect="follow"`: live, selectable `<textPath>`; `align`/`start` → `startOffset`, `baseline-shift` forwarded; needs no font bytes |
 
 ## F. Distort & Transform effects — *Illustrator's Effect menu*
 
@@ -140,7 +140,7 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
 | **Twist** (swirl, rotation ∝ radius) | AI Effect | E | ✅ | **shipped** — `field="twist"` (§B) |
-| **Roughen** (jittered edge displacement) | AI Effect | S | ○ | seeded deterministic noise as a displacement field over the flattened polyline (size/detail params); *seeded* so compiles are reproducible |
+| **Roughen** (jittered edge displacement) | AI Effect | S | ✅ | **shipped** (§7.3) — `field="roughen" bend detail`: smooth 2-D value noise from a fixed-seed lattice hash, so compiles are reproducible; amplitude `\|bend\|·min(hw,hh)/4`, wavelength `100/detail` |
 | **Pucker & Bloat** | AI Effect | S | ❌ | anchors stay, segment midpoints pull toward/away from center — anchor-aware, not a space field |
 | **Zig Zag** | AI Effect | S | ❌ | per-segment ridges/waves between anchors — anchor-aware |
 | **Tweak** (random anchor/handle jitter) | AI Effect | S | ❌ | anchor-aware |
@@ -182,16 +182,20 @@ work after (or alongside) Pillar 3.
 (flatten → map with adaptive chord subdivision, quality-graded tolerance, natively unit-tested), and
 **all 15 Make-with-Warp presets** across the five field families (displacement · scale · polar ·
 radial · rotational), plus **perspective** (`corners`-solved homography), **free distort**
-(bilinear), and the **distortion sliders** (a `Chain`-composed projective taper), over shapes,
-paths, and outlined text, with innermost-first nesting and marker-based degradation
+(bilinear), the **distortion sliders** (a `Chain`-composed projective taper), **bend along a spine**
+(`in="#path"`), and **roughen** (deterministic seeded noise), over shapes, paths, and outlined
+text, with innermost-first nesting and marker-based degradation
 ([warp-presets.xsvg](../dataset/warp-presets.xsvg),
 [warp-presets-arc.xsvg](../dataset/warp-presets-arc.xsvg),
-[warp-perspective.xsvg](../dataset/warp-perspective.xsvg)).
-**`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
-extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
-on the **native §7.1 bake** (the browser supplies only glyph outlines + advance widths)
+[warp-perspective.xsvg](../dataset/warp-perspective.xsvg),
+[warp-bend.xsvg](../dataset/warp-bend.xsvg)).
+**`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length follow + normal offset, straight
+extrapolation past the ends), **ribbon** (normal-offset heights), authorable **stair**, native
+**follow** (`<textPath>`, live + selectable), `baseline-shift`, and `align`/`start` placement, on
+the **native §7.1 bake** (the browser supplies only glyph outlines + advance widths)
 ([textpath.xsvg](../dataset/textpath.xsvg), [textpath-rainbow.xsvg](../dataset/textpath-rainbow.xsvg),
-[textpath-align.xsvg](../dataset/textpath-align.xsvg)). Non-destructive authoring holds by
+[textpath-align.xsvg](../dataset/textpath-align.xsvg),
+[textpath-effects.xsvg](../dataset/textpath-effects.xsvg)). Non-destructive authoring holds by
 construction.
 
 **Partial (◑):** nothing — the §6.13 glyph bake now runs on the native pipeline (the browser
@@ -199,8 +203,9 @@ supplies only glyph outlines and advance widths), so every shipped row is native
 quality-graded, and refit. The stair fallback also went native: it needs only the measurer, no
 extra browser seam.
 
-**Planned, field-only (○):** only the gravity/3D-ribbon type effects remain in this bucket — every
-§B preset has shipped. Each is one pure function plus its attribute plumbing.
+**Planned, field-only (○):** empty — every ○ row in the catalog has shipped. What remains is ❌
+machinery: the lattice/handle warps (§D), the anchor-aware Effect-menu distortions (§F), gravity
+(per-glyph decomposition, §E), the raster fallback, and fold-over detection (§G).
 
 **Needs pipeline work (❌):** **bend-along-path** (the rainbow field generalized to arbitrary
 geometry — waits on the `<x:warp>` native bake), **envelope mesh** (FFD lattice), **top-object

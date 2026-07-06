@@ -537,13 +537,21 @@ impl PathFrame {
     /// The path's height profile: its y at horizontal position `x` (first crossing
     /// in path order), clamped to the endpoint y outside the x-extent.
     pub fn y_at(&self, x: f64) -> f64 {
+        self.profile_hit(x).0
+    }
+
+    /// The height profile's value and the unit direction of the crossing segment
+    /// (oriented +x; horizontal `(1, 0)` outside the extent or on degenerate hits).
+    fn profile_hit(&self, x: f64) -> (f64, (f64, f64)) {
         let first = self.pts[0];
         let last = self.pts[self.pts.len() - 1];
         if x <= first.x.min(last.x) {
-            return if first.x <= last.x { first.y } else { last.y };
+            let y = if first.x <= last.x { first.y } else { last.y };
+            return (y, (1.0, 0.0));
         }
         if x >= first.x.max(last.x) {
-            return if first.x <= last.x { last.y } else { first.y };
+            let y = if first.x <= last.x { last.y } else { first.y };
+            return (y, (1.0, 0.0));
         }
         for w in self.pts.windows(2) {
             let (a, b) = (w[0], w[1]);
@@ -553,10 +561,21 @@ impl PathFrame {
                 } else {
                     0.0
                 };
-                return a.y + t * (b.y - a.y);
+                let (mut dx, mut dy) = (b.x - a.x, b.y - a.y);
+                if dx < 0.0 {
+                    dx = -dx;
+                    dy = -dy; // orient +x
+                }
+                let len = dx.hypot(dy);
+                let dir = if len > 0.0 {
+                    (dx / len, dy / len)
+                } else {
+                    (1.0, 0.0)
+                };
+                return (a.y + t * (b.y - a.y), dir);
             }
         }
-        last.y
+        (last.y, (1.0, 0.0))
     }
 }
 
@@ -587,6 +606,115 @@ pub struct RainbowField<'a> {
 impl Field for RainbowField<'_> {
     fn map(&self, p: Point) -> Point {
         self.frame.at(self.s0 + p.x, p.y - self.shift)
+    }
+}
+
+/// §6.13.4 **3D ribbon**: skew's complement — the baseline rides the height profile
+/// like skew, but heights offset along the profile's **normal** instead of straight
+/// up, so vertical strokes tilt perpendicular to the path while horizontal strokes
+/// stay parallel to it (the twisting-ribbon look). No arc-length reparameterization:
+/// like skew it reads the path as a height field, single-valued in `x`.
+pub struct RibbonField<'a> {
+    pub frame: &'a PathFrame,
+    pub base_x: f64,
+    pub shift: f64,
+}
+
+impl Field for RibbonField<'_> {
+    fn map(&self, p: Point) -> Point {
+        let x = self.base_x + p.x;
+        let (y, (dx, dy)) = self.frame.profile_hit(x);
+        // down-normal of the profile segment (flat segment → (0, 1)), matching the
+        // y-down glyph convention: negative glyph y rises above the curve
+        let off = p.y - self.shift;
+        Point::new(x - off * dy, y + off * dx)
+    }
+}
+
+/// §7.3 **bend** (Inkscape's *LPE Bend*): the §6.13.2 path-follow field applied to
+/// arbitrary geometry. The envelope's bend axis maps to arc length from `s0` (the
+/// geometry's left edge starts there) and its cross axis to a normal offset about
+/// the anchor line (the envelope's vertical midline rides the spine). Owns its
+/// frame so it can live in a boxed field chain.
+pub struct BendField {
+    pub frame: PathFrame,
+    pub s0: f64,
+    pub anchor: Point, // (left edge, vertical mid) of the pre-warp envelope
+}
+
+impl Field for BendField {
+    fn map(&self, p: Point) -> Point {
+        self.frame
+            .at(self.s0 + (p.x - self.anchor.x), p.y - self.anchor.y)
+    }
+}
+
+/// §7.2 **roughen** (Illustrator Effect ▸ Roughen): jitter every outline point by
+/// smooth 2-D value noise. **Deterministic** — a fixed-seed lattice hash, so the
+/// same input always compiles to the same output. `bend` scales the amplitude
+/// (`|bend| · min(hw, hh)/4` at 100%); `detail` is ridges per 100 user units
+/// (wavelength `100/detail`). The noise is continuous, so the adaptive bake
+/// subdivides edges into the wiggle within tolerance.
+pub struct RoughenField {
+    amp: f64,
+    freq: f64,
+}
+
+impl RoughenField {
+    pub fn new(bend: f64, detail: f64, bbox: Rect) -> Self {
+        let b = if bend.is_finite() {
+            bend.abs().clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let d = if detail.is_finite() {
+            detail.clamp(0.1, 100.0)
+        } else {
+            10.0
+        };
+        let half_min = (bbox.width() / 2.0).min(bbox.height() / 2.0).max(0.0);
+        Self {
+            amp: b * half_min / 4.0,
+            freq: d / 100.0,
+        }
+    }
+}
+
+/// Deterministic lattice hash → [−1, 1] (splitmix64-style avalanche).
+fn lattice(ix: i64, iy: i64, channel: u64) -> f64 {
+    let mut z = (ix as u64)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add((iy as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9))
+        .wrapping_add(channel.wrapping_mul(0x94d0_49bb_1331_11eb));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^= z >> 31;
+    (z >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+}
+
+/// Smooth 2-D value noise in [−1, 1] at lattice frequency 1 (smoothstep bilinear).
+fn value_noise(x: f64, y: f64, channel: u64) -> f64 {
+    let (ix, iy) = (x.floor(), y.floor());
+    let (fx, fy) = (x - ix, y - iy);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (ix, iy) = (ix as i64, iy as i64);
+    let a = lattice(ix, iy, channel);
+    let b = lattice(ix + 1, iy, channel);
+    let c = lattice(ix, iy + 1, channel);
+    let d = lattice(ix + 1, iy + 1, channel);
+    a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
+}
+
+impl Field for RoughenField {
+    fn map(&self, p: Point) -> Point {
+        if self.amp == 0.0 {
+            return p;
+        }
+        let (nx, ny) = (p.x * self.freq, p.y * self.freq);
+        Point::new(
+            p.x + self.amp * value_noise(nx, ny, 0),
+            p.y + self.amp * value_noise(nx, ny, 1),
+        )
     }
 }
 
@@ -623,6 +751,16 @@ pub fn warp_text_on_path(
             let field = RainbowField {
                 frame: &frame,
                 s0,
+                shift: fx.baseline_shift,
+            };
+            warp_svg_path(outline_d, &field, tolerance, do_refit)
+        }
+        "ribbon" => {
+            let base_x =
+                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
+            let field = RibbonField {
+                frame: &frame,
+                base_x,
                 shift: fx.baseline_shift,
             };
             warp_svg_path(outline_d, &field, tolerance, do_refit)
@@ -1422,6 +1560,97 @@ mod tests {
             false
         )
         .is_none());
+    }
+
+    #[test]
+    fn ribbon_offsets_along_the_profile_normal() {
+        // flat path → ribbon behaves exactly like skew (normal is vertical)
+        let outline = "M0,0 L10,0 L10,-5 L0,-5 Z";
+        let flat = "M0,20 L120,20";
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("ribbon", 0.0, "start", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M0,20"), "{d}");
+        // on a 45° ramp the height offset tilts with the profile: a point 10 above
+        // the baseline lands offset along (dy, -dx)·(-10) = (1,1)/√2·(-10)…
+        let ramp = PathFrame::new("M0,0 L100,100", 0.25).unwrap();
+        let f = RibbonField {
+            frame: &ramp,
+            base_x: 0.0,
+            shift: 0.0,
+        };
+        let m = f.map(Point::new(50.0, -10.0));
+        let inv = std::f64::consts::FRAC_1_SQRT_2;
+        assert!(
+            (m.x - (50.0 + 10.0 * inv)).abs() < 1e-9 && (m.y - (50.0 - 10.0 * inv)).abs() < 1e-9,
+            "{m:?}"
+        );
+    }
+
+    #[test]
+    fn bend_field_flows_geometry_along_a_spine() {
+        // envelope anchored at (left = 10, mid = 30); flat spine at y = 20:
+        // the anchor line lands on the spine, offsets ride the normal
+        let frame = PathFrame::new("M0,20 L200,20", 0.25).unwrap();
+        let f = BendField {
+            frame,
+            s0: 5.0,
+            anchor: Point::new(10.0, 30.0),
+        };
+        // the anchor point itself → 5 units along the spine
+        assert!(
+            f.map(Point::new(10.0, 30.0))
+                .distance(Point::new(5.0, 20.0))
+                < 1e-9
+        );
+        // a point 10 above the anchor line rises 10 above the flat spine
+        assert!(
+            f.map(Point::new(10.0, 20.0))
+                .distance(Point::new(5.0, 10.0))
+                < 1e-9
+        );
+        // on a vertical spine the geometry rotates with it
+        let vert = PathFrame::new("M40,0 L40,200", 0.25).unwrap();
+        let fv = BendField {
+            frame: vert,
+            s0: 0.0,
+            anchor: Point::new(0.0, 0.0),
+        };
+        let m = fv.map(Point::new(30.0, 0.0)); // 30 along the bend axis → 30 down
+        assert!(m.distance(Point::new(40.0, 30.0)) < 1e-9, "{m:?}");
+    }
+
+    #[test]
+    fn roughen_is_deterministic_bounded_and_identity_at_zero() {
+        let bbox = Rect::new(0.0, 0.0, 200.0, 80.0);
+        let f = RoughenField::new(1.0, 10.0, bbox);
+        let p = Point::new(37.0, 11.0);
+        // deterministic: same input, same output
+        assert_eq!(f.map(p), RoughenField::new(1.0, 10.0, bbox).map(p));
+        // bounded by the amplitude (|bend|·min(hw,hh)/4 = 10), and actually moves
+        let mut moved = 0.0f64;
+        for i in 0..100 {
+            let q = Point::new(i as f64 * 2.0, (i % 7) as f64 * 10.0);
+            let d = f.map(q).distance(q);
+            assert!(d <= 10.0 * 1.5, "excursion {d}");
+            moved = moved.max(d);
+        }
+        assert!(moved > 1.0, "noise never moved anything: {moved}");
+        // zero bend / garbage params → identity, never NaN
+        let id = RoughenField::new(0.0, 10.0, bbox);
+        assert_eq!(id.map(p), p);
+        let junk = RoughenField::new(f64::NAN, f64::INFINITY, bbox);
+        assert_eq!(junk.map(p), p);
+        // the noise itself is continuous-ish: nearby points map nearby
+        let a = f.map(Point::new(50.0, 40.0));
+        let b = f.map(Point::new(50.5, 40.0));
+        assert!(a.distance(b) < 5.0, "{}", a.distance(b));
     }
 
     #[test]

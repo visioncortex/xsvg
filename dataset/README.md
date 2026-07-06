@@ -62,6 +62,7 @@ Realistic composites that combine several features into one artifact.
 | [textpath.xsvg](textpath.xsvg) | `<x:textpath in="#wave" effect="skew">` outlines the run and warps it onto the curve via the displacement field — glyphs stay upright and shear, the baseline follows the path |
 | [textpath-rainbow.xsvg](textpath-rainbow.xsvg) | `effect="rainbow"` follows the arc — glyphs rotate and deform along the curve; `baseline-shift` offsets runs along the local normal (one run floats above, a second hangs beneath the same path) |
 | [textpath-align.xsvg](textpath-align.xsvg) | `align="start\|middle\|end"` + `start` place the run within the path's extent (arc length under rainbow, x-extent under skew); `effect="stair"` steps live, selectable `<text>` glyph-by-glyph along the height profile — no font bytes needed (it is also skew's no-font degradation) |
+| [textpath-effects.xsvg](textpath-effects.xsvg) | `effect="ribbon"` — skew's complement: heights offset along the profile *normal*, so verticals tilt with the curve; `effect="follow"` lowers to SVG's native `<textPath>` — live, selectable, undeformed (align/start → `startOffset`) |
 
 ## Geometry transforms — warp (§7.3)
 
@@ -70,6 +71,7 @@ Realistic composites that combine several features into one artifact.
 | [warp-presets.xsvg](warp-presets.xsvg) | `<x:warp field="…" bend="…">` bakes an envelope-preset field into plain `<path>`s — eight presets (arch/flag/rise/wave + fisheye/inflate/squeeze/twist); a rect and `outline="true"` text warp together through the same flatten → map pipeline; dashed boxes show the unwarped source |
 | [warp-presets-arc.xsvg](warp-presets-arc.xsvg) | The arc & shell families — `arc` wraps the box into an annular sector (midline length preserved; negative bend arcs down), `arc-lower/upper` pin one edge and arc the other, `bulge`/`fish` scale about the midline, `shell-lower/upper` flare the corners. Make-with-Warp parity: **15/15 presets** |
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
+| [warp-bend.xsvg](warp-bend.xsvg) | `field="bend" in="#spine"` flows a whole group along a path — the envelope midline rides the spine, `align`/`start` place it by arc length (Inkscape's *LPE Bend*); `field="roughen" bend detail` jitters outlines with **deterministic** seeded value noise |
 
 ## Edge cases & invariants
 

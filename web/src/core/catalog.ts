@@ -169,6 +169,11 @@ export const CATALOG: Category[] = [
         title: "Placement & stair-step",
         blurb: 'align start/middle/end and a start offset place the run along the path; effect="stair" steps live selectable glyphs (also skew\'s no-font fallback)',
       },
+      {
+        file: "textpath-effects.xsvg",
+        title: "Ribbon & native follow",
+        blurb: 'effect="ribbon" tilts verticals with the curve (skew\'s complement); effect="follow" lowers to SVG\'s own <textPath> — live and selectable',
+      },
     ],
   },
   {
@@ -189,6 +194,11 @@ export const CATALOG: Category[] = [
         file: "warp-perspective.xsvg",
         title: "Perspective & free distort",
         blurb: "corners-solved homography (straight lines stay straight), bilinear free distort, and the distort-h/v sliders composing after a preset",
+      },
+      {
+        file: "warp-bend.xsvg",
+        title: "Bend & roughen",
+        blurb: 'field="bend" in="#spine" flows a whole group along a path (align/start place it); field="roughen" jitters outlines with deterministic seeded noise',
       },
     ],
   },

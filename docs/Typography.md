@@ -36,7 +36,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | **Area type in an arbitrary polygon/path** | AI | C | ✅ | **shipped** — `<x:textbox in="#shape">` flows into the outline via a coarse browser raster (align + valign, convex-ideal); the Vision's "fit text in polygon" |
 | **Auto-fit / shrink-to-fit-box** (shrink font until paragraph fits) | AI/PPT | C | ✅ | binary-search font size via `measureText`, re-wrap per trial; see [Syntax.md](Syntax.md) `fit` |
 | **Type on a path** (baseline follows a curve) | AI | E | ◑ | SVG `<textPath>` exists (passthrough); align-to-path + spacing options need custom |
-| Type-on-path options: align (asc/desc/center/baseline), spacing, flip, effect (rainbow/skew/3D-ribbon/stair/gravity) | AI | S | ◑ | **skew + rainbow + stair shipped** (`<x:textpath>`, §6.13) incl. `baseline-shift` along the normal and `align`/`start` placement; spacing/flip, 3D-ribbon, gravity still open |
+| Type-on-path options: align (asc/desc/center/baseline), spacing, flip, effect (rainbow/skew/3D-ribbon/stair/gravity) | AI | S | ◑ | **skew + rainbow + ribbon + stair + native follow shipped** (`<x:textpath>`, §6.13) incl. `baseline-shift` and `align`/`start`; spacing/flip and gravity (per-glyph) still open |
 | **Multi-column / multi-row area** (gutter, inset) | AI | E | ○ | columns are extra rectangles in the layout pass |
 | **Threaded / linked frames** (overflow A→B) | AI/ID | S | ❌ | flow continuation across containers |
 | **Text wrap / runaround** (avoid an obstacle shape) | AI | E | ❌ | subtract obstacle from the flow region per line |
