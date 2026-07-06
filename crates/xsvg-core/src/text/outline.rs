@@ -32,20 +32,12 @@ pub trait GlyphOutliner {
         baseline: f64,
     ) -> Option<String>;
 
-    /// Outline `text` and **warp it onto a path** (the text-on-path specialization of the
-    /// geometry-transform pipeline): the run is shaped on a flat baseline, then every
-    /// outline point is mapped by the field [`PathEffect::effect`] selects, offset and
-    /// placed per the rest of `fx`. `path_d` is the reference path's SVG `d`. Returns the
-    /// warped path `d`, or `None` to fall back to live `<text>`. Default: `None` (no
-    /// path-warping backend).
-    fn outline_on_path(
-        &self,
-        _text: &str,
-        _style: &TextStyle,
-        _size: f64,
-        _path_d: &str,
-        _fx: &PathEffect,
-    ) -> Option<String> {
+    /// Advance width of `text` per the outline font's own metrics — the run width
+    /// that matches the geometry [`GlyphOutliner::outline`] traces (unlike the
+    /// [`super::measure::Measurer`], whose canvas metrics may differ slightly).
+    /// Used to place text-on-path runs (§6.13 `align`). Default: `None` (no font
+    /// bytes → the caller degrades).
+    fn advance_width(&self, _text: &str, _style: &TextStyle, _size: f64) -> Option<f64> {
         None
     }
 }

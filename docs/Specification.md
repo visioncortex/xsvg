@@ -422,18 +422,19 @@ the curve and positive `baseline-shift` lifts the run off it). This both rotates
 along the curve: each point is mapped independently, so strokes compress on the inside of a bend and
 stretch on the outside. Unlike skew there is **no single-valued-in-`x` restriction** — loops and
 vertical segments are fine. **Beyond either end** of the path the frame extends **straight along the
-end tangent**, so a run longer than the path continues rather than bunching at the endpoint. The v0
-adapter samples a uniform arc-length LUT from the reference path (tangents from adjacent samples) and
-runs the standard §7.1 bake; LUT resolution and flatten tolerance are the quality knobs. A
-*non-deforming* follow MAY instead lower to SVG's native `<textPath>` (live `<text>`, font-dependent,
-no shape deformation) — future work.
+end tangent**, so a run longer than the path continues rather than bunching at the endpoint. **The
+bake is native** (§7.1, in `xsvg-core`): the reference path flattens into an arc-length frame, and
+the outlined run — the browser supplies only the glyph geometry and its advance width — runs the
+standard pipeline with the quality-graded tolerance, adaptive subdivision, and cubic refit above
+`fast`. A *non-deforming* follow MAY instead lower to SVG's native `<textPath>` (live `<text>`,
+font-dependent, no shape deformation) — future work.
 
 **6.13.3 Stair Step — per-glyph steps, live text [implemented].** The authorable stepped baseline:
 glyphs stay upright and **undeformed**; each is absolutely positioned via per-glyph `x`/`y` lists —
 `x` from kerned prefix advances plus the §6.8 spacing gaps (honoring `align`/`start`), `y =
-f(x_glyph) − baseline-shift` sampled through the *shaper* seam's height profiler. Because it lowers
-to live `<text>` (never the outliner), it **needs no font bytes**, stays selectable, and uses the
-live face — the one path effect available everywhere.
+f(x_glyph) − baseline-shift` sampled from the **native height profile**. Because it lowers to live
+`<text>` (never the outliner), it **needs no font bytes**, stays selectable, and uses the live
+face — the one path effect available everywhere (only the *measurer* is required).
 
 **Degradation [implemented].** The warping effects need the glyph outliner (§6.12). If it is
 unavailable (no font bytes), **skew degrades to the stair-step lowering** (§6.13.3) — same field,
@@ -489,7 +490,7 @@ interchangeable under §7.1:
 | Field | `D(x, y)` | Notes |
 |---|---|---|
 | **displacement** *(skew, §6.13.1)* | `(x, y + f(x))` | 1-D vertical shift by a height profile `f`; the cheapest field — no arc-length, no offset. **First to ship.** |
-| **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length LUT + normal frame. **Shipped** (browser adapter, §6.13.2) |
+| **path-follow** *(rainbow, §6.13.2)* | `P(s) + y·N(s)`, `s = arclen⁻¹(x)` | follow + normal offset ⇒ glyphs deform; arc-length frame + normal offset. **Shipped, native** (§6.13.2) |
 | **envelope preset** | analytic (arc / arch / flag / wave / fisheye / twist …) | Illustrator Envelope-Distort presets over the source bbox. **All 15 shipped** (§7.3); full catalog in [Transform.md §B](Transform.md) |
 | **perspective** | homography `((ax+cy+e)/(gx+hy+1), (bx+dy+f)/(gx+hy+1))` | 8-DOF projective; SVG can't express it on vectors. **Shipped** (§7.3, `corners`-solved), plus **free** (bilinear) and the distortion-slider taper |
 | **FFD** | trivariate/bivariate Bézier lattice (Sederberg-Parry) | editable cage/grid |
@@ -596,6 +597,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `baseline-shift` (offset the run along the local normal) | implemented |
 | Text on a path — `align` / `start` run placement | implemented |
 | Text on a path — `stair` effect (authorable *Stair Step*, also skew's no-font degradation) | implemented |
+| Text on a path — **native bake** (kurbo arc-length frame; §7.1 tolerance + refit; browser supplies only glyphs + advance) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

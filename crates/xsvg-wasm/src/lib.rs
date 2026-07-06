@@ -6,21 +6,22 @@
 //!   • `<x:textbox>` → wrapped + aligned + shrink-to-fit text, incl. `in="#shape"` region
 //!     flow and cap-height centering (§6.4–6.5, 6.10)
 //!   • styled `<tspan>` runs (§6.11); create outlines `outline="true"` → `<path>` (§6.12);
-//!     text on a path `<x:textpath>` skew + rainbow, with `baseline-shift` (§6.13)
+//!     text on a path `<x:textpath>` skew + rainbow + stair, with `baseline-shift` (§6.13)
 //! Other `x:` extensions are recognized and skipped with a marker.
 //!
 //! **Platform seams.** Everything platform-specific is a trait the core calls, backed here
 //! by JS callbacks: `Measurer` (canvas `measureText` + font metrics), `Shaper` (path
-//! rasterize for region flow), and `GlyphOutliner` (opentype.js glyph outlines, incl.
-//! path-warping). The core layout logic lives in `xsvg-core` and stays platform-free.
+//! rasterize for region flow), and `GlyphOutliner` (opentype.js glyph outlines + advance
+//! widths). All warp math — including the §6.13 fields — runs natively in `xsvg-core`.
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
-    measure_runs, svg_path_bbox, warp_svg_path, Align, Anchor, AreaLayout, AreaSpec, Chain,
-    DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography,
-    LineIncrement, Measurer, PathEffect, PlacedLine, QualityProfile, RasterRegion, Rect,
-    RegionSpec, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    measure_runs, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor,
+    AreaLayout, AreaSpec, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
+    GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine,
+    QualityProfile, RasterRegion, Rect, RegionSpec, Shaper, Taper, TextAlign, TextAreaSpec,
+    TextOverflow, TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -89,12 +90,8 @@ impl Measurer for JsMeasurer<'_> {
 /// Browser-backed [`Shaper`]: `rasterize(pathD, rowH) => Float64Array` where the
 /// array is `[minX, minY, width, height, rowH, l0, r0, l1, r1, …]` (a `NaN` pair for
 /// an empty row). The browser flattens curves + scans via `getBBox`/`isPointInFill`.
-/// `steppedBaseline(pathD, advances, align, start) => Float64Array` samples the
-/// path's height profile for the §6.13 stair-step fallback (`[runStartX, y0, y1, …]`,
-/// empty on failure).
 struct JsShaper<'a> {
     rasterize: &'a js_sys::Function,
-    stepped: &'a js_sys::Function,
 }
 
 impl Shaper for JsShaper<'_> {
@@ -138,36 +135,10 @@ impl Shaper for JsShaper<'_> {
             rows,
         ))
     }
-
-    fn baseline_samples(
-        &self,
-        path_d: &str,
-        advances: &[f64],
-        align: &str,
-        start: f64,
-    ) -> Option<(f64, Vec<f64>)> {
-        let args = js_sys::Array::new();
-        args.push(&JsValue::from_str(path_d));
-        args.push(&js_sys::Float64Array::from(advances));
-        args.push(&JsValue::from_str(align));
-        args.push(&JsValue::from_f64(start));
-        let v = self.stepped.apply(&JsValue::NULL, &args).ok()?;
-        let arr = js_sys::Array::from(&v);
-        // expected: [runStartX, y0 … y(n-1)] for n = advances.len() - 1 glyphs
-        if arr.length() as usize != advances.len() {
-            return None;
-        }
-        let mut vals = Vec::with_capacity(arr.length() as usize);
-        for i in 0..arr.length() {
-            vals.push(arr.get(i).as_f64().filter(|n| n.is_finite())?);
-        }
-        let x0 = vals.remove(0);
-        Some((x0, vals))
-    }
 }
 
 /// Push the run's style as the shared `(family, weight, style, size)` callback arguments
-/// onto `args` — the common prefix of the `outline_run` / `outline_on_path` JS calls.
+/// onto `args` — the common prefix of the outliner JS calls.
 fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
     args.push(&JsValue::from_str(&style.family));
     args.push(&JsValue::from_str(&style.weight));
@@ -177,13 +148,12 @@ fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
 
 /// Browser-backed [`GlyphOutliner`]. `outline_run(text, family, weight, style, size, x,
 /// baseline) => d | ""` returns a glyph outline (opentype.js), or `""` when the font's
-/// bytes aren't available (→ fall back to live `<text>`). `outline_on_path(text, family,
-/// weight, style, size, pathD, effect, baselineShift, align, start) => d | ""`
-/// additionally warps the outline onto a path (§6.13 — the text-on-path specialization
-/// of the §7 geometry pipeline).
+/// bytes aren't available (→ fall back to live `<text>`). `advance_width(text, family,
+/// weight, style, size) => number | NaN` returns the run's advance per the same font.
+/// Path-warping itself is native (§6.13 runs through the core §7.1 bake).
 struct JsOutliner<'a> {
     outline_run: &'a js_sys::Function,
-    outline_on_path: &'a js_sys::Function,
+    advance_width: &'a js_sys::Function,
 }
 
 impl GlyphOutliner for JsOutliner<'_> {
@@ -208,28 +178,15 @@ impl GlyphOutliner for JsOutliner<'_> {
         (!d.is_empty()).then_some(d)
     }
 
-    fn outline_on_path(
-        &self,
-        text: &str,
-        style: &TextStyle,
-        size: f64,
-        path_d: &str,
-        fx: &PathEffect,
-    ) -> Option<String> {
+    fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
         let args = js_sys::Array::new();
         args.push(&JsValue::from_str(text));
         push_style_args(&args, style, size);
-        args.push(&JsValue::from_str(path_d));
-        args.push(&JsValue::from_str(fx.effect));
-        args.push(&JsValue::from_f64(fx.baseline_shift));
-        args.push(&JsValue::from_str(fx.align));
-        args.push(&JsValue::from_f64(fx.start));
-        let d = self
-            .outline_on_path
+        self.advance_width
             .apply(&JsValue::NULL, &args)
             .ok()?
-            .as_string()?;
-        (!d.is_empty()).then_some(d)
+            .as_f64()
+            .filter(|w| w.is_finite())
     }
 }
 
@@ -274,18 +231,14 @@ pub fn compile(
     measure: &js_sys::Function,
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
-    stepped_baseline: &js_sys::Function,
     outline_run: &js_sys::Function,
-    outline_on_path: &js_sys::Function,
+    advance_width: &js_sys::Function,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
-    let shaper = JsShaper {
-        rasterize,
-        stepped: stepped_baseline,
-    };
+    let shaper = JsShaper { rasterize };
     let outliner = JsOutliner {
         outline_run,
-        outline_on_path,
+        advance_width,
     };
     compile_impl(input, quality, sourcemap, &m, &shaper, &outliner).map_err(|e| JsError::new(&e))
 }
@@ -514,15 +467,16 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
 }
 
-/// `<x:textpath in="#path" effect="skew|rainbow|stair">` (§6.13): outline the run and
-/// warp it onto the referenced path via the [`GlyphOutliner::outline_on_path`] seam —
-/// the text-on-path specialization of the geometry-transform pipeline (§7).
-/// `baseline-shift` offsets the run from the path along the local normal (positive =
-/// above); `align` / `start` place the run within the path's extent. Emits
-/// `<g fill=… stroke=…>` + the warped `<path>`. `stair` (§6.13.3) is live `<text>` by
-/// design — per-glyph stepped positions, no outliner — and doubles as skew's
-/// degradation when no outline font is available; the last resort is a straight live
-/// `<text>` at the element's x/y, so the document never breaks.
+/// `<x:textpath in="#path" effect="skew|rainbow|stair">` (§6.13): outline the run flat
+/// (the [`GlyphOutliner`] seam supplies glyph geometry + advance width), then warp it
+/// onto the referenced path **natively** — [`warp_text_on_path`] runs the §7.1 bake at
+/// the quality tolerance, with cubic refit above `fast`. `baseline-shift` offsets the
+/// run from the path along the local normal (positive = above); `align` / `start`
+/// place the run within the path's extent. Emits `<g fill=… stroke=…>` + the warped
+/// `<path>`. `stair` (§6.13.3) is live `<text>` by design — per-glyph stepped
+/// positions, no outliner — and doubles as skew's degradation when no outline font is
+/// available; the last resort is a straight live `<text>` at the element's x/y, so
+/// the document never breaks.
 fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
@@ -547,12 +501,16 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     // "stair" is live <text> by design (§6.13.3) — it never consults the outliner.
     if fx.effect != "stair" {
-        if let Some(d) = ctx
-            .outliner
-            .outline_on_path(&text, &style, style.size, &path_d, &fx)
-        {
-            push_outline_group(out, fill, &stroke, &pos, &[d]);
-            return;
+        let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
+        let advance = ctx.outliner.advance_width(&text, &style, style.size);
+        if let (Some(flat), Some(advance)) = (flat, advance) {
+            let refit = ctx.quality != QualityProfile::Fast;
+            if let Some(d) =
+                warp_text_on_path(&flat, &path_d, &fx, advance, ctx.quality.tolerance(), refit)
+            {
+                push_outline_group(out, fill, &stroke, &pos, &[d]);
+                return;
+            }
         }
     }
 
@@ -608,17 +566,16 @@ fn stepped_text(
             spaces_before += 1;
         }
     }
-    advances.push(line_advance(text, style, style.size, ctx.m)); // total run width
-    if advances.iter().any(|a| !a.is_finite()) {
+    let total = line_advance(text, style, style.size, ctx.m); // total run width
+    if !total.is_finite() || advances.iter().any(|a| !a.is_finite()) {
         return false;
     }
-    let Some((x0, ys)) = ctx
-        .shaper
-        .baseline_samples(path_d, &advances, fx.align, fx.start)
-    else {
+    // sample the path's height profile natively (§6.13.1)
+    let Some(frame) = PathFrame::new(path_d, ctx.quality.tolerance()) else {
         return false;
     };
-    if ys.len() != n || !x0.is_finite() {
+    let x0 = frame.x0() + run_offset(frame.x1() - frame.x0(), total, fx.align, fx.start);
+    if !x0.is_finite() {
         return false;
     }
 
@@ -626,8 +583,11 @@ fn stepped_text(
     push_font_attrs(out, style, style.size, fill);
     out.push_str(pos);
     // absolute per-glyph positions — spacing is baked in, so no spacing attrs
-    let xs: Vec<String> = advances[..n].iter().map(|a| fmt(x0 + a)).collect();
-    let ys: Vec<String> = ys.iter().map(|y| fmt(y - fx.baseline_shift)).collect();
+    let xs: Vec<String> = advances.iter().map(|a| fmt(x0 + a)).collect();
+    let ys: Vec<String> = advances
+        .iter()
+        .map(|a| fmt(frame.y_at(x0 + a) - fx.baseline_shift))
+        .collect();
     out.push_str(&format!(" x=\"{}\" y=\"{}\"", xs.join(" "), ys.join(" ")));
     out.push('>');
     push_escaped(out, text, false);
@@ -1436,52 +1396,16 @@ mod tests {
         }
     }
 
-    /// Stub outliner: a deterministic 1×1 box path at the run origin, so the outline
-    /// emit path can be exercised without a real font.
+    /// Stub outliner: a deterministic 1×1 box path at the run origin (so outline
+    /// emit paths can be exercised without a real font) and Mono-consistent advance
+    /// widths (chars × 0.5 × size), matching the `Mono` measurer.
     struct BoxOutliner;
     impl GlyphOutliner for BoxOutliner {
         fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
             Some(format!("M{x},{b} h1 v-1 h-1 Z"))
         }
-        /// Marker "warped" path encoding that the reference path, size, and the full
-        /// [`PathEffect`] reached the seam — enough to prove the `<x:textpath>` wiring.
-        fn outline_on_path(
-            &self,
-            _t: &str,
-            _s: &TextStyle,
-            sz: f64,
-            path_d: &str,
-            fx: &PathEffect,
-        ) -> Option<String> {
-            Some(format!(
-                "M0,0 L{},{} Z {} {} {} {}",
-                path_d.len(),
-                sz,
-                fx.effect,
-                fx.baseline_shift,
-                fx.align,
-                fx.start
-            ))
-        }
-    }
-
-    /// Stub [`Shaper`] with a stepped-baseline sampler: the run starts at
-    /// `100 + start`, and glyph `i` sits at `y = 50 + i` — deterministic markers for
-    /// the §6.13 stair-step fallback (rasterize stays unavailable).
-    struct StepShaper;
-    impl Shaper for StepShaper {
-        fn rasterize(&self, _d: &str, _row_h: f64) -> Option<RasterRegion> {
-            None
-        }
-        fn baseline_samples(
-            &self,
-            _path_d: &str,
-            advances: &[f64],
-            _align: &str,
-            start: f64,
-        ) -> Option<(f64, Vec<f64>)> {
-            let n = advances.len().checked_sub(1)?;
-            Some((100.0 + start, (0..n).map(|i| 50.0 + i as f64).collect()))
+        fn advance_width(&self, text: &str, _s: &TextStyle, size: f64) -> Option<f64> {
+            Some(text.chars().count() as f64 * 0.5 * size)
         }
     }
 
@@ -1922,11 +1846,12 @@ mod tests {
 
     #[test]
     fn textpath_emits_warped_path() {
-        // <x:textpath in="#p"> with a working warper → <g><path>, no <text> (§6.13)
+        // <x:textpath in="#p"> with an outline font → <g><path>, no <text>; the
+        // native skew field lands the run's baseline on the path (f(0) = 20)
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 C40,0 80,40 120,20" fill="none"/><x:textpath in="#p" effect="skew" font-size="20" fill="#111">wave</x:textpath></svg>"##;
         let out = compile_outlined(svg);
         assert!(out.contains("<g fill=\"#111\""), "{out}");
-        assert!(out.contains("<path d=\"M0,0 L"), "{out}");
+        assert!(out.contains("<path d=\"M0,20"), "{out}");
         assert!(!out.contains("<text"), "{out}");
     }
 
@@ -1940,12 +1865,15 @@ mod tests {
     }
 
     #[test]
-    fn textpath_falls_back_to_text_without_a_font() {
-        // no path-warping backend (NoOutliner → outline_on_path defaults to None) → live <text>
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" x="0" y="20" font-size="20">wave</x:textpath></svg>"##;
+    fn textpath_without_a_font_degrades_to_stepped_text() {
+        // No outline font, but the native height profile still works → the skew run
+        // degrades to stepped live <text> (§6.13.3), not a flat line. Mono at size
+        // 20: "wave" prefix advances 0/10/20/30; the flat path pins y at 20.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" font-size="20">wave</x:textpath></svg>"##;
         let out = compile_test(svg);
         assert!(out.contains(">wave</text>"), "{out}");
-        assert!(!out.contains("<path d=\"M0,0 L"), "{out}");
+        assert!(out.contains(r#"x="0 10 20 30""#), "{out}");
+        assert!(out.contains(r#"y="20 20 20 20""#), "{out}");
     }
 
     #[test]
@@ -1959,94 +1887,97 @@ mod tests {
     }
 
     #[test]
-    fn textpath_forwards_effect_and_baseline_shift() {
-        // effect="rainbow" + baseline-shift reach the outliner seam (§6.13.2)
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,60 A60,60 0 0 1 120,60" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="8" font-size="20" fill="#111">arc</x:textpath></svg>"##;
+    fn textpath_baseline_shift_lifts_the_run() {
+        // rainbow + baseline-shift 8 on a flat path at y = 20 → baseline at y = 12
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="8" font-size="20" fill="#111">arc</x:textpath></svg>"##;
         let out = compile_outlined(svg);
-        assert!(out.contains("rainbow 8"), "{out}");
+        assert!(out.contains("<path d=\"M0,12"), "{out}");
     }
 
     #[test]
-    fn textpath_defaults_to_skew_with_zero_shift() {
-        // no effect / baseline-shift attributes → skew, shift 0 at the seam
+    fn textpath_defaults_to_skew_on_the_path() {
+        // no effect / baseline-shift attributes → skew at the path's start
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" font-size="20" fill="#111">wave</x:textpath></svg>"##;
         let out = compile_outlined(svg);
-        assert!(out.contains("skew 0"), "{out}");
+        assert!(out.contains("<path d=\"M0,20"), "{out}");
     }
 
     #[test]
-    fn textpath_forwards_align_and_start() {
-        // align/start placement options reach the outliner seam (§6.13)
+    fn textpath_align_and_start_place_the_run() {
+        // extent 120, advance("wave") = 40 → middle slack 40, +12 head-start → x = 52
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" align="middle" start="12" font-size="20" fill="#111">wave</x:textpath></svg>"##;
         let out = compile_outlined(svg);
-        assert!(out.contains("skew 0 middle 12"), "{out}");
+        assert!(out.contains("<path d=\"M52,20"), "{out}");
     }
 
     #[test]
     fn textpath_skew_degrades_to_stepped_baseline() {
-        // No outline font, but a height-profile sampler → live <text> whose glyphs are
-        // individually placed (Stair Step, §6.13.1). Mono(0.5·size): prefix advances of
-        // "abc" at size 10 are 0/5/10; StepShaper starts the run at 100+start and steps
-        // y by one per glyph; baseline-shift subtracts.
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 C40,20 80,80 120,50" fill="none"/><x:textpath in="#p" effect="skew" baseline-shift="2" start="10" font-size="10" fill="#111">abc</x:textpath></svg>"##;
-        let out = compile_impl(svg, "balanced", false, &Mono, &StepShaper, &NoOutliner).unwrap();
-        assert!(out.contains(r#"x="110 115 120""#), "{out}");
-        assert!(out.contains(r#"y="48 49 50""#), "{out}");
+        // No outline font → the native height profile places each glyph (Stair Step,
+        // §6.13.1). Mono(0.5·size): "abc" prefix advances 0/5/10; start=10 offsets;
+        // the flat path pins y at 50, baseline-shift 2 lifts to 48.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 L120,50" fill="none"/><x:textpath in="#p" effect="skew" baseline-shift="2" start="10" font-size="10" fill="#111">abc</x:textpath></svg>"##;
+        let out = compile_test(svg);
+        assert!(out.contains(r#"x="10 15 20""#), "{out}");
+        assert!(out.contains(r#"y="48 48 48""#), "{out}");
         assert!(out.contains(">abc</text>"), "{out}");
 
         // letter-spacing widens the per-glyph gaps in the baked positions (§6.8)
-        let ls = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 C40,20 80,80 120,50" fill="none"/><x:textpath in="#p" effect="skew" letter-spacing="2" font-size="10" fill="#111">abc</x:textpath></svg>"##;
-        let out = compile_impl(ls, "balanced", false, &Mono, &StepShaper, &NoOutliner).unwrap();
-        assert!(out.contains(r#"x="100 107 114""#), "{out}");
+        let ls = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 L120,50" fill="none"/><x:textpath in="#p" effect="skew" letter-spacing="2" font-size="10" fill="#111">abc</x:textpath></svg>"##;
+        let out = compile_test(ls);
+        assert!(out.contains(r#"x="0 7 14""#), "{out}");
     }
 
     #[test]
     fn textpath_stair_is_an_authored_effect() {
         // effect="stair" chooses the stepped live-<text> lowering even when an
         // outline font IS available — it never consults the outliner (§6.13.3).
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 C40,20 80,80 120,50" fill="none"/><x:textpath in="#p" effect="stair" font-size="10" fill="#111">abc</x:textpath></svg>"##;
-        let out = compile_impl(svg, "balanced", false, &Mono, &StepShaper, &BoxOutliner).unwrap();
-        assert!(out.contains(r#"x="100 105 110""#), "{out}");
-        assert!(out.contains(r#"y="50 51 52""#), "{out}");
-        assert!(!out.contains("<path d=\"M0,0 L"), "outliner ran: {out}");
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 L120,50" fill="none"/><x:textpath in="#p" effect="stair" font-size="10" fill="#111">abc</x:textpath></svg>"##;
+        let out = compile_outlined(svg);
+        assert!(out.contains(r#"x="0 5 10""#), "{out}");
+        assert!(out.contains(r#"y="50 50 50""#), "{out}");
+        assert!(!out.contains("<path d=\""), "outliner ran: {out}");
 
-        // with no height-profile sampler either → straight <text>, never a panic
-        let out = compile_impl(svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap();
+        // a degenerate (zero-length) target path → straight <text>, never a panic
+        let degen = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M5,5 L5,5" fill="none"/><x:textpath in="#p" effect="stair" font-size="10" fill="#111">abc</x:textpath></svg>"##;
+        let out = compile_outlined(degen);
         assert!(out.contains(r#"x="0" y="0""#), "{out}");
     }
 
     #[test]
     fn textpath_rainbow_without_font_stays_straight() {
-        // stepped degradation is skew-only; rainbow with no outliner → straight <text>
+        // stepped degradation is skew/stair-only; rainbow with no outliner → straight
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 C40,20 80,80 120,50" fill="none"/><x:textpath in="#p" effect="rainbow" font-size="10" fill="#111">abc</x:textpath></svg>"##;
-        let out = compile_impl(svg, "balanced", false, &Mono, &StepShaper, &NoOutliner).unwrap();
+        let out = compile_test(svg);
         assert!(out.contains(r#"x="0" y="0""#), "{out}");
-        assert!(!out.contains("x=\"100"), "{out}");
+        assert!(!out.contains("<path d=\""), "{out}");
     }
 
     #[test]
     fn textpath_stepped_skips_empty_and_whitespace_text() {
         // nothing to place → the straight fallback, never a panic or an empty x list
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,50 L120,50" fill="none"/><x:textpath in="#p" effect="skew" font-size="10">   </x:textpath></svg>"##;
-        let out = compile_impl(svg, "balanced", false, &Mono, &StepShaper, &NoOutliner).unwrap();
+        let out = compile_test(svg);
         assert!(out.contains(r#"x="0" y="0""#), "{out}");
     }
 
     #[test]
     fn textpath_degenerate_input_never_panics_or_leaks_nan() {
-        // Degenerate baseline-shift values (garbage, ±inf, NaN, unit suffix) collapse
-        // to a finite number at the seam — never NaN (§4 totality).
+        // Degenerate baseline-shift values (garbage, ±inf, NaN) collapse to 0 —
+        // the output matches an unshifted run and never leaks NaN (§4 totality).
+        let plain = compile_outlined(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" font-size="20">wave</x:textpath></svg>"##,
+        );
         for bad in ["garbage", "1e999", "-1e999", "NaN", "inf"] {
             let svg = format!(
                 r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="{bad}" font-size="20">wave</x:textpath></svg>"##
             );
             let out = compile_outlined(&svg);
-            assert!(out.contains("rainbow 0"), "shift={bad}: {out}");
+            assert_eq!(out, plain, "shift={bad}");
             assert!(!out.contains("NaN"), "shift={bad}: {out}");
         }
         // A unit suffix parses its numeric prefix (13px → 13), like every length attr.
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="rainbow" baseline-shift="13px" font-size="20">wave</x:textpath></svg>"##;
-        assert!(compile_outlined(svg).contains("rainbow 13"));
+        assert!(compile_outlined(svg).contains("<path d=\"M0,7"));
     }
 
     #[test]

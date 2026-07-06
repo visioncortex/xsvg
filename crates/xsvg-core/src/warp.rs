@@ -419,6 +419,218 @@ impl Field for Taper {
     }
 }
 
+/// Where a run of width `w` begins within a path extent `extent` (§6.13):
+/// `align` distributes the slack, `start` adds an absolute head-start. Slack may be
+/// negative (run longer than the path) — `middle`/`end` then shift before the
+/// path's start, symmetric with the past-the-end overshoot.
+pub fn run_offset(extent: f64, w: f64, align: &str, start: f64) -> f64 {
+    start
+        + match align {
+            "middle" => (extent - w) / 2.0,
+            "end" => extent - w,
+            _ => 0.0,
+        }
+}
+
+/// A reference path flattened to an arc-length-parameterized polyline — the shared
+/// geometry behind the §6.13 text-on-path fields. `at(s, off)` walks `s` user units
+/// of arc length from the path's start and steps `off` along the local normal (the
+/// tangent rotated +90° in y-down coords: for a left→right path positive `off`
+/// points down, so negative glyph y rises above the curve); past either end it
+/// extends straight along the end tangent. `y_at(x)` reads the same polyline as a
+/// height field (§6.13.1 skew — first crossing wins, clamped outside the x-extent).
+/// Only the first subpath is used. `None` for unparsable or zero-length paths.
+pub struct PathFrame {
+    pts: Vec<Point>,
+    cum: Vec<f64>, // cumulative arc length per vertex; cum[0] = 0
+}
+
+impl PathFrame {
+    pub fn new(path_d: &str, tolerance: f64) -> Option<Self> {
+        let path = BezPath::from_svg(path_d).ok()?;
+        let mut pts: Vec<Point> = Vec::new();
+        // flatten finer than the output tolerance so the frame isn't the bottleneck
+        let tol = (tolerance / 2.0).clamp(1e-3, 0.25);
+        let mut done = false;
+        kurbo::flatten(path.elements().iter().copied(), tol, |el| match el {
+            PathEl::MoveTo(p) => {
+                if pts.is_empty() {
+                    pts.push(p);
+                } else {
+                    done = true; // first subpath only
+                }
+            }
+            PathEl::LineTo(p) if !done => pts.push(p),
+            PathEl::ClosePath if !done => {
+                if let Some(&first) = pts.first() {
+                    pts.push(first);
+                }
+                done = true;
+            }
+            _ => {}
+        });
+        if pts.len() < 2 || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
+            return None;
+        }
+        let mut cum = Vec::with_capacity(pts.len());
+        let mut acc = 0.0;
+        cum.push(0.0);
+        for w in pts.windows(2) {
+            acc += w[0].distance(w[1]);
+            cum.push(acc);
+        }
+        (acc > 1e-9).then_some(Self { pts, cum })
+    }
+
+    /// Total arc length — the run-placement extent under rainbow.
+    pub fn len(&self) -> f64 {
+        *self.cum.last().unwrap()
+    }
+
+    /// The path's start / end x — its extent for run placement under skew.
+    pub fn x0(&self) -> f64 {
+        self.pts[0].x
+    }
+    pub fn x1(&self) -> f64 {
+        self.pts[self.pts.len() - 1].x
+    }
+
+    /// Unit tangent of the polyline segment starting at vertex `i` (degenerate → +x).
+    fn tangent(&self, i: usize) -> (f64, f64) {
+        let d = self.pts[i + 1] - self.pts[i];
+        let len = d.hypot();
+        if len > 0.0 {
+            (d.x / len, d.y / len)
+        } else {
+            (1.0, 0.0)
+        }
+    }
+
+    /// Point `off` units along the local normal from the path point at arc length
+    /// `s`; straight extrapolation past the ends.
+    pub fn at(&self, s: f64, off: f64) -> Point {
+        let len = self.len();
+        let sc = s.clamp(0.0, len);
+        let over = s - sc; // straight-line overshoot past the path's ends
+                           // binary search for the segment containing sc
+        let i = match self.cum.binary_search_by(|c| c.partial_cmp(&sc).unwrap()) {
+            Ok(i) => i.min(self.pts.len() - 2),
+            Err(i) => i.saturating_sub(1).min(self.pts.len() - 2),
+        };
+        let seg = self.cum[i + 1] - self.cum[i];
+        let frac = if seg > 0.0 {
+            (sc - self.cum[i]) / seg
+        } else {
+            0.0
+        };
+        let (tx, ty) = self.tangent(if over < 0.0 {
+            0
+        } else if over > 0.0 {
+            self.pts.len() - 2
+        } else {
+            i
+        });
+        let p = self.pts[i].lerp(self.pts[i + 1], frac);
+        Point::new(p.x + over * tx - off * ty, p.y + over * ty + off * tx)
+    }
+
+    /// The path's height profile: its y at horizontal position `x` (first crossing
+    /// in path order), clamped to the endpoint y outside the x-extent.
+    pub fn y_at(&self, x: f64) -> f64 {
+        let first = self.pts[0];
+        let last = self.pts[self.pts.len() - 1];
+        if x <= first.x.min(last.x) {
+            return if first.x <= last.x { first.y } else { last.y };
+        }
+        if x >= first.x.max(last.x) {
+            return if first.x <= last.x { last.y } else { first.y };
+        }
+        for w in self.pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if (x >= a.x && x <= b.x) || (x <= a.x && x >= b.x) {
+                let t = if b.x != a.x {
+                    (x - a.x) / (b.x - a.x)
+                } else {
+                    0.0
+                };
+                return a.y + t * (b.y - a.y);
+            }
+        }
+        last.y
+    }
+}
+
+/// §6.13.1 **skew**: vertical displacement by the frame's height profile — glyphs
+/// stay upright. `base_x` is the absolute x where the run begins (placement already
+/// applied); `shift` is the baseline-shift (positive = above the path).
+pub struct SkewField<'a> {
+    pub frame: &'a PathFrame,
+    pub base_x: f64,
+    pub shift: f64,
+}
+
+impl Field for SkewField<'_> {
+    fn map(&self, p: Point) -> Point {
+        let x = self.base_x + p.x;
+        Point::new(x, self.frame.y_at(x) + p.y - self.shift)
+    }
+}
+
+/// §6.13.2 **rainbow**: arc-length follow + normal offset — glyphs rotate and
+/// deform along the curve. `s0` is the arc length where the run begins.
+pub struct RainbowField<'a> {
+    pub frame: &'a PathFrame,
+    pub s0: f64,
+    pub shift: f64,
+}
+
+impl Field for RainbowField<'_> {
+    fn map(&self, p: Point) -> Point {
+        self.frame.at(self.s0 + p.x, p.y - self.shift)
+    }
+}
+
+/// The native text-on-path bake (§6.13): warp a flat-baseline outlined run onto a
+/// reference path. `outline_d` is the run outlined at the origin (baseline y = 0,
+/// advancing in +x); `advance` is its advance width (align placement); `fx` selects
+/// and places the field. Runs the §7.1 bake (+ refit per quality). `None` when the
+/// effect is unknown or either path is degenerate — the caller degrades (§6.13.3).
+pub fn warp_text_on_path(
+    outline_d: &str,
+    ref_path_d: &str,
+    fx: &crate::PathEffect,
+    advance: f64,
+    tolerance: f64,
+    do_refit: bool,
+) -> Option<String> {
+    if !advance.is_finite() {
+        return None;
+    }
+    let frame = PathFrame::new(ref_path_d, tolerance)?;
+    match fx.effect {
+        "skew" => {
+            let base_x =
+                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
+            let field = SkewField {
+                frame: &frame,
+                base_x,
+                shift: fx.baseline_shift,
+            };
+            warp_svg_path(outline_d, &field, tolerance, do_refit)
+        }
+        "rainbow" => {
+            let s0 = run_offset(frame.len(), advance, fx.align, fx.start);
+            let field = RainbowField {
+                frame: &frame,
+                s0,
+                shift: fx.baseline_shift,
+            };
+            warp_svg_path(outline_d, &field, tolerance, do_refit)
+        }
+        _ => None,
+    }
+}
+
 /// How many times a mapped segment may halve during adaptive subdivision (2^10 ≈
 /// 1000 pieces per input segment) — a hard cap so a pathological field terminates.
 const MAX_SPLIT_DEPTH: u8 = 10;
@@ -1072,6 +1284,172 @@ mod tests {
     #[test]
     fn unknown_preset_is_none() {
         assert!(EnvelopePreset::new("twirl", 0.5, WarpAxis::H, Rect::ZERO).is_none());
+    }
+
+    // ---- text-on-path (§6.13, native) ----
+
+    use crate::PathEffect;
+
+    fn fx<'a>(effect: &'a str, shift: f64, align: &'a str, start: f64) -> PathEffect<'a> {
+        PathEffect {
+            effect,
+            baseline_shift: shift,
+            align,
+            start,
+        }
+    }
+
+    #[test]
+    fn path_frame_measures_and_samples() {
+        let f = PathFrame::new("M0,0 L100,0", 0.25).unwrap();
+        assert!((f.len() - 100.0).abs() < 1e-9);
+        assert_eq!((f.x0(), f.x1()), (0.0, 100.0));
+        // on-path, normal offset, and straight extrapolation past both ends
+        assert!(f.at(50.0, 0.0).distance(Point::new(50.0, 0.0)) < 1e-9);
+        assert!(f.at(50.0, -10.0).distance(Point::new(50.0, -10.0)) < 1e-9);
+        assert!(f.at(150.0, 0.0).distance(Point::new(150.0, 0.0)) < 1e-9);
+        assert!(f.at(-50.0, 0.0).distance(Point::new(-50.0, 0.0)) < 1e-9);
+        // height field on a slope, clamped outside the extent
+        let g = PathFrame::new("M0,0 L100,100", 0.25).unwrap();
+        assert!((g.y_at(50.0) - 50.0).abs() < 1e-9);
+        assert!((g.y_at(-10.0) - 0.0).abs() < 1e-9);
+        assert!((g.y_at(200.0) - 100.0).abs() < 1e-9);
+        // a curve's arc length exceeds its chord
+        let c = PathFrame::new("M0,40 C40,0 80,80 120,40", 0.25).unwrap();
+        assert!(c.len() > 120.0, "{}", c.len());
+        // degenerate inputs
+        assert!(PathFrame::new("", 0.25).is_none());
+        assert!(PathFrame::new("garbage", 0.25).is_none());
+        assert!(PathFrame::new("M5,5 L5,5", 0.25).is_none());
+    }
+
+    #[test]
+    fn warp_text_on_path_places_and_shifts() {
+        // a 10×5 box outline on the baseline, on a flat reference path at y = 20
+        let outline = "M0,0 L10,0 L10,-5 L0,-5 Z";
+        let flat = "M0,20 L120,20";
+        // skew, defaults: run starts at the path's start x; baseline lands on y=20
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("skew", 0.0, "start", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M0,20"), "{d}");
+        // baseline-shift lifts it; start pushes it along; align=end right-aligns
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("skew", 8.0, "start", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M0,12"), "{d}");
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("skew", 0.0, "start", 15.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M15,20"), "{d}");
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("skew", 0.0, "end", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M110,20"), "{d}");
+        // rainbow on the same flat path behaves identically at s0 = 0
+        let d = warp_text_on_path(
+            outline,
+            flat,
+            &fx("rainbow", 0.0, "middle", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M55,20"), "{d}");
+        // rainbow on a vertical path: the run follows it downward, rotated 90°
+        let vert = "M40,0 L40,120";
+        let d = warp_text_on_path(
+            outline,
+            vert,
+            &fx("rainbow", 0.0, "start", 0.0),
+            10.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        assert!(d.starts_with("M40,0"), "{d}");
+        assert!(d.contains("40,10"), "advance runs down the path: {d}");
+        // unknown effect / degenerate inputs degrade to None, never NaN
+        assert!(warp_text_on_path(
+            outline,
+            flat,
+            &fx("stair", 0.0, "start", 0.0),
+            10.0,
+            0.25,
+            false
+        )
+        .is_none());
+        assert!(warp_text_on_path(
+            outline,
+            "M5,5 L5,5",
+            &fx("skew", 0.0, "start", 0.0),
+            10.0,
+            0.25,
+            false
+        )
+        .is_none());
+        assert!(warp_text_on_path(
+            outline,
+            flat,
+            &fx("skew", 0.0, "start", 0.0),
+            f64::NAN,
+            0.25,
+            false
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn warp_text_on_path_refits_curved_output() {
+        // a long baseline box over a curved path: polyline subdivides, refit fuses
+        let outline = "M0,0 L100,0 L100,-10 L0,-10 Z";
+        let wave = "M0,40 C40,0 80,80 120,40";
+        let poly = warp_text_on_path(
+            outline,
+            wave,
+            &fx("skew", 0.0, "start", 0.0),
+            100.0,
+            0.25,
+            false,
+        )
+        .unwrap();
+        let fitted = warp_text_on_path(
+            outline,
+            wave,
+            &fx("skew", 0.0, "start", 0.0),
+            100.0,
+            0.25,
+            true,
+        )
+        .unwrap();
+        assert!(!poly.contains('C'));
+        assert!(fitted.contains('C'), "{fitted}");
+        assert!(fitted.len() < poly.len());
     }
 
     #[test]

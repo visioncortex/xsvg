@@ -39,9 +39,9 @@ catalog: [Typography.md](Typography.md) (Pillar 1).
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **The bake**: flatten → map → refit (§7.1) | §7 | C | ✅ | **all three steps shipped** in `xsvg-core` for `<x:warp>`: flatten → map with adaptive chord subdivision → corner-aware **cubic refit** (`fast` keeps the polyline), natively unit-tested; the §6.13 glyph bake still lives in the browser adapter (the remaining ◑, tracked on its own row below) |
-| **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ✅ | **shipped** — `Field` trait + the `EnvelopePreset` family over a normalized envelope frame; the §6.13 fields stay adapter-side until the glyph bake moves native |
-| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ◑ | **wired for `<x:warp>`**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units *and* polyline-vs-refit output form; the §6.13 adapter still hardcodes `size/12` |
+| **The bake**: flatten → map → refit (§7.1) | §7 | C | ✅ | **all three steps shipped** in `xsvg-core`, for `<x:warp>` *and* `<x:textpath>`: flatten → map with adaptive chord subdivision → corner-aware **cubic refit** (`fast` keeps the polyline), natively unit-tested end to end |
+| **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ✅ | **shipped** — `Field` trait with the `EnvelopePreset` family, corner-driven maps, *and* the §6.13 `SkewField`/`RainbowField` over a shared native `PathFrame`; one field library, one bake |
+| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ✅ | **fully wired**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units and polyline-vs-refit output form, for both `<x:warp>` and `<x:textpath>` |
 | **`<x:warp>` generic front-end** (§7.3) | AI Envelope | C | ✅ | **shipped** — displacement presets over wrapped children; unknown/absent fields degrade behind a marker, unwarpable children skip with a marker |
 | **Warp arbitrary geometry** (basic shapes, `<path>`, `<g>` subtrees) | AI | C | ✅ | **shipped** — shapes convert to path geometry and bake; live text / rounded rects / lines / images are skipped with a marker (never silently unwarped) |
 | **Warp outlined text** | AI (after Create Outlines) | C | ✅ | **shipped** — `outline="true"` boxes and `<x:textpath>` output warp like any path inside `<x:warp>` |
@@ -114,7 +114,7 @@ true 2-D fields.
 | **Envelope mesh** (m×n lattice, movable points) | AI Make with Mesh | E | ❌ | bivariate Bézier / FFD lattice (Sederberg–Parry); needs lattice syntax + basis evaluation; shares patch vocabulary with `<x:mesh>` (Pillar 3) |
 | **Envelope — top object** (conform to an arbitrary shape) | AI Make with Top Object | S | ❌ | parameterize the target outline into a warped quad domain — the hardest envelope; needs shape parameterization machinery |
 | **MLS handle warp** (move-a-few-points) | Schaefer et al. / xsvg | S | ❌ | `handles="x,y→x′,y′ …"`; affine/similarity/rigid classes; `rust_mls` or in-house — new dependency, so not field-only |
-| **Bend along a path** (whole group follows a spine) | Inkscape LPE Bend | E | ❌ | the §6.13.2 path-follow field applied to arbitrary geometry — the arc-length + normal machinery now exists in the browser adapter (rainbow); generalizing it rides the `<x:warp>` native bake |
+| **Bend along a path** (whole group follows a spine) | Inkscape LPE Bend | E | ○ | the §6.13.2 path-follow field applied to arbitrary geometry — `PathFrame` + `RainbowField` are now **native in core**, so this is front-end plumbing: an `in="#path"` reference on `<x:warp>` + mapping the envelope's bend axis to arc length |
 
 ## E. Type on a path — *the text front-end (§6.13)*
 
@@ -189,14 +189,15 @@ paths, and outlined text, with innermost-first nesting and marker-based degradat
 [warp-perspective.xsvg](../dataset/warp-perspective.xsvg)).
 **`<x:textpath>`** (§6.13) — **skew**, **rainbow** (arc-length LUT + normal offset, straight
 extrapolation past the ends), authorable **stair**, `baseline-shift`, and `align`/`start` placement,
-via the `GlyphOutliner::outline_on_path` browser seam
+on the **native §7.1 bake** (the browser supplies only glyph outlines + advance widths)
 ([textpath.xsvg](../dataset/textpath.xsvg), [textpath-rainbow.xsvg](../dataset/textpath-rainbow.xsvg),
 [textpath-align.xsvg](../dataset/textpath-align.xsvg)). Non-destructive authoring holds by
 construction.
 
-**Partial (◑):** the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance
-and polyline-only output, so the text-on-path fields aren't natively tested (or refit) the way
-`<x:warp>`'s are — porting it onto the core bake is the main remaining hygiene item.
+**Partial (◑):** nothing — the §6.13 glyph bake now runs on the native pipeline (the browser
+supplies only glyph outlines and advance widths), so every shipped row is natively tested,
+quality-graded, and refit. The stair fallback also went native: it needs only the measurer, no
+extra browser seam.
 
 **Planned, field-only (○):** only the gravity/3D-ribbon type effects remain in this bucket — every
 §B preset has shipped. Each is one pure function plus its attribute plumbing.
@@ -221,7 +222,8 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
    `highest` = refit at graded tolerance).~~ ✅ *(shipped; the `align`/`start` and stair-step items
    originally here shipped early, alongside rainbow)*
 6. ~~**Rainbow** — arc-length + normal machinery~~ ✅ *(shipped early with `baseline-shift`, riding
-   the §6.13 adapter seam ahead of the native bake; bend-along-path §D still waits on slice 2)*
+   the §6.13 adapter seam ahead of the native bake — since ported onto it; bend-along-path §D is
+   now field-only plumbing)*
 7. **Later** — envelope mesh (with Pillar 3's patch vocabulary), top object, MLS, anchor-aware
    effects, raster fallback.
 

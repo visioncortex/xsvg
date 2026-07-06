@@ -120,16 +120,7 @@ export function rasterize(d: string, rowH: number): number[] {
 // "Create outlines" (`x:outline`/`outline="true"`) turns a text run into a <path>;
 // opentype.js needs the font *bytes*, keyed by family. A family with no registered
 // font returns "" → the compiler falls back to live <text>, so nothing ever breaks.
-interface OtCmd {
-  type: "M" | "L" | "C" | "Q" | "Z";
-  x?: number;
-  y?: number;
-  x1?: number;
-  y1?: number;
-  x2?: number;
-  y2?: number;
-}
-type OtGlyphPath = { toPathData(fractionalDigits?: number): string; commands: OtCmd[] };
+type OtGlyphPath = { toPathData(fractionalDigits?: number): string };
 type OtFont = {
   getPath(t: string, x: number, y: number, size: number): OtGlyphPath;
   getAdvanceWidth(t: string, size: number): number;
@@ -260,258 +251,18 @@ function outline(
   return font.getPath(text, x, baseline, size).toPathData(2);
 }
 
-// --- Text on a path (§6.13): the browser adapter for GlyphOutliner::outline_on_path.
-// Outline the run on a flat baseline (opentype's structured commands), flatten to a
-// tolerance, then push every vertex through a path-derived field — the §7 bake done in
-// JS (the pure-Rust kurbo path is the later native impl). Fields: skew (§6.13.1 —
-// vertical displacement by the path's height profile) and rainbow (§6.13.2 — arc-length
-// follow + normal offset); baseline-shift offsets the run along the local normal.
-
-// Sample a reference path as a height field f(x) — its y at horizontal position x
-// (§6.13.1). Reuses the offscreen probe; assumes the path is single-valued in x.
-// `x0`/`x1` are the path's start/end x — its extent for run placement (§6.13).
-function pathHeightField(
-  pathD: string,
-): { x0: number; x1: number; y(x: number): number } | null {
-  const p = probe();
-  p.setAttribute("d", pathD);
-  let len: number;
-  try {
-    len = p.getTotalLength();
-  } catch {
-    return null;
-  }
-  if (!(len > 0)) return null;
-  const K = 256;
-  const xs = new Float64Array(K + 1);
-  const ys = new Float64Array(K + 1);
-  for (let i = 0; i <= K; i++) {
-    const pt = p.getPointAtLength((i / K) * len);
-    xs[i] = pt.x;
-    ys[i] = pt.y;
-  }
-  return {
-    x0: xs[0],
-    x1: xs[K],
-    y(x: number): number {
-      if (x <= xs[0]) return ys[0];
-      if (x >= xs[K]) return ys[K];
-      for (let i = 0; i < K; i++) {
-        const a = xs[i];
-        const b = xs[i + 1];
-        if ((x >= a && x <= b) || (x <= a && x >= b)) {
-          const t = b === a ? 0 : (x - a) / (b - a);
-          return ys[i] + t * (ys[i + 1] - ys[i]);
-        }
-      }
-      return ys[K];
-    },
-  };
-}
-
-// Sample a reference path as an arc-length frame (§6.13.2): `at(s, off)` is the point
-// `off` units along the local normal from the path point at arc length `s`; `len` is
-// the total arc length (the run-placement extent, §6.13). The normal is the tangent
-// rotated +90° in y-down coords — for a left→right path it points down, so negative
-// glyph y (ascenders) rises above the curve. Beyond either end the frame extends
-// straight along the end tangent, so a run longer than the path continues rather than
-// bunching up. Reuses the offscreen probe.
-function pathArcFrame(
-  pathD: string,
-): { len: number; at(s: number, off: number): [number, number] } | null {
-  const p = probe();
-  p.setAttribute("d", pathD);
-  let len: number;
-  try {
-    len = p.getTotalLength();
-  } catch {
-    return null;
-  }
-  if (!(len > 0)) return null;
-  const K = 512;
-  const xs = new Float64Array(K + 1);
-  const ys = new Float64Array(K + 1);
-  for (let i = 0; i <= K; i++) {
-    const pt = p.getPointAtLength((i / K) * len);
-    xs[i] = pt.x;
-    ys[i] = pt.y;
-  }
-  // unit tangent of the LUT segment starting at sample i (degenerate → +x)
-  const tangent = (i: number): [number, number] => {
-    const dx = xs[i + 1] - xs[i];
-    const dy = ys[i + 1] - ys[i];
-    const d = Math.hypot(dx, dy);
-    return d > 0 ? [dx / d, dy / d] : [1, 0];
-  };
-  const at = (s: number, off: number): [number, number] => {
-    const sc = Math.min(Math.max(s, 0), len); // clamped arc position
-    const over = s - sc; // straight-line overshoot past the path's ends
-    const t = (sc / len) * K;
-    const i = Math.min(K - 1, Math.floor(t));
-    const frac = t - i;
-    const [tx, ty] = tangent(i);
-    const px = xs[i] + frac * (xs[i + 1] - xs[i]);
-    const py = ys[i] + frac * (ys[i + 1] - ys[i]);
-    return [px + over * tx - off * ty, py + over * ty + off * tx];
-  };
-  return { len, at };
-}
-
-// Where a run of width `w` begins within a path extent `E` (§6.13): `align`
-// distributes the slack, `start` adds an absolute head-start. Slack may be negative
-// (run longer than the path) — middle/end then shift before the start, symmetric with
-// the past-the-end overshoot.
-function runOffset(E: number, w: number, align: string, start: number): number {
-  return start + (align === "middle" ? (E - w) / 2 : align === "end" ? E - w : 0);
-}
-
-// Flatten opentype glyph commands to closed contours (flat [x0,y0,x1,y1,…] arrays),
-// no sub-segment longer than `step` (the graded quality knob).
-function flattenGlyph(cmds: OtCmd[], step: number): number[][] {
-  const contours: number[][] = [];
-  let cur: number[] = [];
-  let cx = 0;
-  let cy = 0;
-  let sx = 0;
-  let sy = 0;
-  const lineTo = (x: number, y: number) => {
-    const n = Math.max(1, Math.ceil(Math.hypot(x - cx, y - cy) / step));
-    for (let k = 1; k <= n; k++) cur.push(cx + ((x - cx) * k) / n, cy + ((y - cy) * k) / n);
-    cx = x;
-    cy = y;
-  };
-  for (const c of cmds) {
-    if (c.type === "M") {
-      if (cur.length) contours.push(cur);
-      cur = [c.x!, c.y!];
-      cx = sx = c.x!;
-      cy = sy = c.y!;
-    } else if (c.type === "L") {
-      lineTo(c.x!, c.y!);
-    } else if (c.type === "Q") {
-      const x0 = cx;
-      const y0 = cy;
-      const n = Math.max(
-        2,
-        Math.ceil((Math.hypot(c.x1! - x0, c.y1! - y0) + Math.hypot(c.x! - c.x1!, c.y! - c.y1!)) / step),
-      );
-      for (let k = 1; k <= n; k++) {
-        const t = k / n;
-        const u = 1 - t;
-        cur.push(
-          u * u * x0 + 2 * u * t * c.x1! + t * t * c.x!,
-          u * u * y0 + 2 * u * t * c.y1! + t * t * c.y!,
-        );
-      }
-      cx = c.x!;
-      cy = c.y!;
-    } else if (c.type === "C") {
-      const x0 = cx;
-      const y0 = cy;
-      const n = Math.max(
-        2,
-        Math.ceil(
-          (Math.hypot(c.x1! - x0, c.y1! - y0) +
-            Math.hypot(c.x2! - c.x1!, c.y2! - c.y1!) +
-            Math.hypot(c.x! - c.x2!, c.y! - c.y2!)) /
-            step,
-        ),
-      );
-      for (let k = 1; k <= n; k++) {
-        const t = k / n;
-        const u = 1 - t;
-        cur.push(
-          u * u * u * x0 + 3 * u * u * t * c.x1! + 3 * u * t * t * c.x2! + t * t * t * c.x!,
-          u * u * u * y0 + 3 * u * u * t * c.y1! + 3 * u * t * t * c.y2! + t * t * t * c.y!,
-        );
-      }
-      cx = c.x!;
-      cy = c.y!;
-    } else if (c.type === "Z") {
-      lineTo(sx, sy);
-    }
-  }
-  if (cur.length) contours.push(cur);
-  return contours;
-}
-
-function outlineOnPath(
+// Advance width of a run per the outline font's own metrics — the browser adapter
+// for GlyphOutliner::advance_width. NaN when the family has no registered bytes
+// (→ Rust degrades). All §6.13 path-warp math itself runs natively in xsvg-core.
+function advanceWidth(
   text: string,
   family: string,
   _weight: string,
   _style: string,
   size: number,
-  pathD: string,
-  effect: string,
-  baselineShift: number,
-  align: string,
-  start: number,
-): string {
+): number {
   const font = lookupFont(family);
-  if (!font) return ""; // no bytes → Rust falls back to live <text>
-  const w = font.getAdvanceWidth(text, size); // run width for align (outline geometry
-  // carries no letter/word-spacing, §6.12 — the extent slack must match it)
-  // Per-effect vertex map — a §7.2 field. (gx, gy) are outline coords on the flat run
-  // baseline (gy negative above it); baseline-shift lifts the run off the path.
-  let map: (gx: number, gy: number) => [number, number];
-  if (effect === "skew") {
-    const field = pathHeightField(pathD);
-    if (!field) return "";
-    // skew field: (x, y) → (x, y + f(x)); align/start place the run in the x-extent
-    const base = field.x0 + runOffset(field.x1 - field.x0, w, align, start);
-    map = (gx, gy) => {
-      const x = base + gx;
-      return [x, field.y(x) + gy - baselineShift];
-    };
-  } else if (effect === "rainbow") {
-    const frame = pathArcFrame(pathD);
-    if (!frame) return "";
-    // path-follow field: (x, y) → P(s) + y·N(s); align/start place s in the arc length
-    const base = runOffset(frame.len, w, align, start);
-    map = (gx, gy) => frame.at(base + gx, gy - baselineShift);
-  } else {
-    return ""; // unknown effect → graceful live-<text> fallback
-  }
-  const step = Math.max(1, size / 12); // flatten tolerance, size-relative (quality knob)
-  const contours = flattenGlyph(font.getPath(text, 0, 0, size).commands, step);
-  const r = (n: number) => (Math.round(n * 100) / 100).toString();
-  let d = "";
-  for (const c of contours) {
-    for (let i = 0; i < c.length; i += 2) {
-      const [x, y] = map(c[i], c[i + 1]);
-      // totality (§4): a degenerate path/field must never leak NaN/inf coordinates —
-      // abandon the warp and let Rust fall back to live <text>
-      if (!(Number.isFinite(x) && Number.isFinite(y))) return "";
-      d += (i === 0 ? "M" : "L") + r(x) + "," + r(y);
-    }
-    d += "Z";
-  }
-  return d;
-}
-
-// Stepped-baseline sampler (§6.13.1 degradation) — the browser adapter for
-// Shaper::baseline_samples. `advances` holds each glyph's x-offset from the run
-// origin plus a final total-width entry; returns [runStartX, y0 … y(n-1)] with the
-// run placed by align/start in the path's x-extent, or an empty array on failure
-// (→ straight-text fallback). Non-finite samples abort — never leak NaN (§4).
-function steppedBaseline(
-  pathD: string,
-  advances: Float64Array,
-  align: string,
-  start: number,
-): Float64Array {
-  const n = advances.length - 1;
-  const field = n >= 1 ? pathHeightField(pathD) : null;
-  if (!field) return new Float64Array(0);
-  const x0 = field.x0 + runOffset(field.x1 - field.x0, advances[n], align, start);
-  const out = new Float64Array(n + 1);
-  out[0] = x0;
-  for (let i = 0; i < n; i++) {
-    const y = field.y(x0 + advances[i]);
-    if (!Number.isFinite(y)) return new Float64Array(0);
-    out[i + 1] = y;
-  }
-  return out;
+  return font ? font.getAdvanceWidth(text, size) : NaN;
 }
 
 export interface CompileOptions {
@@ -533,15 +284,5 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(
-    source,
-    quality,
-    sourcemap,
-    measure,
-    metrics,
-    rasterize,
-    steppedBaseline,
-    outline,
-    outlineOnPath,
-  );
+  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth);
 }
