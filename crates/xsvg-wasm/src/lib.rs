@@ -701,11 +701,13 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     match field {
         Some(f) => {
             let tol = ctx.quality.tolerance();
+            // `fast` emits the raw polyline; better profiles refit to cubics (§7.1)
+            let refit = ctx.quality != QualityProfile::Fast;
             let mut last = 0;
             for (a, b) in ranges {
                 out.push_str(&inner[last..a]);
                 // a path that fails to bake keeps its original geometry (§4 totality)
-                match warp_svg_path(&inner[a..b], f.as_ref(), tol) {
+                match warp_svg_path(&inner[a..b], f.as_ref(), tol, refit) {
                     Some(d) => out.push_str(&d),
                     None => out.push_str(&inner[a..b]),
                 }
@@ -2066,6 +2068,11 @@ mod tests {
     const XW: &str =
         r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
 
+    /// Compile at `fast` quality — raw polyline output, exact vertex assertions.
+    fn compile_fast(svg: &str) -> String {
+        compile_impl(svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap()
+    }
+
     #[test]
     fn warp_arch_bends_a_rect() {
         // bbox 100×40, bend 100% → A = 25: the top edge's center maps to (50, −25),
@@ -2073,7 +2080,7 @@ mod tests {
         let svg = format!(
             r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="100" height="40" fill="#f00"/></x:warp></svg>"##
         );
-        let out = compile_test(&svg);
+        let out = compile_fast(&svg);
         assert!(out.contains("<g"), "{out}");
         assert!(!out.contains("<rect"), "{out}");
         assert!(out.contains(r##"fill="#f00""##), "{out}");
@@ -2149,7 +2156,7 @@ mod tests {
         let svg = format!(
             r##"{XW}<x:warp field="perspective" corners="20,10 180,10 200,120 0,120"><rect x="0" y="0" width="200" height="120" fill="#f0f"/></x:warp></svg>"##
         );
-        let out = compile_test(&svg);
+        let out = compile_fast(&svg);
         assert!(out.contains("M20,10"), "{out}");
         assert!(out.contains("180,10"), "{out}");
         assert!(out.contains("0,120"), "{out}");
@@ -2209,18 +2216,18 @@ mod tests {
     }
 
     #[test]
-    fn warp_quality_grades_segment_count() {
+    fn warp_quality_grades_output_form() {
+        // fast = raw polyline (no cubics, many segments); balanced/highest = the
+        // refit — a handful of cubics even at a 20× tighter tolerance
         let svg = format!(
             r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="200" height="60"/></x:warp></svg>"##
         );
         let fast = compile_impl(&svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap();
         let hi = compile_impl(&svg, "highest", false, &Mono, &NoShaper, &NoOutliner).unwrap();
-        assert!(
-            hi.matches('L').count() > fast.matches('L').count(),
-            "highest ({}) !> fast ({})",
-            hi.matches('L').count(),
-            fast.matches('L').count()
-        );
+        assert!(!fast.contains('C'), "{fast}");
+        assert!(fast.matches('L').count() > 8, "{fast}");
+        assert!(hi.contains('C'), "{hi}");
+        assert!(hi.matches('C').count() < 25, "{hi}");
     }
 
     #[test]

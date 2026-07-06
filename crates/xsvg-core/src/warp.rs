@@ -3,6 +3,7 @@
 //! upgrade). Platform-free and kurbo-backed: the wasm layer hands SVG path data in
 //! and gets warped path data out, so the math is natively unit-testable.
 
+use kurbo::simplify::{simplify_bezpath, SimplifyOptLevel, SimplifyOptions};
 use kurbo::{BezPath, PathEl, Point, Rect, Shape};
 
 /// A deformation field: a pure point map `D : ℝ² → ℝ²` (§7.2). Implementations may
@@ -525,33 +526,63 @@ pub fn svg_path_bbox(d: &str) -> Option<Rect> {
     (!path.elements().is_empty()).then(|| path.bounding_box())
 }
 
+/// Refit a baked polyline to cubic Béziers (§7.1's third step): kurbo's simplify is
+/// corner-aware and error-bounded, so the result stays within the same `tolerance`
+/// budget while dropping most vertices. The angle threshold separates the small
+/// turning angles of adaptive-subdivision joins (a few degrees — fused into curves)
+/// from genuine mapped corners (kept sharp); kurbo's default (~1 mrad) would treat
+/// every sampled vertex as a corner and fuse nothing. The `Optimize` level matters:
+/// the default subdivision fitter degrades badly on right-to-left runs (kurbo
+/// 0.13.1 — a symmetric parabola fits to 2 cubics forward but ~16 backward).
+pub fn refit(path: &BezPath, tolerance: f64) -> BezPath {
+    let options = SimplifyOptions::default()
+        .angle_thresh(0.25) // ≈ 14°
+        .opt_level(SimplifyOptLevel::Optimize);
+    simplify_bezpath(
+        path.elements().iter().copied(),
+        tolerance.max(1e-3),
+        &options,
+    )
+}
+
 /// Bake an SVG path `d` string through `field` and re-serialize it (2-decimal
-/// coordinates). `None` if the input doesn't parse, produces nothing, or the field
-/// leaks a non-finite coordinate — the caller keeps the original geometry (§4
-/// totality: a warp degrades, it never emits NaN).
-pub fn warp_svg_path(d: &str, field: &dyn Field, tolerance: f64) -> Option<String> {
+/// coordinates). With `refit`, the mapped polyline is refit to cubics at the same
+/// tolerance (the `balanced`/`highest` output; `fast` keeps the raw polyline).
+/// `None` if the input doesn't parse, produces nothing, or the field leaks a
+/// non-finite coordinate — the caller keeps the original geometry (§4 totality:
+/// a warp degrades, it never emits NaN).
+pub fn warp_svg_path(d: &str, field: &dyn Field, tolerance: f64, do_refit: bool) -> Option<String> {
     let path = BezPath::from_svg(d).ok()?;
-    let baked = bake(&path, field, tolerance);
+    let mut baked = bake(&path, field, tolerance);
+    if do_refit {
+        baked = refit(&baked, tolerance);
+    }
     let mut s = String::new();
     for el in baked.elements() {
         match el {
-            PathEl::MoveTo(p) => push_point(&mut s, 'M', *p)?,
-            PathEl::LineTo(p) => push_point(&mut s, 'L', *p)?,
+            PathEl::MoveTo(p) => push_cmd(&mut s, 'M', &[*p])?,
+            PathEl::LineTo(p) => push_cmd(&mut s, 'L', &[*p])?,
+            PathEl::QuadTo(p1, p2) => push_cmd(&mut s, 'Q', &[*p1, *p2])?,
+            PathEl::CurveTo(p1, p2, p3) => push_cmd(&mut s, 'C', &[*p1, *p2, *p3])?,
             PathEl::ClosePath => s.push('Z'),
-            _ => return None,
         }
     }
     (!s.is_empty()).then_some(s)
 }
 
-fn push_point(s: &mut String, cmd: char, p: Point) -> Option<()> {
-    if !(p.x.is_finite() && p.y.is_finite()) {
+fn push_cmd(s: &mut String, cmd: char, pts: &[Point]) -> Option<()> {
+    if pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
         return None;
     }
     s.push(cmd);
-    s.push_str(&round2(p.x));
-    s.push(',');
-    s.push_str(&round2(p.y));
+    for (i, p) in pts.iter().enumerate() {
+        if i > 0 {
+            s.push(' ');
+        }
+        s.push_str(&round2(p.x));
+        s.push(',');
+        s.push_str(&round2(p.y));
+    }
     Some(())
 }
 
@@ -1046,11 +1077,69 @@ mod tests {
     #[test]
     fn warp_svg_path_round_trips_and_rejects_garbage() {
         let f = arch(0.5, Rect::new(0.0, 0.0, 100.0, 40.0));
-        let d = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25).unwrap();
+        let d = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, false).unwrap();
         assert!(d.starts_with('M') && d.ends_with('Z'), "{d}");
         assert!(!d.contains("NaN") && !d.contains("inf"), "{d}");
-        assert!(warp_svg_path("not a path", &f, 0.25).is_none());
-        assert!(warp_svg_path("", &f, 0.25).is_none());
+        assert!(warp_svg_path("not a path", &f, 0.25, false).is_none());
+        assert!(warp_svg_path("", &f, 0.25, false).is_none());
+    }
+
+    #[test]
+    fn refit_shrinks_the_polyline_and_stays_within_tolerance() {
+        let tol = 0.25;
+        let f = arch(1.0, Rect::new(0.0, 0.0, 100.0, 40.0));
+        let path = BezPath::from_svg("M0,0 L100,0 L100,40 L0,40 Z").unwrap();
+        let poly = bake(&path, &f, tol);
+        let fitted = refit(&poly, tol);
+        assert!(
+            fitted.elements().len() < poly.elements().len() / 2,
+            "refit {} !<< polyline {}",
+            fitted.elements().len(),
+            poly.elements().len()
+        );
+        assert!(fitted
+            .elements()
+            .iter()
+            .any(|e| matches!(e, PathEl::CurveTo(..))));
+        // every polyline vertex must lie within ~tol of the fitted curve
+        use kurbo::ParamCurveNearest;
+        for v in vertices(&poly) {
+            let d2 = fitted
+                .segments()
+                .map(|seg| seg.nearest(v, 1e-3).distance_sq)
+                .fold(f64::INFINITY, f64::min);
+            assert!(d2.sqrt() <= tol * 2.0, "vertex {v:?} is {} away", d2.sqrt());
+        }
+        // corners survive: the mapped rect corners stay on the fitted outline
+        for src in [
+            Point::new(0.0, 0.0),
+            Point::new(100.0, 0.0),
+            Point::new(100.0, 40.0),
+            Point::new(0.0, 40.0),
+        ] {
+            let c = f.map(src);
+            let d2 = fitted
+                .segments()
+                .map(|seg| seg.nearest(c, 1e-3).distance_sq)
+                .fold(f64::INFINITY, f64::min);
+            assert!(d2.sqrt() <= tol * 2.0, "corner {c:?} drifted {}", d2.sqrt());
+        }
+    }
+
+    #[test]
+    fn warp_svg_path_refit_emits_cubics() {
+        let f = arch(0.8, Rect::new(0.0, 0.0, 100.0, 40.0));
+        let poly = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, false).unwrap();
+        let refitted = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, true).unwrap();
+        assert!(!poly.contains('C'));
+        assert!(refitted.contains('C'), "{refitted}");
+        assert!(
+            refitted.len() < poly.len(),
+            "{} !< {}",
+            refitted.len(),
+            poly.len()
+        );
+        assert!(refitted.ends_with('Z'), "{refitted}");
     }
 
     #[test]

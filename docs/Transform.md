@@ -39,9 +39,9 @@ catalog: [Typography.md](Typography.md) (Pillar 1).
 
 | Capability | From | Tier | Status | xsvg note |
 |---|---|---|---|---|
-| **The bake**: flatten → map → refit (§7.1) | §7 | C | ◑ | **native kurbo bake shipped** in `xsvg-core` for `<x:warp>` — flatten → map with *adaptive chord subdivision* (mapped-midpoint error ≤ tolerance), natively unit-tested; the §6.13 glyph bake still lives in the browser adapter; **refit is missing** — output is `M/L/Z` polylines |
+| **The bake**: flatten → map → refit (§7.1) | §7 | C | ✅ | **all three steps shipped** in `xsvg-core` for `<x:warp>`: flatten → map with adaptive chord subdivision → corner-aware **cubic refit** (`fast` keeps the polyline), natively unit-tested; the §6.13 glyph bake still lives in the browser adapter (the remaining ◑, tracked on its own row below) |
 | **`Field` seam** — `D: ℝ²→ℝ²` trait in `xsvg-core` | Plan §2.3 | C | ✅ | **shipped** — `Field` trait + the `EnvelopePreset` family over a normalized envelope frame; the §6.13 fields stay adapter-side until the glyph bake moves native |
-| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ◑ | **wired for `<x:warp>`**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units; the §6.13 adapter still hardcodes `size/12` |
+| **Quality knob** — flatten tolerance ← `QualityProfile` | §7.1 | C | ◑ | **wired for `<x:warp>`**: `fast`/`balanced`/`highest` → 1.0/0.25/0.05 user units *and* polyline-vs-refit output form; the §6.13 adapter still hardcodes `size/12` |
 | **`<x:warp>` generic front-end** (§7.3) | AI Envelope | C | ✅ | **shipped** — displacement presets over wrapped children; unknown/absent fields degrade behind a marker, unwarpable children skip with a marker |
 | **Warp arbitrary geometry** (basic shapes, `<path>`, `<g>` subtrees) | AI | C | ✅ | **shipped** — shapes convert to path geometry and bake; live text / rounded rects / lines / images are skipped with a marker (never silently unwarped) |
 | **Warp outlined text** | AI (after Create Outlines) | C | ✅ | **shipped** — `outline="true"` boxes and `<x:textpath>` output warp like any path inside `<x:warp>` |
@@ -179,9 +179,9 @@ via the `GlyphOutliner::outline_on_path` browser seam
 [textpath-align.xsvg](../dataset/textpath-align.xsvg)). Non-destructive authoring holds by
 construction.
 
-**Partial (◑):** the bake emits polylines (**no cubic refit** yet — the `balanced`/`highest`
-upgrade); the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance, so the
-text-on-path fields aren't natively tested the way `<x:warp>`'s are.
+**Partial (◑):** the §6.13 glyph bake still lives in the browser adapter with a hardcoded tolerance
+and polyline-only output, so the text-on-path fields aren't natively tested (or refit) the way
+`<x:warp>`'s are — porting it onto the core bake is the main remaining hygiene item.
 
 **Planned, field-only (○):** only the gravity/3D-ribbon type effects remain in this bucket — every
 §B preset has shipped. Each is one pure function plus its attribute plumbing.
@@ -202,9 +202,9 @@ envelopes** (shape parameterization), **MLS handles**, the anchor-aware Effect-m
 4. ~~**Remaining analytic presets** — the scale family (arc-lower/upper, bulge, shell ×2, fish) +
    polar (arc); radial (fisheye, inflate), rotational (twist), squeeze.~~ ✅ *(shipped — **full
    Make-with-Warp parity, 15/15**)*
-5. **Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
-   `highest` = refit at graded tolerance). *(The `align`/`start` and stair-step items originally
-   here shipped early, alongside rainbow.)*
+5. ~~**Refit** — polyline → cubic fitting behind the quality knob (`fast` = polyline, `balanced`/
+   `highest` = refit at graded tolerance).~~ ✅ *(shipped; the `align`/`start` and stair-step items
+   originally here shipped early, alongside rainbow)*
 6. ~~**Rainbow** — arc-length + normal machinery~~ ✅ *(shipped early with `baseline-shift`, riding
    the §6.13 adapter seam ahead of the native bake; bend-along-path §D still waits on slice 2)*
 7. **Later** — envelope mesh (with Pillar 3's patch vocabulary), top object, MLS, anchor-aware

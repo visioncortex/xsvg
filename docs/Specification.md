@@ -455,7 +455,7 @@ front-ends. Text on a path (§6.13) is *one* front-end; skew / rainbow are *just
 Grounded in [Research.md §7](Research.md); the capability catalog (Illustrator parity: warp presets,
 perspective, envelopes) and build order are in [Transform.md](Transform.md).
 
-### 7.1 The bake (normative) [implemented: flatten → map; refit planned]
+### 7.1 The bake (normative) [implemented]
 
 Every geometry transform is the same three steps, parameterized only by a field `D` and a tolerance:
 
@@ -469,12 +469,16 @@ with segment span × field nonlinearity). The **`tolerance` is the graded qualit
 gives segment count ∝ `tolerance`⁻½, so tightening it trades path size for fidelity. This is the *only*
 approximation step; the emitted `<path>` is exact SVG.
 
-**The v1 implementation** (kurbo-backed, in `xsvg-core`, natively tested) emits the mapped polyline
-directly (`M`/`L`/`Z`); cubic **refit is the planned upgrade** for `balanced`/`highest`. Chords —
-including straight source segments and implicit closing edges — are **subdivided adaptively**: a
-segment splits while its mapped midpoint deviates from the mapped chord by more than `tolerance`
-(depth-capped), so long straight edges curve smoothly under a nonlinear field. Tolerance per profile:
-`fast` 1.0 · `balanced` 0.25 · `highest` 0.05 user units.
+**The v1 implementation** (kurbo-backed, in `xsvg-core`, natively tested) runs all three steps.
+Chords — including straight source segments and implicit closing edges — are **subdivided
+adaptively**: a segment splits while any mapped probe (mid + quarter points) deviates from the
+mapped chord *segment* by more than `tolerance` (depth-capped), so long straight edges curve
+smoothly under a nonlinear field while line-preserving fields (perspective) emit zero waste. The
+**refit** then fits the polyline back to cubics via kurbo's corner-aware, error-bounded simplify
+(angle threshold ≈ 14° separates subdivision joins from real corners; the optimizing fit level —
+the default subdivision fitter degrades on reversed runs). Output form per profile: `fast` = the
+raw polyline (`M`/`L`/`Z`) · `balanced`/`highest` = refit cubics, at tolerances 1.0 / 0.25 / 0.05
+user units. Both forms stay within the same tolerance of the true mapped geometry.
 
 ### 7.2 Deformation fields [skew shipped-first]
 
@@ -553,8 +557,8 @@ silently emit unwarped content. An unknown or absent `field`, or no usable geome
 children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
 non-finite coordinates never reach the output (§4).
 
-**v1 limits.** Polyline output for curved fields (no cubic refit, §7.1); a `<g>` child whose
-subtree still contains non-path geometry is skipped whole; text must be outlined to participate.
+**v1 limits.** A `<g>` child whose subtree still contains non-path geometry is skipped whole; text
+must be outlined to participate.
 
 ### 7.4 Remaining pillars & deferred [planned]
 
@@ -596,7 +600,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
-| Geometry bake — cubic refit of warped polylines | planned |
+| Geometry bake — cubic refit (`balanced`/`highest`; `fast` keeps the polyline) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |
