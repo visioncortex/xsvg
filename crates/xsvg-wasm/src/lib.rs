@@ -2067,10 +2067,24 @@ mod tests {
         compile_impl(svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap()
     }
 
+    /// Reparse the last emitted `d` attribute — the warped output (reference paths
+    /// pass through first). The output is compact/relative, so geometry assertions
+    /// go through kurbo rather than string matching.
+    fn first_path(out: &str) -> xsvg_core::kurbo::BezPath {
+        let d = out
+            .rsplit(" d=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        xsvg_core::kurbo::BezPath::from_svg(d).unwrap()
+    }
+
     #[test]
     fn warp_arch_bends_a_rect() {
-        // bbox 100×40, bend 100% → A = 25: the top edge's center maps to (50, −25),
-        // the corners stay pinned (u = ±1 → Δ = 0), and the rect is now a polyline.
+        // bbox 100×40, bend 100% → A = 25: the apex reaches y = −25, the corners
+        // stay pinned (u = ±1 → Δ = 0), and the rect is now a subdivided polyline.
         let svg = format!(
             r##"{XW}<x:warp field="arch" bend="100"><rect x="0" y="0" width="100" height="40" fill="#f00"/></x:warp></svg>"##
         );
@@ -2078,9 +2092,14 @@ mod tests {
         assert!(out.contains("<g"), "{out}");
         assert!(!out.contains("<rect"), "{out}");
         assert!(out.contains(r##"fill="#f00""##), "{out}");
-        assert!(out.contains("M0,0"), "{out}");
-        assert!(out.contains("50,-25"), "apex missing: {out}");
-        assert!(out.matches('L').count() > 8, "no subdivision: {out}");
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!((bb.y0 + 25.0).abs() < 0.1, "apex {}: {out}", bb.y0);
+        assert!((bb.x0.abs()) < 0.1 && (bb.x1 - 100.0).abs() < 0.1, "{out}");
+        assert!(
+            first_path(&out).elements().len() > 10,
+            "no subdivision: {out}"
+        );
     }
 
     #[test]
@@ -2152,16 +2171,24 @@ mod tests {
         );
         let out = compile_fast(&svg);
         assert!(out.contains("M20,10"), "{out}");
-        assert!(out.contains("180,10"), "{out}");
-        assert!(out.contains("0,120"), "{out}");
-        let d = out
-            .split(" d=\"")
-            .nth(1)
-            .unwrap()
-            .split('"')
-            .next()
-            .unwrap();
-        assert_eq!(d.matches('L').count(), 4, "{d}");
+        let path = first_path(&out);
+        use xsvg_core::kurbo::PathEl;
+        let lines = path
+            .elements()
+            .iter()
+            .filter(|e| matches!(e, PathEl::LineTo(_)))
+            .count();
+        assert_eq!(lines, 4, "{out}");
+        // the authored corners are pinned exactly (within the fast grid)
+        for corner in [(20.0, 10.0), (180.0, 10.0), (200.0, 120.0), (0.0, 120.0)] {
+            let hit = path.elements().iter().any(|e| match e {
+                PathEl::MoveTo(p) | PathEl::LineTo(p) => {
+                    (p.x - corner.0).abs() < 0.06 && (p.y - corner.1).abs() < 0.06
+                }
+                _ => false,
+            });
+            assert!(hit, "corner {corner:?} missing: {out}");
+        }
     }
 
     #[test]
@@ -2209,7 +2236,15 @@ mod tests {
         );
         let out = compile_fast(&svg);
         assert!(out.contains("M0,80"), "{out}");
-        assert!(out.contains("100,120"), "{out}");
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!(
+            bb.x0.abs() < 0.1
+                && (bb.x1 - 100.0).abs() < 0.1
+                && (bb.y0 - 80.0).abs() < 0.1
+                && (bb.y1 - 120.0).abs() < 0.1,
+            "band {bb:?}: {out}"
+        );
         // a vertical spine rotates the band onto it
         let svg = format!(
             r##"{XW}<path id="spine" d="M50,0 L50,300" fill="none"/><x:warp field="bend" in="#spine"><rect x="0" y="0" width="100" height="40" fill="#0af"/></x:warp></svg>"##
@@ -2289,12 +2324,11 @@ mod tests {
         let fast = compile_impl(&svg, "fast", false, &Mono, &NoShaper, &NoOutliner).unwrap();
         let hi = compile_impl(&svg, "highest", false, &Mono, &NoShaper, &NoOutliner).unwrap();
         assert!(!fast.contains('C') && !hi.contains('C'), "{hi}");
-        assert!(
-            hi.matches('L').count() > fast.matches('L').count(),
-            "highest ({}) !> fast ({})",
-            hi.matches('L').count(),
-            fast.matches('L').count()
+        let (nf, nh) = (
+            first_path(&fast).elements().len(),
+            first_path(&hi).elements().len(),
         );
+        assert!(nh > nf, "highest ({nh}) !> fast ({nf})");
     }
 
     #[test]

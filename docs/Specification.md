@@ -506,7 +506,11 @@ but **disabled in the lowering**: on dense, quantized glyph outlines kurbo 0.13'
 — producing notched edges and hairline slivers — and its optimizing level dominates compile time
 (its subdivision level degrades badly on reversed runs). Until a robust fitter lands, **every
 profile emits the tolerance-graded polyline** (`M`/`L`/`Z`) at 1.0 / 0.25 / 0.05 user units, which
-stays within tolerance of the true mapped geometry by construction.
+stays within tolerance of the true mapped geometry by construction. Baked path data serializes
+**compactly**: coordinates quantize to a decimal grid (1 decimal at `fast`-shape tolerances, else
+2), and everything after each subpath start is emitted as **relative commands with implicit
+repetition** (`M12,80l.6,-.4 .7,-.3…z`); deltas are computed on the grid in integer units, so
+rounding never accumulates. This trims dense glyph runs by ~25% at zero geometric risk.
 
 ### 7.2 Deformation fields [skew shipped-first]
 
@@ -645,6 +649,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit | implemented at the API, **disabled in lowering** (kurbo fitter overshoots on glyph-density input) |
+| Geometry bake — compact path serialization (quantized grid, relative + implicit repetition, drift-free) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
 | `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

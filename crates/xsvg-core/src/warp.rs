@@ -935,57 +935,145 @@ pub fn refit(path: &BezPath, tolerance: f64) -> BezPath {
     )
 }
 
-/// Bake an SVG path `d` string through `field` and re-serialize it (2-decimal
-/// coordinates). With `refit`, the mapped polyline is refit to cubics at the same
-/// tolerance (the `balanced`/`highest` output; `fast` keeps the raw polyline).
-/// `None` if the input doesn't parse, produces nothing, or the field leaks a
-/// non-finite coordinate — the caller keeps the original geometry (§4 totality:
-/// a warp degrades, it never emits NaN).
+/// Bake an SVG path `d` string through `field` and re-serialize it compactly
+/// ([`serialize_compact`]). With `refit`, the mapped polyline is refit to cubics at
+/// the same tolerance. `None` if the input doesn't parse, produces nothing, or the
+/// field leaks a non-finite coordinate — the caller keeps the original geometry
+/// (§4 totality: a warp degrades, it never emits NaN).
 pub fn warp_svg_path(d: &str, field: &dyn Field, tolerance: f64, do_refit: bool) -> Option<String> {
     let path = BezPath::from_svg(d).ok()?;
     let mut baked = bake(&path, field, tolerance);
     if do_refit {
         baked = refit(&baked, tolerance);
     }
+    serialize_compact(&baked, tolerance)
+}
+
+/// Serialize a baked path compactly: coordinates quantize to a decimal grid (1
+/// decimal when `tolerance ≥ 0.5`, else 2 — the quantum stays well inside the
+/// tolerance budget), and everything after each subpath's start is **relative**
+/// with implicit command repetition (`l x,y x,y …`). Deltas are computed on the
+/// quantized grid in integer units, so rounding error never accumulates along the
+/// chain. Zero-length line segments are dropped. `None` on any non-finite
+/// coordinate or an empty path.
+fn serialize_compact(path: &BezPath, tolerance: f64) -> Option<String> {
+    let scale: i64 = if tolerance >= 0.5 { 10 } else { 100 };
+    // grid units of an absolute point; None poisons the whole path (§4)
+    let q = |p: Point| -> Option<(i64, i64)> {
+        (p.x.is_finite() && p.y.is_finite()).then(|| {
+            (
+                (p.x * scale as f64).round() as i64,
+                (p.y * scale as f64).round() as i64,
+            )
+        })
+    };
+    // grid units → decimal text: "-12.3", ".5", "7" (trailing zeros and a leading
+    // integer zero are trimmed)
+    let fmt_u = |u: i64| -> String {
+        let neg = u < 0;
+        let a = u.unsigned_abs();
+        let (int, frac) = (a / scale as u64, a % scale as u64);
+        let mut out = String::new();
+        if neg {
+            out.push('-');
+        }
+        if frac == 0 {
+            out.push_str(&int.to_string());
+            return out;
+        }
+        if int != 0 {
+            out.push_str(&int.to_string());
+        }
+        out.push('.');
+        let width = if scale == 10 { 1 } else { 2 };
+        let mut digits = format!("{frac:0width$}");
+        while digits.ends_with('0') {
+            digits.pop();
+        }
+        out.push_str(&digits);
+        out
+    };
+    // one coordinate pair; separators only where the grammar needs them (a minus
+    // sign is its own separator)
+    let push_pair = |s: &mut String, first: bool, dx: i64, dy: i64| {
+        let x = fmt_u(dx);
+        if !first && !x.starts_with('-') {
+            s.push(' ');
+        }
+        s.push_str(&x);
+        let y = fmt_u(dy);
+        if !y.starts_with('-') {
+            s.push(',');
+        }
+        s.push_str(&y);
+    };
+
     let mut s = String::new();
-    for el in baked.elements() {
+    let mut cur = (0i64, 0i64);
+    let mut start = (0i64, 0i64);
+    let mut started = false;
+    let mut last_cmd = '\0';
+    for el in path.elements() {
         match el {
-            PathEl::MoveTo(p) => push_cmd(&mut s, 'M', &[*p])?,
-            PathEl::LineTo(p) => push_cmd(&mut s, 'L', &[*p])?,
-            PathEl::QuadTo(p1, p2) => push_cmd(&mut s, 'Q', &[*p1, *p2])?,
-            PathEl::CurveTo(p1, p2, p3) => push_cmd(&mut s, 'C', &[*p1, *p2, *p3])?,
-            PathEl::ClosePath => s.push('Z'),
+            PathEl::MoveTo(p) => {
+                let g = q(*p)?;
+                if started {
+                    s.push('m');
+                    push_pair(&mut s, true, g.0 - cur.0, g.1 - cur.1);
+                } else {
+                    s.push('M');
+                    push_pair(&mut s, true, g.0, g.1);
+                    started = true;
+                }
+                cur = g;
+                start = g;
+                last_cmd = 'm';
+            }
+            PathEl::LineTo(p) => {
+                let g = q(*p)?;
+                let (dx, dy) = (g.0 - cur.0, g.1 - cur.1);
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let first = last_cmd != 'l';
+                if first {
+                    s.push('l');
+                    last_cmd = 'l';
+                }
+                push_pair(&mut s, first, dx, dy);
+                cur = g;
+            }
+            PathEl::QuadTo(p1, p2) => {
+                let (g1, g2) = (q(*p1)?, q(*p2)?);
+                let first = last_cmd != 'q';
+                if first {
+                    s.push('q');
+                    last_cmd = 'q';
+                }
+                push_pair(&mut s, first, g1.0 - cur.0, g1.1 - cur.1);
+                push_pair(&mut s, false, g2.0 - cur.0, g2.1 - cur.1);
+                cur = g2;
+            }
+            PathEl::CurveTo(p1, p2, p3) => {
+                let (g1, g2, g3) = (q(*p1)?, q(*p2)?, q(*p3)?);
+                let first = last_cmd != 'c';
+                if first {
+                    s.push('c');
+                    last_cmd = 'c';
+                }
+                push_pair(&mut s, first, g1.0 - cur.0, g1.1 - cur.1);
+                push_pair(&mut s, false, g2.0 - cur.0, g2.1 - cur.1);
+                push_pair(&mut s, false, g3.0 - cur.0, g3.1 - cur.1);
+                cur = g3;
+            }
+            PathEl::ClosePath => {
+                s.push('z');
+                cur = start;
+                last_cmd = 'z';
+            }
         }
     }
     (!s.is_empty()).then_some(s)
-}
-
-fn push_cmd(s: &mut String, cmd: char, pts: &[Point]) -> Option<()> {
-    if pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
-        return None;
-    }
-    s.push(cmd);
-    for (i, p) in pts.iter().enumerate() {
-        if i > 0 {
-            s.push(' ');
-        }
-        s.push_str(&round2(p.x));
-        s.push(',');
-        s.push_str(&round2(p.y));
-    }
-    Some(())
-}
-
-/// Format with at most 2 decimals, trimming trailing zeros (`1.50` → `1.5`,
-/// `2.00` → `2`).
-fn round2(v: f64) -> String {
-    let r = (v * 100.0).round() / 100.0;
-    if r.fract() == 0.0 {
-        format!("{}", r as i64)
-    } else {
-        let s = format!("{r:.2}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    }
 }
 
 #[cfg(test)]
@@ -1571,7 +1659,7 @@ mod tests {
         )
         .unwrap();
         assert!(d.starts_with("M40,0"), "{d}");
-        assert!(d.contains("40,10"), "advance runs down the path: {d}");
+        assert!(d.contains("l0,10"), "advance runs down the path: {d}");
         // unknown effect / degenerate inputs degrade to None, never NaN
         assert!(warp_text_on_path(
             outline,
@@ -1716,8 +1804,8 @@ mod tests {
             true,
         )
         .unwrap();
-        assert!(!poly.contains('C'));
-        assert!(fitted.contains('C'), "{fitted}");
+        assert!(!poly.contains('c'));
+        assert!(fitted.contains('c'), "{fitted}");
         assert!(fitted.len() < poly.len());
     }
 
@@ -1725,10 +1813,55 @@ mod tests {
     fn warp_svg_path_round_trips_and_rejects_garbage() {
         let f = arch(0.5, Rect::new(0.0, 0.0, 100.0, 40.0));
         let d = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, false).unwrap();
-        assert!(d.starts_with('M') && d.ends_with('Z'), "{d}");
+        assert!(d.starts_with('M') && d.ends_with('z'), "{d}");
         assert!(!d.contains("NaN") && !d.contains("inf"), "{d}");
         assert!(warp_svg_path("not a path", &f, 0.25, false).is_none());
         assert!(warp_svg_path("", &f, 0.25, false).is_none());
+    }
+
+    #[test]
+    fn compact_serialization_round_trips_on_the_grid() {
+        // relative + implicit-repetition output must reparse to the same geometry:
+        // every baked vertex within a grid quantum of the reparsed path, and the
+        // final vertex exact (no cumulative drift)
+        let f = arch(1.0, Rect::new(0.0, 0.0, 100.0, 40.0));
+        let baked = bake(&rect_path(), &f, 0.25);
+        let d = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, false).unwrap();
+        // one absolute M, one lowercase l with implicit repeats, nothing absolute after
+        assert!(d.starts_with('M') && d.ends_with('z'), "{d}");
+        assert_eq!(d.matches('l').count(), 1, "{d}");
+        assert!(!d[1..].contains('L') && !d[1..].contains('M'), "{d}");
+        let reparsed = BezPath::from_svg(&d).unwrap();
+        let vs = vertices(&reparsed);
+        for v in vertices(&baked) {
+            let near = vs
+                .iter()
+                .map(|p| p.distance(v))
+                .fold(f64::INFINITY, f64::min);
+            assert!(near <= 0.0075, "vertex {v:?} drifted {near}");
+        }
+        assert!(
+            vs.last()
+                .unwrap()
+                .distance(*vertices(&baked).last().unwrap())
+                <= 0.0075
+        );
+    }
+
+    #[test]
+    fn compact_serialization_uses_a_coarser_grid_at_fast_tolerance() {
+        let f = arch(1.0, Rect::new(0.0, 0.0, 100.0, 40.0));
+        let d = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 1.0, false).unwrap();
+        // 1-decimal grid: never two digits after a decimal point
+        let bytes = d.as_bytes();
+        for i in 0..bytes.len().saturating_sub(2) {
+            if bytes[i] == b'.' {
+                assert!(
+                    !bytes[i + 2].is_ascii_digit(),
+                    "two decimals at fast grid: {d}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1778,15 +1911,15 @@ mod tests {
         let f = arch(0.8, Rect::new(0.0, 0.0, 100.0, 40.0));
         let poly = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, false).unwrap();
         let refitted = warp_svg_path("M0,0 L100,0 L100,40 L0,40 Z", &f, 0.25, true).unwrap();
-        assert!(!poly.contains('C'));
-        assert!(refitted.contains('C'), "{refitted}");
+        assert!(!poly.contains('c'));
+        assert!(refitted.contains('c'), "{refitted}");
         assert!(
             refitted.len() < poly.len(),
             "{} !< {}",
             refitted.len(),
             poly.len()
         );
-        assert!(refitted.ends_with('Z'), "{refitted}");
+        assert!(refitted.ends_with('z'), "{refitted}");
     }
 
     #[test]
