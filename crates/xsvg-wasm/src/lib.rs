@@ -244,6 +244,62 @@ pub fn compile(
     compile_impl(input, quality, sourcemap, &m, &shaper, &outliner).map_err(|e| JsError::new(&e))
 }
 
+/// Incremental entry (docs/Incremental.md): re-emit only the top-level element
+/// containing byte `offset`. Same callbacks as [`compile`]; the returned markup is
+/// byte-identical to that element's span in a full compile, so the caller can
+/// replace the corresponding DOM node surgically.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: u32,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    advance_width: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
+    let shaper = JsShaper { rasterize };
+    let outliner = JsOutliner {
+        outline_run,
+        advance_width,
+    };
+    compile_fragment_impl(
+        input,
+        quality,
+        sourcemap,
+        offset as usize,
+        &m,
+        &shaper,
+        &outliner,
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Source byte range `[start, end]` of the fragment unit containing `offset`, or
+/// an empty array when the offset falls outside every top-level element.
+#[wasm_bindgen]
+pub fn fragment_range(input: &str, offset: u32) -> Vec<u32> {
+    match fragment_range_impl(input, offset as usize) {
+        Some((s, e)) => vec![s as u32, e as u32],
+        None => Vec::new(),
+    }
+}
+
+/// Flat `[start, end, start, end, …]` byte ranges of the top-level elements whose
+/// baked `in="#id"` references point into the fragment at `offset` — they must be
+/// re-emitted alongside it.
+#[wasm_bindgen]
+pub fn dependents(input: &str, offset: u32) -> Vec<u32> {
+    dependents_impl(input, offset as usize)
+        .into_iter()
+        .flat_map(|(s, e)| [s as u32, e as u32])
+        .collect()
+}
+
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
 pub fn compile_impl(
     input: &str,
@@ -275,6 +331,103 @@ pub fn compile_impl(
         },
     );
     Ok(out)
+}
+
+/// The direct element child of the document root whose source byte range contains
+/// `offset` — the **fragment unit** of incremental compilation (docs/Incremental.md).
+fn top_level_at<'a>(
+    doc: &'a roxmltree::Document<'a>,
+    offset: usize,
+) -> Option<roxmltree::Node<'a, 'a>> {
+    doc.root_element()
+        .children()
+        .filter(|c| c.is_element())
+        .find(|c| {
+            let r = c.range();
+            r.start <= offset && offset < r.end
+        })
+}
+
+/// Incremental compilation (docs/Incremental.md): re-emit only the top-level
+/// element containing byte `offset`. Emission is a pure function of the subtree
+/// plus anything it references, so the result is **byte-identical to the span the
+/// full compile would produce** for that element (enforced by test) — the caller
+/// can splice it over the previous output surgically. Errors when `offset` doesn't
+/// fall inside a top-level element.
+pub fn compile_fragment_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Result<String, String> {
+    let q = xsvg_core::QualityProfile::parse(quality);
+    check_nesting_depth(input, MAX_NESTING_DEPTH)?;
+    let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
+    let node = top_level_at(&doc, offset)
+        .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
+    let mut out = String::new();
+    serialize(
+        node,
+        &mut out,
+        false,
+        &Ctx {
+            m,
+            shaper,
+            outliner,
+            quality: q,
+            sourcemap,
+        },
+    );
+    Ok(out)
+}
+
+/// Source byte range of the fragment unit containing `offset` (for the caller's
+/// identity bookkeeping — ranges shift by the edit delta between compiles).
+pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)> {
+    let doc = roxmltree::Document::parse(input).ok()?;
+    top_level_at(&doc, offset).map(|n| {
+        let r = n.range();
+        (r.start, r.end)
+    })
+}
+
+/// Source byte ranges of every *other* top-level element whose subtree references
+/// — via a compile-time-baked `in="#id"` attribute (textbox / textpath / warp
+/// bend) — an id defined inside the fragment at `offset`. Editing that fragment
+/// invalidates these too. Live references (`href`, `url(#…)` paints) re-resolve in
+/// the DOM and are deliberately NOT reported.
+pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
+    let Ok(doc) = roxmltree::Document::parse(input) else {
+        return Vec::new();
+    };
+    let Some(target) = top_level_at(&doc, offset) else {
+        return Vec::new();
+    };
+    let ids: Vec<&str> = target
+        .descendants()
+        .filter_map(|n| n.attribute("id"))
+        .collect();
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    doc.root_element()
+        .children()
+        .filter(|c| c.is_element() && c.range() != target.range())
+        .filter(|c| {
+            c.descendants().any(|n| {
+                n.attribute("in")
+                    .map(|r| ids.contains(&r.strip_prefix('#').unwrap_or(r)))
+                    .unwrap_or(false)
+            })
+        })
+        .map(|c| {
+            let r = c.range();
+            (r.start, r.end)
+        })
+        .collect()
 }
 
 /// Recursively emit a node as SVG.
@@ -2140,6 +2293,128 @@ mod tests {
         // a target with no fillable geometry (<line>) → comment marker, no panic
         let line = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><line id="p" x1="0" y1="20" x2="120" y2="20"/><x:textpath in="#p" effect="rainbow" font-size="20">hi</x:textpath></svg>"##;
         assert!(compile_outlined(line).contains("not found or not a path"));
+    }
+
+    // ---- incremental compilation (docs/Incremental.md) ----
+
+    /// A document exercising every emitter family: passthrough, textbox, a
+    /// referenced path + its textpath, a warp, and a boolean.
+    const INC: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" viewBox="0 0 400 300">
+  <rect x="5" y="5" width="40" height="20" fill="#eee"/>
+  <x:textbox x="0" y="0" width="80" height="30" font-size="10" fill="#111">hello world</x:textbox>
+  <path id="wave" d="M0,100 C40,60 80,140 120,100" fill="none"/>
+  <x:textpath in="#wave" font-size="12" fill="#222">on the wave</x:textpath>
+  <x:warp field="arch" bend="40"><rect x="0" y="200" width="100" height="30" fill="#333"/></x:warp>
+  <x:boolean op="subtract" fill="#444"><rect x="200" y="200" width="60" height="30"/><rect x="230" y="200" width="60" height="30"/></x:boolean>
+</svg>"##;
+
+    /// Byte offsets of every top-level element in `INC`, via the parser itself.
+    fn top_level_offsets(input: &str) -> Vec<usize> {
+        let doc = roxmltree::Document::parse(input).unwrap();
+        doc.root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .map(|c| c.range().start)
+            .collect()
+    }
+
+    #[test]
+    fn fragments_are_verbatim_slices_of_the_full_compile() {
+        // THE incremental invariant: emission is a pure function of the subtree
+        // (plus its references), so each fragment must appear byte-identically —
+        // and in order — inside the full compile. If a future emitter introduces
+        // cross-sibling state, this test is the canary.
+        for sourcemap in [false, true] {
+            let full =
+                compile_impl(INC, "balanced", sourcemap, &Mono, &NoShaper, &BoxOutliner).unwrap();
+            let mut cursor = 0;
+            for off in top_level_offsets(INC) {
+                let frag = compile_fragment_impl(
+                    INC,
+                    "balanced",
+                    sourcemap,
+                    off,
+                    &Mono,
+                    &NoShaper,
+                    &BoxOutliner,
+                )
+                .unwrap();
+                assert!(!frag.is_empty());
+                let at = full[cursor..]
+                    .find(&frag)
+                    .unwrap_or_else(|| panic!("fragment not found in order: {frag}\n{full}"));
+                cursor += at + frag.len();
+            }
+        }
+    }
+
+    #[test]
+    fn fragment_range_and_offsets_resolve() {
+        let offs = top_level_offsets(INC);
+        for &off in &offs {
+            let (s, e) = fragment_range_impl(INC, off).unwrap();
+            assert_eq!(s, off);
+            assert!(e > s);
+            // any offset inside the element resolves to the same fragment
+            assert_eq!(fragment_range_impl(INC, off + 1), Some((s, e)));
+        }
+        // offset in inter-element whitespace or the root tag → no fragment
+        assert_eq!(fragment_range_impl(INC, 0), None);
+        assert!(
+            compile_fragment_impl(INC, "balanced", false, 0, &Mono, &NoShaper, &NoOutliner)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dependents_track_baked_in_references() {
+        let offs = top_level_offsets(INC);
+        // editing the referenced #wave path invalidates the textpath that bakes it
+        let wave_off = offs[2];
+        let deps = dependents_impl(INC, wave_off);
+        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(deps[0].0, offs[3], "expected the textpath: {deps:?}");
+        // an unreferenced element invalidates nothing
+        assert!(dependents_impl(INC, offs[0]).is_empty());
+        // the dependent itself has no dependents
+        assert!(dependents_impl(INC, offs[3]).is_empty());
+    }
+
+    #[test]
+    fn fragment_recompile_reflects_a_local_edit() {
+        // same-length edit inside the textbox keeps all offsets stable
+        let edited = INC.replace("hello world", "HELLO WORLD");
+        let off = top_level_offsets(INC)[1];
+        let before =
+            compile_fragment_impl(INC, "balanced", false, off, &Mono, &NoShaper, &NoOutliner)
+                .unwrap();
+        let after = compile_fragment_impl(
+            &edited,
+            "balanced",
+            false,
+            off,
+            &Mono,
+            &NoShaper,
+            &NoOutliner,
+        )
+        .unwrap();
+        assert_ne!(before, after);
+        assert!(after.contains("HELLO"), "{after}");
+        // and the unrelated warp fragment is byte-identical across the edit
+        let woff = top_level_offsets(INC)[4];
+        let w0 = compile_fragment_impl(INC, "balanced", false, woff, &Mono, &NoShaper, &NoOutliner)
+            .unwrap();
+        let w1 = compile_fragment_impl(
+            &edited,
+            "balanced",
+            false,
+            woff,
+            &Mono,
+            &NoShaper,
+            &NoOutliner,
+        )
+        .unwrap();
+        assert_eq!(w0, w1);
     }
 
     // ---- <x:boolean> (§7.5) ----
