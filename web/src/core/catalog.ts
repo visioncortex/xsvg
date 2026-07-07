@@ -198,6 +198,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Path algebra — booleans",
+    note: '<x:boolean op="union|intersect|subtract|exclude"> — Pathfinder ops baked to one <path> (§7.4).',
+    samples: [
+      {
+        file: "boolean.xsvg",
+        title: "Boolean operations",
+        blurb: "union merges a circle cloud under one stroke; subtract punches text from a plate; intersect/exclude; and a boolean warped by flag — composability both ways",
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

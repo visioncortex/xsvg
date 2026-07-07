@@ -16,12 +16,13 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    layout_area_measured, layout_flow, layout_region, layout_text_area_runs, line_advance,
-    measure_runs, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor,
-    AreaLayout, AreaSpec, BendField, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
-    GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine,
-    QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper, TextAlign,
-    TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    boolean_svg_paths, layout_area_measured, layout_flow, layout_region, layout_text_area_runs,
+    line_advance, measure_runs, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
+    Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
+    EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer,
+    PathEffect, PathFrame, PlacedLine, QualityProfile, RasterRegion, Rect, RegionSpec,
+    RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -293,6 +294,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "textbox" => emit_textbox(node, out, ctx),
             "textpath" => emit_textpath(node, out, ctx),
             "warp" => emit_warp(node, out, ctx),
+            "boolean" => emit_boolean(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -823,6 +825,84 @@ fn find_path_d_ranges(s: &str) -> Vec<(usize, usize)> {
         i = start + len + 1;
     }
     out
+}
+
+/// `<x:boolean op="union|intersect|subtract|exclude">` (§7.5): Pathfinder-style
+/// path algebra. Each element child is one **operand** (lowered to path geometry
+/// exactly like `<x:warp>` children — shapes convert, text participates outlined,
+/// nested `x:` elements compose); `subtract` removes every later operand from the
+/// first (*Minus Front*), the other ops fold symmetrically. Operands flatten at
+/// the profile tolerance; the ops are integer-exact and deterministic. The result
+/// is one region: paint comes from the element itself (per-child paint is
+/// ignored), a legitimately empty result emits an empty `<g>`, and an unknown
+/// `op` degrades behind a marker with the children un-operated.
+fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // lower each child to path markup; one child = one operand
+    let mut markups: Vec<(String, bool)> = Vec::new(); // (markup, even_odd)
+    let mut markers = String::new();
+    for child in node.children().filter(|c| c.is_element()) {
+        match warp_child_markup(child, ctx) {
+            Ok(m) => {
+                let even_odd = child.attribute("fill-rule") == Some("evenodd");
+                markups.push((m, even_odd));
+            }
+            Err(why) => markers.push_str(&format!(
+                "<!-- xsvg: <x:boolean> skipped <{}>: {why} -->",
+                child.tag_name().name()
+            )),
+        }
+    }
+
+    let op = BoolOp::parse(node.attribute("op").unwrap_or("union"));
+    let Some(op) = op else {
+        // unknown op → children un-operated behind a marker (never silent)
+        out.push_str(&format!(
+            "<!-- xsvg: <x:boolean op=\"{}\"> unknown op — children un-combined -->",
+            node.attribute("op").unwrap_or("")
+        ));
+        out.push_str(&markers);
+        out.push_str("<g");
+        copy_attrs(node, out, &["op"]);
+        out.push_str(&pos_attr(node, ctx));
+        out.push('>');
+        for (m, _) in &markups {
+            out.push_str(m);
+        }
+        out.push_str("</g>");
+        return;
+    };
+
+    let operands: Vec<BoolOperand> = markups
+        .iter()
+        .map(|(m, even_odd)| BoolOperand {
+            paths: find_path_d_ranges(m)
+                .into_iter()
+                .map(|(a, b)| &m[a..b])
+                .collect(),
+            even_odd: *even_odd,
+        })
+        .filter(|o| !o.paths.is_empty())
+        .collect();
+
+    out.push_str(&markers);
+    match boolean_svg_paths(&operands, op, ctx.quality.tolerance()) {
+        Some(d) if !d.is_empty() => {
+            out.push_str("<path");
+            copy_attrs(node, out, &["op"]);
+            out.push_str(&pos_attr(node, ctx));
+            out.push_str(&format!(" d=\"{d}\"/>"));
+        }
+        Some(_) => {
+            // a legitimately empty result (e.g. disjoint intersect)
+            out.push_str("<g");
+            copy_attrs(node, out, &["op"]);
+            out.push_str(&pos_attr(node, ctx));
+            out.push_str("/>");
+        }
+        None => {
+            out.push_str("<!-- xsvg: <x:boolean> no usable geometry -->");
+        }
+    }
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -2055,6 +2135,102 @@ mod tests {
         // a target with no fillable geometry (<line>) → comment marker, no panic
         let line = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><line id="p" x1="0" y1="20" x2="120" y2="20"/><x:textpath in="#p" effect="rainbow" font-size="20">hi</x:textpath></svg>"##;
         assert!(compile_outlined(line).contains("not found or not a path"));
+    }
+
+    // ---- <x:boolean> (§7.5) ----
+
+    #[test]
+    fn boolean_subtract_takes_paint_from_the_element() {
+        // rect minus rect → one <path>, element paint, no child paint, L-shape bbox
+        let svg = format!(
+            r##"{XW}<x:boolean op="subtract" fill="#1d4ed8"><rect x="0" y="0" width="100" height="40" fill="#fff"/><rect x="60" y="0" width="60" height="40" fill="#000"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains(r##"<path fill="#1d4ed8""##), "{out}");
+        assert!(!out.contains("#fff") && !out.contains("#000"), "{out}");
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!(bb.x0.abs() < 0.1 && (bb.x1 - 60.0).abs() < 0.1, "{bb:?}");
+    }
+
+    #[test]
+    fn boolean_defaults_to_union() {
+        // two overlapping rects, no op attr → one merged outline (5 distinct
+        // corners on the silhouette → more than one rect's 4)
+        let svg = format!(
+            r##"{XW}<x:boolean fill="#111"><rect x="0" y="0" width="100" height="40"/><rect x="50" y="20" width="100" height="40"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!(
+            (bb.x1 - 150.0).abs() < 0.1 && (bb.y1 - 60.0).abs() < 0.1,
+            "{bb:?}"
+        );
+        assert_eq!(out.matches("<path").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn boolean_punches_outlined_text() {
+        // the flagship: text (BoxOutliner's 1×1 box at the line origin) punched
+        // out of a plate — the result is a single path with a hole
+        let svg = format!(
+            r##"{XW}<x:boolean op="subtract" fill="#333"><rect x="0" y="0" width="80" height="20"/><x:textbox x="10" y="5" width="60" height="10" outline="true" font-size="8">x</x:textbox></x:boolean></svg>"##
+        );
+        let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap();
+        assert!(out.contains("<path fill=\"#333\""), "{out}");
+        // two contours: the plate outline + the punched hole
+        let d = out
+            .rsplit(" d=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert_eq!(d.matches('M').count() + d.matches('m').count(), 2, "{out}");
+    }
+
+    #[test]
+    fn boolean_empty_and_degenerate_results() {
+        // disjoint intersect → legitimately empty <g/>
+        let svg = format!(
+            r##"{XW}<x:boolean op="intersect" fill="#111"><rect x="0" y="0" width="10" height="10"/><rect x="100" y="0" width="10" height="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("<path"), "{out}");
+        assert!(out.contains("<g fill=\"#111\"/>"), "{out}");
+        // unknown op → marker + children un-combined
+        let svg = format!(
+            r##"{XW}<x:boolean op="divide"><rect x="0" y="0" width="10" height="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("unknown op"), "{out}");
+        assert!(out.contains("h10"), "child lost: {out}");
+        // live-text child skipped with a marker; empty element → no-geometry marker
+        let svg = format!(
+            r##"{XW}<x:boolean><x:textbox x="0" y="0" width="40" height="10" font-size="8">hi</x:textbox></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<x:boolean> skipped <textbox>"), "{out}");
+        assert!(out.contains("no usable geometry"), "{out}");
+    }
+
+    #[test]
+    fn boolean_composes_with_warp_both_ways() {
+        // boolean inside warp: the combined path bakes like any geometry
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="50"><x:boolean op="union" fill="#111"><rect x="0" y="0" width="60" height="20"/><rect x="40" y="0" width="60" height="20"/></x:boolean></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<path"), "{out}");
+        assert!(!out.contains("skipped"), "{out}");
+        // warp inside boolean: warped output is an operand
+        let svg = format!(
+            r##"{XW}<x:boolean op="intersect" fill="#111"><x:warp field="arch" bend="50"><rect x="0" y="0" width="100" height="30"/></x:warp><rect x="0" y="-20" width="100" height="30"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<path fill=\"#111\""), "{out}");
+        assert!(!out.contains("NaN"), "{out}");
     }
 
     // ---- <x:warp> (§7.3) ----

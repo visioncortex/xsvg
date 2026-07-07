@@ -163,15 +163,15 @@ variant of the bake (map anchors + handles, don't flatten). The space-field subs
 ## H. Related but not a deformation — `<x:boolean>` live path algebra
 
 Boolean shape operators (union / intersect / subtract / exclude — Illustrator's **Pathfinder**) are
-**planned Core, tracked in [Plan.md §2.5](Plan.md)** as a *cross-cutting* capability, deliberately
-outside this pillar: a warp is a pure point map riding the one bake, while a boolean is **path
-algebra** (robust curve intersection + winding resolution) needing its own engine behind a swappable
-backend seam (`i_overlay` robust default → `flo_curves` curve-exact → kurbo-native when it lands;
-Skia PathOps as an optional out-of-core wasm module). The warp pillar lowered its cost materially:
-the v1 recipe is *flatten at the profile tolerance → polygon boolean → refit* — and the flatten,
-tolerance, and refit machinery all now ship in `xsvg-core`. It would also close §G's fold-over item
-(a union/simplify pass over baked paths). Status: ❌ planned, unscheduled — the next geometry-engine
-work after (or alongside) Pillar 3.
+a *cross-cutting* Core capability ([Plan.md §2.5](Plan.md)), deliberately outside this pillar: a
+warp is a pure point map riding the one bake, while a boolean is **path algebra** needing its own
+engine. **Status: ✅ shipped** ([Specification.md §7.4](Specification.md)) — `<x:boolean
+op="union|intersect|subtract|exclude">` shares `<x:warp>`'s child lowering, flattens operands at
+the profile tolerance, and runs the ops **integer-exact and deterministically** on the
+[`i_overlay`](https://crates.io/crates/i_overlay) backend behind a swappable seam (`flo_curves`
+curve-exact / kurbo-native / Skia PathOps can slot in later). Composes with warps in both
+directions, and each operand's per-fill-rule resolve doubles as a self-intersection cleanup — the
+primitive §G's fold-over item needs.
 
 ---
 

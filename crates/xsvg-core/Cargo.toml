@@ -6,6 +6,8 @@ description = "xsvg shared types (pure Rust, no platform deps)."
 publish = false
 
 [dependencies]
+i_overlay = "7.0.2"
+i_shape = "3.0.0"
 kurbo = "0.13.1"
 
 [dev-dependencies]

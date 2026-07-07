@@ -604,12 +604,52 @@ non-finite coordinates never reach the output (§4).
 **v1 limits.** A `<g>` child whose subtree still contains non-path geometry is skipped whole; text
 must be outlined to participate.
 
-### 7.4 Remaining pillars & deferred [planned]
+### 7.4 `<x:boolean>` — live path algebra [implemented: v1]
+
+Pathfinder-style boolean operations over filled regions ([Plan.md §2.5](Plan.md): a *cross-cutting*
+capability). The children stay editable in the source; the compiler emits the combined region as
+one plain `<path>`.
+
+```xml
+<x:boolean op="subtract" fill="#1d4ed8">
+  <rect x="40" y="40" width="280" height="90"/>
+  <x:textbox x="40" y="40" width="280" height="90" align="center" valign="middle"
+             outline="true">PUNCH</x:textbox>
+</x:boolean>
+```
+
+| Attr | Values | Initial | Effect |
+|---|---|---|---|
+| `op` | `union` \| `intersect` \| `subtract` \| `exclude` | `union` | the operation; `exclude` = XOR |
+| paint attrs | `fill`, `stroke*`, `opacity`, `transform`, … | — | the **result's** paint — per-child paint is ignored (a boolean yields one region) |
+
+**Model (normative).** Each element child is one **operand**, lowered to path geometry exactly like
+`<x:warp>` children (§7.3): basic shapes convert, text participates through its outlined form,
+nested `x:` elements compose (a boolean can wrap a warp and vice versa). Each operand is resolved
+as a region under **its own `fill-rule`** (default `nonzero`) — this also resolves
+self-intersections — then the op folds over the operands: `union` / `intersect` / `exclude` are
+symmetric; **`subtract` removes every later operand from the first** (document order is
+back-to-front, so this is Illustrator's *Minus Front*). Operands **flatten at the profile
+tolerance** (the §7.1 graded-approximation contract); the ops themselves are **integer-exact and
+deterministic**. The result's contours carry deterministic opposite windings for holes, so it
+renders identically under either fill rule.
+
+**Degradation (normative).** A child that cannot become path geometry is skipped with a marker —
+never silently dropped from the algebra. An unknown `op` emits the children **un-combined behind a
+marker**. A legitimately **empty result** (e.g. a disjoint `intersect`) emits an empty `<g>`; an
+element with no usable geometry at all emits only a marker. Plain viewers skip the subtree (§3).
+
+**v1 limits.** Children only (no `in="#a #b"` reference form yet); ops act on **fill regions** —
+strokes apply to the result, not the operand geometry; no multi-output Pathfinder modes
+(Divide/Trim/Merge). Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable
+seam (curve-exact and kurbo-native backends can slot in later without surface changes).
+
+### 7.5 Remaining pillars & deferred [planned]
 
 - **`<x:mesh>`** *(Pillar 3)* — Coons/tensor mesh gradients with **cracks / T-junctions** and
   **transparency (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
-- **Deferred** (valuable, but no longer headline pillars): **`<x:vstroke>`** variable-width strokes
-  (research retained in [Research.md §1](Research.md)) and **`<x:boolean>`** live path algebra.
+- **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
+  (research retained in [Research.md §1](Research.md)).
 
 ## 8. Lowering target [implemented]
 
@@ -644,6 +684,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Text on a path — `ribbon` (normal-offset heights) and `follow` (native `<textPath>`, live + selectable) | implemented |
 | `<x:warp field="bend" in="#spine">` — flow arbitrary geometry along a path (align/start placement) | implemented |
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
+| `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
@@ -651,5 +692,5 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Geometry bake — cubic refit | implemented at the API, **disabled in lowering** (kurbo fitter overshoots on glyph-density input) |
 | Geometry bake — compact path serialization (quantized grid, relative + implicit repetition, drift-free) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
-| `<x:vstroke>`, `<x:mesh>`, `<x:boolean>` | planned |
+| `<x:vstroke>`, `<x:mesh>` | planned |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

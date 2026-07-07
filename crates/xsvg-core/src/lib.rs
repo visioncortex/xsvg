@@ -3,9 +3,11 @@
 //! This crate must stay free of platform/JS/web dependencies so it compiles
 //! identically for native and `wasm32` targets (see Plan.md §1, "Core invariant").
 
+pub mod boolean;
 pub mod text;
 pub mod warp;
 
+pub use boolean::*;
 pub use text::*;
 pub use warp::*;
 

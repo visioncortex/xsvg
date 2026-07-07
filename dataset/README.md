@@ -72,6 +72,12 @@ Realistic composites that combine several features into one artifact.
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
 | [warp-bend.xsvg](warp-bend.xsvg) | `field="bend" in="#spine"` flows a whole group along a path — the envelope midline rides the spine, `align`/`start` place it by arc length (Inkscape's *LPE Bend*); `field="roughen" bend detail` jitters outlines with **deterministic** seeded value noise |
 
+## Path algebra — `<x:boolean>` (§7.4)
+
+| File | Shows |
+|---|---|
+| [boolean.xsvg](boolean.xsvg) | `op="union"` merges a circle cloud into one outline (single silhouette stroke); `op="subtract"` punches outlined text from a plate (*Minus Front*); `intersect` keeps the lens, `exclude` turns the overlap into a hole; the last card warps a boolean result with `field="flag"` — path algebra and warps compose both ways |
+
 ## Edge cases & invariants
 
 | File | Shows |

@@ -956,7 +956,7 @@ pub fn warp_svg_path(d: &str, field: &dyn Field, tolerance: f64, do_refit: bool)
 /// quantized grid in integer units, so rounding error never accumulates along the
 /// chain. Zero-length line segments are dropped. `None` on any non-finite
 /// coordinate or an empty path.
-fn serialize_compact(path: &BezPath, tolerance: f64) -> Option<String> {
+pub(crate) fn serialize_compact(path: &BezPath, tolerance: f64) -> Option<String> {
     let scale: i64 = if tolerance >= 0.5 { 10 } else { 100 };
     // grid units of an absolute point; None poisons the whole path (§4)
     let q = |p: Point| -> Option<(i64, i64)> {

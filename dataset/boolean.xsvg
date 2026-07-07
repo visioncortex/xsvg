@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 560" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="560" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:boolean — Pathfinder path algebra: operands in, one plain &lt;path&gt; out</text>
+
+  <!-- union: three circles become ONE outline — note the single silhouette stroke -->
+  <text x="48" y="64" font-size="11" fill="#94a3b8">op="union" — one region, one stroke</text>
+  <x:boolean op="union" fill="#14532d" stroke="#86efac" stroke-width="2">
+    <circle cx="105" cy="140" r="36"/>
+    <circle cx="160" cy="126" r="46"/>
+    <circle cx="215" cy="142" r="34"/>
+  </x:boolean>
+
+  <!-- subtract: outlined text punched out of a plate (Minus Front) -->
+  <text x="390" y="64" font-size="11" fill="#94a3b8">op="subtract" — text punched out of the plate</text>
+  <x:boolean op="subtract" fill="#1d4ed8">
+    <rect x="390" y="96" width="280" height="88"/>
+    <x:textbox x="390" y="96" width="280" height="88" align="center" valign="middle" outline="true"
+               font-family="-x-google-Anton" font-size="52">PUNCH</x:textbox>
+  </x:boolean>
+
+  <!-- intersect: the lens where a square and a circle overlap -->
+  <text x="48" y="236" font-size="11" fill="#94a3b8">op="intersect" — only the overlap survives</text>
+  <x:boolean op="intersect" fill="#7c2d12" stroke="#fdba74" stroke-width="2">
+    <rect x="60" y="270" width="120" height="90"/>
+    <circle cx="180" cy="315" r="62"/>
+  </x:boolean>
+
+  <!-- exclude: XOR of two circles — the overlap becomes a hole -->
+  <text x="390" y="236" font-size="11" fill="#94a3b8">op="exclude" — the overlap becomes a hole</text>
+  <x:boolean op="exclude" fill="#3b0764" stroke="#d8b4fe" stroke-width="2">
+    <circle cx="480" cy="315" r="52"/>
+    <circle cx="550" cy="315" r="52"/>
+  </x:boolean>
+
+  <!-- composability: the boolean result is geometry like any other — warp it -->
+  <text x="48" y="416" font-size="11" fill="#94a3b8">a boolean inside a warp — punched, then waved</text>
+  <x:warp field="flag" bend="16">
+    <x:boolean op="subtract" fill="#7f1d1d">
+      <rect x="60" y="448" width="600" height="70"/>
+      <x:textbox x="60" y="448" width="600" height="70" align="center" valign="middle" outline="true"
+                 font-family="-x-google-Anton" font-size="44">BOOLEAN, THEN WARPED</x:textbox>
+    </x:boolean>
+  </x:warp>
+</svg>
