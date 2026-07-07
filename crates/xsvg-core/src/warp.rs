@@ -770,10 +770,9 @@ pub fn warp_text_on_path(
     if !advance.is_finite() {
         return None;
     }
-    // Glyphs are judged at reading distance: chords the shape tolerance allows are
-    // visibly faceted on letterforms, so text bakes 10× tighter (fast/balanced/
-    // highest → 0.1/0.025/0.005). The frame flattens finer still (tol/2 inside).
-    let tolerance = (tolerance / 10.0).max(1e-3);
+    // callers pass the glyph-grade tolerance (`QualityProfile::text_tolerance`);
+    // the frame flattens finer still (tol/2 inside)
+    let tolerance = tolerance.max(1e-3);
     let frame = PathFrame::new(ref_path_d, tolerance)?;
     match fx.effect {
         "skew" => {
@@ -950,14 +949,20 @@ pub fn warp_svg_path(d: &str, field: &dyn Field, tolerance: f64, do_refit: bool)
 }
 
 /// Serialize a baked path compactly: coordinates quantize to a decimal grid (1
-/// decimal when `tolerance ≥ 0.5`, else 2 — the quantum stays well inside the
-/// tolerance budget), and everything after each subpath's start is **relative**
+/// decimal when `tolerance ≥ 0.5`, 3 below 0.02, else 2 — the quantum stays well
+/// inside the tolerance budget), and everything after each subpath's start is **relative**
 /// with implicit command repetition (`l x,y x,y …`). Deltas are computed on the
 /// quantized grid in integer units, so rounding error never accumulates along the
 /// chain. Zero-length line segments are dropped. `None` on any non-finite
 /// coordinate or an empty path.
 pub(crate) fn serialize_compact(path: &BezPath, tolerance: f64) -> Option<String> {
-    let scale: i64 = if tolerance >= 0.5 { 10 } else { 100 };
+    let scale: i64 = if tolerance >= 0.5 {
+        10
+    } else if tolerance < 0.02 {
+        1000
+    } else {
+        100
+    };
     // grid units of an absolute point; None poisons the whole path (§4)
     let q = |p: Point| -> Option<(i64, i64)> {
         (p.x.is_finite() && p.y.is_finite()).then(|| {
@@ -985,7 +990,11 @@ pub(crate) fn serialize_compact(path: &BezPath, tolerance: f64) -> Option<String
             out.push_str(&int.to_string());
         }
         out.push('.');
-        let width = if scale == 10 { 1 } else { 2 };
+        let width = match scale {
+            10 => 1,
+            100 => 2,
+            _ => 3,
+        };
         let mut digits = format!("{frac:0width$}");
         while digits.ends_with('0') {
             digits.pop();

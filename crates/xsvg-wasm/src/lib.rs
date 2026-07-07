@@ -505,7 +505,7 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // that follows the curve without deforming; no font bytes needed, only the
     // path's arc length for align placement.
     if fx.effect == "follow" {
-        if let Some(frame) = PathFrame::new(&path_d, ctx.quality.tolerance()) {
+        if let Some(frame) = PathFrame::new(&path_d, ctx.quality.text_tolerance()) {
             let advance = line_advance(&text, &style, style.size, ctx.m);
             let offset = run_offset(frame.len(), advance, fx.align, fx.start);
             out.push_str("<text");
@@ -537,9 +537,14 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             // quantized glyph outlines (notches + hairline smears) and its Optimize
             // level dominates compile time. Polyline output at the graded tolerance
             // is the shipped form until a robust fitter lands.
-            if let Some(d) =
-                warp_text_on_path(&flat, &path_d, &fx, advance, ctx.quality.tolerance(), false)
-            {
+            if let Some(d) = warp_text_on_path(
+                &flat,
+                &path_d,
+                &fx,
+                advance,
+                ctx.quality.text_tolerance(),
+                false,
+            ) {
                 push_outline_group(out, fill, &stroke, &pos, &[d]);
                 return;
             }
@@ -603,7 +608,7 @@ fn stepped_text(
         return false;
     }
     // sample the path's height profile natively (§6.13.1)
-    let Some(frame) = PathFrame::new(path_d, ctx.quality.tolerance()) else {
+    let Some(frame) = PathFrame::new(path_d, ctx.quality.text_tolerance()) else {
         return false;
     };
     let x0 = frame.x0() + run_offset(frame.x1() - frame.x0(), total, fx.align, fx.start);

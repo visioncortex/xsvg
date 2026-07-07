@@ -48,13 +48,27 @@ impl QualityProfile {
     }
 
     /// The geometry-bake tolerance (§7.1) in user units: the Hausdorff bound for
-    /// curve flattening and for the adaptive subdivision of mapped segments. The
-    /// single graded quality knob of the transform pipeline.
+    /// curve flattening and for the adaptive subdivision of mapped segments — the
+    /// graded quality knob for **shape** geometry. (Balanced sits at 0.1: a
+    /// stroked circle edge at 0.25 showed faint visible faceting.)
     pub fn tolerance(self) -> f64 {
         match self {
             Self::Fast => 1.0,
-            Self::Balanced => 0.25,
-            Self::Highest | Self::Raster => 0.05,
+            Self::Balanced => 0.1,
+            Self::Highest | Self::Raster => 0.02,
+        }
+    }
+
+    /// The bake tolerance for **glyph** geometry (§6.13): letterforms are judged
+    /// at reading distance, so text bakes much tighter than shapes. These values
+    /// are visually validated (pixel parity with dense uniform sampling) — they
+    /// are pinned independently of [`Self::tolerance`] so shape tuning cannot
+    /// silently change text quality.
+    pub fn text_tolerance(self) -> f64 {
+        match self {
+            Self::Fast => 0.1,
+            Self::Balanced => 0.025,
+            Self::Highest | Self::Raster => 0.005,
         }
     }
 }

@@ -426,7 +426,8 @@ vertical segments are fine. **Beyond either end** of the path the frame extends 
 end tangent**, so a run longer than the path continues rather than bunching at the endpoint. **The
 bake is native** (§7.1, in `xsvg-core`): the reference path flattens into an arc-length frame, and
 the outlined run — the browser supplies only the glyph geometry and its advance width — runs the
-standard pipeline with the quality-graded tolerance and adaptive subdivision. For a
+standard pipeline with the quality-graded **text tolerance** (0.1 / 0.025 / 0.005 — glyphs are
+judged at reading distance, so text bakes tighter than shapes) and adaptive subdivision. For a
 *non-deforming* follow, use `effect="follow"` (§6.13.5).
 
 **6.13.3 Stair Step — per-glyph steps, live text [implemented].** The authorable stepped baseline:
@@ -505,10 +506,12 @@ smoothly under a nonlinear field while line-preserving fields (perspective) emit
 but **disabled in the lowering**: on dense, quantized glyph outlines kurbo 0.13's fitter overshoots
 — producing notched edges and hairline slivers — and its optimizing level dominates compile time
 (its subdivision level degrades badly on reversed runs). Until a robust fitter lands, **every
-profile emits the tolerance-graded polyline** (`M`/`L`/`Z`) at 1.0 / 0.25 / 0.05 user units, which
+profile emits the tolerance-graded polyline** (`M`/`L`/`Z`) — shapes at 1.0 / 0.1 / 0.02 user
+units for `fast`/`balanced`/`highest`, glyph runs tighter at 0.1 / 0.025 / 0.005 — which
 stays within tolerance of the true mapped geometry by construction. Baked path data serializes
-**compactly**: coordinates quantize to a decimal grid (1 decimal at `fast`-shape tolerances, else
-2), and everything after each subpath start is emitted as **relative commands with implicit
+**compactly**: coordinates quantize to a decimal grid (1 decimal at `fast`-shape tolerances, 3 at
+the tightest text tolerances, else 2), and everything after each subpath start is emitted as
+**relative commands with implicit
 repetition** (`M12,80l.6,-.4 .7,-.3…z`); deltas are computed on the grid in integer units, so
 rounding never accumulates. This trims dense glyph runs by ~25% at zero geometric risk.
 
