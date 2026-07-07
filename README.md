@@ -1,7 +1,8 @@
 # xsvg
 
-**eXtensible SVG** — an XML interchange format that compiles to a subset of SVG. Pure-Rust core,
-compiled to WASM, run entirely client-side in the browser.
+**eXtensible SVG** — an XML graphics format that compiles to plain SVG, with the text layout,
+warps, and gradient meshes SVG never got. Pure-Rust core, compiled to WASM, runs entirely
+client-side in the browser.
 
 - [Vision.md](docs/Vision.md) — north star
 - [Specification.md](docs/Specification.md) — normative spec (language + lowering rules), evolving

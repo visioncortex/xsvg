@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "eXtensible SVG — an XML graphics format that compiles to plain SVG, with the text layout and typography SVG lacks.",
+  "description": "eXtensible SVG — an XML graphics format that compiles to plain SVG, with the text layout, warps, and gradient meshes SVG never got.",
   "scripts": {
     "wasm:dev": "wasm-pack build crates/xsvg-wasm --dev --target web --out-dir ../../web/pkg",
     "wasm:build": "wasm-pack build crates/xsvg-wasm --release --target web --out-dir ../../web/pkg",
