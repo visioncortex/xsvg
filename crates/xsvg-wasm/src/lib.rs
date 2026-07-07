@@ -453,6 +453,19 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    // Foreign-namespace elements (editor metadata like sodipodi:/inkscape:) can't
+    // be re-emitted faithfully — we declare no xmlns for them — so they drop with
+    // a marker rather than being silently reparented into the SVG namespace.
+    if let Some(ns) = node.tag_name().namespace() {
+        if ns != SVG_NS {
+            out.push_str(&format!(
+                "<!-- xsvg: foreign-namespace <{}> dropped -->",
+                node.tag_name().name()
+            ));
+            return;
+        }
+    }
+
     // <xsvg> root is just an alias for <svg>.
     let name = match node.tag_name().name() {
         "xsvg" => "svg",
@@ -1546,13 +1559,28 @@ fn intern_run(
     styles.len() - 1
 }
 
-/// Copy a node's attributes (skipping `x:`-namespaced ones and any in `skip`).
+const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
+const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+
+/// Copy a node's attributes, normalizing namespaces: `x:` attrs are consumed (not
+/// copied), `xlink:*` modernizes to the unprefixed SVG 2 form (`xlink:href` →
+/// `href` — supported by every current renderer, and we declare no xlink xmlns),
+/// `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`), and other foreign
+/// namespaces drop (editor metadata we can't re-emit faithfully). `skip` filters
+/// by local name.
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     for attr in node.attributes() {
-        if attr.namespace() == Some(XSVG_NS) || skip.contains(&attr.name()) {
+        if skip.contains(&attr.name()) {
             continue;
         }
+        let prefix = match attr.namespace() {
+            None => "",
+            Some(XLINK_NS) => "",
+            Some(XML_NS) => "xml:",
+            Some(_) => continue, // x: (consumed) and foreign metadata
+        };
         out.push(' ');
+        out.push_str(prefix);
         out.push_str(attr.name());
         out.push_str("=\"");
         push_escaped(out, attr.value(), true);

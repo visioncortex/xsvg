@@ -74,6 +74,17 @@ through. Defined lowerings:
 
 - **`<rect>`** with no `rx`/`ry` → `<path>`; rounded rects pass through unchanged.
 
+**Passthrough (normative).** Any element in the **SVG namespace** the compiler doesn't recognize —
+filters, gradients, masks, markers, `foreignObject`, future or unknown elements — passes through
+**verbatim** (re-escaped), with all attributes and children, recursively. Namespace normalization:
+`xlink:*` attributes modernize to the unprefixed SVG 2 form (`xlink:href` → `href`; no xlink xmlns
+is declared); `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`); **foreign-namespace
+elements and attributes** (editor metadata such as `sodipodi:`/`inkscape:`) are **dropped** —
+elements with a marker comment, attributes silently — since they cannot be re-emitted faithfully.
+*Known gap:* `<script>`/animation elements currently pass through despite §8's static-subset
+target; the concrete allow/deny enforcement is the pending [Plan.md](Plan.md) R6 deliverable
+(pinned as documented behavior by test until then).
+
 ## 6. Text
 
 ### 6.1 Common layout primitives [implemented]
