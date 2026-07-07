@@ -68,9 +68,14 @@ enough that one edit re-lowers one feature's worth of work.
 
 - **Granularity** is the top-level element: editing a node nested in a deep passthrough `<g>`
   re-emits the whole top-level group. Acceptable; refine later if profiling demands.
-- **Dependency scan is direct, not transitive** — `in` targets are plain shapes in practice, and
-  `x:` elements cannot themselves be `in`-targets (they lower to something else), so there are no
-  meaningful chains today. Revisit if a referenceable lowered element ever ships.
+- **Dependency scan is one hop, not a transitive closure** — and today that is *complete*, not an
+  approximation. A chain would require an `x:` element to itself be an `in`-target (edit `#a` →
+  re-emit `<x:warp id="b" in="#a">` → also re-emit `<x:textpath in="#b">`), but `in` resolves the
+  target's **source** geometry via `shape_to_path_d`, which only understands plain shapes — an
+  `x:` target fails with the "not a path" marker. Every `in` edge therefore ends at a plain shape,
+  which references nothing: the dependency graph has depth one. **If a "reference the compiled
+  output of an `x:` element" feature ever ships, `dependents` must switch to a transitive
+  closure** — that feature's author owns this line.
 - **A fragment can begin with marker comments** (skip/degradation markers precede the element).
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient
