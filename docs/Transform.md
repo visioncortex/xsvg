@@ -200,7 +200,9 @@ construction.
 **Partial (◑):** the **refit** — implemented and natively tested at the API, but disabled in the
 lowering after visible glyph regressions (kurbo 0.13's fitter overshoots on dense quantized
 outlines: notched edges, hairline slivers) and heavy compile cost. Output is the tolerance-graded
-polyline everywhere; re-enable behind a robust fitter.
+polyline everywhere; re-enable behind a robust fitter. The upstream defect is pinned in-repo:
+`cargo run -p xsvg-core --example kurbo_simplify_repro`, guarded by the
+`kurbo_simplify_reversed_run_canary` test, which fails loudly when a kurbo upgrade fixes it.
 
 **Planned, field-only (○):** empty — every ○ row in the catalog has shipped. What remains is ❌
 machinery: the lattice/handle warps (§D), the anchor-aware Effect-menu distortions (§F), gravity

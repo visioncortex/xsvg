@@ -1552,6 +1552,50 @@ mod tests {
         assert!(EnvelopePreset::new("twirl", 0.5, WarpAxis::H, Rect::ZERO).is_none());
     }
 
+    /// Canary for the upstream kurbo defect that keeps the §7.1 refit disabled
+    /// (see `examples/kurbo_simplify_repro.rs`): `simplify_bezpath` fits the same
+    /// smooth polyline to ~3 elements forward but ~33 reversed, on pure default
+    /// options. **If this test fails after a kurbo upgrade, the bug is fixed** —
+    /// re-evaluate enabling refit in the lowering (and this test can go).
+    #[test]
+    fn kurbo_simplify_reversed_run_canary() {
+        use kurbo::simplify::{simplify_bezpath, SimplifyOptions};
+        let parabola = |reversed: bool| -> BezPath {
+            let mut pts: Vec<(f64, f64)> = (0..=2000)
+                .map(|i| {
+                    let x = i as f64 * 0.05;
+                    let u = x / 50.0 - 1.0;
+                    (x, -25.0 * (1.0 - u * u))
+                })
+                .collect();
+            if reversed {
+                pts.reverse();
+            }
+            let mut path = BezPath::new();
+            path.move_to(pts[0]);
+            for p in &pts[1..] {
+                path.line_to(*p);
+            }
+            path
+        };
+        let count = |rev: bool| {
+            simplify_bezpath(
+                parabola(rev).elements().iter().copied(),
+                0.25,
+                &SimplifyOptions::default(),
+            )
+            .elements()
+            .len()
+        };
+        let (fwd, rev) = (count(false), count(true));
+        assert!(fwd <= 5, "forward fit regressed: {fwd} elements");
+        assert!(
+            rev > 4 * fwd,
+            "kurbo's reversed-run fit appears FIXED ({rev} vs {fwd} elements) — \
+             re-evaluate enabling the §7.1 refit and retire this canary"
+        );
+    }
+
     // ---- text-on-path (§6.13, native) ----
 
     use crate::PathEffect;
