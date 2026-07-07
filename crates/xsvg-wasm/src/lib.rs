@@ -200,6 +200,10 @@ struct Ctx<'a> {
     outliner: &'a dyn GlyphOutliner,
     quality: QualityProfile,
     sourcemap: bool,
+    /// ids currently being resolved as compiled-output references — the cycle
+    /// guard for `ref_geometry` (a target that is already on this stack degrades
+    /// with a marker instead of recursing forever).
+    resolving: std::cell::RefCell<Vec<String>>,
 }
 
 /// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
@@ -328,6 +332,7 @@ pub fn compile_impl(
             outliner,
             quality: q,
             sourcemap,
+            resolving: std::cell::RefCell::new(Vec::new()),
         },
     );
     Ok(out)
@@ -379,6 +384,7 @@ pub fn compile_fragment_impl(
             outliner,
             quality: q,
             sourcemap,
+            resolving: std::cell::RefCell::new(Vec::new()),
         },
     );
     Ok(out)
@@ -394,11 +400,15 @@ pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)>
     })
 }
 
-/// Source byte ranges of every *other* top-level element whose subtree references
-/// — via a compile-time-baked `in="#id"` attribute (textbox / textpath / warp
-/// bend) — an id defined inside the fragment at `offset`. Editing that fragment
-/// invalidates these too. Live references (`href`, `url(#…)` paints) re-resolve in
-/// the DOM and are deliberately NOT reported.
+/// Source byte ranges of every *other* top-level element that must be re-emitted
+/// when the fragment at `offset` changes — the **transitive closure** over
+/// compile-time-baked `in="#id"` references (textbox / textpath / warp bend).
+/// Chains are real since `x:` elements can be `in`-targets themselves (their
+/// compiled output is the referenced geometry): editing `#a` re-emits
+/// `<x:warp id="w" in="#a">`, whose changed output re-emits `<x:textpath
+/// in="#w">`, and so on to a fixpoint. Live references (`href`, `url(#…)`
+/// paints) re-resolve in the DOM and are deliberately NOT reported. Results are
+/// in document order.
 pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
     let Ok(doc) = roxmltree::Document::parse(input) else {
         return Vec::new();
@@ -406,28 +416,57 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
     let Some(target) = top_level_at(&doc, offset) else {
         return Vec::new();
     };
-    let ids: Vec<&str> = target
+    // ids whose (compiled) geometry has changed; grows as dependents join
+    let mut live: Vec<&str> = target
         .descendants()
         .filter_map(|n| n.attribute("id"))
         .collect();
-    if ids.is_empty() {
+    if live.is_empty() {
         return Vec::new();
     }
-    doc.root_element()
+    let tops: Vec<roxmltree::Node> = doc
+        .root_element()
         .children()
         .filter(|c| c.is_element() && c.range() != target.range())
-        .filter(|c| {
-            c.descendants().any(|n| {
+        .collect();
+    let mut included = vec![false; tops.len()];
+    loop {
+        let mut changed = false;
+        for (i, tl) in tops.iter().enumerate() {
+            if included[i] {
+                continue;
+            }
+            let refs_live = tl.descendants().any(|n| {
                 n.attribute("in")
-                    .map(|r| ids.contains(&r.strip_prefix('#').unwrap_or(r)))
+                    .map(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
                     .unwrap_or(false)
-            })
-        })
-        .map(|c| {
-            let r = c.range();
+            });
+            if refs_live {
+                included[i] = true;
+                changed = true;
+                // its output changed, so ids it defines go live too
+                for id in tl.descendants().filter_map(|n| n.attribute("id")) {
+                    if !live.contains(&id) {
+                        live.push(id);
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut out: Vec<(usize, usize)> = tops
+        .iter()
+        .zip(&included)
+        .filter(|(_, inc)| **inc)
+        .map(|(tl, _)| {
+            let r = tl.range();
             (r.start, r.end)
         })
-        .collect()
+        .collect();
+    out.sort_unstable();
+    out
 }
 
 /// Recursively emit a node as SVG.
@@ -581,9 +620,10 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             );
             return;
         }
-        // any other shape → flow inside its filled outline via the raster region
+        // any other shape — or an x: element's compiled output (e.g. a boolean
+        // union) — flows text inside its filled outline via the raster region
         // (styled runs are not supported in curved region flow in v0)
-        let region = shape_to_path_d(target)
+        let region = ref_geometry(node, reference, ctx)
             .and_then(|d| ctx.shaper.rasterize(&d, (style.size / 3.0).max(1.0)));
         let Some(region) = region else {
             out.push_str("<!-- xsvg: <x:textbox in> shape not rasterizable -->");
@@ -662,7 +702,7 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out.push_str("<!-- xsvg: <x:textpath> requires in=\"#path\" -->");
         return;
     };
-    let Some(path_d) = resolve_ref(node, reference).and_then(shape_to_path_d) else {
+    let Some(path_d) = ref_geometry(node, reference, ctx) else {
         out.push_str("<!-- xsvg: <x:textpath in> target not found or not a path -->");
         return;
     };
@@ -848,8 +888,7 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             // its vertical midline rides it
             let frame = node
                 .attribute("in")
-                .and_then(|r| resolve_ref(node, r))
-                .and_then(shape_to_path_d)
+                .and_then(|r| ref_geometry(node, r, ctx))
                 .and_then(|d| PathFrame::new(&d, ctx.quality.tolerance()))?;
             let s0 = run_offset(
                 frame.len(),
@@ -1098,6 +1137,32 @@ fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::
     node.document()
         .descendants()
         .find(|n| n.attribute("id") == Some(id))
+}
+
+/// Resolve an `in="#id"` reference to **geometry** (§6.10/§6.13/§7.3): a plain
+/// shape yields its source geometry; an `x:` element yields its **compiled
+/// output** — every `<path d>` it emits, joined as one multi-subpath region — so
+/// composition works by reference (flow text inside a boolean union, set type on
+/// a warped spine). Cycles (a target already being resolved) and targets that
+/// emit no path geometry return `None`; the caller degrades with its marker.
+fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Option<String> {
+    let target = resolve_ref(node, r)?;
+    if target.tag_name().namespace() != Some(XSVG_NS) {
+        return shape_to_path_d(target);
+    }
+    let id = target.attribute("id")?.to_string();
+    if ctx.resolving.borrow().contains(&id) {
+        return None; // reference cycle
+    }
+    ctx.resolving.borrow_mut().push(id);
+    let mut buf = String::new();
+    serialize(target, &mut buf, false, ctx);
+    ctx.resolving.borrow_mut().pop();
+    let ds: Vec<&str> = find_path_d_ranges(&buf)
+        .into_iter()
+        .map(|(a, b)| &buf[a..b])
+        .collect();
+    (!ds.is_empty()).then(|| ds.join(" "))
 }
 
 /// Convert a fillable SVG shape element to a path `d` string (for rasterization).
@@ -2334,6 +2399,8 @@ mod tests {
   <x:textpath in="#wave" font-size="12" fill="#222">on the wave</x:textpath>
   <x:warp field="arch" bend="40"><rect x="0" y="200" width="100" height="30" fill="#333"/></x:warp>
   <x:boolean op="subtract" fill="#444"><rect x="200" y="200" width="60" height="30"/><rect x="230" y="200" width="60" height="30"/></x:boolean>
+  <x:boolean id="blob" op="union" fill="#555"><rect x="300" y="240" width="40" height="50"/><rect x="320" y="240" width="40" height="50"/></x:boolean>
+  <x:textbox in="#blob" font-size="10" fill="#666">into the blob</x:textbox>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -2354,7 +2421,7 @@ mod tests {
         // cross-sibling state, this test is the canary.
         for sourcemap in [false, true] {
             let full =
-                compile_impl(INC, "balanced", sourcemap, &Mono, &NoShaper, &BoxOutliner).unwrap();
+                compile_impl(INC, "balanced", sourcemap, &Mono, &BoxShaper, &BoxOutliner).unwrap();
             let mut cursor = 0;
             for off in top_level_offsets(INC) {
                 let frag = compile_fragment_impl(
@@ -2363,7 +2430,7 @@ mod tests {
                     sourcemap,
                     off,
                     &Mono,
-                    &NoShaper,
+                    &BoxShaper,
                     &BoxOutliner,
                 )
                 .unwrap();
@@ -2406,6 +2473,82 @@ mod tests {
         assert!(dependents_impl(INC, offs[0]).is_empty());
         // the dependent itself has no dependents
         assert!(dependents_impl(INC, offs[3]).is_empty());
+        // an x: element can be a target: editing the #blob boolean invalidates
+        // the textbox that flows inside its compiled output
+        let deps = dependents_impl(INC, offs[6]);
+        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(deps[0].0, offs[7], "expected the blob textbox: {deps:?}");
+    }
+
+    #[test]
+    fn dependents_closure_is_transitive() {
+        // #spine ← warp#bent(in=#spine) ← textpath(in=#bent): editing the spine
+        // must re-emit BOTH downstream elements, since the warp's compiled output
+        // is itself baked geometry for the textpath.
+        let svg = format!(
+            r##"{XW}<path id="spine" d="M0,80 C40,20 60,20 100,80" fill="none"/><x:warp id="bent" field="bend" in="#spine" bend="30"><rect x="0" y="40" width="100" height="20" fill="#333"/></x:warp><x:textpath in="#bent" effect="stair" font-size="10" fill="#111">chain</x:textpath></svg>"##
+        );
+        let offs = top_level_offsets(&svg);
+        let starts = |deps: Vec<(usize, usize)>| deps.into_iter().map(|d| d.0).collect::<Vec<_>>();
+        assert_eq!(
+            starts(dependents_impl(&svg, offs[0])),
+            vec![offs[1], offs[2]]
+        );
+        assert_eq!(starts(dependents_impl(&svg, offs[1])), vec![offs[2]]);
+        assert!(dependents_impl(&svg, offs[2]).is_empty());
+    }
+
+    #[test]
+    fn textbox_flows_inside_a_boolean_union() {
+        // the union of two overlapping rects is ONE region; the textbox flows
+        // inside the boolean's compiled output, not any single source shape
+        let svg = format!(
+            r##"{XW}<x:boolean id="blob" op="union" fill="#eee"><rect x="0" y="0" width="40" height="60"/><rect x="20" y="0" width="40" height="60"/></x:boolean><x:textbox in="#blob" font-size="10" fill="#111">alpha beta gamma</x:textbox></svg>"##
+        );
+        let out = compile_shaped(&svg);
+        assert!(!out.contains("not rasterizable"), "{out}");
+        assert!(!out.contains("target not found"), "{out}");
+        assert!(out.contains("alpha"), "{out}");
+    }
+
+    #[test]
+    fn textpath_rides_a_warped_spine_not_its_source() {
+        // in= on an x:warp must sample the WARPED spine: the stair steps differ
+        // from the same textpath bound to the raw source path
+        let spine = r##"<path d="M0,80 C40,20 60,20 100,80" fill="none"/>"##;
+        let text = r##"effect="stair" font-size="10" fill="#111">abcdef</x:textpath>"##;
+        let warped = format!(
+            r##"{XW}<x:warp id="s" field="arch" bend="60">{spine}</x:warp><x:textpath in="#s" {text}</svg>"##
+        );
+        let raw = format!(
+            r##"{XW}<path id="s" d="M0,80 C40,20 60,20 100,80" fill="none"/><x:textpath in="#s" {text}</svg>"##
+        );
+        let w = compile_test(&warped);
+        let r = compile_test(&raw);
+        assert!(!w.contains("target not found"), "{w}");
+        let ys = |out: &str| {
+            let text = &out[out.find("<text").unwrap()..];
+            let y = &text[text.find(" y=\"").unwrap() + 4..];
+            y[..y.find('"').unwrap()].to_string()
+        };
+        assert_ne!(ys(&w), ys(&r), "stair must step along the warped spine");
+    }
+
+    #[test]
+    fn reference_cycles_degrade_instead_of_hanging() {
+        // mutual references: both degrade with the standard marker, no recursion
+        let svg = format!(
+            r##"{XW}<x:textpath id="a" in="#b" effect="stair" font-size="10">one</x:textpath><x:textpath id="b" in="#a" effect="stair" font-size="10">two</x:textpath></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("target not found or not a path"), "{out}");
+        // self-reference from inside: the cyclic contribution drops out and the
+        // textbox flows in the rest of the boolean (the rect)
+        let svg = format!(
+            r##"{XW}<x:boolean id="a" op="union" fill="#eee"><rect x="0" y="0" width="60" height="60"/><x:textbox in="#a" font-size="10">loop</x:textbox></x:boolean></svg>"##
+        );
+        let out = compile_shaped(&svg);
+        assert!(out.contains("<path"), "{out}");
     }
 
     #[test]

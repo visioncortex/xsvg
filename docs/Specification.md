@@ -60,6 +60,21 @@ Shape geometry for region flow (§6.10) is obtained through a parallel *shaper* 
 filled path into coarse per-row inside-spans. In v0 the browser supplies it (`getBBox` +
 `isPointInFill`); a pure-Rust backend can slot in behind the same trait later.
 
+**Reference resolution (normative).** The `in="#id"` attribute (`<x:textbox>` §6.10, `<x:textpath>`
+§6.13, `<x:warp field="bend">` §7.3) resolves to geometry by target kind:
+
+- A **plain SVG shape** (`rect`, `path`, `circle`, `ellipse`, `polygon`, `polyline`) contributes its
+  own source geometry.
+- An **`x:` element** contributes its **compiled output**: the target is lowered as if in place and
+  every `<path d>` it emits is concatenated into one (possibly multi-subpath) region. Features
+  therefore chain by reference — a textbox can flow inside a boolean union, type can be set on the
+  spine an `x:warp` emitted, and a `path → x:warp → x:textpath` chain re-derives end-to-end from one
+  edit (the incremental `dependents` scan is a transitive closure over these edges —
+  [Incremental.md](Incremental.md)).
+- A **reference cycle** (the target is already being resolved somewhere up the chain) is a
+  degradation, not an error: the cyclic edge resolves to nothing and the referrer falls back exactly
+  as for a missing target (§3) — compilation always terminates.
+
 **Robustness (normative).** Compilation is total on well-formed input: degenerate geometry
 (zero/negative width, height, padding, or `font-size`), degenerate spacing (negative
 `letter-spacing`/`word-spacing`), and pathological measurer output (non-finite or negative advances)
@@ -283,6 +298,8 @@ Binds a textbox to a referenced shape instead of its own `x/y/width/height`.
   **inside the actual filled outline** (the Vision's *fit-text-in-polygon*): each line is wrapped to
   the shape's inside width *at that height*, so a triangle's lines shorten toward its apex and a
   circle's bulge across the middle.
+- An **`x:` element** target contributes its **compiled output** (§4 *Reference resolution*) — text
+  flows inside e.g. a `<x:boolean>` union's merged silhouette.
 
 **Geometry seam (normative architecture).** Region geometry is obtained through a host-supplied
 *shaper* — the geometric analog of the *measurer* (§4). The shaper rasterizes a filled path into a
@@ -388,7 +405,8 @@ of per-point, on live `<text>` (§6.13.3).
 <path id="wave" d="M0,40 C60,0 140,80 200,40" fill="none"/>
 <x:textpath in="#wave" effect="skew" font-family="-x-google-Anton" font-size="32" fill="#111">rides the wave</x:textpath>
 ```
-- **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`). Like
+- **`in="#id"`** *(required)* — the reference path (an open `<path>` / `<line>` / `<polyline>`, or an
+  `x:` element whose **compiled output** supplies the path — §4 *Reference resolution*). Like
   `<x:textbox in="#shape">` and `clipPath`, only its **geometry** is used; its own paint is ignored.
 - **`effect`** — `skew` *(default; §6.13.1)* | `rainbow` *(§6.13.2)* | `stair` *(§6.13.3)* |
   `ribbon` *(§6.13.4)* | `follow` *(§6.13.5)*.
@@ -561,7 +579,7 @@ carrying the element's paint and `transform` (affine, so it composes after the b
 | `axis` | `h` \| `v` | `h` | the bend axis (Illustrator's Horizontal/Vertical); applies to the displacement family and `squeeze` — the radial/rotational presets are symmetric and ignore it |
 | `corners` | 8 numbers `"x0,y0 x1,y1 x2,y2 x3,y3"` | — | the target corners — **TL TR BR BL** — for `perspective` / `free`; required by both |
 | `distort-h`, `distort-v` | number, −100…100 (%) | `0` | Illustrator's Distortion sliders: a projective **taper composed after** the field |
-| `in` | `#id` | — | the spine path for `bend`; required by it (like `<x:textpath in>`, only its geometry is used) |
+| `in` | `#id` | — | the spine path for `bend`; required by it (like `<x:textpath in>`, only its geometry is used; an `x:` target resolves to its compiled output — §4) |
 | `align`, `start` | as §6.13 | `start`, `0` | place the `bend` envelope along the spine's arc length |
 | `detail` | number > 0 | `10` | `roughen` ridge frequency — ridges per 100 user units |
 
@@ -699,6 +717,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp field="bend" in="#spine">` — flow arbitrary geometry along a path (align/start placement) | implemented |
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
+| Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

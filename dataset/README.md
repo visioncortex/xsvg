@@ -78,6 +78,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [boolean.xsvg](boolean.xsvg) | `op="union"` merges a circle cloud into one outline (single silhouette stroke); `op="subtract"` punches outlined text from a plate (*Minus Front*); `intersect` keeps the lens, `exclude` turns the overlap into a hole; the last card warps a boolean result with `field="flag"` — path algebra and warps compose both ways |
 
+## Composition by reference (§4)
+
+| File | Shows |
+|---|---|
+| [compose.xsvg](compose.xsvg) | `in="#id"` pointing at an `x:` element resolves its **compiled output**: a textbox flows inside a boolean union's merged silhouette; type rides the arched spine an `x:warp` emitted; and a `path → x:warp bend → x:textpath` chain gives three linked elements one edit point |
+
 ## Edge cases & invariants
 
 | File | Shows |

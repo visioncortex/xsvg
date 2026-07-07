@@ -48,8 +48,9 @@ enough that one edit re-lowers one feature's worth of work.
   root tag (caller falls back to a full compile).
 - `fragment_range(input, offset) → [start, end]` — the fragment unit's source range, for the
   caller's identity bookkeeping.
-- `dependents(input, offset) → [start, end, …]` — ranges of the *other* top-level elements whose
-  baked `in="#id"` references point into this fragment; they must be re-emitted alongside it.
+- `dependents(input, offset) → [start, end, …]` — ranges of the *other* top-level elements that must
+  be re-emitted alongside this fragment: the **transitive closure** over baked `in="#id"` references
+  (an `x:` element's compiled output can itself be a target — Specification.md §4).
 
 ## 4. JS-side protocol (next slice)
 
@@ -68,14 +69,12 @@ enough that one edit re-lowers one feature's worth of work.
 
 - **Granularity** is the top-level element: editing a node nested in a deep passthrough `<g>`
   re-emits the whole top-level group. Acceptable; refine later if profiling demands.
-- **Dependency scan is one hop, not a transitive closure** — and today that is *complete*, not an
-  approximation. A chain would require an `x:` element to itself be an `in`-target (edit `#a` →
-  re-emit `<x:warp id="b" in="#a">` → also re-emit `<x:textpath in="#b">`), but `in` resolves the
-  target's **source** geometry via `shape_to_path_d`, which only understands plain shapes — an
-  `x:` target fails with the "not a path" marker. Every `in` edge therefore ends at a plain shape,
-  which references nothing: the dependency graph has depth one. **If a "reference the compiled
-  output of an `x:` element" feature ever ships, `dependents` must switch to a transitive
-  closure** — that feature's author owns this line.
+- ~~Dependency scan is one hop~~ — **the scan is now a transitive closure.** Since composition by
+  reference shipped (Specification.md §4 *Reference resolution*), an `x:` element can itself be an
+  `in`-target: editing `#a` re-emits `<x:warp id="b" in="#a">`, whose changed output re-emits
+  `<x:textpath in="#b">`, to a fixpoint. `dependents` computes exactly this closure (document
+  order), pinned by `dependents_closure_is_transitive`. Reference **cycles** are a compile-time
+  degradation (the cyclic edge resolves to nothing), so the closure always terminates.
 - **A fragment can begin with marker comments** (skip/degradation markers precede the element).
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient

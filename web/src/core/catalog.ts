@@ -209,6 +209,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Composition by reference",
+    note: 'in="#id" on an x: element resolves its compiled output — features chain.',
+    samples: [
+      {
+        file: "compose.xsvg",
+        title: "Reference the compiled output",
+        blurb: "a textbox flowed inside a boolean union; type riding a warp's arched spine; a path → warp → textpath chain with one edit point",
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

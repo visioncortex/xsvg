@@ -173,6 +173,11 @@ curve-exact / kurbo-native / Skia PathOps can slot in later). Composes with warp
 directions, and each operand's per-fill-rule resolve doubles as a self-intersection cleanup — the
 primitive §G's fold-over item needs.
 
+Composition also goes beyond child nesting: **`in="#id"` on an `x:` target resolves its compiled
+output** ([Specification.md §4](Specification.md), *Reference resolution*) — flow a textbox inside
+a boolean union, set type on the spine a warp emitted, or chain `path → x:warp → x:textpath` with
+one edit point (the incremental `dependents` scan closes over these edges transitively).
+
 ---
 
 ## Status summary

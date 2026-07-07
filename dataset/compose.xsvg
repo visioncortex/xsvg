@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 800 520" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="800" height="520" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">Composition by reference — in="#id" resolves an x: element's COMPILED output</text>
+
+  <!-- text poured into a boolean union: the textbox flows inside the merged
+       silhouette, not any single source circle -->
+  <text x="48" y="66" font-size="11" fill="#94a3b8">x:textbox in="#blob" — flowed inside the merged silhouette</text>
+  <x:boolean id="blob" op="union" fill="#0c4a6e" stroke="#7dd3fc" stroke-width="2">
+    <circle cx="140" cy="190" r="62"/>
+    <circle cx="215" cy="155" r="78"/>
+    <circle cx="290" cy="200" r="58"/>
+    <rect x="110" y="200" width="220" height="72" rx="24"/>
+  </x:boolean>
+  <x:textbox in="#blob" padding="10" align="center" valign="middle" font-size="13" fill="#e0f2fe"
+    >Four shapes went in, one region came out, and this paragraph pours into the merged silhouette — each line hugging the union's outline.</x:textbox>
+
+  <!-- type set on a warp's output: the textpath rides the arched spine the warp
+       emitted, not the straight source line -->
+  <text x="450" y="66" font-size="11" fill="#94a3b8">x:textpath in="#crest" — type riding the spine an x:warp emitted</text>
+  <x:warp id="crest" field="arch" bend="45">
+    <path d="M450,240 L770,240" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="3 5"/>
+  </x:warp>
+  <x:textpath in="#crest" effect="rainbow" align="middle" font-family="-x-google-Anton"
+              font-size="30" fill="#f59e0b">OVER THE CREST</x:textpath>
+
+  <!-- the full chain in one line: source path → x:warp bend → x:textpath, so an
+       edit to #road re-emits both downstream elements (transitive dependents) -->
+  <text x="48" y="356" font-size="11" fill="#94a3b8">chain: path → x:warp bend in="#road" → x:textpath in="#swash" — three links, one edit point</text>
+  <path id="road" d="M60,450 C280,380 560,520 740,450" fill="none" stroke="#1e293b" stroke-width="10" stroke-linecap="round"/>
+  <x:warp id="swash" field="bend" in="#road">
+    <path d="M60,450 L740,450" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="2 4"/>
+  </x:warp>
+  <x:textpath in="#swash" effect="skew" align="middle" font-family="-x-google-Anton"
+              font-size="26" fill="#a5b4fc">EDIT THE ROAD, EVERYTHING FOLLOWS</x:textpath>
+</svg>
