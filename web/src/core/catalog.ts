@@ -206,6 +206,11 @@ export const CATALOG: Category[] = [
         title: "Boolean operations",
         blurb: "union merges a circle cloud under one stroke; subtract punches text from a plate; intersect/exclude; and a boolean warped by flag — composability both ways",
       },
+      {
+        file: "boolean-refs.xsvg",
+        title: "Operands by reference",
+        blurb: "<use href> children: a venn lens derived from circles that keep rendering, a motif stamped at offsets and fused, and a union punching a plate by reference",
+      },
     ],
   },
   {

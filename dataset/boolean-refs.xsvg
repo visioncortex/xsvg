@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 520" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="520" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:boolean with &lt;use&gt; operands — derive shapes from things that keep existing</text>
+
+  <!-- venn: the two circles render themselves; the lens is DERIVED from them
+       by reference instead of consuming them as children -->
+  <text x="48" y="64" font-size="11" fill="#94a3b8">the venn lens — operands keep rendering, the intersect is derived</text>
+  <circle id="va" cx="150" cy="180" r="72" fill="#1e3a8a" stroke="#93c5fd" stroke-width="2"/>
+  <circle id="vb" cx="240" cy="180" r="72" fill="#14532d" stroke="#86efac" stroke-width="2"/>
+  <x:boolean op="intersect" fill="#f59e0b" stroke="#fde68a" stroke-width="1.5">
+    <use href="#va"/>
+    <use href="#vb"/>
+  </x:boolean>
+
+  <!-- stamping: one motif, three <use x> offsets, fused into a single outline -->
+  <text x="410" y="64" font-size="11" fill="#94a3b8">one motif stamped at &lt;use x&gt; offsets, fused by union</text>
+  <circle id="stamp" cx="460" cy="180" r="42" fill="#3b0764"/>
+  <x:boolean op="union" fill="none" stroke="#d8b4fe" stroke-width="2.5">
+    <use href="#stamp"/>
+    <use href="#stamp" x="52" y="-18"/>
+    <use href="#stamp" x="104"/>
+    <use href="#stamp" x="156" y="-18"/>
+  </x:boolean>
+
+  <!-- chaining: a union's compiled output is itself an operand — the cloud
+       renders at the left AND punches the plate at the right, shifted by x -->
+  <text x="48" y="336" font-size="11" fill="#94a3b8">chain: the #cloud union renders here — and punches the plate by reference, restamped at x="290"</text>
+  <x:boolean id="cloud" op="union" fill="#0c4a6e" stroke="#7dd3fc" stroke-width="2">
+    <circle cx="110" cy="430" r="40"/>
+    <circle cx="165" cy="412" r="48"/>
+    <circle cx="220" cy="432" r="36"/>
+  </x:boolean>
+  <x:boolean op="subtract" fill="#7f1d1d">
+    <rect x="390" y="365" width="280" height="110"/>
+    <use href="#cloud" x="290"/>
+  </x:boolean>
+</svg>

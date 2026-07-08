@@ -19,13 +19,15 @@ incremental compilation needs. Verified properties (each enforced by tests where
 | **Node identity** — every element that corresponds 1:1 to a source element carries `data-xsvg-pos="start-end"` when `sourcemap` is on. | ✅ existing |
 | **Cheap parse, expensive lowering** — re-parsing the whole source per fragment call is fine; the cost lives in bake/layout, which the fragment API skips for everything else. | ✅ by design |
 
-**Cross-reference inventory** — the only compile-time-baked references are the three `in="#id"`
-consumers (`<x:textbox in>`, `<x:textpath in>`, `<x:warp field="bend" in>`). Everything else that
-references by id — gradient/pattern paints via `url(#…)`, `<use href>`, and the `<textPath href>`
-that `effect="follow"` emits — stays a **live reference** the browser re-resolves, so editing those
-targets needs only the target's own re-emit. (Caveat inside the rule: `follow` *also* bakes the
-path's arc length into `startOffset`, but its source attribute is `in`, so the dependency scan
-covers it.)
+**Cross-reference inventory** — the compile-time-baked references are the three `in="#id"`
+consumers (`<x:textbox in>`, `<x:textpath in>`, `<x:warp field="bend" in>`) plus the `href` of a
+`<use>` that is a **direct child of `<x:boolean>`** (an operand by reference, §7.4 — the one place
+`<use>` is baked). Everything else that references by id — gradient/pattern paints via `url(#…)`,
+passthrough `<use href>` anywhere else, and the `<textPath href>` that `effect="follow"` emits —
+stays a **live reference** the browser re-resolves, so editing those targets needs only the
+target's own re-emit. The `baked_ref` helper in the dependency scan is the single point of truth
+for this distinction. (Caveat inside the rule: `follow` *also* bakes the path's arc length into
+`startOffset`, but its source attribute is `in`, so the dependency scan covers it.)
 
 ## 2. The invariant (normative)
 

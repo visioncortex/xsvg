@@ -61,7 +61,8 @@ filled path into coarse per-row inside-spans. In v0 the browser supplies it (`ge
 `isPointInFill`); a pure-Rust backend can slot in behind the same trait later.
 
 **Reference resolution (normative).** The `in="#id"` attribute (`<x:textbox>` §6.10, `<x:textpath>`
-§6.13, `<x:warp field="bend">` §7.3) resolves to geometry by target kind:
+§6.13, `<x:warp field="bend">` §7.3) and `<use href>` operands inside `<x:boolean>` (§7.4) resolve
+to geometry by target kind:
 
 - A **plain SVG shape** (`rect`, `path`, `circle`, `ellipse`, `polygon`, `polyline`) contributes its
   own source geometry.
@@ -666,15 +667,27 @@ tolerance** (the §7.1 graded-approximation contract); the ops themselves are **
 deterministic**. The result's contours carry deterministic opposite windings for holes, so it
 renders identically under either fill rule.
 
+**Operands by reference (normative).** A `<use href="#id">` child is an operand that **borrows**
+the target's geometry per §4 *Reference resolution* (a plain shape's source geometry; an `x:`
+element's compiled output) **without consuming it** — the target keeps rendering wherever it is.
+This is the derived-shape form: a venn lens over circles that still draw themselves, a plate
+punched by a union that is also its own artwork. `x`/`y` on the `<use>` translate the borrowed
+geometry (SVG's own `<use>` offset semantics), so one motif can be stamped at several offsets and
+fused. The operand's `fill-rule` is read from the `<use>` element itself; legacy `xlink:href` is
+accepted. A `<use>` whose target is missing, has no geometry, or closes a reference cycle is
+skipped with a marker, like any other unusable operand. (Everywhere outside `<x:boolean>`, `<use>`
+remains an untouched live SVG reference — §5.)
+
 **Degradation (normative).** A child that cannot become path geometry is skipped with a marker —
 never silently dropped from the algebra. An unknown `op` emits the children **un-combined behind a
 marker**. A legitimately **empty result** (e.g. a disjoint `intersect`) emits an empty `<g>`; an
 element with no usable geometry at all emits only a marker. Plain viewers skip the subtree (§3).
 
-**v1 limits.** Children only (no `in="#a #b"` reference form yet); ops act on **fill regions** —
-strokes apply to the result, not the operand geometry; no multi-output Pathfinder modes
-(Divide/Trim/Merge). Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable
-seam (curve-exact and kurbo-native backends can slot in later without surface changes).
+**v1 limits.** Ops act on **fill regions** — strokes apply to the result, not the operand
+geometry; no multi-output Pathfinder modes (Divide/Trim/Merge); `<use>` operands take `x`/`y`
+offsets but not a full `transform`. Backend: [`i_overlay`](https://crates.io/crates/i_overlay)
+behind a swappable seam (curve-exact and kurbo-native backends can slot in later without surface
+changes).
 
 ### 7.5 Remaining pillars & deferred [planned]
 
@@ -718,6 +731,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
+| `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (`x`/`y` offsets) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

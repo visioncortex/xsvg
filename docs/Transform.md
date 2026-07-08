@@ -176,7 +176,9 @@ primitive §G's fold-over item needs.
 Composition also goes beyond child nesting: **`in="#id"` on an `x:` target resolves its compiled
 output** ([Specification.md §4](Specification.md), *Reference resolution*) — flow a textbox inside
 a boolean union, set type on the spine a warp emitted, or chain `path → x:warp → x:textpath` with
-one edit point (the incremental `dependents` scan closes over these edges transitively).
+one edit point (the incremental `dependents` scan closes over these edges transitively). Booleans
+take **operands by reference** the same way — `<use href="#id">` children borrow geometry without
+consuming it (venn-style derived shapes, offset stamping via `x`/`y`).
 
 ---
 

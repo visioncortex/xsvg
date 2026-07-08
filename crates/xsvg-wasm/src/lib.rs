@@ -409,6 +409,28 @@ pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)>
 /// in="#w">`, and so on to a fixpoint. Live references (`href`, `url(#…)`
 /// paints) re-resolve in the DOM and are deliberately NOT reported. Results are
 /// in document order.
+/// The reference this node **bakes** at compile time, if any: an `in="#id"`
+/// attribute (textbox / textpath / warp bend), or the `href` of a `<use>` that
+/// is a direct child of `<x:boolean>` (an operand by reference — §7.4). A
+/// passthrough `<use>` anywhere else is a live reference the browser resolves,
+/// so it is deliberately not reported.
+fn baked_ref<'a>(n: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+    if let Some(r) = n.attribute("in") {
+        return Some(r);
+    }
+    if n.tag_name().name() == "use"
+        && n.tag_name().namespace() != Some(XSVG_NS)
+        && n.parent().is_some_and(|p| {
+            p.tag_name().namespace() == Some(XSVG_NS) && p.tag_name().name() == "boolean"
+        })
+    {
+        return n
+            .attribute("href")
+            .or_else(|| n.attribute((XLINK_NS, "href")));
+    }
+    None
+}
+
 pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
     let Ok(doc) = roxmltree::Document::parse(input) else {
         return Vec::new();
@@ -437,7 +459,7 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
                 continue;
             }
             let refs_live = tl.descendants().any(|n| {
-                n.attribute("in")
+                baked_ref(n)
                     .map(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
                     .unwrap_or(false)
             });
@@ -1047,15 +1069,31 @@ fn find_path_d_ranges(s: &str) -> Vec<(usize, usize)> {
 /// ignored), a legitimately empty result emits an empty `<g>`, and an unknown
 /// `op` degrades behind a marker with the children un-operated.
 fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    // lower each child to path markup; one child = one operand
+    // lower each child to path markup; one child = one operand. A <use href>
+    // child is an operand **by reference** (§7.4): the target's geometry (§4
+    // reference resolution — compiled output for x: targets) joins the algebra
+    // while the target itself keeps rendering wherever it is.
     let mut markups: Vec<(String, bool)> = Vec::new(); // (markup, even_odd)
     let mut markers = String::new();
     for child in node.children().filter(|c| c.is_element()) {
-        match warp_child_markup(child, ctx) {
-            Ok(m) => {
-                let even_odd = child.attribute("fill-rule") == Some("evenodd");
-                markups.push((m, even_odd));
+        let even_odd = child.attribute("fill-rule") == Some("evenodd");
+        if child.tag_name().name() == "use" && child.tag_name().namespace() != Some(XSVG_NS) {
+            let href = child
+                .attribute("href")
+                .or_else(|| child.attribute((XLINK_NS, "href")));
+            match href.and_then(|r| ref_geometry(child, r, ctx)) {
+                Some(d) => {
+                    let d = use_offset_d(&d, child).unwrap_or(d);
+                    markups.push((format!("<path d=\"{d}\"/>"), even_odd));
+                }
+                None => markers.push_str(
+                    "<!-- xsvg: <x:boolean> skipped <use>: target not found or no geometry -->",
+                ),
             }
+            continue;
+        }
+        match warp_child_markup(child, ctx) {
+            Ok(m) => markups.push((m, even_odd)),
             Err(why) => markers.push_str(&format!(
                 "<!-- xsvg: <x:boolean> skipped <{}>: {why} -->",
                 child.tag_name().name()
@@ -1139,6 +1177,18 @@ fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::
         .find(|n| n.attribute("id") == Some(id))
 }
 
+/// Apply a `<use>` element's `x`/`y` offset (SVG's translate semantics) to
+/// referenced geometry. `None` when there is no offset (caller keeps `d` as-is).
+fn use_offset_d(d: &str, use_el: roxmltree::Node) -> Option<String> {
+    let (x, y) = (attr_num(use_el, "x", 0.0), attr_num(use_el, "y", 0.0));
+    if x == 0.0 && y == 0.0 {
+        return None;
+    }
+    let mut path = xsvg_core::kurbo::BezPath::from_svg(d).ok()?;
+    path.apply_affine(xsvg_core::kurbo::Affine::translate((x, y)));
+    Some(path.to_svg())
+}
+
 /// Resolve an `in="#id"` reference to **geometry** (§6.10/§6.13/§7.3): a plain
 /// shape yields its source geometry; an `x:` element yields its **compiled
 /// output** — every `<path d>` it emits, joined as one multi-subpath region — so
@@ -1171,6 +1221,32 @@ fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Option<String> {
 fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
     match node.tag_name().name() {
         "path" => node.attribute("d").map(str::to_string),
+        "rect" => {
+            let (x, y, w, h) = (
+                attr_num(node, "x", 0.0),
+                attr_num(node, "y", 0.0),
+                attr_num(node, "width", 0.0),
+                attr_num(node, "height", 0.0),
+            );
+            if w <= 0.0 || h <= 0.0 {
+                return None;
+            }
+            // rx/ry default to each other per SVG, clamped to the half-extent
+            let rx = attr_num(node, "rx", attr_num(node, "ry", 0.0)).clamp(0.0, w / 2.0);
+            let ry = attr_num(node, "ry", attr_num(node, "rx", 0.0)).clamp(0.0, h / 2.0);
+            Some(if rx > 0.0 && ry > 0.0 {
+                format!(
+                    "M{},{y} h{} a{rx},{ry} 0 0,1 {rx},{ry} v{} a{rx},{ry} 0 0,1 -{rx},{ry} h-{} a{rx},{ry} 0 0,1 -{rx},-{ry} v-{} a{rx},{ry} 0 0,1 {rx},-{ry} Z",
+                    x + rx,
+                    w - 2.0 * rx,
+                    h - 2.0 * ry,
+                    w - 2.0 * rx,
+                    h - 2.0 * ry
+                )
+            } else {
+                format!("M{x},{y} h{w} v{h} h-{w} Z")
+            })
+        }
         "circle" => {
             let (cx, cy, r) = (
                 attr_num(node, "cx", 0.0),
@@ -1203,6 +1279,15 @@ fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
                     -2.0 * rx
                 )
             })
+        }
+        "line" => {
+            let (x1, y1, x2, y2) = (
+                attr_num(node, "x1", 0.0),
+                attr_num(node, "y1", 0.0),
+                attr_num(node, "x2", 0.0),
+                attr_num(node, "y2", 0.0),
+            );
+            Some(format!("M{x1},{y1} L{x2},{y2}"))
         }
         "polygon" | "polyline" => node.attribute("points").and_then(points_to_path_d),
         _ => None,
@@ -2383,9 +2468,12 @@ mod tests {
         // backend's to detect — it returns None and the element falls back)
         let point = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><path id="p" d="M5,5 L5,5" fill="none"/><x:textpath in="#p" effect="rainbow" font-size="20">dot</x:textpath></svg>"##;
         compile_outlined(point);
-        // a target with no fillable geometry (<line>) → comment marker, no panic
+        // a <line> target is a valid reference path per §6.13 (was a gap until
+        // shape_to_path_d grew a line arm): text warps onto it, no marker
         let line = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><line id="p" x1="0" y1="20" x2="120" y2="20"/><x:textpath in="#p" effect="rainbow" font-size="20">hi</x:textpath></svg>"##;
-        assert!(compile_outlined(line).contains("not found or not a path"));
+        let out = compile_outlined(line);
+        assert!(!out.contains("not found or not a path"), "{out}");
+        assert!(out.contains("<path"), "{out}");
     }
 
     // ---- incremental compilation (docs/Incremental.md) ----
@@ -2401,6 +2489,7 @@ mod tests {
   <x:boolean op="subtract" fill="#444"><rect x="200" y="200" width="60" height="30"/><rect x="230" y="200" width="60" height="30"/></x:boolean>
   <x:boolean id="blob" op="union" fill="#555"><rect x="300" y="240" width="40" height="50"/><rect x="320" y="240" width="40" height="50"/></x:boolean>
   <x:textbox in="#blob" font-size="10" fill="#666">into the blob</x:textbox>
+  <x:boolean op="intersect" fill="#777"><use href="#blob"/><rect x="310" y="250" width="40" height="30"/></x:boolean>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -2474,10 +2563,15 @@ mod tests {
         // the dependent itself has no dependents
         assert!(dependents_impl(INC, offs[3]).is_empty());
         // an x: element can be a target: editing the #blob boolean invalidates
-        // the textbox that flows inside its compiled output
+        // the textbox that flows inside its compiled output AND the boolean
+        // holding #blob as a <use> operand (a baked href, unlike passthrough <use>)
         let deps = dependents_impl(INC, offs[6]);
-        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(deps.len(), 2, "{deps:?}");
         assert_eq!(deps[0].0, offs[7], "expected the blob textbox: {deps:?}");
+        assert_eq!(
+            deps[1].0, offs[8],
+            "expected the use-operand boolean: {deps:?}"
+        );
     }
 
     #[test]
@@ -2548,6 +2642,77 @@ mod tests {
             r##"{XW}<x:boolean id="a" op="union" fill="#eee"><rect x="0" y="0" width="60" height="60"/><x:textbox in="#a" font-size="10">loop</x:textbox></x:boolean></svg>"##
         );
         let out = compile_shaped(&svg);
+        assert!(out.contains("<path"), "{out}");
+    }
+
+    #[test]
+    fn boolean_use_children_are_operands_by_reference() {
+        // venn lens: two circles referenced by <use> — both keep rendering,
+        // and the intersect gets their geometry without consuming them
+        let svg = format!(
+            r##"{XW}<circle id="va" cx="100" cy="100" r="60" fill="#fecaca"/><circle id="vb" cx="150" cy="100" r="60" fill="#bbf7d0"/><x:boolean op="intersect" fill="#818cf8"><use href="#va"/><use href="#vb"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<circle").count(), 2, "{out}");
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        // lens spans [90,160] × [100 ± √(60²−25²) ≈ 54.5]
+        assert!(
+            (bb.x0 - 90.0).abs() < 1.0 && (bb.x1 - 160.0).abs() < 1.0,
+            "{bb:?}"
+        );
+        assert!(
+            (bb.y0 - 45.5).abs() < 1.0 && (bb.y1 - 154.5).abs() < 1.0,
+            "{bb:?}"
+        );
+    }
+
+    #[test]
+    fn boolean_use_mixes_with_literals_and_takes_xy_offsets() {
+        // literal subject minus a referenced cutter stamped at a <use x y> offset
+        let svg = format!(
+            r##"{XW}<rect id="cut" x="0" y="0" width="40" height="40"/><x:boolean op="subtract" fill="#123"><rect x="0" y="100" width="100" height="40"/><use href="#cut" x="60" y="100"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        use xsvg_core::kurbo::Shape;
+        let p = first_path(&out);
+        let bb = p.bounding_box();
+        assert!(
+            (bb.x1 - 60.0).abs() < 0.5,
+            "cutter offset not applied: {bb:?}"
+        );
+        assert!((p.area().abs() - 2400.0).abs() < 5.0, "{}", p.area());
+    }
+
+    #[test]
+    fn boolean_use_can_reference_a_compiled_x_target() {
+        // operand = another boolean's compiled output (union spans x 0..100)
+        let svg = format!(
+            r##"{XW}<x:boolean id="u" op="union" fill="#eee"><rect x="0" y="0" width="60" height="40"/><rect x="40" y="0" width="60" height="40"/></x:boolean><x:boolean op="intersect" fill="#345"><use href="#u"/><rect x="80" y="0" width="80" height="40"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        use xsvg_core::kurbo::Shape;
+        let p = first_path(&out);
+        let bb = p.bounding_box();
+        assert!(
+            (bb.x0 - 80.0).abs() < 0.5 && (bb.x1 - 100.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        assert!((p.area().abs() - 800.0).abs() < 5.0, "{}", p.area());
+    }
+
+    #[test]
+    fn boolean_use_missing_target_and_self_reference_degrade() {
+        let svg = format!(
+            r##"{XW}<x:boolean op="union" fill="#123"><use href="#ghost"/><rect x="0" y="0" width="10" height="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("skipped <use>"), "{out}");
+        assert!(out.contains("<path"), "{out}"); // the surviving operand still emits
+        let svg = format!(
+            r##"{XW}<x:boolean id="s" op="union" fill="#123"><use href="#s"/><rect x="0" y="0" width="10" height="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg); // terminates; cyclic operand drops out
         assert!(out.contains("<path"), "{out}");
     }
 

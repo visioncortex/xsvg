@@ -77,6 +77,7 @@ Realistic composites that combine several features into one artifact.
 | File | Shows |
 |---|---|
 | [boolean.xsvg](boolean.xsvg) | `op="union"` merges a circle cloud into one outline (single silhouette stroke); `op="subtract"` punches outlined text from a plate (*Minus Front*); `intersect` keeps the lens, `exclude` turns the overlap into a hole; the last card warps a boolean result with `field="flag"` — path algebra and warps compose both ways |
+| [boolean-refs.xsvg](boolean-refs.xsvg) | Operands **by reference**: a `<use href>` child borrows geometry without consuming it — the venn lens is derived from circles that keep rendering; one motif is stamped at `<use x y>` offsets and fused by union; and a union's compiled output punches a plate by reference, restamped at an offset |
 
 ## Composition by reference (§4)
 
