@@ -89,7 +89,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word, degenerate `<x:textpath>` targets (zero-length path → live-text fallback; vertical path under skew; rainbow run outliving its path) |
+| [degenerate.xsvg](degenerate.xsvg) | Edge cases: empty text, `inline-size=0`, `font-size=0`, shrink, `fit-min>size`, oversized word, degenerate `<x:textpath>` targets (zero-length path → live-text fallback; vertical path under skew; rainbow run outliving its path); **reference cycles** — a self-referential `<use>` operand drops out, a mutual `in=` pair degrades to markers (§4) |
 | [descenders.xsvg](descenders.xsvg) | Proof that descenders (`Gg`) do not shift the baseline vs `Bb` (shared-baseline guide) |
 
 ## Viewing them

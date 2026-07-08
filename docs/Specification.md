@@ -75,6 +75,12 @@ to geometry by target kind:
 - A **reference cycle** (the target is already being resolved somewhere up the chain) is a
   degradation, not an error: the cyclic edge resolves to nothing and the referrer falls back exactly
   as for a missing target (§3) — compilation always terminates.
+- **Chain depth is bounded** (v0: 32 links). Element nesting is capped at 512 (§4 *Robustness*),
+  but reference chains run between *siblings*, so they get their own, lower cap — each link
+  recurses through a full emitter, and totality must hold on wasm's small stack. A deeper chain
+  degrades at the cap with the same marker as a cycle. Within one compile, **context-free
+  resolutions are memoized**, so a target referenced N times lowers once and diamond-shaped
+  fan-out (each level referencing the previous one twice) stays linear rather than exponential.
 
 **Robustness (normative).** Compilation is total on well-formed input: degenerate geometry
 (zero/negative width, height, padding, or `font-size`), degenerate spacing (negative

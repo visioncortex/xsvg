@@ -34,6 +34,14 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 /// ceiling that still leaves a wide stack margin.
 const MAX_NESTING_DEPTH: usize = 512;
 
+/// Depth cap for **reference chains** (`ref_geometry` recursion). Much lower
+/// than [`MAX_NESTING_DEPTH`]: each chain link recurses through a full emitter
+/// (frames of kilobytes, not the parser's small ones), so 512 links would
+/// overflow a 1–2 MB stack. Real derivation chains are a handful of links; 32
+/// is far beyond that, and a deeper chain degrades with a marker (§4 totality)
+/// instead of trapping.
+const MAX_REF_DEPTH: usize = 32;
+
 /// Runs once when the module is instantiated: route Rust panics to `console.error`.
 #[wasm_bindgen(start)]
 pub fn on_start() {
@@ -202,8 +210,19 @@ struct Ctx<'a> {
     sourcemap: bool,
     /// ids currently being resolved as compiled-output references — the cycle
     /// guard for `ref_geometry` (a target that is already on this stack degrades
-    /// with a marker instead of recursing forever).
+    /// with a marker instead of recursing forever). Its length is also the
+    /// reference-chain depth, capped at [`MAX_REF_DEPTH`] (§4 totality: sibling
+    /// chains must not overflow the stack either).
     resolving: std::cell::RefCell<Vec<String>>,
+    /// per-compile memo of **context-free** `ref_geometry` results (id → joined
+    /// `d`). Only resolutions untouched by a cycle/depth cut are cached — a cut
+    /// result depends on what was on the stack, so it must not leak into other
+    /// contexts. Collapses diamond-shaped reference fan-out from exponential to
+    /// linear; dies with this compile call, so it can never go stale.
+    resolved: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
+    /// counts cycle/depth cuts; `ref_geometry` snapshots it around a resolution
+    /// to decide whether the result was context-free (memoizable).
+    cuts: std::cell::Cell<u64>,
 }
 
 /// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
@@ -333,6 +352,8 @@ pub fn compile_impl(
             quality: q,
             sourcemap,
             resolving: std::cell::RefCell::new(Vec::new()),
+            resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
+            cuts: std::cell::Cell::new(0),
         },
     );
     Ok(out)
@@ -385,6 +406,8 @@ pub fn compile_fragment_impl(
             quality: q,
             sourcemap,
             resolving: std::cell::RefCell::new(Vec::new()),
+            resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
+            cuts: std::cell::Cell::new(0),
         },
     );
     Ok(out)
@@ -1189,22 +1212,35 @@ fn use_offset_d(d: &str, use_el: roxmltree::Node) -> Option<String> {
     Some(path.to_svg())
 }
 
-/// Resolve an `in="#id"` reference to **geometry** (§6.10/§6.13/§7.3): a plain
-/// shape yields its source geometry; an `x:` element yields its **compiled
+/// Resolve an `in="#id"` reference to **geometry** (§6.10/§6.13/§7.3/§7.4): a
+/// plain shape yields its source geometry; an `x:` element yields its **compiled
 /// output** — every `<path d>` it emits, joined as one multi-subpath region — so
 /// composition works by reference (flow text inside a boolean union, set type on
-/// a warped spine). Cycles (a target already being resolved) and targets that
-/// emit no path geometry return `None`; the caller degrades with its marker.
+/// a warped spine). Cycles (a target already being resolved), chains deeper than
+/// [`MAX_REF_DEPTH`], and targets that emit no path geometry return `None`;
+/// the caller degrades with its marker (§4 totality — never a stack overflow).
+///
+/// Context-free resolutions (no cut occurred underneath) are memoized for the
+/// rest of the compile call, so a target referenced N times lowers once and
+/// diamond-shaped fan-out stays linear instead of exponential.
 fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Option<String> {
     let target = resolve_ref(node, r)?;
     if target.tag_name().namespace() != Some(XSVG_NS) {
         return shape_to_path_d(target);
     }
     let id = target.attribute("id")?.to_string();
-    if ctx.resolving.borrow().contains(&id) {
-        return None; // reference cycle
+    if let Some(hit) = ctx.resolved.borrow().get(&id) {
+        return hit.clone();
     }
-    ctx.resolving.borrow_mut().push(id);
+    {
+        let stack = ctx.resolving.borrow();
+        if stack.contains(&id) || stack.len() >= MAX_REF_DEPTH {
+            ctx.cuts.set(ctx.cuts.get() + 1);
+            return None; // reference cycle, or a chain deeper than the ref bound
+        }
+    }
+    let cuts_before = ctx.cuts.get();
+    ctx.resolving.borrow_mut().push(id.clone());
     let mut buf = String::new();
     serialize(target, &mut buf, false, ctx);
     ctx.resolving.borrow_mut().pop();
@@ -1212,7 +1248,13 @@ fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Option<String> {
         .into_iter()
         .map(|(a, b)| &buf[a..b])
         .collect();
-    (!ds.is_empty()).then(|| ds.join(" "))
+    let result = (!ds.is_empty()).then(|| ds.join(" "));
+    // a cut below means this result reflects what was on the stack, not the
+    // target itself — valid here, poison anywhere else
+    if ctx.cuts.get() == cuts_before {
+        ctx.resolved.borrow_mut().insert(id, result.clone());
+    }
+    result
 }
 
 /// Convert a fillable SVG shape element to a path `d` string (for rasterization).
@@ -2714,6 +2756,48 @@ mod tests {
         );
         let out = compile_test(&svg); // terminates; cyclic operand drops out
         assert!(out.contains("<path"), "{out}");
+    }
+
+    #[test]
+    fn reference_chains_deeper_than_the_tree_bound_degrade() {
+        // 80 SIBLING elements chained by reference sidestep the XML nesting
+        // bound entirely; the resolving stack's own MAX_REF_DEPTH cap keeps §4
+        // totality — a marker, never a stack overflow. (Reversed document order
+        // defeats memo pre-warming, forcing the deep descents.)
+        let mut body = String::new();
+        for i in (1..=80).rev() {
+            body.push_str(&format!(
+                r##"<x:boolean id="c{i}" op="union" fill="#000"><use href="#c{}"/></x:boolean>"##,
+                i - 1
+            ));
+        }
+        body.push_str(r##"<rect id="c0" x="0" y="0" width="10" height="10"/>"##);
+        let out = compile_test(&format!("{XW}{body}</svg>"));
+        assert!(out.contains("skipped <use>"), "expected a depth-cut marker");
+        assert!(out.contains("<path"));
+    }
+
+    #[test]
+    fn diamond_reference_fanout_is_memoized_not_exponential() {
+        // each level references the previous level TWICE (once offset by 5);
+        // 24 levels would be 2^24 lowerings without the per-compile memo —
+        // this test finishing at all is the assertion that the memo works
+        let mut body = String::from(r##"<rect id="g0" x="0" y="0" width="40" height="30"/>"##);
+        for i in 1..=24 {
+            body.push_str(&format!(
+                r##"<x:boolean id="g{i}" op="union" fill="#000"><use href="#g{}"/><use href="#g{}" x="5"/></x:boolean>"##,
+                i - 1,
+                i - 1
+            ));
+        }
+        let out = compile_test(&format!("{XW}{body}</svg>"));
+        use xsvg_core::kurbo::Shape;
+        // width grows by 5 per level: 40 + 24·5 = 160
+        let bb = first_path(&out).bounding_box();
+        assert!(
+            (bb.x1 - 160.0).abs() < 0.5 && (bb.y1 - 30.0).abs() < 0.5,
+            "{bb:?}"
+        );
     }
 
     #[test]

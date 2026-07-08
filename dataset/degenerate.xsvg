@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 590 510" font-family="sans-serif">
+     viewBox="0 0 590 660" font-family="sans-serif">
   <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">degenerate inputs — must stay sane, never panic</text>
 
   <!-- empty text -->
@@ -52,4 +52,18 @@
   <rect x="400" y="358" width="170" height="120" rx="8" fill="#f0fdf4" stroke="#4ade80"/>
   <path id="deg-short" d="M410,438 C420,412 445,412 470,424" fill="none" stroke="#bbf7d0" stroke-width="2"/>
   <x:textpath in="#deg-short" effect="rainbow" font-family="-x-google-Anton" font-size="16" fill="#14532d">keeps on going</x:textpath>
+
+  <!-- a reference cycle: the <use> pointing at its own boolean is cut; the circle survives -->
+  <text x="20" y="504" font-size="11" fill="#64748b">self-cycle → edge drops out</text>
+  <rect x="20" y="510" width="170" height="120" rx="8" fill="#fff7ed" stroke="#fb923c"/>
+  <x:boolean id="deg-cycle" op="union" fill="#9a3412">
+    <use href="#deg-cycle"/>
+    <circle cx="105" cy="570" r="38"/>
+  </x:boolean>
+
+  <!-- mutual references: both edges cut, both elements degrade to markers -->
+  <text x="210" y="504" font-size="11" fill="#64748b">mutual cycle → markers only (blank)</text>
+  <rect x="210" y="510" width="170" height="120" rx="8" fill="#fdf4ff" stroke="#d946ef"/>
+  <x:textpath id="deg-cyc-a" in="#deg-cyc-b" effect="stair" font-size="14" fill="#86198f">never resolves</x:textpath>
+  <x:textpath id="deg-cyc-b" in="#deg-cyc-a" effect="stair" font-size="14" fill="#86198f">never resolves</x:textpath>
 </svg>

@@ -230,7 +230,7 @@ export const CATALOG: Category[] = [
       {
         file: "degenerate.xsvg",
         title: "Degenerate input",
-        blurb: "empty text, inline-size=0, font-size=0, shrink floors, oversized words, degenerate textpath targets",
+        blurb: "empty text, inline-size=0, font-size=0, shrink floors, oversized words, degenerate textpath targets, reference cycles",
       },
       {
         file: "descenders.xsvg",

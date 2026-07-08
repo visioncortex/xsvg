@@ -76,7 +76,10 @@ enough that one edit re-lowers one feature's worth of work.
   `in`-target: editing `#a` re-emits `<x:warp id="b" in="#a">`, whose changed output re-emits
   `<x:textpath in="#b">`, to a fixpoint. `dependents` computes exactly this closure (document
   order), pinned by `dependents_closure_is_transitive`. Reference **cycles** are a compile-time
-  degradation (the cyclic edge resolves to nothing), so the closure always terminates.
+  degradation (the cyclic edge resolves to nothing), so the closure always terminates. Within any
+  one `compile`/`compile_fragment` call, context-free reference resolutions **memoize** (id →
+  geometry), so a fragment that sits on a chain re-derives each upstream target once, not once per
+  mention; chain depth itself is capped (Specification.md §4, v0: 32).
 - **A fragment can begin with marker comments** (skip/degradation markers precede the element).
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient
