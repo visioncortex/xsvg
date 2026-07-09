@@ -64,23 +64,41 @@ filled path into coarse per-row inside-spans. In v0 the browser supplies it (`ge
 §6.13, `<x:warp field="bend">` §7.3) and `<use href>` operands inside `<x:boolean>` (§7.4) resolve
 to geometry by target kind:
 
-- A **plain SVG shape** (`rect`, `path`, `circle`, `ellipse`, `polygon`, `polyline`) contributes its
-  own source geometry.
+- A **plain SVG shape** (`rect`, `path`, `circle`, `ellipse`, `line`, `polygon`, `polyline`)
+  contributes its own source geometry.
+- A **plain `<g>`** contributes the union of its shape descendants; transforms compose down the
+  tree and nested `x:` elements resolve as below. (Children with no geometry — text, `<defs>`,
+  live `<use>` — are skipped, not fatal.)
 - An **`x:` element** contributes its **compiled output**: the target is lowered as if in place and
-  every `<path d>` it emits is concatenated into one (possibly multi-subpath) region. Features
-  therefore chain by reference — a textbox can flow inside a boolean union, type can be set on the
-  spine an `x:warp` emitted, and a `path → x:warp → x:textpath` chain re-derives end-to-end from one
-  edit (the incremental `dependents` scan is a transitive closure over these edges —
-  [Incremental.md](Incremental.md)).
+  every `<path d>` it emits is concatenated into one (possibly multi-subpath) region. Referenced
+  **text auto-outlines**: the resolution pass forces `outline="true"` semantics so a referenced
+  textbox contributes its glyph geometry (while itself still rendering live). Output containing a
+  path under `fill-rule="evenodd"` is **resolved through the boolean engine** so the borrowed
+  region equals the *painted* region. Features therefore chain by reference — a textbox can flow
+  inside a boolean union, type can be set on the spine an `x:warp` emitted, and a
+  `path → x:warp → x:textpath` chain re-derives end-to-end from one edit (the incremental
+  `dependents` scan is a transitive closure over these edges — [Incremental.md](Incremental.md)).
+- The target's **own `transform` is honored** — borrowed geometry lands where the user sees the
+  target, not where its untransformed source is. A transform **nested deeper** in an `x:` target's
+  output (e.g. on a warp's child) cannot be honored by the flat harvest and degrades with a marker
+  instead of silently mis-placing geometry.
 - A **reference cycle** (the target is already being resolved somewhere up the chain) is a
   degradation, not an error: the cyclic edge resolves to nothing and the referrer falls back exactly
   as for a missing target (§3) — compilation always terminates.
 - **Chain depth is bounded** (v0: 32 links). Element nesting is capped at 512 (§4 *Robustness*),
   but reference chains run between *siblings*, so they get their own, lower cap — each link
   recurses through a full emitter, and totality must hold on wasm's small stack. A deeper chain
-  degrades at the cap with the same marker as a cycle. Within one compile, **context-free
-  resolutions are memoized**, so a target referenced N times lowers once and diamond-shaped
-  fan-out (each level referencing the previous one twice) stays linear rather than exponential.
+  degrades at the cap. Within one compile, **context-free resolutions are memoized** (a target
+  referenced N times lowers once) and total resolutions are **fuel-bounded** (v0: 65 536) — the
+  depth cap bounds how deep a resolution tree goes, the fuel how wide, so cycle-poisoned fan-out
+  (which the memo must not cache) exhausts fuel instead of time.
+- Every failed resolution emits a marker (§3) **naming the reason** — target not found, no path
+  geometry, chain too deep, budget exhausted, nested transform — so a blank chain is diagnosable
+  from the output alone.
+
+*Approximation note.* A referenced `x:` output is already flattened and quantized at the profile
+tolerance (§7.1), and the consumer approximates again — each link compounds roughly one tolerance
+of error. Negligible at `balanced`; on deep chains at `fast`, prefer a tighter profile.
 
 **Robustness (normative).** Compilation is total on well-formed input: degenerate geometry
 (zero/negative width, height, padding, or `font-size`), degenerate spacing (negative
@@ -674,15 +692,21 @@ deterministic**. The result's contours carry deterministic opposite windings for
 renders identically under either fill rule.
 
 **Operands by reference (normative).** A `<use href="#id">` child is an operand that **borrows**
-the target's geometry per §4 *Reference resolution* (a plain shape's source geometry; an `x:`
-element's compiled output) **without consuming it** — the target keeps rendering wherever it is.
-This is the derived-shape form: a venn lens over circles that still draw themselves, a plate
-punched by a union that is also its own artwork. `x`/`y` on the `<use>` translate the borrowed
-geometry (SVG's own `<use>` offset semantics), so one motif can be stamped at several offsets and
-fused. The operand's `fill-rule` is read from the `<use>` element itself; legacy `xlink:href` is
-accepted. A `<use>` whose target is missing, has no geometry, or closes a reference cycle is
-skipped with a marker, like any other unusable operand. (Everywhere outside `<x:boolean>`, `<use>`
-remains an untouched live SVG reference — §5.)
+the target's geometry per §4 *Reference resolution* (a plain shape's source geometry; a group's
+descendants; an `x:` element's compiled output) **without consuming it** — the target keeps
+rendering wherever it is. This is the derived-shape form: a venn lens over circles that still draw
+themselves, a plate punched by a union that is also its own artwork. The `<use>` element's own
+`transform` and its `x`/`y` offset both apply (composed in SVG's order), so one motif can be
+stamped at several placements and fused. The operand's `fill-rule` is read from the `<use>`
+element itself; legacy `xlink:href` is accepted. A `<use>` that cannot resolve is skipped with a
+marker naming the reason (§4). (Everywhere outside `<x:boolean>`, `<use>` remains an untouched
+live SVG reference — §5.)
+
+> **Binding time (normative).** This `<use>` is resolved **at compile time** — it borrows a
+> snapshot of the target's geometry, unlike SVG's own `<use>`, which is a *live* clone the browser
+> keeps in sync. CSS/SMIL animation, script mutation, or any later change to the target does **not**
+> update geometry derived from it; re-compile to re-derive. The same holds for every `in="#id"`
+> reference (§4).
 
 **Degradation (normative).** A child that cannot become path geometry is skipped with a marker —
 never silently dropped from the algebra. An unknown `op` emits the children **un-combined behind a
@@ -690,10 +714,9 @@ marker**. A legitimately **empty result** (e.g. a disjoint `intersect`) emits an
 element with no usable geometry at all emits only a marker. Plain viewers skip the subtree (§3).
 
 **v1 limits.** Ops act on **fill regions** — strokes apply to the result, not the operand
-geometry; no multi-output Pathfinder modes (Divide/Trim/Merge); `<use>` operands take `x`/`y`
-offsets but not a full `transform`. Backend: [`i_overlay`](https://crates.io/crates/i_overlay)
-behind a swappable seam (curve-exact and kurbo-native backends can slot in later without surface
-changes).
+geometry (no *expand stroke* pre-pass yet); no multi-output Pathfinder modes (Divide/Trim/Merge).
+Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable seam (curve-exact
+and kurbo-native backends can slot in later without surface changes).
 
 ### 7.5 Remaining pillars & deferred [planned]
 
@@ -737,7 +760,8 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
-| `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (`x`/`y` offsets) | implemented |
+| `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
+| Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

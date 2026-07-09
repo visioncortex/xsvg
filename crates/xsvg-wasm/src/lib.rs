@@ -42,6 +42,12 @@ const MAX_NESTING_DEPTH: usize = 512;
 /// instead of trapping.
 const MAX_REF_DEPTH: usize = 32;
 
+/// Total reference resolutions allowed per compile call. The memo makes legit
+/// documents consume roughly one unit per distinct id'd target; only
+/// cycle-poisoned fan-out (unmemoizable by design) burns fuel combinatorially,
+/// and this is the bound that stops it.
+const REF_FUEL: u32 = 65_536;
+
 /// Runs once when the module is instantiated: route Rust panics to `console.error`.
 #[wasm_bindgen(start)]
 pub fn on_start() {
@@ -223,6 +229,14 @@ struct Ctx<'a> {
     /// counts cycle/depth cuts; `ref_geometry` snapshots it around a resolution
     /// to decide whether the result was context-free (memoizable).
     cuts: std::cell::Cell<u64>,
+    /// remaining reference resolutions for this compile call ([`REF_FUEL`]).
+    /// The depth cap bounds how deep a resolution tree goes; this bounds how
+    /// WIDE — cycle-poisoned fan-out defeats the memo (cut results are never
+    /// cached), so without fuel a document could branch 2^depth resolutions.
+    fuel: std::cell::Cell<u32>,
+    /// forces `outline="true"` semantics while scratch-serializing a reference
+    /// target, so referenced text contributes glyph geometry instead of nothing.
+    force_outline: std::cell::Cell<bool>,
 }
 
 /// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
@@ -354,6 +368,8 @@ pub fn compile_impl(
             resolving: std::cell::RefCell::new(Vec::new()),
             resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
             cuts: std::cell::Cell::new(0),
+            fuel: std::cell::Cell::new(REF_FUEL),
+            force_outline: std::cell::Cell::new(false),
         },
     );
     Ok(out)
@@ -408,6 +424,8 @@ pub fn compile_fragment_impl(
             resolving: std::cell::RefCell::new(Vec::new()),
             resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
             cuts: std::cell::Cell::new(0),
+            fuel: std::cell::Cell::new(REF_FUEL),
+            force_outline: std::cell::Cell::new(false),
         },
     );
     Ok(out)
@@ -631,7 +649,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
-    let outline = node.attribute("outline") == Some("true");
+    let outline = node.attribute("outline") == Some("true") || ctx.force_outline.get();
     let stroke = outline_stroke_attrs(node);
     let pos = pos_attr(node, ctx);
 
@@ -668,8 +686,17 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // any other shape — or an x: element's compiled output (e.g. a boolean
         // union) — flows text inside its filled outline via the raster region
         // (styled runs are not supported in curved region flow in v0)
-        let region = ref_geometry(node, reference, ctx)
-            .and_then(|d| ctx.shaper.rasterize(&d, (style.size / 3.0).max(1.0)));
+        let geometry = match ref_geometry(node, reference, ctx) {
+            Ok(d) => d,
+            Err(f) => {
+                out.push_str(&format!(
+                    "<!-- xsvg: <x:textbox in> no region geometry ({}) -->",
+                    f.reason()
+                ));
+                return;
+            }
+        };
+        let region = ctx.shaper.rasterize(&geometry, (style.size / 3.0).max(1.0));
         let Some(region) = region else {
             out.push_str("<!-- xsvg: <x:textbox in> shape not rasterizable -->");
             return;
@@ -747,9 +774,15 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out.push_str("<!-- xsvg: <x:textpath> requires in=\"#path\" -->");
         return;
     };
-    let Some(path_d) = ref_geometry(node, reference, ctx) else {
-        out.push_str("<!-- xsvg: <x:textpath in> target not found or not a path -->");
-        return;
+    let path_d = match ref_geometry(node, reference, ctx) {
+        Ok(d) => d,
+        Err(f) => {
+            out.push_str(&format!(
+                "<!-- xsvg: <x:textpath in> target not found or not a path ({}) -->",
+                f.reason()
+            ));
+            return;
+        }
     };
 
     // "follow" (§6.13.5) lowers to SVG's own <textPath> — live, selectable text
@@ -933,7 +966,7 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             // its vertical midline rides it
             let frame = node
                 .attribute("in")
-                .and_then(|r| ref_geometry(node, r, ctx))
+                .and_then(|r| ref_geometry(node, r, ctx).ok())
                 .and_then(|d| PathFrame::new(&d, ctx.quality.tolerance()))?;
             let s0 = run_offset(
                 frame.len(),
@@ -1104,14 +1137,16 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let href = child
                 .attribute("href")
                 .or_else(|| child.attribute((XLINK_NS, "href")));
-            match href.and_then(|r| ref_geometry(child, r, ctx)) {
-                Some(d) => {
-                    let d = use_offset_d(&d, child).unwrap_or(d);
-                    markups.push((format!("<path d=\"{d}\"/>"), even_odd));
-                }
-                None => markers.push_str(
-                    "<!-- xsvg: <x:boolean> skipped <use>: target not found or no geometry -->",
-                ),
+            let placed = href
+                .ok_or(RefFail::NotFound)
+                .and_then(|r| ref_geometry(child, r, ctx))
+                .and_then(|d| transform_d(&d, use_placement(child)).ok_or(RefFail::NoGeometry));
+            match placed {
+                Ok(d) => markups.push((format!("<path d=\"{d}\"/>"), even_odd)),
+                Err(f) => markers.push_str(&format!(
+                    "<!-- xsvg: <x:boolean> skipped <use> ({}) -->",
+                    f.reason()
+                )),
             }
             continue;
         }
@@ -1200,61 +1235,240 @@ fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::
         .find(|n| n.attribute("id") == Some(id))
 }
 
-/// Apply a `<use>` element's `x`/`y` offset (SVG's translate semantics) to
-/// referenced geometry. `None` when there is no offset (caller keeps `d` as-is).
-fn use_offset_d(d: &str, use_el: roxmltree::Node) -> Option<String> {
-    let (x, y) = (attr_num(use_el, "x", 0.0), attr_num(use_el, "y", 0.0));
-    if x == 0.0 && y == 0.0 {
-        return None;
+/// Parse an SVG `transform` list into a kurbo [`Affine`] (§4 reference
+/// resolution honors the target's own transform). Mirrors browser behavior for
+/// invalid input: the whole list is ignored (identity).
+fn parse_transform(s: &str) -> xsvg_core::kurbo::Affine {
+    use xsvg_core::kurbo::Affine;
+    let mut total = Affine::IDENTITY;
+    let mut rest = s;
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim_matches(|c: char| c == ',' || c.is_whitespace());
+        let Some(close) = rest[open..].find(')') else {
+            return Affine::IDENTITY;
+        };
+        let args: Vec<f64> = rest[open + 1..open + close]
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(parse_num)
+            .collect();
+        let t = match (name, args.as_slice()) {
+            ("matrix", [a, b, c, d, e, f]) => Affine::new([*a, *b, *c, *d, *e, *f]),
+            ("translate", [tx]) => Affine::translate((*tx, 0.0)),
+            ("translate", [tx, ty]) => Affine::translate((*tx, *ty)),
+            ("scale", [k]) => Affine::scale(*k),
+            ("scale", [kx, ky]) => Affine::scale_non_uniform(*kx, *ky),
+            ("rotate", [a]) => Affine::rotate(a.to_radians()),
+            ("rotate", [a, cx, cy]) => {
+                Affine::translate((*cx, *cy))
+                    * Affine::rotate(a.to_radians())
+                    * Affine::translate((-*cx, -*cy))
+            }
+            ("skewX", [a]) => Affine::new([1.0, 0.0, a.to_radians().tan(), 1.0, 0.0, 0.0]),
+            ("skewY", [a]) => Affine::new([1.0, a.to_radians().tan(), 0.0, 1.0, 0.0, 0.0]),
+            _ => return Affine::IDENTITY,
+        };
+        total *= t;
+        rest = &rest[open + close + 1..];
     }
-    let mut path = xsvg_core::kurbo::BezPath::from_svg(d).ok()?;
-    path.apply_affine(xsvg_core::kurbo::Affine::translate((x, y)));
-    Some(path.to_svg())
+    if total.is_finite() {
+        total
+    } else {
+        Affine::IDENTITY
+    }
 }
 
-/// Resolve an `in="#id"` reference to **geometry** (§6.10/§6.13/§7.3/§7.4): a
-/// plain shape yields its source geometry; an `x:` element yields its **compiled
-/// output** — every `<path d>` it emits, joined as one multi-subpath region — so
-/// composition works by reference (flow text inside a boolean union, set type on
-/// a warped spine). Cycles (a target already being resolved), chains deeper than
-/// [`MAX_REF_DEPTH`], and targets that emit no path geometry return `None`;
-/// the caller degrades with its marker (§4 totality — never a stack overflow).
-///
-/// Context-free resolutions (no cut occurred underneath) are memoized for the
-/// rest of the compile call, so a target referenced N times lowers once and
-/// diamond-shaped fan-out stays linear instead of exponential.
-fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Option<String> {
-    let target = resolve_ref(node, r)?;
-    if target.tag_name().namespace() != Some(XSVG_NS) {
-        return shape_to_path_d(target);
+/// Apply an affine to path data. `None` if `d` fails to parse.
+fn transform_d(d: &str, a: xsvg_core::kurbo::Affine) -> Option<String> {
+    if a == xsvg_core::kurbo::Affine::IDENTITY {
+        return Some(d.to_string());
     }
-    let id = target.attribute("id")?.to_string();
-    if let Some(hit) = ctx.resolved.borrow().get(&id) {
-        return hit.clone();
-    }
-    {
-        let stack = ctx.resolving.borrow();
-        if stack.contains(&id) || stack.len() >= MAX_REF_DEPTH {
-            ctx.cuts.set(ctx.cuts.get() + 1);
-            return None; // reference cycle, or a chain deeper than the ref bound
+    let mut p = xsvg_core::kurbo::BezPath::from_svg(d).ok()?;
+    p.apply_affine(a);
+    Some(p.to_svg())
+}
+
+/// A `<use>` operand's placement: its `transform` composed with the extra
+/// `x`/`y` translation (per SVG, x/y append a translate after the transform).
+fn use_placement(use_el: roxmltree::Node) -> xsvg_core::kurbo::Affine {
+    let t = use_el
+        .attribute("transform")
+        .map(parse_transform)
+        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+    t * xsvg_core::kurbo::Affine::translate((
+        attr_num(use_el, "x", 0.0),
+        attr_num(use_el, "y", 0.0),
+    ))
+}
+
+/// Why a reference failed to resolve to geometry — spelled into the caller's
+/// marker so degradations are distinguishable (§4).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RefFail {
+    NotFound,
+    NoGeometry,
+    Cycle,
+    Depth,
+    Budget,
+    InnerTransform,
+}
+
+impl RefFail {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::NotFound => "target not found",
+            Self::NoGeometry => "target has no path geometry",
+            Self::Cycle => "reference cycle",
+            Self::Depth => "reference chain too deep",
+            Self::Budget => "reference budget exhausted",
+            Self::InnerTransform => "referenced output nests a transform",
         }
     }
+}
+
+/// Resolve an `in="#id"` / `<use href>` reference to **geometry** (§4): a plain
+/// shape yields its source geometry, a plain `<g>` the union of its shape
+/// descendants, and an `x:` element its **compiled output** — every `<path d>`
+/// it emits, joined as one multi-subpath region — so composition works by
+/// reference. The target's own `transform` is honored (applied to the borrowed
+/// geometry). Cycles, chains deeper than [`MAX_REF_DEPTH`], and an exhausted
+/// [`REF_FUEL`] budget degrade with a distinguishable [`RefFail`] (§4 totality).
+fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Result<String, RefFail> {
+    let target = resolve_ref(node, r).ok_or(RefFail::NotFound)?;
+    target_geometry(target, ctx)
+}
+
+/// The geometry a single element contributes when referenced (or when swept up
+/// by a group walk). Guards, budget, memo, and the element's own `transform`
+/// live here; the per-kind harvests live in [`x_output_geometry`] /
+/// [`group_geometry`] / [`shape_to_path_d`].
+fn target_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail> {
+    let own = target
+        .attribute("transform")
+        .map(parse_transform)
+        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+    let is_x = target.tag_name().namespace() == Some(XSVG_NS);
+    if !is_x && target.tag_name().name() != "g" {
+        let d = shape_to_path_d(target).ok_or(RefFail::NoGeometry)?;
+        return transform_d(&d, own).ok_or(RefFail::NoGeometry);
+    }
+    let id = target.attribute("id").map(str::to_string);
+    if let Some(id) = &id {
+        if let Some(hit) = ctx.resolved.borrow().get(id) {
+            return hit.clone().ok_or(RefFail::NoGeometry);
+        }
+        if ctx.resolving.borrow().contains(id) {
+            ctx.cuts.set(ctx.cuts.get() + 1);
+            return Err(RefFail::Cycle);
+        }
+    }
+    if ctx.resolving.borrow().len() >= MAX_REF_DEPTH {
+        ctx.cuts.set(ctx.cuts.get() + 1);
+        return Err(RefFail::Depth);
+    }
+    if ctx.fuel.get() == 0 {
+        ctx.cuts.set(ctx.cuts.get() + 1);
+        return Err(RefFail::Budget);
+    }
+    ctx.fuel.set(ctx.fuel.get() - 1);
     let cuts_before = ctx.cuts.get();
-    ctx.resolving.borrow_mut().push(id.clone());
-    let mut buf = String::new();
-    serialize(target, &mut buf, false, ctx);
-    ctx.resolving.borrow_mut().pop();
-    let ds: Vec<&str> = find_path_d_ranges(&buf)
-        .into_iter()
-        .map(|(a, b)| &buf[a..b])
-        .collect();
-    let result = (!ds.is_empty()).then(|| ds.join(" "));
+    if let Some(id) = &id {
+        ctx.resolving.borrow_mut().push(id.clone());
+    }
+    let harvested = if is_x {
+        x_output_geometry(target, ctx)
+    } else {
+        group_geometry(target, ctx)
+    };
+    if id.is_some() {
+        ctx.resolving.borrow_mut().pop();
+    }
+    let result = harvested.and_then(|d| transform_d(&d, own).ok_or(RefFail::NoGeometry));
     // a cut below means this result reflects what was on the stack, not the
     // target itself — valid here, poison anywhere else
     if ctx.cuts.get() == cuts_before {
-        ctx.resolved.borrow_mut().insert(id, result.clone());
+        if let Some(id) = id {
+            match &result {
+                Ok(d) => {
+                    ctx.resolved.borrow_mut().insert(id, Some(d.clone()));
+                }
+                Err(RefFail::NoGeometry) => {
+                    ctx.resolved.borrow_mut().insert(id, None);
+                }
+                Err(_) => {}
+            }
+        }
     }
     result
+}
+
+/// Harvest an `x:` element's compiled output as geometry: scratch-serialize
+/// (with glyph outlining forced, so referenced text contributes its glyph
+/// geometry), reject nested transforms the d-only harvest cannot honor, resolve
+/// winding-sensitive output through the boolean engine, and join the rest.
+fn x_output_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail> {
+    let prev = ctx.force_outline.replace(true);
+    let mut buf = String::new();
+    serialize(target, &mut buf, false, ctx);
+    ctx.force_outline.set(prev);
+    // the target's own transform reappears on its output wrapper (copy_attrs)
+    // and is applied by target_geometry; any FURTHER transform nested in the
+    // output would be silently lost by a d-only harvest — degrade loudly
+    let expected = usize::from(target.attribute("transform").is_some());
+    if buf.matches(" transform=\"").count() > expected {
+        return Err(RefFail::InnerTransform);
+    }
+    let ranges = find_path_d_ranges(&buf);
+    if ranges.is_empty() {
+        return Err(RefFail::NoGeometry);
+    }
+    let ds: Vec<&str> = ranges.iter().map(|&(a, b)| &buf[a..b]).collect();
+    let even: Vec<bool> = ranges
+        .iter()
+        .map(|&(a, b)| {
+            let tag = buf[..a].rfind('<').unwrap_or(0);
+            let end = buf[b..].find('>').map(|i| b + i).unwrap_or(buf.len());
+            buf[tag..end].contains(r#"fill-rule="evenodd""#)
+        })
+        .collect();
+    if even.iter().any(|&e| e) {
+        // an evenodd path's painted region differs from its nonzero reading —
+        // resolve through the boolean engine so borrowed = painted
+        let ops: Vec<BoolOperand> = ds
+            .iter()
+            .zip(&even)
+            .map(|(d, &e)| BoolOperand {
+                paths: vec![d],
+                even_odd: e,
+            })
+            .collect();
+        return match boolean_svg_paths(&ops, BoolOp::Union, ctx.quality.tolerance()) {
+            Some(d) if !d.is_empty() => Ok(d),
+            _ => Err(RefFail::NoGeometry),
+        };
+    }
+    Ok(ds.join(" "))
+}
+
+/// A plain `<g>` target: every shape descendant contributes, transforms compose
+/// down the tree (each child applies its own inside [`target_geometry`]),
+/// nested `x:` elements resolve to their compiled output. Children that carry
+/// no geometry (text, defs, live `<use>`) are skipped, not fatal.
+fn group_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail> {
+    let mut ds = Vec::new();
+    for child in target.children().filter(|c| c.is_element()) {
+        // a passthrough <use> stays a live reference (§5), even inside a group
+        if child.tag_name().name() == "use" && child.tag_name().namespace() != Some(XSVG_NS) {
+            continue;
+        }
+        if let Ok(d) = target_geometry(child, ctx) {
+            ds.push(d);
+        }
+    }
+    if ds.is_empty() {
+        return Err(RefFail::NoGeometry);
+    }
+    Ok(ds.join(" "))
 }
 
 /// Convert a fillable SVG shape element to a path `d` string (for rasterization).
@@ -2756,6 +2970,153 @@ mod tests {
         );
         let out = compile_test(&svg); // terminates; cyclic operand drops out
         assert!(out.contains("<path"), "{out}");
+    }
+
+    #[test]
+    fn parse_transform_matches_svg_semantics() {
+        use xsvg_core::kurbo::Point;
+        let p = |x, y| Point::new(x, y);
+        assert_eq!(
+            parse_transform("translate(10,20)") * p(0.0, 0.0),
+            p(10.0, 20.0)
+        );
+        assert_eq!(
+            parse_transform("matrix(1 0 0 1 5 6)") * p(1.0, 1.0),
+            p(6.0, 7.0)
+        );
+        // list applies left-to-right: scale first in point terms, then translate
+        assert_eq!(
+            parse_transform("translate(10) scale(2)") * p(1.0, 0.0),
+            p(12.0, 0.0)
+        );
+        let r = parse_transform("rotate(90 10 10)") * p(10.0, 0.0);
+        assert!(
+            (r.x - 20.0).abs() < 1e-9 && (r.y - 10.0).abs() < 1e-9,
+            "{r:?}"
+        );
+        // invalid input → the whole list is ignored, like a browser
+        assert_eq!(parse_transform("rotate(nope)") * p(3.0, 4.0), p(3.0, 4.0));
+    }
+
+    #[test]
+    fn referenced_targets_honor_their_own_transform() {
+        // plain shape: a rect rotated about (20,20) — the borrowed geometry is
+        // where the user SEES it, not the untransformed source
+        let svg = format!(
+            r##"{XW}<rect id="t" x="0" y="0" width="40" height="10" transform="rotate(90 20 20)"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean></svg>"##
+        );
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&compile_test(&svg)).bounding_box();
+        assert!(
+            (bb.x0 - 30.0).abs() < 0.5 && (bb.x1 - 40.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        assert!(
+            (bb.y0 - 0.0).abs() < 0.5 && (bb.y1 - 40.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        // x: target: the transform on the boolean applies to its borrowed output
+        let svg = format!(
+            r##"{XW}<x:boolean id="b" op="union" fill="#000" transform="translate(100,0)"><rect x="0" y="0" width="40" height="30"/></x:boolean><x:boolean op="union" fill="#000"><use href="#b"/></x:boolean></svg>"##
+        );
+        let bb = first_path(&compile_test(&svg)).bounding_box();
+        assert!(
+            (bb.x0 - 100.0).abs() < 0.5 && (bb.x1 - 140.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        // a <use> operand's own transform composes with x/y
+        let svg = format!(
+            r##"{XW}<rect id="st" x="0" y="0" width="10" height="10"/><x:boolean op="union" fill="#000"><use href="#st" transform="scale(2)"/></x:boolean></svg>"##
+        );
+        let bb = first_path(&compile_test(&svg)).bounding_box();
+        assert!(
+            (bb.x1 - 20.0).abs() < 0.5 && (bb.y1 - 20.0).abs() < 0.5,
+            "{bb:?}"
+        );
+    }
+
+    #[test]
+    fn nested_transform_in_referenced_output_degrades_loudly() {
+        // the warp's CHILD carries a transform that survives into its output;
+        // a d-only harvest cannot honor it, so the reference degrades
+        let svg = format!(
+            r##"{XW}<x:warp id="t" field="arch" bend="10"><path d="M0,20 h40 v10 h-40 Z" transform="translate(3,4)" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">hi</x:textpath></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("(referenced output nests a transform)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn referenced_evenodd_output_resolves_to_its_painted_region() {
+        // a ring drawn with two same-winding subpaths under evenodd: the painted
+        // region is the frame (1200), not the nonzero solid (1600)
+        let svg = format!(
+            r##"{XW}<x:warp id="ring" field="arch" bend="0"><path d="M0,0 h40 v40 h-40 Z M10,10 h20 v20 h-20 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:boolean op="union" fill="#000"><use href="#ring"/></x:boolean></svg>"##
+        );
+        use xsvg_core::kurbo::Shape;
+        let p = first_path(&compile_test(&svg));
+        assert!((p.area().abs() - 1200.0).abs() < 5.0, "{}", p.area());
+    }
+
+    #[test]
+    fn group_targets_contribute_their_shape_descendants() {
+        // transforms compose down the tree: group translate + nested-group translate
+        let svg = format!(
+            r##"{XW}<g id="grp" transform="translate(10,0)"><circle cx="20" cy="20" r="10"/><g transform="translate(0,40)"><rect x="0" y="0" width="10" height="10"/></g></g><x:boolean op="union" fill="#000"><use href="#grp"/></x:boolean></svg>"##
+        );
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&compile_test(&svg)).bounding_box();
+        assert!(
+            (bb.x0 - 10.0).abs() < 0.5 && (bb.x1 - 40.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        assert!(
+            (bb.y0 - 10.0).abs() < 0.5 && (bb.y1 - 50.0).abs() < 0.5,
+            "{bb:?}"
+        );
+    }
+
+    #[test]
+    fn cycle_poisoned_fanout_exhausts_fuel_not_time() {
+        // a self-cycle at the bottom poisons the memo (cut results are never
+        // cached), so 26 double-referencing levels would branch ~2^26 without
+        // the fuel bound — this compiling promptly IS the assertion
+        let mut body = String::from(
+            r##"<x:boolean id="p0" op="union" fill="#000"><use href="#p0"/><rect x="0" y="0" width="10" height="10"/></x:boolean>"##,
+        );
+        for i in 1..=26 {
+            body.push_str(&format!(
+                r##"<x:boolean id="p{i}" op="union" fill="#000"><use href="#p{}"/><use href="#p{}" x="5"/></x:boolean>"##,
+                i - 1,
+                i - 1
+            ));
+        }
+        let out = compile_test(&format!("{XW}{body}</svg>"));
+        assert!(
+            out.contains("(reference budget exhausted)"),
+            "expected a fuel cut"
+        );
+    }
+
+    #[test]
+    fn referenced_text_is_outlined_for_geometry() {
+        // punching a textbox by reference: the scratch resolution forces
+        // outline="true" semantics so glyphs contribute geometry — while the
+        // textbox itself still renders as live <text>
+        let svg = format!(
+            r##"{XW}<x:textbox id="w" x="10" y="10" width="80" height="20" font-size="10">hi</x:textbox><x:boolean op="subtract" fill="#000"><rect x="0" y="0" width="100" height="40"/><use href="#w"/></x:boolean></svg>"##
+        );
+        let out = compile_outlined(&svg);
+        assert!(
+            out.contains("<text"),
+            "textbox itself must stay live: {out}"
+        );
+        use xsvg_core::kurbo::Shape;
+        let a = first_path(&out).area().abs();
+        assert!(a < 3999.5 && a > 3990.0, "glyph geometry not punched: {a}");
     }
 
     #[test]

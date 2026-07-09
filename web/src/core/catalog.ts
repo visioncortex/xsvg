@@ -209,7 +209,7 @@ export const CATALOG: Category[] = [
       {
         file: "boolean-refs.xsvg",
         title: "Operands by reference",
-        blurb: "<use href> children: a venn lens derived from circles that keep rendering, a motif stamped at offsets and fused, and a union punching a plate by reference",
+        blurb: "<use href> children: a venn lens derived from circles that keep rendering, motifs stamped by offset and by rotation, a union punching a plate, and live text whose glyphs punch by reference",
       },
     ],
   },
