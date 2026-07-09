@@ -1108,6 +1108,58 @@ mod tests {
     }
 
     #[test]
+    fn v_axis_presets_bend_the_cross_direction() {
+        // axis="v": u runs along y, displacement/scale act across it — the
+        // V arms of the displacement and scale families
+        assert_eq!(WarpAxis::parse("V"), WarpAxis::V);
+        let path = rect_path();
+        let bbox = path.bounding_box();
+        for name in ["flag", "squeeze", "rise"] {
+            let f = EnvelopePreset::new(name, 0.4, WarpAxis::V, bbox).unwrap();
+            let baked = bake(&path, &f, 0.25);
+            let bb = baked.bounding_box();
+            assert!(bb.width().is_finite() && bb.height().is_finite());
+            assert_ne!(
+                vertices(&baked),
+                vertices(&bake(
+                    &path,
+                    &EnvelopePreset::new(name, 0.4, WarpAxis::H, bbox).unwrap(),
+                    0.25
+                )),
+                "{name}: V must differ from H"
+            );
+        }
+    }
+
+    #[test]
+    fn path_frame_uses_the_first_subpath_only() {
+        let frame = PathFrame::new("M0,0 L10,0 M20,0 L30,0", 0.1).unwrap();
+        // arc length is the first subpath's 10, and the far end extrapolates
+        // straight along it — the second subpath contributes nothing
+        let p = frame.at(10.0, 0.0);
+        assert!((p.x - 10.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
+        let p = frame.at(15.0, 0.0);
+        assert!(
+            (p.x - 15.0).abs() < 1e-9,
+            "extrapolation past the end: {p:?}"
+        );
+    }
+
+    #[test]
+    fn compact_serialization_covers_quads_and_the_fine_grid() {
+        // quadratics survive the encoder (nothing in today's pipeline emits
+        // them post-bake, but the encoder is pinned for all element kinds)
+        let p = BezPath::from_svg("M0,0 Q10,10 20,0 C25,-5 35,-5 40,0 Z").unwrap();
+        let d = serialize_compact(&p, 0.25).unwrap();
+        let back = BezPath::from_svg(&d).unwrap();
+        assert!((back.bounding_box().x1 - 40.0).abs() < 0.5, "{d}");
+        // tolerance < 0.02 selects the 1000-unit grid: three decimals survive
+        let p = BezPath::from_svg("M0.123,0 L10.457,0").unwrap();
+        let d = serialize_compact(&p, 0.01).unwrap();
+        assert!(d.contains(".123"), "fine grid must keep 3 decimals: {d}");
+    }
+
+    #[test]
     fn zero_bend_is_identity() {
         let path = rect_path();
         let baked = bake(&path, &arch(0.0, path.bounding_box()), 0.25);

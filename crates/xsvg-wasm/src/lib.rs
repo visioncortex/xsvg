@@ -2807,6 +2807,12 @@ mod tests {
     }
 
     #[test]
+    fn dependents_of_nothing_is_nothing() {
+        assert!(dependents_impl("<svg", 2).is_empty()); // malformed input
+        assert!(dependents_impl(INC, 0).is_empty()); // offset in the root tag
+    }
+
+    #[test]
     fn dependents_track_baked_in_references() {
         let offs = top_level_offsets(INC);
         // editing the referenced #wave path invalidates the textpath that bakes it
@@ -2973,6 +2979,121 @@ mod tests {
     }
 
     #[test]
+    fn grim_corpus_is_total_and_never_silent() {
+        // §3/§4 as a property, swept across every emitter: a degenerate
+        // document must COMPILE (no panic), the output must never be empty,
+        // must never leak NaN/inf coordinates, and an x: element that cannot
+        // do its job must leave a marker — degradation is always acknowledged,
+        // never silent.
+        let cases: &[&str] = &[
+            // x: elements with nothing to work with
+            r##"<x:textbox in="#nope">text</x:textbox>"##,
+            r##"<x:textpath font-size="10">no in</x:textpath>"##,
+            r##"<x:textpath in="#nope" font-size="10">x</x:textpath>"##,
+            r##"<x:warp><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="nope" bend="40"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="bend"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:boolean op="union"><g/></x:boolean>"##,
+            r##"<x:boolean op="nope"><rect x="0" y="0" width="10" height="10"/></x:boolean>"##,
+            r##"<x:boolean op="union"><use/></x:boolean>"##,
+            // degenerate numerics
+            r##"<x:warp field="arch" bend="NaN"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="arch" bend="1e999"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="roughen" bend="-40" detail="-8"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="perspective" corners="a b c d"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:warp field="arch" bend="40"><rect x="0" y="0" width="0" height="0"/></x:warp>"##,
+            // degenerate reference targets
+            r##"<path id="t" d=""/><x:textpath in="#t" font-size="10">x</x:textpath>"##,
+            r##"<path id="t" d="garbage"/><x:textpath in="#t" font-size="10">x</x:textpath>"##,
+            r##"<circle id="t" cx="5" cy="5" r="0"/><x:textbox in="#t">x</x:textbox>"##,
+            r##"<text id="t">words</text><x:textpath in="#t" font-size="10">x</x:textpath>"##,
+            r##"<g id="t"/><x:boolean op="union"><use href="#t"/></x:boolean>"##,
+            r##"<g id="t"><text>only text</text></g><x:textbox in="#t">x</x:textbox>"##,
+            // hostile transforms
+            r##"<rect id="t" x="0" y="0" width="10" height="10" transform="matrix(0 0 0 0 0 0)"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean>"##,
+            r##"<rect id="t" x="0" y="0" width="10" height="10"/><x:boolean op="union" fill="#000"><use href="#t" transform="scale(0)"/></x:boolean>"##,
+            r##"<rect id="t" x="0" y="0" width="10" height="10"/><x:boolean op="union" fill="#000"><use href="#t" transform="translate(1e300)"/></x:boolean>"##,
+            r##"<rect id="t" x="0" y="0" width="10" height="10"/><x:boolean op="union" fill="#000"><use href="#t" transform="rotate(1e9)"/></x:boolean>"##,
+            r##"<rect id="t" x="0" y="0" width="10" height="10" transform="skewX(90)"/><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // self-reference in every consumer
+            r##"<x:textbox id="s" in="#s">x</x:textbox>"##,
+            r##"<x:warp id="s" field="bend" in="#s"><rect x="0" y="0" width="10" height="10"/></x:warp>"##,
+            r##"<x:boolean id="s" op="subtract"><use href="#s"/></x:boolean>"##,
+            // group walk: live <use> children skipped, not fatal
+            r##"<g id="t"><use href="#s"/><rect x="0" y="0" width="10" height="10"/></g><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean>"##,
+            // zero-extent rect as a reference target
+            r##"<rect id="t" x="0" y="0" width="0" height="10"/><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // unparseable d inside a warp child: segment passes through unwarped
+            r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
+            // evenodd output that cancels to nothing
+            r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+        ];
+        for (i, body) in cases.iter().enumerate() {
+            let svg = format!("{XW}{body}</svg>");
+            let out = compile_shaped(&svg); // a panic here fails the test: totality
+            assert!(!out.is_empty(), "case {i} produced empty output: {body}");
+            assert!(
+                !out.contains("NaN") && !out.contains("inf"),
+                "case {i} leaked non-finite coords: {body}\n{out}"
+            );
+            assert!(
+                out.contains("<path") || out.contains("<text") || out.contains("<!-- xsvg:"),
+                "case {i} degraded SILENTLY (no geometry, no live text, no marker): {body}\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn textbox_region_without_a_shaper_markers() {
+        // geometry resolves but the host cannot rasterize: the marker names it
+        let svg = format!(
+            r##"{XW}<circle id="t" cx="20" cy="20" r="15"/><x:textbox in="#t" font-size="10">x</x:textbox></svg>"##
+        );
+        let out = compile_test(&svg); // NoShaper
+        assert!(out.contains("not rasterizable"), "{out}");
+    }
+
+    #[test]
+    fn every_plain_shape_kind_resolves_as_a_reference() {
+        use xsvg_core::kurbo::Shape;
+        let bb =
+            |body: &str| first_path(&compile_test(&format!("{XW}{body}</svg>"))).bounding_box();
+        let e = bb(
+            r##"<ellipse id="t" cx="20" cy="10" rx="20" ry="10"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean>"##,
+        );
+        assert!(
+            (e.x1 - 40.0).abs() < 0.5 && (e.y1 - 20.0).abs() < 0.5,
+            "{e:?}"
+        );
+        let p = bb(
+            r##"<polygon id="t" points="0,0 20,0 10,18"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean>"##,
+        );
+        assert!(
+            (p.x1 - 20.0).abs() < 0.5 && (p.y1 - 18.0).abs() < 0.5,
+            "{p:?}"
+        );
+        let l = bb(
+            r##"<polyline id="t" points="0,0 10,5 20,0"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean>"##,
+        );
+        assert!(
+            (l.x1 - 20.0).abs() < 0.5 && (l.y1 - 5.0).abs() < 0.5,
+            "{l:?}"
+        );
+    }
+
+    #[test]
+    fn warp_unions_the_bbox_of_multiple_children() {
+        // the envelope frame is the union of all child geometry, so both rects
+        // share one field and bend together
+        let svg = format!(
+            r##"{XW}<x:warp field="arch" bend="40"><rect x="0" y="0" width="40" height="10" fill="#000"/><rect x="60" y="0" width="40" height="10" fill="#000"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<path").count(), 2, "{out}");
+        assert!(!out.contains("<!-- xsvg:"), "{out}");
+    }
+
+    #[test]
     fn parse_transform_matches_svg_semantics() {
         use xsvg_core::kurbo::Point;
         let p = |x, y| Point::new(x, y);
@@ -2994,8 +3115,17 @@ mod tests {
             (r.x - 20.0).abs() < 1e-9 && (r.y - 10.0).abs() < 1e-9,
             "{r:?}"
         );
+        assert_eq!(parse_transform("scale(2,3)") * p(1.0, 1.0), p(2.0, 3.0));
+        let sk = parse_transform("skewY(45)") * p(10.0, 0.0);
+        assert!((sk.y - 10.0).abs() < 1e-9, "{sk:?}");
         // invalid input → the whole list is ignored, like a browser
         assert_eq!(parse_transform("rotate(nope)") * p(3.0, 4.0), p(3.0, 4.0));
+        assert_eq!(parse_transform("translate(3") * p(0.0, 0.0), p(0.0, 0.0));
+        // a finite list whose product overflows is ignored too
+        assert_eq!(
+            parse_transform("scale(1e308) scale(1e308)") * p(1.0, 1.0),
+            p(1.0, 1.0)
+        );
     }
 
     #[test]

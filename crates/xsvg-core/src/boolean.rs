@@ -149,6 +149,28 @@ pub fn boolean_svg_paths(operands: &[BoolOperand], op: BoolOp, tolerance: f64) -
 mod tests {
     use super::*;
 
+    #[test]
+    fn curved_operands_flatten_into_the_algebra() {
+        // quadratic and cubic segments in operand paths (the flatten arms)
+        let ops = [
+            BoolOperand {
+                paths: vec!["M0,0 Q20,30 40,0 Z"],
+                even_odd: false,
+            },
+            BoolOperand {
+                paths: vec!["M10,0 C15,-15 25,-15 30,0 Z"],
+                even_odd: false,
+            },
+        ];
+        let d = boolean_svg_paths(&ops, BoolOp::Union, 0.1).unwrap();
+        assert!(!d.is_empty());
+        let area = net_area(&d);
+        assert!(
+            area.abs() > 100.0,
+            "curved union should have real area: {area}"
+        );
+    }
+
     fn operand(paths: Vec<&str>) -> BoolOperand<'_> {
         BoolOperand {
             paths,
