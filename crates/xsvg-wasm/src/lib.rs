@@ -469,6 +469,16 @@ fn baked_ref<'a>(n: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
             .attribute("href")
             .or_else(|| n.attribute((XLINK_NS, "href")));
     }
+    // a fill referencing a <meshgradient> is compiled, not live (§8.2)
+    if let Some(id) = n
+        .attribute("fill")
+        .and_then(|f| f.strip_prefix("url(#"))
+        .and_then(|f| f.strip_suffix(')'))
+    {
+        if resolve_ref(n, id).is_some_and(|t| t.tag_name().name() == "meshgradient") {
+            return Some(id);
+        }
+    }
     None
 }
 
@@ -601,6 +611,14 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     if name == "textArea" {
         emit_text_area(node, out, ctx);
         return;
+    }
+
+    // A fill referencing an SVG 2 <meshgradient> (the Inkscape dialect no
+    // browser renders) compiles to the mesh pipeline, clipped by the shape.
+    if let Some(mg) = mesh_fill_target(node) {
+        if emit_meshgradient_fill(node, mg, out, ctx) {
+            return;
+        }
     }
 
     // Sharp-cornered <rect> → <path>. Rounded rects pass through unchanged.
@@ -1259,8 +1277,7 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// 2×2). Regions are clipped by the exact union of their face polygons
 /// (nonzero), so cracks stay geometry-sharp regardless of raster resolution.
 fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    use xsvg_core::gradient;
-    use xsvg_core::gradient::{fit_field, fit_grid, texel_placement, Dof, Mesh};
+    use xsvg_core::gradient::Mesh;
 
     // ---- parse: grid sugar (cols/rows attributes) or points= + <x:face>
     let mut mesh = Mesh::default();
@@ -1362,7 +1379,31 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         return;
     }
 
-    // ---- stage 1: rasterize over the mesh bbox at a profile-graded resolution
+    out.push_str("<g");
+    copy_attrs(
+        node,
+        out,
+        &[
+            "cols", "rows", "x", "y", "width", "height", "fill", "points",
+        ],
+    );
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    if !lower_mesh(&mesh, node.range().start, out, ctx) {
+        out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
+    }
+    out.push_str("</g>");
+}
+
+/// The shared mesh lowering (§8.2 stage 1 + 2): rasterize at a profile-graded
+/// resolution, fit each crack region with a grown grid field, and emit one
+/// texel-aligned tiny PNG (or plain path for constant regions) per region.
+/// `seed` namespaces the clip ids (the caller's source position). Returns
+/// `false` on a degenerate extent (caller emits its marker).
+fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, ctx: &Ctx) -> bool {
+    use xsvg_core::gradient;
+    use xsvg_core::gradient::{fit_field, fit_grid, texel_placement, Dof};
+
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for &(x, y) in &mesh.verts {
         x0 = x0.min(x);
@@ -1371,8 +1412,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         y1 = y1.max(y);
     }
     if !(x1 > x0 && y1 > y0) {
-        out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
-        return;
+        return false;
     }
     let (max_px, min_px) = match ctx.quality {
         QualityProfile::Fast => (64.0f32, 24.0f32),
@@ -1413,17 +1453,6 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         QualityProfile::Highest | QualityProfile::Raster => (0.5, 48),
     };
 
-    out.push_str("<g");
-    copy_attrs(
-        node,
-        out,
-        &[
-            "cols", "rows", "x", "y", "width", "height", "fill", "points",
-        ],
-    );
-    out.push_str(&pos_attr(node, ctx));
-    out.push('>');
-    let mesh_pos = node.range().start;
     for r in 0..raster.regions {
         if region_px[r].is_empty() {
             continue;
@@ -1484,7 +1513,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // raster pixel space -> user units
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
         let (uw, uh) = (iw * scale as f64, ih * scale as f64);
-        let cid = format!("x-mesh-{mesh_pos}-{r}");
+        let cid = format!("x-mesh-{seed}-{r}");
         out.push_str(&format!(
             "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{}\"/>",
             fmt(ux),
@@ -1494,7 +1523,244 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             gradient::base64::encode(&png)
         ));
     }
+    true
+}
+
+/// The `fill="url(#id)"` target, when it is an SVG 2 `<meshgradient>` — the
+/// Inkscape mesh dialect no browser renders; xsvg compiles it (§8.2).
+fn mesh_fill_target<'a>(node: roxmltree::Node<'a, 'a>) -> Option<roxmltree::Node<'a, 'a>> {
+    let fill = node.attribute("fill")?;
+    let id = fill.strip_prefix("url(#")?.strip_suffix(')')?;
+    let target = resolve_ref(node, id)?;
+    (target.tag_name().name() == "meshgradient").then_some(target)
+}
+
+/// Lower a shape whose fill references an SVG 2 `<meshgradient>`: tessellate
+/// the Coons patches into the straight-quad mesh (polycurve → points), lower
+/// it through the standard pipeline, clip by the shape's geometry, and re-emit
+/// the stroke (if any) on top. Returns `false` (caller falls through to normal
+/// emission, mesh unrendered as in any browser) when the dialect doesn't parse.
+fn emit_meshgradient_fill(
+    node: roxmltree::Node,
+    mg: roxmltree::Node,
+    out: &mut String,
+    ctx: &Ctx,
+) -> bool {
+    let Some(shape_d) = shape_to_path_d(node) else {
+        return false;
+    };
+    let tess = match ctx.quality {
+        QualityProfile::Fast => 8usize,
+        QualityProfile::Balanced => 12,
+        QualityProfile::Highest | QualityProfile::Raster => 20,
+    };
+    let Some(mesh) = parse_meshgradient(mg, tess) else {
+        out.push_str(
+            "<!-- xsvg: meshgradient fill left live (unsupported or malformed dialect) -->",
+        );
+        return false;
+    };
+    let pos = node.range().start;
+    out.push_str(&format!(
+        "<clipPath id=\"x-mgc-{pos}\"><path d=\"{shape_d}\"/></clipPath><g clip-path=\"url(#x-mgc-{pos})\""
+    ));
+    if let Some(t) = node.attribute("transform") {
+        out.push_str(" transform=\"");
+        push_escaped(out, t, true);
+        out.push('"');
+    }
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    if !lower_mesh(&mesh, pos, out, ctx) {
+        out.push_str("<!-- xsvg: meshgradient degenerate extent -->");
+    }
     out.push_str("</g>");
+    // the stroke still paints over the mesh fill
+    if node.attribute("stroke").is_some() {
+        out.push_str("<path");
+        copy_attrs(
+            node,
+            out,
+            &[
+                "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
+                "x1", "y1", "x2", "y2",
+            ],
+        );
+        out.push_str(&format!(" fill=\"none\" d=\"{shape_d}\"/>"));
+    }
+    true
+}
+
+/// Parse the SVG 2 / Inkscape `<meshgradient>` dialect into a tessellated
+/// mesh: `meshrow`s of `meshpatch`es whose `<stop>`s carry one cubic (`c`/`C`)
+/// or line (`l`/`L`) edge each plus a corner color, with the standard
+/// inheritance — a patch after the first in a row inherits its left edge
+/// (reversed) from the neighbour, rows after the first inherit top edges from
+/// the row above, and inherited corners keep their colors. Colors attach to
+/// each stop edge's START corner on the very first patch, and to the END
+/// corner elsewhere (inherited corners win). `gradientTransform` is honored;
+/// `gradientUnits="objectBoundingBox"` and `type="bicubic"` degrade (bicubic
+/// renders as bilinear). Returns `None` if anything fails to parse.
+fn parse_meshgradient(mg: roxmltree::Node, tess: usize) -> Option<xsvg_core::gradient::Mesh> {
+    use xsvg_core::gradient::{reverse_edge, CoonsPatch, LinRgb, Mesh};
+    if mg.attribute("gradientUnits") == Some("objectBoundingBox") {
+        return None;
+    }
+    let origin = (attr_num(mg, "x", 0.0) as f32, attr_num(mg, "y", 0.0) as f32);
+    let affine = mg
+        .attribute("gradientTransform")
+        .map(parse_transform)
+        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+
+    let mut rows: Vec<Vec<CoonsPatch>> = Vec::new();
+    for row_el in mg
+        .children()
+        .filter(|c| c.is_element() && c.tag_name().name() == "meshrow")
+    {
+        let r = rows.len();
+        let mut row: Vec<CoonsPatch> = Vec::new();
+        for patch_el in row_el
+            .children()
+            .filter(|c| c.is_element() && c.tag_name().name() == "meshpatch")
+        {
+            let i = row.len();
+            let above = rows.last().and_then(|pr| pr.get(i)).copied();
+            let prev = row.last().copied();
+            if r > 0 && above.is_none() {
+                return None; // ragged rows are not meshes
+            }
+            let top = (r > 0).then(|| reverse_edge(above.unwrap().edges[2]));
+            let left = (i > 0).then(|| reverse_edge(prev.unwrap().edges[1]));
+
+            let mut edges: [Option<[(f32, f32); 4]>; 4] = [top, None, None, left];
+            // corners [TL, TR, BR, BL]; inherited ones are fixed
+            let mut colors: [Option<LinRgb>; 4] = [None; 4];
+            if let Some(p) = above {
+                colors[0] = Some(p.colors[3]); // our TL = above BL
+                colors[1] = Some(p.colors[2]); // our TR = above BR
+            }
+            if let Some(p) = prev {
+                colors[0] = Some(p.colors[1]); // our TL = prev TR
+                colors[3] = Some(p.colors[2]); // our BL = prev BR
+            }
+
+            let missing: Vec<usize> = (0..4).filter(|&k| edges[k].is_none()).collect();
+            let stops: Vec<roxmltree::Node> = patch_el
+                .children()
+                .filter(|c| c.is_element() && c.tag_name().name() == "stop")
+                .collect();
+            if stops.len() < missing.len() {
+                return None;
+            }
+            // walking start: TL for a parsed top edge, else TR (top inherited)
+            let mut cur = match (r > 0, i > 0) {
+                (false, false) => origin,
+                (false, true) => prev.unwrap().edges[1][0], // prev TR
+                (true, _) => top.unwrap()[3],               // TR, after the inherited top
+            };
+            for (stop, &k) in stops.iter().zip(missing.iter()) {
+                let (edge, next) = parse_stop_edge(stop.attribute("path")?, cur)?;
+                edges[k] = Some(edge);
+                cur = next;
+                // this stop's color belongs to the edge's END corner — except on
+                // the very first patch, where it is the START corner
+                let corner = if r == 0 && i == 0 { k } else { (k + 1) % 4 };
+                if colors[corner].is_none() {
+                    colors[corner] = Some(stop_color(*stop)?);
+                }
+            }
+            // first patch: the 4th stop's color lands on BL via the ends rule
+            // never firing — fill any hole from the stop list in corner order
+            if r == 0 && i == 0 {
+                for (stop, &k) in stops.iter().zip(missing.iter()) {
+                    if colors[k].is_none() {
+                        colors[k] = Some(stop_color(*stop)?);
+                    }
+                }
+            }
+            if colors.iter().any(|c| c.is_none()) {
+                return None;
+            }
+            row.push(CoonsPatch {
+                edges: [edges[0]?, edges[1]?, edges[2]?, edges[3]?],
+                colors: [colors[0]?, colors[1]?, colors[2]?, colors[3]?],
+            });
+        }
+        if row.is_empty() {
+            return None;
+        }
+        rows.push(row);
+    }
+    if rows.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::default();
+    let mut dedup = std::collections::HashMap::new();
+    for row in &rows {
+        for patch in row {
+            let mut p = *patch;
+            if affine != xsvg_core::kurbo::Affine::IDENTITY {
+                for e in &mut p.edges {
+                    for pt in e.iter_mut() {
+                        let m = affine * xsvg_core::kurbo::Point::new(pt.0 as f64, pt.1 as f64);
+                        *pt = (m.x as f32, m.y as f32);
+                    }
+                }
+            }
+            p.tessellate_into(&mut mesh, tess, &mut dedup);
+        }
+    }
+    Some(mesh)
+}
+
+/// One `<stop path>` edge: a single `c`/`C` cubic or `l`/`L` line from `cur`.
+/// Returns the edge (4 control points, walking order) and the new current point.
+fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 4], (f32, f32))> {
+    let d = d.trim();
+    let (cmd, rest) = d.split_at(1);
+    let nums: Vec<f32> = rest
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse::<f32>().ok().filter(|v| v.is_finite()))
+        .collect::<Option<Vec<f32>>>()?;
+    let rel = |k: usize| (cur.0 + nums[k], cur.1 + nums[k + 1]);
+    let abs = |k: usize| (nums[k], nums[k + 1]);
+    match (cmd, nums.len()) {
+        ("c", 6) => {
+            let e = [cur, rel(0), rel(2), rel(4)];
+            Some((e, e[3]))
+        }
+        ("C", 6) => {
+            let e = [cur, abs(0), abs(2), abs(4)];
+            Some((e, e[3]))
+        }
+        ("l", 2) => {
+            let e = xsvg_core::gradient::line_edge(cur, rel(0));
+            Some((e, e[3]))
+        }
+        ("L", 2) => {
+            let e = xsvg_core::gradient::line_edge(cur, abs(0));
+            Some((e, e[3]))
+        }
+        _ => None,
+    }
+}
+
+/// A mesh `<stop>`'s color: the `stop-color` attribute, or the `style`
+/// attribute's `stop-color` declaration (Inkscape's habit).
+fn stop_color(stop: roxmltree::Node) -> Option<xsvg_core::gradient::LinRgb> {
+    if let Some(c) = stop.attribute("stop-color") {
+        return parse_hex_color(c.trim());
+    }
+    stop.attribute("style")?.split(';').find_map(|kv| {
+        let (k, v) = kv.split_once(':')?;
+        if k.trim() == "stop-color" {
+            parse_hex_color(v.trim())
+        } else {
+            None
+        }
+    })
 }
 
 /// `#rgb` / `#rrggbb` → linear-light RGB.
@@ -3058,6 +3324,8 @@ mod tests {
   <x:boolean op="intersect" fill="#777"><use href="#blob"/><rect x="310" y="250" width="40" height="30"/></x:boolean>
   <rect x="5" y="270" width="30" height="20" fill="#48a" filter="brightness(1.2) saturate(0.8)"/>
   <x:mesh points="340,240 380,240 380,280 340,280"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #ff0"/></x:mesh>
+  <meshgradient id="mg" x="200" y="240"><meshrow><meshpatch><stop path="l 40,0" stop-color="#e11"/><stop path="l 0,30" stop-color="#fa0"/><stop path="l -40,0" stop-color="#3b7"/><stop path="l 0,-30" stop-color="#06c"/></meshpatch></meshrow></meshgradient>
+  <rect x="200" y="240" width="40" height="30" fill="url(#mg)"/>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -3145,6 +3413,13 @@ mod tests {
         assert_eq!(
             deps[1].0, offs[8],
             "expected the use-operand boolean: {deps:?}"
+        );
+        // a meshgradient fill is baked: editing the gradient re-emits the shape
+        let deps = dependents_impl(INC, offs[11]);
+        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(
+            deps[0].0, offs[12],
+            "expected the mesh-filled rect: {deps:?}"
         );
     }
 
@@ -3339,6 +3614,9 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile meshgradient: bare stop, empty gradient, referenced fills
+            r##"<meshgradient id="gm"><meshrow><meshpatch><stop path="l 5,0"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="10" height="10" fill="url(#gm)"/>"##,
+            r##"<meshgradient id="gm2" x="0" y="0"/><circle cx="5" cy="5" r="5" fill="url(#gm2)"/>"##,
             // hostile grid sugar: wrong color count, zero cells
             r##"<x:mesh x="0" y="0" width="10" height="10" cols="2" rows="2" fill="#f00 #0f0"/>"##,
             r##"<x:mesh x="0" y="0" width="10" height="10" cols="0" rows="2" fill="#f00"/>"##,
@@ -3486,6 +3764,56 @@ mod tests {
         };
         assert!(attr("width") > 200.0, "image must overhang the bbox");
         assert!(attr("x") < 0.5, "offset before the bbox");
+    }
+
+    const INKMESH: &str = r##"<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="c 30,-20 70,20 100,0" style="stop-color:#e11"/><stop path="c 10,20 -10,60 0,80" style="stop-color:#fa0"/><stop path="c -30,20 -70,-20 -100,0" style="stop-color:#3b7"/><stop path="c -10,-20 10,-60 0,-80" style="stop-color:#06c"/></meshpatch><meshpatch><stop path="c 30,20 70,-20 100,0" stop-color="#ff5"/><stop path="c -10,20 10,60 0,80" stop-color="#09f"/><stop path="c -30,-20 -70,20 -100,0"/></meshpatch></meshrow></meshgradient>"##;
+
+    #[test]
+    fn meshgradient_fill_compiles_the_inkscape_dialect() {
+        // two Coons patches with edge/corner inheritance filling a rect: the
+        // patches agree at the shared edge, so ONE smooth region, one image
+        let svg = format!(
+            r##"{XW}{INKMESH}<rect x="0" y="0" width="200" height="80" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<clipPath id=\"x-mgc-"), "{out}");
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+        assert!(out.contains("data:image/png;base64,"), "{out}");
+        // the curved top edge bows ABOVE the anchor line: the mesh raster (and
+        // so the image placement) must start above y=0
+        let k = out.find("<image").unwrap();
+        let y = {
+            let j = out[k..].find(" y=\"").unwrap() + k + 4;
+            out[j..j + out[j..].find('"').unwrap()]
+                .parse::<f64>()
+                .unwrap()
+        };
+        assert!(y < 0.0, "curved bulge must lift the raster: y={y}");
+    }
+
+    #[test]
+    fn meshgradient_fill_keeps_the_stroke_on_top() {
+        let svg = format!(
+            r##"{XW}{INKMESH}<rect x="0" y="0" width="200" height="80" fill="url(#m)" stroke="#111" stroke-width="3"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        let img = out.find("<image").unwrap();
+        let stroke = out.rfind("stroke=\"#111\"").unwrap();
+        assert!(stroke > img, "stroke overlay paints after the mesh: {out}");
+        assert!(out.contains("fill=\"none\""), "{out}");
+    }
+
+    #[test]
+    fn malformed_meshgradient_fill_stays_live_with_a_marker() {
+        // a stop with garbage path: the dialect fails to parse, the element
+        // passes through with its url() fill (unrendered, as in any browser)
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="q 1 2" stop-color="#e11"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="20" height="20" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("meshgradient fill left live"), "{out}");
+        assert!(out.contains("fill=\"url(#m)\""), "{out}");
+        assert!(!out.contains("<image"), "{out}");
     }
 
     #[test]

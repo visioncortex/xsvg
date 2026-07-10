@@ -63,6 +63,10 @@ vertices, the renderer's own bilinear image filter reconstructs the field exactl
 is literally a stretched 2×2). Engine: the workspace `gradient` crate, extracted from vtracer's
 quadmesh/gradient work.
 
+**SVG 2 / Inkscape `<meshgradient>` fills compile too**: Coons patches (cubic edges) tessellate
+into the same straight-quad mesh — polycurve → points — making Inkscape mesh files renderable
+outside Inkscape for the first time.
+
 ## Status summary
 
 **Shipped:** the full CSS pixel-adjustment vocabulary (spec-exact primitives, sRGB and region

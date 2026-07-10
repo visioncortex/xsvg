@@ -27,6 +27,7 @@
 pub mod base64;
 pub mod color;
 pub mod contour;
+pub mod coons;
 pub mod emit;
 pub mod field;
 pub mod mesh;
@@ -34,6 +35,7 @@ pub mod png;
 
 pub use color::{linear_to_srgb8, srgb8_to_linear, LinRgb, RgbColor};
 pub use contour::{region_contours, Loop};
+pub use coons::{cubic, line_edge, reverse_edge, CoonsPatch};
 pub use emit::texel_placement;
 pub use field::{fit_field, fit_grid, fit_grid_lin, ColorField, Dof, GridField, Rect};
 pub use mesh::{Face, Mesh, Raster};

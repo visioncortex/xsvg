@@ -808,6 +808,22 @@ any zoom; a region whose fit collapses to a constant emits a plain `<path fill>`
 cracks** (each side clips independently) but a hanging node interior to a *smooth* region is not;
 `image-rendering` must remain default (smooth) for the reconstruction to hold.
 
+#### SVG 2 / Inkscape `<meshgradient>` compatibility [implemented: v1]
+
+Inkscape is the only major tool that *authors* SVG 2 mesh gradients, and no browser renders them —
+xsvg compiles them. A shape whose `fill` references a `<meshgradient>` lowers through the same
+pipeline: each Coons patch (four cubic edges, four corner colors) **tessellates into the
+straight-quad mesh** (polycurve → points, at a profile-graded density of 8/12/20 cells per patch
+axis), the shape's geometry becomes the clip, and the stroke (if any) re-emits on top. Dialect
+coverage: `meshrow`/`meshpatch`/`stop` with one `c`/`C`/`l`/`L` edge per stop, `stop-color` as an
+attribute or inside `style` (hex), the standard edge/corner **inheritance** (a patch after the
+first inherits its left edge reversed from its neighbour, later rows inherit top edges from
+above), and `gradientTransform`. Adjacent patches join smoothly by construction (shared edges
+tessellate to shared vertices with matching colors). The reference is **compile-time baked**, so
+the incremental `dependents` scan treats `fill="url(#mesh)"` like an `in=` edge. Degradations:
+`gradientUnits="objectBoundingBox"` or an unparseable dialect leave the element as authored with a
+marker (unrendered live, exactly as in a browser); `type="bicubic"` renders as bilinear.
+
 ## 9. Lowering target [implemented]
 
 Output is the **static SVG subset** (resvg's scope): no script, animation, events, or `meshgradient`.
@@ -849,6 +865,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Pixel adjustments — `blur()` / `drop-shadow()` (region inflation) | planned |
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
+| SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha (feathering), smooth-interior T-junctions, `.qmesh` import | planned |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |

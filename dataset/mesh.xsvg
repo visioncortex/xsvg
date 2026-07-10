@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 720 520" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="720" height="520" fill="#0f172a"/>
+     viewBox="0 0 720 700" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="700" fill="#0f172a"/>
   <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:mesh — mesh gradients: corner colors on a quad/tri mesh, cracks included</text>
   <text x="28" y="52" font-size="11" fill="#94a3b8">lowered as tiny texel-aligned PNGs — the renderer's own bilinear filter reconstructs each region's fitted field</text>
 
@@ -39,4 +39,26 @@
           fill="#1e1b4b #7c3aed #1e1b4b #1e1b4b
                 #7c3aed #fde68a #7c3aed #1e1b4b
                 #1e1b4b #7c3aed #1e1b4b #1e1b4b"/>
+
+  <!-- SVG 2 / Inkscape meshgradient: curved Coons patches no browser can draw,
+       compiled through the same pipeline — the curved silhouette IS the mesh -->
+  <text x="48" y="522" font-size="11" fill="#94a3b8">SVG 2 / Inkscape meshgradient — curved Coons patches, compiled to the same tiny PNGs</text>
+  <defs>
+    <meshgradient id="ink" x="110" y="560">
+      <meshrow>
+        <meshpatch>
+          <stop path="c 60,-30 170,30 230,10" style="stop-color:#fbbf24"/>
+          <stop path="c 15,30 -15,60 5,88" style="stop-color:#f472b6"/>
+          <stop path="c -60,30 -170,-30 -230,-8" style="stop-color:#7c3aed"/>
+          <stop path="c -10,-30 10,-60 -5,-90" style="stop-color:#0ea5e9"/>
+        </meshpatch>
+        <meshpatch>
+          <stop path="c 60,-30 170,20 230,0" style="stop-color:#38bdf8"/>
+          <stop path="c 15,25 -15,60 5,85" style="stop-color:#10b981"/>
+          <stop path="c -60,25 -170,-25 -230,3"/>
+        </meshpatch>
+      </meshrow>
+    </meshgradient>
+  </defs>
+  <rect x="80" y="526" width="560" height="160" fill="url(#ink)"/>
 </svg>
