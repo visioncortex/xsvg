@@ -785,10 +785,10 @@ endpoint — a mismatch is a **crack**, a hard discontinuity; a *region* is a ma
 connected through smooth edges. Cracks need no extra markup: they fall out of the colors.
 
 **Lowering (normative): render → refit.** (1) The mesh is rasterized in memory at a
-profile-graded resolution (fast/balanced/highest → 64/128/256 px across the long axis, and at
-least ~32 px across the short one), in linear-light, with per-pixel region labels. (2) Each region is refit with a **seam-free
+profile-graded resolution (fast/balanced/highest → 64/128/384 px across the long axis, and at
+least 24/32/48 px across the short one), in linear-light, with per-pixel region labels. (2) Each region is refit with a **seam-free
 shared-vertex grid field** — one global least squares per region, grown (1×1 → up to
-10/24/32 per axis by profile) until the sRGB residual passes the profile tolerance (4/1.5/0.75
+10/24/48 per axis by profile) until the sRGB residual passes the profile tolerance (4/1.5/0.5
 RMSE) — and serialized as a **tiny PNG** (`(gx+1)×(gy+1)` texels, often 2×2, ~40 bytes base64)
 placed so its **texel centers land exactly on the grid vertices**: the image spans `n·s/(n−1)` of
 the region's bbox span `s`, offset by half a texel-interval — the renderer's own smooth bilinear

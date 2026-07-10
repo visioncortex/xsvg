@@ -1329,15 +1329,15 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
         return;
     }
-    let max_px = match ctx.quality {
-        QualityProfile::Fast => 64.0f32,
-        QualityProfile::Balanced => 128.0,
-        QualityProfile::Highest | QualityProfile::Raster => 256.0,
+    let (max_px, min_px) = match ctx.quality {
+        QualityProfile::Fast => (64.0f32, 24.0f32),
+        QualityProfile::Balanced => (128.0, 32.0),
+        QualityProfile::Highest | QualityProfile::Raster => (384.0, 48.0),
     };
-    // resolution from the LONG axis, but never starve the short one below
-    // ~32px — a thin strip still needs rows for its cross-axis fit
+    // resolution from the LONG axis, but never starve the short one — a thin
+    // strip still needs rows for its cross-axis fit
     let (dim_max, dim_min) = ((x1 - x0).max(y1 - y0), (x1 - x0).min(y1 - y0));
-    let scale = (dim_max / max_px).min(dim_min / 32.0).max(1e-6);
+    let scale = (dim_max / max_px).min(dim_min / min_px).max(1e-6);
     let (w, h) = (
         (((x1 - x0) / scale).ceil() as usize).max(1),
         (((y1 - y0) / scale).ceil() as usize).max(1),
@@ -1365,7 +1365,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let (tol, cap) = match ctx.quality {
         QualityProfile::Fast => (4.0f32, 10usize),
         QualityProfile::Balanced => (1.5, 24),
-        QualityProfile::Highest | QualityProfile::Raster => (0.75, 32),
+        QualityProfile::Highest | QualityProfile::Raster => (0.5, 48),
     };
 
     out.push_str("<g");
@@ -1408,7 +1408,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let (bx0, by0, bx1, by1) = bbox[r];
         let ar = ((bx1 - bx0).max(1) as f32) / ((by1 - by0).max(1) as f32);
         let mut best = None;
-        for g in [1usize, 2, 3, 4, 6, 8, 12, 16, 24, 32] {
+        for g in [1usize, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48] {
             let gx = ((g as f32 * ar.sqrt()).round() as usize).clamp(1, cap);
             let gy = ((g as f32 / ar.sqrt()).round() as usize).clamp(1, cap);
             let grid = fit_grid(&region_px[r], w, &srgb, gx, gy);
