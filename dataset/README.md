@@ -83,7 +83,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [mesh.xsvg](mesh.xsvg) | Indexed mesh gradients: shared `<x:verts>` + `<x:face v fill>` quads/tris with per-corner colors — a seamless two-quad sky, the bilinear twist, a **crack** (shared edge, disagreeing colors → hard split), a barycentric triangle fan, and a 3×3 glow grid. Lowered by render→refit: each crack region is fitted with a seam-free grid field and serialized as a **texel-aligned tiny PNG** (often 2×2) whose stretch makes the renderer's own bilinear filter reconstruct the gradient, clipped by the exact face-polygon union |
+| [mesh.xsvg](mesh.xsvg) | Indexed mesh gradients: a shared `points` list (SVG's polygon syntax) + `<x:face v fill>` quads/tris with per-corner colors — a seamless two-quad sky, the bilinear twist, a **crack** (shared edge, disagreeing colors → hard split), a barycentric triangle fan, and the **grid sugar** form (`cols`/`rows` + one `fill` of vertex colors, no indices). Lowered by render→refit: each crack region is fitted with a seam-free grid field and serialized as a **texel-aligned tiny PNG** (often 2×2) whose stretch makes the renderer's own bilinear filter reconstruct the gradient, clipped by the exact face-polygon union |
 
 ## Pixel adjustments (§8)
 

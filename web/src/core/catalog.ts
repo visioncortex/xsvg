@@ -220,7 +220,7 @@ export const CATALOG: Category[] = [
       {
         file: "mesh.xsvg",
         title: "Mesh gradients",
-        blurb: "a seamless two-quad sky, the bilinear twist, a hard crack, a barycentric triangle fan, and a 3×3 glow grid — each region one tiny PNG the browser's bilinear filter reconstructs",
+        blurb: "a seamless two-quad sky, the bilinear twist, a hard crack, a barycentric triangle fan, and the grid-sugar glow (cols/rows + vertex colors, no indices) — each region one tiny PNG the browser's bilinear filter reconstructs",
       },
     ],
   },

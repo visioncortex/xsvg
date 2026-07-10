@@ -1262,25 +1262,70 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     use xsvg_core::gradient;
     use xsvg_core::gradient::{fit_field, fit_grid, texel_placement, Dof, Mesh};
 
-    // ---- parse: <x:verts> + <x:face v=".." fill="..">
+    // ---- parse: grid sugar (cols/rows attributes) or points= + <x:face>
     let mut mesh = Mesh::default();
     let mut markers = String::new();
-    for child in node.children().filter(|c| c.is_element()) {
-        if child.tag_name().name() == "verts" {
-            let text = child.text().unwrap_or("");
-            let nums: Vec<f32> = text
-                .split(|c: char| c == ',' || c.is_whitespace())
-                .filter(|t| !t.is_empty())
-                .filter_map(|t| t.parse::<f32>().ok().filter(|v| v.is_finite()))
-                .collect();
-            for pair in nums.chunks_exact(2) {
-                mesh.add_vertex(pair[0], pair[1]);
+    let grid_sugar = node.attribute("cols").is_some() || node.attribute("rows").is_some();
+    if grid_sugar {
+        // <x:mesh x y width height cols rows fill="(cols+1)·(rows+1) vertex
+        // colors, row-major"/> — per-VERTEX colors, smooth by construction
+        // (cracks are the indexed form's job)
+        let cols = attr_num(node, "cols", 0.0) as usize;
+        let rows = attr_num(node, "rows", 0.0) as usize;
+        let (gx, gy) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+        let (gw, gh) = (attr_num(node, "width", 0.0), attr_num(node, "height", 0.0));
+        let cols_ok = (1..=64).contains(&cols) && (1..=64).contains(&rows);
+        let vcols: Vec<xsvg_core::gradient::LinRgb> = node
+            .attribute("fill")
+            .unwrap_or("")
+            .split_whitespace()
+            .filter_map(parse_hex_color)
+            .collect();
+        if !cols_ok || gw <= 0.0 || gh <= 0.0 || vcols.len() != (cols + 1) * (rows + 1) {
+            out.push_str(
+                "<!-- xsvg: <x:mesh> grid form needs cols/rows in 1..64, positive width/height, and (cols+1)*(rows+1) fill colors -->",
+            );
+            return;
+        }
+        for j in 0..=rows {
+            for i in 0..=cols {
+                mesh.add_vertex(
+                    (gx + gw * i as f64 / cols as f64) as f32,
+                    (gy + gh * j as f64 / rows as f64) as f32,
+                );
             }
+        }
+        let vid = |i: usize, j: usize| (j * (cols + 1) + i) as u32;
+        for j in 0..rows {
+            for i in 0..cols {
+                mesh.add_quad(
+                    [vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)],
+                    [
+                        vcols[vid(i, j) as usize],
+                        vcols[vid(i + 1, j) as usize],
+                        vcols[vid(i + 1, j + 1) as usize],
+                        vcols[vid(i, j + 1) as usize],
+                    ],
+                );
+            }
+        }
+    }
+    if !grid_sugar {
+        // shared vertices in SVG's own polygon `points` syntax
+        let nums: Vec<f32> = node
+            .attribute("points")
+            .unwrap_or("")
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| t.parse::<f32>().ok().filter(|v| v.is_finite()))
+            .collect();
+        for pair in nums.chunks_exact(2) {
+            mesh.add_vertex(pair[0], pair[1]);
         }
     }
     let nv = mesh.verts.len() as u32;
     for child in node.children().filter(|c| c.is_element()) {
-        if child.tag_name().name() != "face" {
+        if grid_sugar || child.tag_name().name() != "face" {
             continue;
         }
         let idx: Vec<u32> = child
@@ -1369,7 +1414,13 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     };
 
     out.push_str("<g");
-    copy_attrs(node, out, &[]);
+    copy_attrs(
+        node,
+        out,
+        &[
+            "cols", "rows", "x", "y", "width", "height", "fill", "points",
+        ],
+    );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let mesh_pos = node.range().start;
@@ -3006,7 +3057,7 @@ mod tests {
   <x:textbox in="#blob" font-size="10" fill="#666">into the blob</x:textbox>
   <x:boolean op="intersect" fill="#777"><use href="#blob"/><rect x="310" y="250" width="40" height="30"/></x:boolean>
   <rect x="5" y="270" width="30" height="20" fill="#48a" filter="brightness(1.2) saturate(0.8)"/>
-  <x:mesh><x:verts>340,240 380,240 380,280 340,280</x:verts><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #ff0"/></x:mesh>
+  <x:mesh points="340,240 380,240 380,280 340,280"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #ff0"/></x:mesh>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -3288,11 +3339,14 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile grid sugar: wrong color count, zero cells
+            r##"<x:mesh x="0" y="0" width="10" height="10" cols="2" rows="2" fill="#f00 #0f0"/>"##,
+            r##"<x:mesh x="0" y="0" width="10" height="10" cols="0" rows="2" fill="#f00"/>"##,
             // hostile meshes: bad indices, color-count mismatch, degenerate extent
-            r##"<x:mesh><x:verts>0,0 10,0</x:verts><x:face v="0 1 9" fill="#f00"/></x:mesh>"##,
-            r##"<x:mesh><x:verts>0,0 10,0 10,10 0,10</x:verts><x:face v="0 1 2 3" fill="#f00 #0f0"/></x:mesh>"##,
-            r##"<x:mesh><x:verts>5,5 5,5 5,5</x:verts><x:face v="0 1 2" fill="#f00"/></x:mesh>"##,
-            r##"<x:mesh><x:verts>garbage</x:verts><x:face v="0 1 2" fill="#f00 #0f0 #00f"/></x:mesh>"##,
+            r##"<x:mesh points="0,0 10,0"><x:face v="0 1 9" fill="#f00"/></x:mesh>"##,
+            r##"<x:mesh points="0,0 10,0 10,10 0,10"><x:face v="0 1 2 3" fill="#f00 #0f0"/></x:mesh>"##,
+            r##"<x:mesh points="5,5 5,5 5,5"><x:face v="0 1 2" fill="#f00"/></x:mesh>"##,
+            r##"<x:mesh points="garbage"><x:face v="0 1 2" fill="#f00 #0f0 #00f"/></x:mesh>"##,
             // hostile filter attributes: unparseable lists stay as authored
             r##"<rect x="0" y="0" width="10" height="10" filter="brightness("/>"##,
             r##"<rect x="0" y="0" width="10" height="10" filter="brightness(NaN)"/>"##,
@@ -3418,7 +3472,7 @@ mod tests {
         // one smooth quad -> one region -> one clipped tiny-PNG image whose
         // placement OVERHANGS the mesh bbox (the texel-center construction)
         let svg = format!(
-            r##"{XW}<x:mesh><x:verts>0,0 200,0 200,100 0,100</x:verts><x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/></x:mesh></svg>"##
+            r##"{XW}<x:mesh points="0,0 200,0 200,100 0,100"><x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/></x:mesh></svg>"##
         );
         let out = compile_test(&svg);
         assert!(!out.contains("<!-- xsvg:"), "{out}");
@@ -3435,9 +3489,37 @@ mod tests {
     }
 
     #[test]
+    fn mesh_grid_sugar_desugars_to_the_indexed_mesh() {
+        // the sugar and its hand-written indexed equivalent must emit the SAME
+        // fitted PNG and placement (ids differ by source position only)
+        let sugar = format!(
+            r##"{XW}<x:mesh x="0" y="0" width="200" height="100" cols="2" rows="1" fill="#e11 #fa0 #ff5 #06c #3b7 #09f"/></svg>"##
+        );
+        let indexed = format!(
+            r##"{XW}<x:mesh points="0,0 100,0 200,0 0,100 100,100 200,100"><x:face v="0 1 4 3" fill="#e11 #fa0 #3b7 #06c"/><x:face v="1 2 5 4" fill="#fa0 #ff5 #09f #3b7"/></x:mesh></svg>"##
+        );
+        let a = compile_test(&sugar);
+        let b = compile_test(&indexed);
+        assert!(!a.contains("<!-- xsvg:"), "{a}");
+        let uri = |o: &str| {
+            let k = o.find("base64,").unwrap();
+            o[k..k + o[k..].find('"').unwrap()].to_string()
+        };
+        assert_eq!(uri(&a), uri(&b), "same mesh, same fitted PNG");
+        for attr in [" width=", " height=", " x=", " y="] {
+            let val = |o: &str| {
+                let img = o.find("<image").unwrap();
+                let k = o[img..].find(attr).unwrap() + img + attr.len() + 1;
+                o[k..k + o[k..].find('"').unwrap()].to_string()
+            };
+            assert_eq!(val(&a), val(&b), "{attr}");
+        }
+    }
+
+    #[test]
     fn mesh_solid_region_is_a_plain_path() {
         let svg = format!(
-            r##"{XW}<x:mesh><x:verts>0,0 40,0 40,40 0,40</x:verts><x:face v="0 1 2 3" fill="#3b82f6"/></x:mesh></svg>"##
+            r##"{XW}<x:mesh points="0,0 40,0 40,40 0,40"><x:face v="0 1 2 3" fill="#3b82f6"/></x:mesh></svg>"##
         );
         let out = compile_test(&svg);
         assert!(!out.contains("<image"), "{out}");
@@ -3449,14 +3531,14 @@ mod tests {
         // two quads sharing an edge with DISAGREEING colors: a crack -> two
         // regions, each with its own image + clip
         let svg = format!(
-            r##"{XW}<x:mesh><x:verts>0,0 100,0 200,0 0,100 100,100 200,100</x:verts><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#06c #3b7 #3b7 #06c"/></x:mesh></svg>"##
+            r##"{XW}<x:mesh points="0,0 100,0 200,0 0,100 100,100 200,100"><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#06c #3b7 #3b7 #06c"/></x:mesh></svg>"##
         );
         let out = compile_test(&svg);
         assert_eq!(out.matches("<clipPath").count(), 2, "{out}");
         assert_eq!(out.matches("<image").count(), 2, "{out}");
         // smooth version (shared edge agrees) -> ONE region
         let svg = format!(
-            r##"{XW}<x:mesh><x:verts>0,0 100,0 200,0 0,100 100,100 200,100</x:verts><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#fa0 #3b7 #3b7 #fa0"/></x:mesh></svg>"##
+            r##"{XW}<x:mesh points="0,0 100,0 200,0 0,100 100,100 200,100"><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#fa0 #3b7 #3b7 #fa0"/></x:mesh></svg>"##
         );
         let out = compile_test(&svg);
         assert_eq!(out.matches("<image").count(), 1, "{out}");
@@ -3465,7 +3547,7 @@ mod tests {
     #[test]
     fn mesh_triangles_and_single_color_faces_work() {
         let svg = format!(
-            r##"{XW}<x:mesh><x:verts>0,0 80,0 40,60</x:verts><x:face v="0 1 2" fill="#e11 #3b7 #06c"/></x:mesh></svg>"##
+            r##"{XW}<x:mesh points="0,0 80,0 40,60"><x:face v="0 1 2" fill="#e11 #3b7 #06c"/></x:mesh></svg>"##
         );
         let out = compile_test(&svg);
         assert_eq!(out.matches("<image").count(), 1, "{out}");

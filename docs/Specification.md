@@ -767,22 +767,28 @@ The Pillar 3 headline: **corner colors on a quad-dominant mesh**, the representa
 (extracted from vtracer's quadmesh/gradient work).
 
 ```xml
-<x:mesh>
-  <x:verts>0,0 120,0 240,10  0,90 120,80 240,100</x:verts>
+<x:mesh points="0,0 120,0 240,10  0,90 120,80 240,100">
   <x:face v="0 1 4 3" fill="#e11 #fa0 #3b7 #06c"/>
   <x:face v="1 2 5 4" fill="#fa0 #ff5 #09f #3b7"/>
   <x:face v="3 4 5"   fill="#06c #3b7 #09f"/>
 </x:mesh>
 ```
 
-**Model (normative).** `<x:verts>` holds shared vertex coordinates (`x,y` pairs, comma or
-whitespace separated); each `<x:face v="…">` names 3 or 4 CCW vertex indices and the same number
+**Model (normative).** The `points` attribute holds the shared vertices in SVG's own
+`<polygon points>` syntax (`x,y` pairs, comma or whitespace separated); each `<x:face v="…">` names 3 or 4 CCW vertex indices and the same number
 of corner colors in `fill` (`#rgb`/`#rrggbb`; one color replicates to all corners). Quad corners
 map to local `(u,v)` as `0→(0,0) 1→(1,0) 2→(1,1) 3→(0,1)`; color interpolates bilinearly
 (inverse-bilinear for non-rectangular quads), barycentrically for triangles, in **linear-light
 RGB**. An edge shared by two faces is **smooth** iff both agree on the color at each shared
 endpoint — a mismatch is a **crack**, a hard discontinuity; a *region* is a maximal set of faces
 connected through smooth edges. Cracks need no extra markup: they fall out of the colors.
+
+**Grid sugar.** The smooth common case needs no indices: `<x:mesh x y width height cols rows
+fill="…"/>` lays a `cols×rows`-cell grid over the box, with `fill` holding the
+`(cols+1)·(rows+1)` **vertex** colors row-major — per-vertex colors are smooth by construction
+(one region), and the form desugars to exactly the indexed mesh (pinned by test). Cracks and
+irregular geometry use the indexed form. A malformed grid (wrong color count, `cols`/`rows`
+outside 1..64, non-positive extent) degrades with a marker.
 
 **Lowering (normative): render → refit.** (1) The mesh is rasterized in memory at a
 profile-graded resolution (fast/balanced/highest → 64/128/384 px across the long axis, and at
@@ -842,6 +848,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
 | Pixel adjustments — `blur()` / `drop-shadow()` (region inflation) | planned |
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
+| `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha (feathering), smooth-interior T-junctions, `.qmesh` import | planned |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
