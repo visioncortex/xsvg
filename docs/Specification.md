@@ -121,7 +121,7 @@ filters, gradients, masks, markers, `foreignObject`, future or unknown elements 
 is declared); `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`); **foreign-namespace
 elements and attributes** (editor metadata such as `sodipodi:`/`inkscape:`) are **dropped** —
 elements with a marker comment, attributes silently — since they cannot be re-emitted faithfully.
-*Known gap:* `<script>`/animation elements currently pass through despite §8's static-subset
+*Known gap:* `<script>`/animation elements currently pass through despite §9's static-subset
 target; the concrete allow/deny enforcement is the pending [Plan.md](Plan.md) R6 deliverable
 (pinned as documented behavior by test until then).
 
@@ -720,12 +720,47 @@ and kurbo-native backends can slot in later without surface changes).
 
 ### 7.5 Remaining pillars & deferred [planned]
 
-- **`<x:mesh>`** *(Pillar 3)* — Coons/tensor mesh gradients with **cracks / T-junctions** and
-  **transparency (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
+- **Pillar 3 — paint & pixels.** First slice **shipped**: pixel adjustments (§8). Remaining:
+  **`<x:mesh>`** — Coons/tensor mesh gradients with **cracks / T-junctions** and **transparency
+  (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
 - **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
   (research retained in [Research.md §1](Research.md)).
 
-## 8. Lowering target [implemented]
+## 8. Pixel adjustments — CSS filter functions [implemented]
+
+The first slice of Pillar 3 (*paint & pixels* — capability catalog: [Paint.md](Paint.md)). The
+author writes the **standard `filter` attribute with CSS function syntax** — the form browsers
+already render live, so an uncompiled document degrades perfectly (§3) — and the compiler lowers
+it to an equivalent **`<filter>` element graph** so the static subset (§9) gets the same pixels.
+
+```xml
+<use href="#photo" filter="brightness(1.1) contrast(1.2) -x-curve(0 0, .3 .15, .7 .9, 1 1)"/>
+```
+
+**Vocabulary (v1).** `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`,
+`invert()`, `opacity()` (number or percentage; the 0–1 family clamps like CSS), `hue-rotate()`
+(degrees), plus the xsvg extension **`-x-curve(x0 y0, x1 y1, …)`** — a Photoshop-style tone curve
+through control points in [0, 1]² (≥ 2 points, x strictly increasing), interpolated
+**monotone-cubically** (no overshoot) and sampled into a `feComponentTransfer` lookup table.
+`-x-curve-r/-g/-b/-a` target a single channel. Like other `-x-` vocabulary (§6's
+`-x-google-…` fonts), an unsupporting browser ignores the whole declaration and renders the
+element unfiltered — degradation, not breakage.
+
+**Lowering (normative).** Each filtered element gets its own `<filter>` definition emitted
+immediately before it (self-contained per fragment — [Incremental.md](Incremental.md)), with:
+`color-interpolation-filters="sRGB"` (the CSS shorthands are specified in sRGB; SVG's linearRGB
+default is the classic mismatch bug), a region of −10 % / 120 % (so strokes outside the fill bbox
+survive; the v1 vocabulary is pointwise, so nothing bleeds further), one primitive per function
+**in authored order**, and the numeric mappings the Filter Effects spec defines for each shorthand
+— lowered output matches live browser rendering. The element's `filter` attribute is rewritten to
+`url(#…)`.
+
+**What passes through untouched:** `filter="url(#…)"` references, `none`, and any list the parser
+declines — an unknown function (`blur()`/`drop-shadow()` are **deferred**: they need region
+inflation the pointwise set doesn't) or an invalid argument — mirroring CSS's
+whole-declaration-invalid rule; browsers still honor those live.
+
+## 9. Lowering target [implemented]
 
 Output is the **static SVG subset** (resvg's scope): no script, animation, events, or `meshgradient`.
 Text lowers to `<text>`/`<tspan>` in v0 (browser-shaped), or to outlined `<path>` on demand (§6.12).
@@ -762,6 +797,8 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
+| Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
+| Pixel adjustments — `blur()` / `drop-shadow()` (region inflation) | planned |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

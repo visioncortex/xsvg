@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 760 560" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="760" height="560" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">Pixel adjustments — CSS filter functions, compiled to portable &lt;filter&gt; primitives</text>
+  <text x="28" y="52" font-size="11" fill="#94a3b8">one artwork, stamped with filter="…" — live in any browser as authored, static-renderer-safe once compiled; -x-curve() adds real tone curves</text>
+
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <clipPath id="frame">
+      <rect x="0" y="0" width="200" height="110" rx="8"/>
+    </clipPath>
+    <g id="art">
+      <g clip-path="url(#frame)">
+        <rect x="0" y="0" width="200" height="110" fill="url(#sky)"/>
+        <circle cx="150" cy="34" r="20" fill="#fbbf24"/>
+        <path d="M0,110 C40,60 80,95 120,75 C160,55 180,85 200,70 L200,110 Z" fill="#16a34a"/>
+        <path d="M0,110 C50,85 120,105 200,88 L200,110 Z" fill="#15803d"/>
+      </g>
+      <rect x="0" y="0" width="200" height="110" rx="8" fill="none" stroke="#334155" stroke-width="1"/>
+    </g>
+  </defs>
+
+  <text x="40" y="84" font-size="11" fill="#94a3b8">original</text>
+  <use href="#art" x="40" y="92"/>
+  <text x="280" y="84" font-size="11" fill="#94a3b8">brightness(1.35)</text>
+  <use href="#art" x="280" y="92" filter="brightness(1.35)"/>
+  <text x="520" y="84" font-size="11" fill="#94a3b8">contrast(1.6)</text>
+  <use href="#art" x="520" y="92" filter="contrast(1.6)"/>
+
+  <text x="40" y="242" font-size="11" fill="#94a3b8">saturate(0.2)</text>
+  <use href="#art" x="40" y="250" filter="saturate(0.2)"/>
+  <text x="280" y="242" font-size="11" fill="#94a3b8">sepia(0.85)</text>
+  <use href="#art" x="280" y="250" filter="sepia(0.85)"/>
+  <text x="520" y="242" font-size="11" fill="#94a3b8">hue-rotate(150deg)</text>
+  <use href="#art" x="520" y="250" filter="hue-rotate(150deg)"/>
+
+  <text x="40" y="400" font-size="11" fill="#94a3b8">invert(0.9)</text>
+  <use href="#art" x="40" y="408" filter="invert(0.9)"/>
+  <text x="280" y="400" font-size="11" fill="#94a3b8">-x-curve(0 0, .3 .15, .7 .9, 1 1) — S-curve pop</text>
+  <use href="#art" x="280" y="408" filter="-x-curve(0 0, 0.3 0.15, 0.7 0.9, 1 1)"/>
+  <text x="520" y="400" font-size="11" fill="#94a3b8">-x-curve-b(0 .25, 1 .9) + sepia — cool fade</text>
+  <use href="#art" x="520" y="408" filter="sepia(0.35) -x-curve-b(0 0.25, 1 0.9)"/>
+</svg>

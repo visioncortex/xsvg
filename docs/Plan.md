@@ -16,7 +16,9 @@ research digest for citations behind every library and algorithm choice referenc
 >   (`font-family="-x-google-<Name>"`) and **stroked outlines** — *not* the originally-planned
 >   in-WASM skrifa path (still the native/CLI option). Normative surface: [Specification.md](Specification.md).
 > - **Pillar set revised** (per [Vision](Vision.md)): **(1) typography ✓ · (2) non-affine &
->   non-destructive geometry transforms · (3) mesh gradients with cracks/T-junctions + feathering.**
+>   non-destructive geometry transforms · (3) paint & pixels** — mesh gradients with
+>   cracks/T-junctions + feathering, **plus pixel adjustments** (CSS filter functions + `-x-curve`
+>   tone curves, **shipped** — [Specification.md §8](Specification.md), [Paint.md](Paint.md)).
 >   **Variable-width strokes (old Pillar 2) and live booleans are deferred** — no longer headline
 >   pillars. So the "variable strokes first" ordering in §3 is superseded (see the §3 note); §2.3 below
 >   now describes the geometry-transform pillar.
@@ -357,7 +359,12 @@ smallest surface, maximal plumbing exercised.
 - **Risks:** height-field sampling of arbitrary paths (single-valued-in-`x` assumption; steep/vertical
   segments); refit segment-budget vs fidelity; joining/oriented contours of warped glyph outlines.
 
-### 2.4 Pillar 3 — Mesh gradients (Coons / tensor patches)
+### 2.4 Pillar 3 — Paint & pixels: adjustments ✓ + mesh gradients (Coons / tensor patches)
+
+**First slice shipped:** pixel adjustments — the standard `filter` attribute with CSS function
+syntax, lowered to portable `<filter>` primitive graphs (sRGB, ordered), plus `-x-curve[-r/g/b/a]`
+Photoshop-style tone curves. Catalog: [Paint.md](Paint.md); normative:
+[Specification.md §8](Specification.md). The rest of this section is the mesh-gradient plan.
 
 A grid of patches with corner colors + edge control points + **per-corner alpha** (transparency /
 **feathering** for soft fades). Adjacency is explicit, enabling intentional **cracks / T-junctions**

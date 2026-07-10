@@ -4,10 +4,12 @@
 //! identically for native and `wasm32` targets (see Plan.md §1, "Core invariant").
 
 pub mod boolean;
+pub mod filter;
 pub mod text;
 pub mod warp;
 
 pub use boolean::*;
+pub use filter::*;
 pub use text::*;
 pub use warp::*;
 

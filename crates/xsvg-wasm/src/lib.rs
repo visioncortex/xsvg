@@ -16,13 +16,13 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    boolean_svg_paths, layout_area_measured, layout_flow, layout_region, layout_text_area_runs,
-    line_advance, measure_runs, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
-    Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
-    EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer,
-    PathEffect, PathFrame, PlacedLine, QualityProfile, RasterRegion, Rect, RegionSpec,
-    RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
-    WarpAxis,
+    boolean_svg_paths, filter_primitives, layout_area_measured, layout_flow, layout_region,
+    layout_text_area_runs, line_advance, measure_runs, parse_filter_functions, run_offset,
+    svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor, AreaLayout, AreaSpec,
+    BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
+    GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine,
+    QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper, TextAlign,
+    TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -533,6 +533,25 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
 }
 
 /// Recursively emit a node as SVG.
+/// Lower a `filter` attribute holding CSS filter functions (§8) to a real
+/// `<filter>` definition: the def is emitted immediately before the element
+/// (self-contained per fragment — §Incremental), and the returned markup is
+/// the substitute ` filter="url(#…)"` attribute. `None` leaves the attribute
+/// as authored: absent, `none`, a `url(#…)` reference, or a list the parser
+/// declines (unknown function, invalid argument) — browsers still honor those
+/// live, mirroring CSS's whole-declaration-invalid rule. sRGB interpolation is
+/// pinned so lowered output matches live browser rendering; the region gets
+/// the ±10% margin so strokes outside the fill bbox survive.
+fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> {
+    let fns = parse_filter_functions(node.attribute("filter")?)?;
+    let id = format!("x-flt-{}", node.range().start);
+    out.push_str(&format!(
+        "<filter id=\"{id}\" color-interpolation-filters=\"sRGB\" x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\">{}</filter>",
+        filter_primitives(&fns)
+    ));
+    Some(format!(" filter=\"url(#{id})\""))
+}
+
 fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) {
     if !node.is_element() {
         if node.is_text() {
@@ -589,12 +608,23 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    let filter_sub = if is_root {
+        None
+    } else {
+        lower_filter_attr(node, out)
+    };
     out.push('<');
     out.push_str(name);
     if is_root {
         out.push_str(&format!(" xmlns=\"{SVG_NS}\""));
     }
-    copy_attrs(node, out, &[]);
+    match &filter_sub {
+        Some(sub) => {
+            copy_attrs(node, out, &["filter"]);
+            out.push_str(sub);
+        }
+        None => copy_attrs(node, out, &[]),
+    }
     out.push_str(&pos_attr(node, ctx));
 
     if node.has_children() {
@@ -615,8 +645,15 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let w = attr_num(node, "width", 0.0);
     let h = attr_num(node, "height", 0.0);
 
+    let filter_sub = lower_filter_attr(node, out);
     out.push_str("<path");
-    copy_attrs(node, out, &["x", "y", "width", "height"]);
+    match &filter_sub {
+        Some(sub) => {
+            copy_attrs(node, out, &["x", "y", "width", "height", "filter"]);
+            out.push_str(sub);
+        }
+        None => copy_attrs(node, out, &["x", "y", "width", "height"]),
+    }
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" d=\"M{x},{y} h{w} v{h} h{} Z\"/>", -w));
 }
@@ -2746,6 +2783,7 @@ mod tests {
   <x:boolean id="blob" op="union" fill="#555"><rect x="300" y="240" width="40" height="50"/><rect x="320" y="240" width="40" height="50"/></x:boolean>
   <x:textbox in="#blob" font-size="10" fill="#666">into the blob</x:textbox>
   <x:boolean op="intersect" fill="#777"><use href="#blob"/><rect x="310" y="250" width="40" height="30"/></x:boolean>
+  <rect x="5" y="270" width="30" height="20" fill="#48a" filter="brightness(1.2) saturate(0.8)"/>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -3027,15 +3065,24 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile filter attributes: unparseable lists stay as authored
+            r##"<rect x="0" y="0" width="10" height="10" filter="brightness("/>"##,
+            r##"<rect x="0" y="0" width="10" height="10" filter="brightness(NaN)"/>"##,
+            r##"<rect x="0" y="0" width="10" height="10" filter="-x-curve(9 9)"/>"##,
+            r##"<g filter="brightness(1e999)"><rect x="0" y="0" width="10" height="10"/></g>"##,
         ];
         for (i, body) in cases.iter().enumerate() {
             let svg = format!("{XW}{body}</svg>");
             let out = compile_shaped(&svg); // a panic here fails the test: totality
             assert!(!out.is_empty(), "case {i} produced empty output: {body}");
-            assert!(
-                !out.contains("NaN") && !out.contains("inf"),
-                "case {i} leaked non-finite coords: {body}\n{out}"
-            );
+            // non-finite text is only allowed where the AUTHOR wrote it (a
+            // passthrough attribute value); generated coordinates never carry it
+            for bad in ["NaN", "inf"] {
+                assert!(
+                    !out.contains(bad) || body.contains(bad),
+                    "case {i} leaked non-finite coords: {body}\n{out}"
+                );
+            }
             assert!(
                 out.contains("<path") || out.contains("<text") || out.contains("<!-- xsvg:"),
                 "case {i} degraded SILENTLY (no geometry, no live text, no marker): {body}\n{out}"
@@ -3091,6 +3138,51 @@ mod tests {
         let out = compile_test(&svg);
         assert_eq!(out.matches("<path").count(), 2, "{out}");
         assert!(!out.contains("<!-- xsvg:"), "{out}");
+    }
+
+    #[test]
+    fn filter_functions_lower_to_a_filter_definition() {
+        // §8: CSS filter functions on any graphics element become a real
+        // <filter> (sRGB, ±10% region) referenced by url() — one per element,
+        // deterministic id, self-contained in the element's own fragment
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="brightness(1.2) contrast(1.1)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<filter id=\"x-flt-"), "{out}");
+        assert!(
+            out.contains("color-interpolation-filters=\"sRGB\""),
+            "{out}"
+        );
+        assert!(out.contains("filter=\"url(#x-flt-"), "{out}");
+        assert!(out.contains("slope=\"1.2\""), "{out}");
+        assert!(!out.contains("filter=\"brightness"), "{out}");
+        // passthrough elements get the same treatment, children intact
+        let svg = format!(
+            r##"{XW}<g filter="saturate(0)"><circle cx="5" cy="5" r="4" fill="#c00"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("type=\"saturate\" values=\"0\""), "{out}");
+        assert!(out.contains("<circle"), "{out}");
+        // a tone curve samples into a lookup table
+        let svg = format!(
+            r##"{XW}<g filter="-x-curve(0 0, 0.4 0.6, 1 1)"><rect x="0" y="0" width="10" height="10"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("type=\"table\" tableValues=\"0 "), "{out}");
+    }
+
+    #[test]
+    fn filter_references_and_unknown_functions_pass_through() {
+        // url() references and functions we do not lower (blur, for now) stay
+        // exactly as authored — browsers still honor them live
+        for f in ["url(#soft)", "blur(3px)", "none"] {
+            let svg =
+                format!(r##"{XW}<rect x="0" y="0" width="10" height="10" filter="{f}"/></svg>"##);
+            let out = compile_test(&svg);
+            assert!(out.contains(&format!("filter=\"{f}\"")), "{f}: {out}");
+            assert!(!out.contains("<filter id="), "{f}: {out}");
+        }
     }
 
     #[test]

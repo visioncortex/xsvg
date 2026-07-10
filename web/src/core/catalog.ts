@@ -214,6 +214,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Pixel adjustments",
+    note: 'filter="brightness(1.2) …" — CSS filter functions lowered to portable <filter> primitives (§8).',
+    samples: [
+      {
+        file: "adjust.xsvg",
+        title: "Filters & tone curves",
+        blurb: "brightness/contrast/saturate/sepia/invert/hue-rotate compiled to sRGB filter graphs, plus -x-curve() Photoshop-style tone curves sampled into lookup tables",
+      },
+    ],
+  },
+  {
     name: "Composition by reference",
     note: 'in="#id" on an x: element resolves its compiled output — features chain.',
     samples: [
