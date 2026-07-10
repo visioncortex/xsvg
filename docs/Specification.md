@@ -720,9 +720,9 @@ and kurbo-native backends can slot in later without surface changes).
 
 ### 7.5 Remaining pillars & deferred [planned]
 
-- **Pillar 3 — paint & pixels.** First slice **shipped**: pixel adjustments (§8). Remaining:
-  **`<x:mesh>`** — Coons/tensor mesh gradients with **cracks / T-junctions** and **transparency
-  (feathering / fade)**, lowered to flat patches / gradient triangles / raster `<image>`.
+- **Pillar 3 — paint & pixels.** Pixel adjustments (§8) and **`<x:mesh>` mesh gradients with
+  cracks (§8.2) shipped**. Remaining: per-corner alpha (feathering / fade), smooth-interior
+  T-junctions, `.qmesh` import from the vtracer pipeline.
 - **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
   (research retained in [Research.md §1](Research.md)).
 
@@ -759,6 +759,48 @@ survive; the v1 vocabulary is pointwise, so nothing bleeds further), one primiti
 declines — an unknown function (`blur()`/`drop-shadow()` are **deferred**: they need region
 inflation the pointwise set doesn't) or an invalid argument — mirroring CSS's
 whole-declaration-invalid rule; browsers still honor those live.
+
+### 8.2 Mesh gradients — `<x:mesh>` [implemented: v1]
+
+The Pillar 3 headline: **corner colors on a quad-dominant mesh**, the representation SVG never got
+(SVG 2's `<meshgradient>` was dropped by every browser). Engine: the workspace `gradient` crate
+(extracted from vtracer's quadmesh/gradient work).
+
+```xml
+<x:mesh>
+  <x:verts>0,0 120,0 240,10  0,90 120,80 240,100</x:verts>
+  <x:face v="0 1 4 3" fill="#e11 #fa0 #3b7 #06c"/>
+  <x:face v="1 2 5 4" fill="#fa0 #ff5 #09f #3b7"/>
+  <x:face v="3 4 5"   fill="#06c #3b7 #09f"/>
+</x:mesh>
+```
+
+**Model (normative).** `<x:verts>` holds shared vertex coordinates (`x,y` pairs, comma or
+whitespace separated); each `<x:face v="…">` names 3 or 4 CCW vertex indices and the same number
+of corner colors in `fill` (`#rgb`/`#rrggbb`; one color replicates to all corners). Quad corners
+map to local `(u,v)` as `0→(0,0) 1→(1,0) 2→(1,1) 3→(0,1)`; color interpolates bilinearly
+(inverse-bilinear for non-rectangular quads), barycentrically for triangles, in **linear-light
+RGB**. An edge shared by two faces is **smooth** iff both agree on the color at each shared
+endpoint — a mismatch is a **crack**, a hard discontinuity; a *region* is a maximal set of faces
+connected through smooth edges. Cracks need no extra markup: they fall out of the colors.
+
+**Lowering (normative): render → refit.** (1) The mesh is rasterized in memory at a
+profile-graded resolution (fast/balanced/highest → 64/128/256 px across the long axis), in
+linear-light, with per-pixel region labels. (2) Each region is refit with a **seam-free
+shared-vertex grid field** — one global least squares per region, grown (1×1 → up to
+6/12/16 per axis by profile) until the sRGB residual passes the profile tolerance (6/2.5/1
+RMSE) — and serialized as a **tiny PNG** (`(gx+1)×(gy+1)` texels, often 2×2, ~40 bytes base64)
+placed so its **texel centers land exactly on the grid vertices**: the image spans `n·s/(n−1)` of
+the region's bbox span `s`, offset by half a texel-interval — the renderer's own smooth bilinear
+image filter then interpolates the exact tensor-product basis of the fitted field. Fitting happens
+in the encoded (sRGB) domain because that is the space image samplers interpolate in. Each region
+is clipped by the **exact union of its face polygons** (nonzero), so cracks stay geometry-sharp at
+any zoom; a region whose fit collapses to a constant emits a plain `<path fill>`. Degradations
+(bad indices, color-count mismatch, degenerate extent) skip with markers (§3).
+
+**v1 limits.** Opaque RGB (no per-corner alpha/feathering yet); T-junctions are supported **on
+cracks** (each side clips independently) but a hanging node interior to a *smooth* region is not;
+`image-rendering` must remain default (smooth) for the reconstruction to hold.
 
 ## 9. Lowering target [implemented]
 
@@ -799,6 +841,8 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
 | Pixel adjustments — `blur()` / `drop-shadow()` (region inflation) | planned |
+| `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
+| `<x:mesh>` — per-corner alpha (feathering), smooth-interior T-junctions, `.qmesh` import | planned |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

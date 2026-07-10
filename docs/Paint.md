@@ -50,12 +50,22 @@ unfiltered until compiled — degradation, never breakage.
 | `blur()` / `drop-shadow()` | need **region inflation** (a blur bleeds past the bbox; the v1 set is pointwise) | lower with radius-derived region growth |
 | Levels (`-x-levels(black white gamma)`) | expressible today as a 3-point curve | sugar over `-x-curve` when demanded |
 | `backdrop-filter` semantics | needs compositing context, not static-subset-able | out of scope |
-| **Mesh gradients `<x:mesh>`** | the remaining Pillar 3 headline: Coons/tensor patches, cracks/T-junctions, feathering | own design doc before code (the Transform.md treatment); lowering candidates: flat-patch subdivision, gradient triangles, raster `<image>` — graded by the quality profile |
+| Mesh feathering (per-corner alpha) + smooth-interior T-junctions + `.qmesh` import | v1 meshes are opaque RGB with crack-side T-junctions only | additive on the shipped §8.2 model |
+
+## D. Mesh gradients — `<x:mesh>` ✅ shipped (v1)
+
+The pillar headline ([Specification.md §8.2](Specification.md)): corner colors on an indexed
+quad/tri mesh, cracks derived from color disagreement, triangles first-class. Lowered by
+**render → refit**: rasterize in linear-light, fit each crack region with a seam-free
+shared-vertex grid field (grow until the residual passes the profile tolerance), and serialize
+each region as a **texel-aligned tiny PNG** — placed so its texel centers land on the grid
+vertices, the renderer's own bilinear image filter reconstructs the field exactly (a single patch
+is literally a stretched 2×2). Engine: the workspace `gradient` crate, extracted from vtracer's
+quadmesh/gradient work.
 
 ## Status summary
 
-**Shipped:** the full CSS pixel-adjustment vocabulary, compiled to spec-exact primitives with the
-sRGB and region pitfalls handled, plus real per-channel tone curves CSS never had. One authored
-attribute, live everywhere, portable once compiled.
-
-**Next:** mesh gradients — the last unbuilt promise in the tagline.
+**Shipped:** the full CSS pixel-adjustment vocabulary (spec-exact primitives, sRGB and region
+pitfalls handled), per-channel tone curves CSS never had, and v1 mesh gradients with cracks — the
+tagline's last promise. **Next:** mesh feathering (per-corner alpha), smooth-interior
+T-junctions, and `.qmesh` import from the vtracer pipeline.

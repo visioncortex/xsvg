@@ -52,6 +52,9 @@ pub struct Raster {
     pub labels: Vec<u32>,
     /// number of regions (labels are `0..regions`)
     pub regions: usize,
+    /// region label per face (the labeling the pixels were painted with) —
+    /// callers build exact per-region clip geometry from the face polygons
+    pub face_regions: Vec<u32>,
 }
 
 impl Raster {
@@ -197,6 +200,7 @@ impl Mesh {
         let (face_region, regions) = self.face_regions(eps);
         let mut lin = vec![0f32; w * h * 3];
         let mut labels = vec![NONE; w * h];
+        let face_regions_out = face_region.clone();
 
         for (f, face) in self.faces.iter().enumerate() {
             let n = face.arity();
@@ -249,6 +253,7 @@ impl Mesh {
             lin,
             labels,
             regions,
+            face_regions: face_regions_out,
         }
     }
 }

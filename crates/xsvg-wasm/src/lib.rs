@@ -569,6 +569,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "textpath" => emit_textpath(node, out, ctx),
             "warp" => emit_warp(node, out, ctx),
             "boolean" => emit_boolean(node, out, ctx),
+            "mesh" => emit_mesh(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -1246,6 +1247,217 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             out.push_str("<!-- xsvg: <x:boolean> no usable geometry -->");
         }
     }
+}
+
+/// `<x:mesh>` (§8.2) — a quad-dominant mesh gradient with per-corner colors and
+/// cracks, lowered by the two-stage pipeline: (1) rasterize the mesh in memory
+/// (linear-light, crack-respecting region labels), (2) refit each region with a
+/// seam-free shared-vertex GridField grown until the residual passes the
+/// profile tolerance, then serialize each region as a **tiny PNG** placed so
+/// its texel centers land on the grid vertices — the renderer's own bilinear
+/// image filter reconstructs the field (a single patch is exactly a stretched
+/// 2×2). Regions are clipped by the exact union of their face polygons
+/// (nonzero), so cracks stay geometry-sharp regardless of raster resolution.
+fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    use xsvg_core::gradient;
+    use xsvg_core::gradient::{fit_field, fit_grid, texel_placement, Dof, Mesh};
+
+    // ---- parse: <x:verts> + <x:face v=".." fill="..">
+    let mut mesh = Mesh::default();
+    let mut markers = String::new();
+    for child in node.children().filter(|c| c.is_element()) {
+        if child.tag_name().name() == "verts" {
+            let text = child.text().unwrap_or("");
+            let nums: Vec<f32> = text
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|t| !t.is_empty())
+                .filter_map(|t| t.parse::<f32>().ok().filter(|v| v.is_finite()))
+                .collect();
+            for pair in nums.chunks_exact(2) {
+                mesh.add_vertex(pair[0], pair[1]);
+            }
+        }
+    }
+    let nv = mesh.verts.len() as u32;
+    for child in node.children().filter(|c| c.is_element()) {
+        if child.tag_name().name() != "face" {
+            continue;
+        }
+        let idx: Vec<u32> = child
+            .attribute("v")
+            .unwrap_or("")
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
+        let cols: Vec<xsvg_core::gradient::LinRgb> = child
+            .attribute("fill")
+            .unwrap_or("")
+            .split_whitespace()
+            .filter_map(parse_hex_color)
+            .collect();
+        let ok_idx = (idx.len() == 3 || idx.len() == 4) && idx.iter().all(|&i| i < nv);
+        let ok_col = cols.len() == idx.len() || cols.len() == 1;
+        if !ok_idx || !ok_col || cols.is_empty() {
+            markers.push_str("<!-- xsvg: <x:face> skipped (bad indices or colors) -->");
+            continue;
+        }
+        let col = |k: usize| if cols.len() == 1 { cols[0] } else { cols[k] };
+        if idx.len() == 4 {
+            mesh.add_quad(
+                [idx[0], idx[1], idx[2], idx[3]],
+                [col(0), col(1), col(2), col(3)],
+            );
+        } else {
+            mesh.add_tri([idx[0], idx[1], idx[2]], [col(0), col(1), col(2)]);
+        }
+    }
+    out.push_str(&markers);
+    if mesh.faces.is_empty() {
+        out.push_str("<!-- xsvg: <x:mesh> no usable faces -->");
+        return;
+    }
+
+    // ---- stage 1: rasterize over the mesh bbox at a profile-graded resolution
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for &(x, y) in &mesh.verts {
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
+    }
+    if !(x1 > x0 && y1 > y0) {
+        out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
+        return;
+    }
+    let max_px = match ctx.quality {
+        QualityProfile::Fast => 64.0f32,
+        QualityProfile::Balanced => 128.0,
+        QualityProfile::Highest | QualityProfile::Raster => 256.0,
+    };
+    let scale = ((x1 - x0).max(y1 - y0) / max_px).max(1e-6);
+    let (w, h) = (
+        (((x1 - x0) / scale).ceil() as usize).max(1),
+        (((y1 - y0) / scale).ceil() as usize).max(1),
+    );
+    let raster = mesh.rasterize(w, h, (x0, y0), scale, 1e-3);
+    let srgb = raster.to_srgb8();
+
+    // per-region pixel index lists + pixel bboxes
+    let mut region_px: Vec<Vec<u32>> = vec![Vec::new(); raster.regions];
+    let mut bbox: Vec<(u32, u32, u32, u32)> = vec![(u32::MAX, u32::MAX, 0, 0); raster.regions];
+    for (i, &l) in raster.labels.iter().enumerate() {
+        if l == gradient::mesh::NONE {
+            continue;
+        }
+        region_px[l as usize].push(i as u32);
+        let (px, py) = ((i % w) as u32, (i / w) as u32);
+        let b = &mut bbox[l as usize];
+        b.0 = b.0.min(px);
+        b.1 = b.1.min(py);
+        b.2 = b.2.max(px);
+        b.3 = b.3.max(py);
+    }
+
+    // rmse tolerance (sRGB units) and grid cap by profile
+    let (tol, cap) = match ctx.quality {
+        QualityProfile::Fast => (6.0f32, 6usize),
+        QualityProfile::Balanced => (2.5, 12),
+        QualityProfile::Highest | QualityProfile::Raster => (1.0, 16),
+    };
+
+    out.push_str("<g");
+    copy_attrs(node, out, &[]);
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    let mesh_pos = node.range().start;
+    for r in 0..raster.regions {
+        if region_px[r].is_empty() {
+            continue;
+        }
+        // exact clip geometry: union of the region's face polygons (nonzero)
+        let mut clip_d = String::new();
+        for (f, face) in mesh.faces.iter().enumerate() {
+            if raster.face_regions[f] != r as u32 {
+                continue;
+            }
+            let n = face.arity();
+            for c in 0..n {
+                let (px, py) = mesh.verts[face.v[c] as usize];
+                clip_d.push(if c == 0 { 'M' } else { 'L' });
+                clip_d.push_str(&format!("{},{}", fmt(px as f64), fmt(py as f64)));
+            }
+            clip_d.push('Z');
+        }
+
+        let single = fit_field(&region_px[r], w, &srgb, 2.0);
+        if single.dof == Dof::Solid {
+            let c = single.corners[0];
+            out.push_str(&format!(
+                "<path fill=\"#{:02x}{:02x}{:02x}\" d=\"{clip_d}\"/>",
+                c[0].round().clamp(0.0, 255.0) as u8,
+                c[1].round().clamp(0.0, 255.0) as u8,
+                c[2].round().clamp(0.0, 255.0) as u8
+            ));
+            continue;
+        }
+
+        // grow the shared-vertex grid until the residual passes the tolerance
+        let (bx0, by0, bx1, by1) = bbox[r];
+        let ar = ((bx1 - bx0).max(1) as f32) / ((by1 - by0).max(1) as f32);
+        let mut best = None;
+        for g in [1usize, 2, 3, 4, 6, 8, 12, 16] {
+            let gx = ((g as f32 * ar.sqrt()).round() as usize).clamp(1, cap);
+            let gy = ((g as f32 / ar.sqrt()).round() as usize).clamp(1, cap);
+            let grid = fit_grid(&region_px[r], w, &srgb, gx, gy);
+            let done = grid.rmse <= tol || g >= cap;
+            best = Some(grid);
+            if done {
+                break;
+            }
+        }
+        let grid = best.unwrap();
+
+        // tiny PNG: (gx+1)×(gy+1) texels, one per grid vertex
+        let (tw, th) = (grid.gx + 1, grid.gy + 1);
+        let mut rgb = Vec::with_capacity(tw * th * 3);
+        for vert in &grid.verts {
+            for c in 0..3 {
+                rgb.push(vert[c].round().clamp(0.0, 255.0) as u8);
+            }
+        }
+        let png = gradient::png::encode_rgb_png(tw as u32, th as u32, &rgb);
+        let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
+        // raster pixel space -> user units
+        let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
+        let (uw, uh) = (iw * scale as f64, ih * scale as f64);
+        let cid = format!("x-mesh-{mesh_pos}-{r}");
+        out.push_str(&format!(
+            "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{}\"/>",
+            fmt(ux),
+            fmt(uy),
+            fmt(uw),
+            fmt(uh),
+            gradient::base64::encode(&png)
+        ));
+    }
+    out.push_str("</g>");
+}
+
+/// `#rgb` / `#rrggbb` → linear-light RGB.
+fn parse_hex_color(s: &str) -> Option<xsvg_core::gradient::LinRgb> {
+    let hex = s.strip_prefix('#')?;
+    let byte = |a: u8, b: u8| {
+        let hi = (a as char).to_digit(16)?;
+        let lo = (b as char).to_digit(16)?;
+        Some((hi * 16 + lo) as u8)
+    };
+    let b = hex.as_bytes();
+    let (r, g, bl) = match b.len() {
+        3 => (byte(b[0], b[0])?, byte(b[1], b[1])?, byte(b[2], b[2])?),
+        6 => (byte(b[0], b[1])?, byte(b[2], b[3])?, byte(b[4], b[5])?),
+        _ => return None,
+    };
+    Some(xsvg_core::gradient::RgbColor::new(r, g, bl).to_linear())
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -2378,10 +2590,17 @@ mod tests {
 
     #[test]
     fn unknown_extension_degrades_to_marker() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:sparkle/></svg>"#;
+        let out = compile_test(svg);
+        assert!(
+            out.contains("<!-- xsvg: <x:sparkle> not yet lowered -->"),
+            "{out}"
+        );
+        // an empty mesh is KNOWN but has nothing to lower — its own marker
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:mesh/></svg>"#;
         let out = compile_test(svg);
         assert!(
-            out.contains("<!-- xsvg: <x:mesh> not yet lowered -->"),
+            out.contains("<!-- xsvg: <x:mesh> no usable faces -->"),
             "{out}"
         );
     }
@@ -2784,6 +3003,7 @@ mod tests {
   <x:textbox in="#blob" font-size="10" fill="#666">into the blob</x:textbox>
   <x:boolean op="intersect" fill="#777"><use href="#blob"/><rect x="310" y="250" width="40" height="30"/></x:boolean>
   <rect x="5" y="270" width="30" height="20" fill="#48a" filter="brightness(1.2) saturate(0.8)"/>
+  <x:mesh><x:verts>340,240 380,240 380,280 340,280</x:verts><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #ff0"/></x:mesh>
 </svg>"##;
 
     /// Byte offsets of every top-level element in `INC`, via the parser itself.
@@ -3065,6 +3285,11 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile meshes: bad indices, color-count mismatch, degenerate extent
+            r##"<x:mesh><x:verts>0,0 10,0</x:verts><x:face v="0 1 9" fill="#f00"/></x:mesh>"##,
+            r##"<x:mesh><x:verts>0,0 10,0 10,10 0,10</x:verts><x:face v="0 1 2 3" fill="#f00 #0f0"/></x:mesh>"##,
+            r##"<x:mesh><x:verts>5,5 5,5 5,5</x:verts><x:face v="0 1 2" fill="#f00"/></x:mesh>"##,
+            r##"<x:mesh><x:verts>garbage</x:verts><x:face v="0 1 2" fill="#f00 #0f0 #00f"/></x:mesh>"##,
             // hostile filter attributes: unparseable lists stay as authored
             r##"<rect x="0" y="0" width="10" height="10" filter="brightness("/>"##,
             r##"<rect x="0" y="0" width="10" height="10" filter="brightness(NaN)"/>"##,
@@ -3183,6 +3408,68 @@ mod tests {
             assert!(out.contains(&format!("filter=\"{f}\"")), "{f}: {out}");
             assert!(!out.contains("<filter id="), "{f}: {out}");
         }
+    }
+
+    #[test]
+    fn mesh_lowers_to_a_texel_aligned_image() {
+        // one smooth quad -> one region -> one clipped tiny-PNG image whose
+        // placement OVERHANGS the mesh bbox (the texel-center construction)
+        let svg = format!(
+            r##"{XW}<x:mesh><x:verts>0,0 200,0 200,100 0,100</x:verts><x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("<!-- xsvg:"), "{out}");
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+        assert!(out.contains("data:image/png;base64,"), "{out}");
+        assert!(out.contains("preserveAspectRatio=\"none\""), "{out}");
+        assert!(out.contains("<clipPath id=\"x-mesh-"), "{out}");
+        let attr = |name: &str| -> f64 {
+            let k = out.find(&format!(" {name}=\"")).unwrap() + name.len() + 3;
+            out[k..k + out[k..].find('"').unwrap()].parse().unwrap()
+        };
+        assert!(attr("width") > 200.0, "image must overhang the bbox");
+        assert!(attr("x") < 0.5, "offset before the bbox");
+    }
+
+    #[test]
+    fn mesh_solid_region_is_a_plain_path() {
+        let svg = format!(
+            r##"{XW}<x:mesh><x:verts>0,0 40,0 40,40 0,40</x:verts><x:face v="0 1 2 3" fill="#3b82f6"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("<image"), "{out}");
+        assert!(out.contains("<path fill=\"#3b82f6\""), "{out}");
+    }
+
+    #[test]
+    fn mesh_cracks_split_into_separately_clipped_regions() {
+        // two quads sharing an edge with DISAGREEING colors: a crack -> two
+        // regions, each with its own image + clip
+        let svg = format!(
+            r##"{XW}<x:mesh><x:verts>0,0 100,0 200,0 0,100 100,100 200,100</x:verts><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#06c #3b7 #3b7 #06c"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<clipPath").count(), 2, "{out}");
+        assert_eq!(out.matches("<image").count(), 2, "{out}");
+        // smooth version (shared edge agrees) -> ONE region
+        let svg = format!(
+            r##"{XW}<x:mesh><x:verts>0,0 100,0 200,0 0,100 100,100 200,100</x:verts><x:face v="0 1 4 3" fill="#e11 #fa0 #fa0 #e11"/><x:face v="1 2 5 4" fill="#fa0 #3b7 #3b7 #fa0"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn mesh_triangles_and_single_color_faces_work() {
+        let svg = format!(
+            r##"{XW}<x:mesh><x:verts>0,0 80,0 40,60</x:verts><x:face v="0 1 2" fill="#e11 #3b7 #06c"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+        // triangle clip path has three points
+        let k = out.find("<clipPath").unwrap();
+        let d = &out[k..k + out[k..].find("/>").unwrap()];
+        assert_eq!(d.matches('L').count(), 2, "{d}");
     }
 
     #[test]

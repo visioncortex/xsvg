@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 520" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="520" fill="#0f172a"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">x:mesh — mesh gradients: corner colors on a quad/tri mesh, cracks included</text>
+  <text x="28" y="52" font-size="11" fill="#94a3b8">lowered as tiny texel-aligned PNGs — the renderer's own bilinear filter reconstructs each region's fitted field</text>
+
+  <!-- a smooth two-quad sky: shared edge agrees, so it fits as ONE region -->
+  <text x="48" y="86" font-size="11" fill="#94a3b8">smooth mesh — two quads, one seamless region</text>
+  <x:mesh>
+    <x:verts>48,96 348,96 648,96 48,216 348,216 648,216</x:verts>
+    <x:face v="0 1 4 3" fill="#0ea5e9 #7c3aed #f472b6 #fbbf24"/>
+    <x:face v="1 2 5 4" fill="#7c3aed #1e1b4b #52525b #f472b6"/>
+  </x:mesh>
+
+  <!-- the bilinear twist: four unrelated corner colors in one quad -->
+  <text x="48" y="256" font-size="11" fill="#94a3b8">one quad, four corners — the bilinear twist</text>
+  <x:mesh>
+    <x:verts>48,266 238,266 238,396 48,396</x:verts>
+    <x:face v="0 1 2 3" fill="#ef4444 #fbbf24 #3b82f6 #10b981"/>
+  </x:mesh>
+
+  <!-- a crack: the shared edge disagrees, so the regions stay hard-split -->
+  <text x="278" y="256" font-size="11" fill="#94a3b8">a crack — shared edge, disagreeing colors</text>
+  <x:mesh>
+    <x:verts>278,266 383,266 488,266 278,396 383,396 488,396</x:verts>
+    <x:face v="0 1 4 3" fill="#fde68a #f59e0b #b45309 #fbbf24"/>
+    <x:face v="1 2 5 4" fill="#0c4a6e #075985 #0ea5e9 #38bdf8"/>
+  </x:mesh>
+
+  <!-- triangles are first-class: a fan with barycentric corner colors -->
+  <text x="528" y="256" font-size="11" fill="#94a3b8">triangle fan — barycentric colors</text>
+  <x:mesh>
+    <x:verts>598,331 528,266 668,266 668,396 528,396</x:verts>
+    <x:face v="0 1 2" fill="#f8fafc #e11d48 #f59e0b"/>
+    <x:face v="0 2 3" fill="#f8fafc #f59e0b #10b981"/>
+    <x:face v="0 3 4" fill="#f8fafc #10b981 #3b82f6"/>
+    <x:face v="0 4 1" fill="#f8fafc #3b82f6 #e11d48"/>
+  </x:mesh>
+
+  <!-- a 3x3 grid of quads bending around a glow — subdivision territory -->
+  <text x="48" y="436" font-size="11" fill="#94a3b8">3×3 smooth grid — a radial-ish glow one patch can't represent, many can</text>
+  <x:mesh>
+    <x:verts>
+      48,446  248,446  448,446  648,446
+      48,472  248,472  448,472  648,472
+      48,498  248,498  448,498  648,498
+    </x:verts>
+    <x:face v="0 1 5 4" fill="#1e1b4b #7c3aed #fde68a #7c3aed"/>
+    <x:face v="1 2 6 5" fill="#7c3aed #1e1b4b #7c3aed #fde68a"/>
+    <x:face v="2 3 7 6" fill="#1e1b4b #1e1b4b #1e1b4b #7c3aed"/>
+    <x:face v="4 5 9 8" fill="#7c3aed #fde68a #7c3aed #1e1b4b"/>
+    <x:face v="5 6 10 9" fill="#fde68a #7c3aed #1e1b4b #7c3aed"/>
+    <x:face v="6 7 11 10" fill="#7c3aed #1e1b4b #1e1b4b #1e1b4b"/>
+  </x:mesh>
+</svg>

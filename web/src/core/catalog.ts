@@ -214,6 +214,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Mesh gradients",
+    note: "<x:mesh> — corner colors on a quad/tri mesh with cracks, fitted and lowered as texel-aligned tiny PNGs (§8.2).",
+    samples: [
+      {
+        file: "mesh.xsvg",
+        title: "Mesh gradients",
+        blurb: "a seamless two-quad sky, the bilinear twist, a hard crack, a barycentric triangle fan, and a 3×3 glow grid — each region one tiny PNG the browser's bilinear filter reconstructs",
+      },
+    ],
+  },
+  {
     name: "Pixel adjustments",
     note: 'filter="brightness(1.2) …" — CSS filter functions lowered to portable <filter> primitives (§8).',
     samples: [

@@ -79,6 +79,12 @@ Realistic composites that combine several features into one artifact.
 | [boolean.xsvg](boolean.xsvg) | `op="union"` merges a circle cloud into one outline (single silhouette stroke); `op="subtract"` punches outlined text from a plate (*Minus Front*); `intersect` keeps the lens, `exclude` turns the overlap into a hole; the last card warps a boolean result with `field="flag"` — path algebra and warps compose both ways |
 | [boolean-refs.xsvg](boolean-refs.xsvg) | Operands **by reference**: a `<use href>` child borrows geometry without consuming it — the venn lens is derived from circles that keep rendering; motifs stamp by `x`/`y` offset **and by full `transform`** (a rotated-bar rosette); a union's compiled output punches a plate; and a **live textbox's glyphs punch by reference** (auto-outlined, §4) while the text stays selectable |
 
+## Mesh gradients — `<x:mesh>` (§8.2)
+
+| File | Shows |
+|---|---|
+| [mesh.xsvg](mesh.xsvg) | Indexed mesh gradients: shared `<x:verts>` + `<x:face v fill>` quads/tris with per-corner colors — a seamless two-quad sky, the bilinear twist, a **crack** (shared edge, disagreeing colors → hard split), a barycentric triangle fan, and a 3×3 glow grid. Lowered by render→refit: each crack region is fitted with a seam-free grid field and serialized as a **texel-aligned tiny PNG** (often 2×2) whose stretch makes the renderer's own bilinear filter reconstruct the gradient, clipped by the exact face-polygon union |
+
 ## Pixel adjustments (§8)
 
 | File | Shows |
