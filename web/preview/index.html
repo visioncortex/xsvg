@@ -30,6 +30,45 @@
         color: #b00020;
         white-space: pre-wrap;
       }
+      /* Slide nav — only present when the document has multiple artboards. */
+      .deck-nav {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 8px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.82);
+        box-shadow: 0 2px 10px rgba(15, 23, 42, 0.25);
+        color: #f8fafc;
+        font: 13px/1 "Helvetica Neue", Arial, sans-serif;
+      }
+      .deck-nav button {
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #f8fafc;
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .deck-nav button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .deck-nav button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .deck-label {
+        min-width: 96px;
+        text-align: center;
+        letter-spacing: 0.02em;
+      }
     </style>
   </head>
   <body>

@@ -609,6 +609,38 @@ fn is_hidden(node: roxmltree::Node) -> bool {
     matches!(node.attribute((XSVG_NS, "hidden")), Some(v) if v != "false")
 }
 
+/// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
+/// slide — that the viewer/preview can zoom to and page through. It compiles to
+/// a plain `<g>` (renders normally in any viewer) carrying
+/// `data-xsvg-artboard="Label"`, plus `data-xsvg-frame="x y w h"` when an
+/// explicit `x:frame` is given (else the tools use the group's bbox). Returns
+/// the attribute string to append, or empty when the element isn't an artboard.
+fn artboard_attr(node: roxmltree::Node) -> String {
+    let Some(label) = node.attribute((XSVG_NS, "artboard")) else {
+        return String::new();
+    };
+    let mut s = String::from(" data-xsvg-artboard=\"");
+    push_escaped(&mut s, label, true);
+    s.push('"');
+    if let Some(frame) = node.attribute((XSVG_NS, "frame")) {
+        let nums: Vec<f64> = frame
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(parse_num)
+            .collect();
+        if nums.len() == 4 && nums[2] > 0.0 && nums[3] > 0.0 {
+            s.push_str(&format!(
+                " data-xsvg-frame=\"{} {} {} {}\"",
+                fmt(nums[0]),
+                fmt(nums[1]),
+                fmt(nums[2]),
+                fmt(nums[3])
+            ));
+        }
+    }
+    s
+}
+
 fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) {
     if !node.is_element() {
         if node.is_text() {
@@ -711,6 +743,9 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         None => copy_attrs(node, out, &[]),
     }
     out.push_str(&pos_attr(node, ctx));
+    if !is_root {
+        out.push_str(&artboard_attr(node));
+    }
 
     if node.has_children() {
         out.push('>');
@@ -3006,6 +3041,33 @@ mod tests {
     /// Compile with the source map on (`data-xsvg-pos` attributes emitted).
     fn compile_mapped(svg: &str) -> String {
         compile_impl(svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap()
+    }
+
+    #[test]
+    fn artboards_carry_data_attributes_and_stay_plain_groups() {
+        let svg = format!(
+            r##"{XW}<g x:artboard="Slide 1" x:frame="0 0 720 405"><rect x="0" y="0" width="10" height="10" fill="#111"/></g><g x:artboard="Slide 2"><rect x="800" y="0" width="10" height="10" fill="#222"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("data-xsvg-artboard").count(), 2, "{out}");
+        assert!(out.contains(r#"data-xsvg-artboard="Slide 1""#), "{out}");
+        assert!(out.contains(r#"data-xsvg-frame="0 0 720 405""#), "{out}");
+        // no explicit frame → no data-xsvg-frame (tools fall back to bbox)
+        assert_eq!(out.matches("data-xsvg-frame").count(), 1, "{out}");
+        // the x: metadata is stripped; artboards emit as plain <g>
+        assert!(
+            !out.contains("x:artboard") && !out.contains("x:frame"),
+            "{out}"
+        );
+        // a malformed frame is dropped, the artboard survives
+        let svg = format!(
+            r##"{XW}<g x:artboard="A" x:frame="0 0 -5 10"><rect x="0" y="0" width="4" height="4"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains(r#"data-xsvg-artboard="A""#) && !out.contains("data-xsvg-frame"),
+            "{out}"
+        );
     }
 
     #[test]

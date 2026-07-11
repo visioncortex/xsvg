@@ -13,6 +13,7 @@ import { SAMPLES, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
 import { createPanZoom, type PanZoom } from "./pan-zoom";
 import { createInspector, type Inspector } from "./inspector";
+import { findArtboards } from "../core/artboards";
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -83,7 +84,11 @@ async function open(name: string, source: string): Promise<void> {
     if (svgEl) {
       sizeToViewBox(svgEl as SVGSVGElement);
       panzoom = createPanZoom(stage, content);
-      panzoom.fit();
+      // Zoom to the first artboard (§5.2) when the document has any; else fit
+      // the whole drawing.
+      const boards = findArtboards(svgEl as SVGSVGElement);
+      if (boards.length) panzoom.fitTo(...boards[0].frame);
+      else panzoom.fit();
       fitted = true;
       updateFitIcon();
       inspector = createInspector({

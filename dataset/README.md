@@ -98,6 +98,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [compose.xsvg](compose.xsvg) | `in="#id"` pointing at an `x:` element resolves its **compiled output**: a textbox flows inside a boolean union's merged silhouette; type rides the arched spine an `x:warp` emitted; and a `path → x:warp bend → x:textpath` chain gives three linked elements one edit point |
 
+## Artboards & slides (§5.2)
+
+| File | Shows |
+|---|---|
+| [artboards.xsvg](artboards.xsvg) | Three `<g x:artboard="…" x:frame="…">` **slides** in one file (title, bar chart, closing card). They render side by side in any plain viewer; the standalone **preview** pages through them with a `‹ ›` nav + slide counter, and the interactive **viewer** zooms to the first artboard on load. The tagging is ignorable `x:` attributes echoed as `data-xsvg-artboard`/`data-xsvg-frame`, so the file never breaks |
+
 ## Layers — compile-time z-order (§5.1)
 
 | File | Shows |

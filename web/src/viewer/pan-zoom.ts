@@ -15,6 +15,9 @@ export interface PanZoom {
   reset(): void;
   /** Scale the content to fill the viewport (with margin) and center it. */
   fit(): void;
+  /** Frame a specific rect (content/SVG-user units) in the viewport, centered
+   *  with margin — used to zoom to an artboard. */
+  fitTo(x: number, y: number, w: number, h: number): void;
   /** Zoom a step in / out, anchored on the viewport center (for the +/- buttons). */
   zoomIn(): void;
   zoomOut(): void;
@@ -161,6 +164,19 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     apply();
   };
 
+  const fitTo = (x: number, y: number, w: number, h: number) => {
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    if (!(w > 0 && h > 0 && vw > 0 && vh > 0)) {
+      fit();
+      return;
+    }
+    scale = clamp(Math.min(vw / w, vh / h) * 0.94, MIN_SCALE, MAX_SCALE);
+    tx = (vw - scale * w) / 2 - scale * x;
+    ty = (vh - scale * h) / 2 - scale * y;
+    apply();
+  };
+
   viewport.addEventListener("wheel", onWheel, { passive: false });
   viewport.addEventListener("pointerdown", onPointerDown);
   viewport.addEventListener("mousedown", onMouseDown);
@@ -173,6 +189,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   return {
     reset,
     fit,
+    fitTo,
     zoomIn: () => zoomAtCenter(1.25),
     zoomOut: () => zoomAtCenter(1 / 1.25),
     scale: () => scale,

@@ -252,6 +252,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Artboards & slides",
+    note: "<g x:artboard=\"…\"> names a slide frame; the preview pages them with < > nav (§5.2).",
+    samples: [
+      {
+        file: "artboards.xsvg",
+        title: "Artboards (slides)",
+        blurb: "Three x:artboard slides in one file — a title, a bar chart, and a closing card; the preview pages them with a < > nav, the viewer zooms to the first, and it stays plain SVG in any viewer",
+      },
+    ],
+  },
+  {
     name: "Layers — compile-time z-order",
     note: "x:layer=\"background|foreground\" on a <g> restacks at compile; still plain SVG uncompiled (§5.1).",
     samples: [

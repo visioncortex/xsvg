@@ -154,6 +154,26 @@ plain `<g>`), so the output carries no trace of the layering. Because `<x:layer>
 would hide its content in an uncompiled viewer (§3 skips unknown elements with their subtree), the
 **attribute-on-`<g>` form is the primitive** — it never degrades to empty.
 
+### 5.2 Artboards — named slide frames [implemented]
+
+An artboard is a `<g x:artboard="Label">` — a named region, like an Illustrator artboard or a
+slide. Degradation-safe the same way as layers (§5.1): it compiles to a plain `<g>` (renders
+normally in any viewer) carrying **`data-xsvg-artboard="Label"`**, so tools can enumerate, frame,
+and page through them. An optional `x:frame="x y w h"` sets an explicit slide rectangle (content
+may bleed past it) and is echoed as **`data-xsvg-frame`**; without it, tools fall back to the
+group's bounding box.
+
+| Attribute | Meaning |
+|---|---|
+| `x:artboard` | marks the group as an artboard; the value is its name |
+| `x:frame` | optional explicit frame `x y w h` (else the group's bbox) |
+
+**Tooling.** The bundled tools treat artboards as **slides**: the standalone preview shows a
+`‹ ›` nav with a slide counter when a document has multiple artboards, paging by reframing the SVG
+`viewBox` to each frame; the interactive viewer **zooms to the first artboard** on load. Both read
+the frames from the emitted `data-` attributes (`web/src/core/artboards.ts`). The compiler itself
+only tags and passes through — artboards do not reorder or clip content.
+
 ## 6. Text
 
 ### 6.1 Common layout primitives [implemented]
@@ -891,6 +911,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Namespaces, prefix policy, degradation contract | implemented |
 | `<rect>` → `<path>` | implemented |
 | Layers — `x:layer` (background/foreground) + `x:order`/`x:label`/`x:hidden` compile-time z-order (§5.1) | implemented |
+| Artboards — `x:artboard`/`x:frame` named slide frames (`data-xsvg-artboard`); preview slide nav + viewer zoom-to-first (§5.2) | implemented |
 | `<text inline-size>` wrap flow | implemented |
 | `<textArea>` (text-align, display-align, line-increment, auto sizing, clip) | implemented |
 | `<tbreak/>` forced line break | implemented |
