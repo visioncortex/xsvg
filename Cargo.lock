@@ -70,6 +70,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient"
+version = "0.1.0"
+
+[[package]]
 name = "i_float"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,6 +336,7 @@ dependencies = [
 name = "xsvg-core"
 version = "0.0.0"
 dependencies = [
+ "gradient",
  "i_overlay",
  "i_shape",
  "kurbo",
