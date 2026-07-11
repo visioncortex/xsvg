@@ -802,9 +802,11 @@ outside 1..64, non-positive extent) degrades with a marker.
 **Lowering (normative): render → refit.** (1) The mesh is rasterized in memory at a
 profile-graded resolution (fast/balanced/highest → 64/128/384 px across the long axis, and at
 least 24/32/48 px across the short one), in linear-light, with per-pixel region labels. (2) Each region is refit with a **seam-free
-shared-vertex grid field** — one global least squares per region, grown (1×1 → up to
-10/24/48 per axis by profile) until the sRGB residual passes the profile tolerance (4/1.5/0.5
-RMSE) — and serialized as a **tiny PNG** (`(gx+1)×(gy+1)` texels, often 2×2, ~40 bytes base64)
+shared-vertex grid field** — one global least squares per region, grown (up to 10/24/48 per axis
+by profile) until the sRGB residual passes the profile tolerance (4/1.5/0.5 RMSE), with the
+grid's aspect set by the **field's measured directional variation** (Σ|∂/∂x| vs Σ|∂/∂y|), so a
+wide region with vertical structure spends its texels on rows instead of stretching a coarse
+column grid — and serialized as a **tiny PNG** (`(gx+1)×(gy+1)` texels, often 2×2, ~40 bytes base64)
 placed so its **texel centers land exactly on the grid vertices**: the image spans `n·s/(n−1)` of
 the region's bbox span `s`, offset by half a texel-interval — the renderer's own smooth bilinear
 image filter then interpolates the exact tensor-product basis of the fitted field. Fitting happens

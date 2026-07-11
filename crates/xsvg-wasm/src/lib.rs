@@ -1542,15 +1542,43 @@ fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, c
             continue;
         }
 
-        // grow the shared-vertex grid until the residual passes the tolerance
+        // grow the shared-vertex grid until the residual passes the tolerance.
+        // The gx:gy aspect comes from the FIELD's measured directional
+        // variation (sum of |∂/∂x| vs |∂/∂y| over the region), not the bbox —
+        // a wide region with purely vertical structure gets rows, not
+        // stretched-wide column padding, so texels stay meaningful. (A greedy
+        // per-axis search stalls here: row counts that straddle an interior
+        // color kink are transiently WORSE, which lets no-op column growth win
+        // ties all the way to the cap.)
         let (bx0, by0, bx1, by1) = bbox[r];
-        let ar = ((bx1 - bx0).max(1) as f32) / ((by1 - by0).max(1) as f32);
+        let (mut vx, mut vy) = (1e-6f64, 1e-6f64);
+        for &idx in &region_px[r] {
+            let i = idx as usize;
+            let (px, py) = (i % w, i / w);
+            if px + 1 < w && raster.labels[i + 1] == r as u32 {
+                for c in 0..4 {
+                    vx += (rgba[(i + 1) * 4 + c] as f64 - rgba[i * 4 + c] as f64).abs();
+                }
+            }
+            if py + 1 < h && raster.labels[i + w] == r as u32 {
+                for c in 0..4 {
+                    vy += (rgba[(i + w) * 4 + c] as f64 - rgba[i * 4 + c] as f64).abs();
+                }
+            }
+        }
+        // blend the field ratio with the bbox aspect: the field says where the
+        // STRUCTURE is, the bbox keeps enough of the other axis that localized
+        // cross-structure (a rim hugging a wide region's end caps) still gets
+        // texels the global sum can't see
+        let field_s = (vx / vy).sqrt();
+        let bbox_s = (((bx1 - bx0).max(1) as f64) / ((by1 - by0).max(1) as f64)).sqrt();
+        let s = ((field_s * bbox_s).sqrt().clamp(1.0 / 6.0, 6.0)) as f32;
         let mut best = None;
         for g in [1usize, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48] {
-            let gx = ((g as f32 * ar.sqrt()).round() as usize).clamp(1, cap);
-            let gy = ((g as f32 / ar.sqrt()).round() as usize).clamp(1, cap);
+            let gx = ((g as f32 * s).round() as usize).clamp(1, cap);
+            let gy = ((g as f32 / s).round() as usize).clamp(1, cap);
             let grid = fit_grid(&region_px[r], w, &rgba, gx, gy);
-            let done = grid.rmse <= tol || g >= cap;
+            let done = grid.rmse <= tol || (gx >= cap && gy >= cap);
             best = Some(grid);
             if done {
                 break;
@@ -4083,6 +4111,25 @@ mod tests {
         let out = compile_test(&svg);
         assert!(out.contains("fill-opacity=\"0.50"), "{out}");
         assert!(!out.contains("<image"), "{out}");
+    }
+
+    #[test]
+    fn grid_growth_follows_the_fields_anisotropy() {
+        // a WIDE mesh whose color varies only vertically: the fitted grid must
+        // spend its texels on rows, not aspect-locked columns — the PNG comes
+        // out tall-and-narrow, not stretched wide
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 400,0 400,50 0,50" cols="1" rows="1"></x:mesh><x:mesh points="0,0 200,0 400,0 0,25 200,25 400,25 0,50 200,50 400,50"><x:face v="0 1 4 3" fill="#000 #000 #777 #777"/><x:face v="1 2 5 4" fill="#000 #000 #777 #777"/><x:face v="3 4 7 6" fill="#777 #777 #fff #fff"/><x:face v="4 5 8 7" fill="#777 #777 #fff #fff"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        let png = b64_prefix(&out, 26);
+        let tw = u32::from_be_bytes(png[16..20].try_into().unwrap());
+        let th = u32::from_be_bytes(png[20..24].try_into().unwrap());
+        assert!(
+            th > tw,
+            "vertical-only structure must yield a tall grid, got {tw}x{th}: {out}"
+        );
+        assert!(tw <= 4, "no wasted columns: {tw}x{th}");
     }
 
     #[test]
