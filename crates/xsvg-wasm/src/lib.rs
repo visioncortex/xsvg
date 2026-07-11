@@ -3910,6 +3910,9 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // degenerate meshgradient extent + non-finite stop-opacity
+            r##"<meshgradient id="gz" x="5" y="5"><meshrow><meshpatch><stop path="l 0,0" stop-color="#e11"/><stop path="l 0,0" stop-color="#fa0"/><stop path="l 0,0" stop-color="#3b7"/><stop path="l 0,0" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="10" height="10" fill="url(#gz)"/>"##,
+            r##"<meshgradient id="gi" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11" stop-opacity="inf"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="9" height="9" fill="url(#gi)"/>"##,
             // hostile alpha: 5-digit hex, garbage stop-opacity
             r##"<x:mesh points="0,0 10,0 10,10 0,10"><x:face v="0 1 2 3" fill="#ff000"/></x:mesh>"##,
             r##"<meshgradient id="ga" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11" stop-opacity="soon"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="9" height="9" fill="url(#ga)"/>"##,
@@ -4149,6 +4152,77 @@ mod tests {
             o[k..k + o[k..].find('"').unwrap()].to_string()
         };
         assert_ne!(uri(&bilinear), uri(&bicubic), "easing must change the fit");
+    }
+
+    #[test]
+    fn meshgradient_multi_row_grids_inherit_top_edges() {
+        // a 2x2 patch grid exercising every inheritance case: (0,0) 4 stops,
+        // (0,1) 3 stops (left inherited), (1,0) 3 stops (top inherited),
+        // (1,1) 2 stops (top + left inherited). Corner colors agree at every
+        // shared corner, so the whole grid is ONE smooth region.
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="l 50,0" stop-color="#e11"/><stop path="l 0,40" stop-color="#fa0"/><stop path="l -50,0" stop-color="#3b7"/><stop path="l 0,-40" stop-color="#06c"/></meshpatch><meshpatch><stop path="l 50,0" stop-color="#ff5"/><stop path="l 0,40" stop-color="#09f"/><stop path="l -50,0"/></meshpatch></meshrow><meshrow><meshpatch><stop path="l 0,40" stop-color="#a3f"/><stop path="l -50,0" stop-color="#0aa"/><stop path="l 0,-40"/></meshpatch><meshpatch><stop path="l 0,40" stop-color="#333"/><stop path="l -50,0"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="100" height="80" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("left live"), "{out}");
+        assert_eq!(out.matches("<image").count(), 1, "one smooth region: {out}");
+        // ragged rows (row 2 wider than row 1) are not a mesh
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="l 50,0" stop-color="#e11"/><stop path="l 0,40" stop-color="#fa0"/><stop path="l -50,0" stop-color="#3b7"/><stop path="l 0,-40" stop-color="#06c"/></meshpatch></meshrow><meshrow><meshpatch><stop path="l 0,40" stop-color="#a3f"/><stop path="l -50,0" stop-color="#0aa"/><stop path="l 0,-40"/></meshpatch><meshpatch><stop path="l 50,0" stop-color="#333"/><stop path="l 0,40" stop-color="#333"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="100" height="80" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("left live"), "{out}");
+    }
+
+    #[test]
+    fn meshgradient_absolute_edge_commands_and_shape_fallbacks() {
+        // absolute C/L stop edges parse like their relative forms
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="C 20,-10 60,10 80,0" stop-color="#e11"/><stop path="L 80,50" stop-color="#fa0"/><stop path="C 60,60 20,40 0,50" stop-color="#3b7"/><stop path="L 0,0" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="80" height="50" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+        // a mesh fill on an element with no shape geometry falls through live
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><text x="0" y="10" fill="url(#m)">hi</text></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("fill=\"url(#m)\""), "{out}");
+        assert!(!out.contains("<image"), "{out}");
+        // a transformed mesh-filled shape keeps its transform on the wrapper
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="9" height="9" fill="url(#m)" transform="translate(30,0)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("transform=\"translate(30,0)\""), "{out}");
+    }
+
+    #[test]
+    fn mesh_lowers_at_every_quality_profile() {
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/></x:mesh></svg>"##
+        );
+        for q in ["fast", "balanced", "highest"] {
+            let out = compile_impl(&svg, q, false, &Mono, &NoShaper, &NoOutliner).unwrap();
+            assert_eq!(out.matches("<image").count(), 1, "{q}: {out}");
+        }
+    }
+
+    #[test]
+    fn short_hex_alpha_and_exact_blur_regions() {
+        // #rgba short form parses (alpha nibble doubled)
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 40,0 40,40 0,40"><x:face v="0 1 2 3" fill="#f00a"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("fill-opacity=\"0.667"), "{out}");
+        // blur's exact region: margin = 0.5 + 3·4 = 12.5 on a 40x30 rect
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="blur(4)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("x=\"-12.5\""), "{out}");
+        assert!(out.contains("width=\"65\""), "{out}");
     }
 
     #[test]
