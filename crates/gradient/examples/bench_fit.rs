@@ -17,7 +17,10 @@ use std::time::Instant;
 /// the same bilinear footprint — used only to check fidelity/time here.
 fn fit_grid_dense(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) -> GridField {
     let rect = gradient::Rect::of_indices(indices, w);
-    let (dx, dy) = ((rect.width - 1).max(1) as f32, (rect.height - 1).max(1) as f32);
+    let (dx, dy) = (
+        (rect.width - 1).max(1) as f32,
+        (rect.height - 1).max(1) as f32,
+    );
     let g = gx + 1;
     let nv = (gx + 1) * (gy + 1);
     let mut mat = vec![vec![0f64; nv]; nv];
@@ -30,7 +33,12 @@ fn fit_grid_dense(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) 
         let ci = (fx.floor() as usize).min(gx - 1);
         let cj = (fy.floor() as usize).min(gy - 1);
         let (s, t) = ((fx - ci as f32) as f64, (fy - cj as f32) as f64);
-        let vs = [cj * g + ci, cj * g + ci + 1, (cj + 1) * g + ci, (cj + 1) * g + ci + 1];
+        let vs = [
+            cj * g + ci,
+            cj * g + ci + 1,
+            (cj + 1) * g + ci,
+            (cj + 1) * g + ci + 1,
+        ];
         let wt = [(1.0 - s) * (1.0 - t), s * (1.0 - t), (1.0 - s) * t, s * t];
         for a in 0..4 {
             for b in 0..4 {
@@ -90,7 +98,13 @@ fn fit_grid_dense(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) 
             ]
         })
         .collect();
-    let mut field = GridField { rect, gx, gy, verts, rmse: 0.0 };
+    let mut field = GridField {
+        rect,
+        gx,
+        gy,
+        verts,
+        rmse: 0.0,
+    };
     let mut sse = 0f64;
     for &idx in indices {
         let i = idx as usize;
@@ -133,7 +147,10 @@ fn main() {
     let idx: Vec<u32> = (0..(w * h) as u32).collect();
 
     println!("SOLVER — radial 256x256, square grids (times in ms)");
-    println!("{:>6} {:>10} {:>10} {:>10} {:>10} {:>12}", "grid", "cg ms", "dense ms", "cg rmse", "dense rmse", "rmse delta");
+    println!(
+        "{:>6} {:>10} {:>10} {:>10} {:>10} {:>12}",
+        "grid", "cg ms", "dense ms", "cg rmse", "dense rmse", "rmse delta"
+    );
     for g in [8usize, 16, 24, 32, 48] {
         let t0 = Instant::now();
         let a = fit_grid(&idx, w, &rgba, g, g);
@@ -147,7 +164,13 @@ fn main() {
         };
         println!(
             "{:>4}x{:<2} {:>10.1} {:>10.1} {:>10.4} {:>10.4} {:>12.6}",
-            g, g, t_cg, t_dense, a.rmse, b_rmse, (a.rmse - b_rmse).abs()
+            g,
+            g,
+            t_cg,
+            t_dense,
+            a.rmse,
+            b_rmse,
+            (a.rmse - b_rmse).abs()
         );
     }
 

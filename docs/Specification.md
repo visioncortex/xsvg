@@ -715,9 +715,10 @@ element with no usable geometry at all emits only a marker. Plain viewers skip t
 
 **Stroke expansion.** A plain-shape operand's **stroke ink joins its region** (Illustrator
 expands strokes before Pathfinder): the stroke is converted to fill geometry via kurbo's
-stroke-to-fill, honoring `stroke-width`, `stroke-linecap`, and `stroke-linejoin`. Limits: nonzero
-operands only (an evenodd operand's stroke is skipped with a marker — the overlap would XOR
-away), no dash patterns, and `<use>`/nested-`x:` operands stay geometry-only.
+stroke-to-fill, honoring `stroke-width`, `stroke-linecap`, `stroke-linejoin`, and
+**`stroke-dasharray`/`stroke-dashoffset`**. An **evenodd** operand pre-resolves its fill
+(evenodd) ∪ stroke (nonzero) through a nested union so the mixed fill rules never meet. Limit:
+`<use>`/nested-`x:` operands stay geometry-only.
 
 **v1 limits.** No multi-output Pathfinder modes (Divide/Trim/Merge).
 Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable seam (curve-exact
@@ -744,9 +745,10 @@ it to an equivalent **`<filter>` element graph** so the static subset (§9) gets
 
 **Vocabulary.** `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`,
 `invert()`, `opacity()` (number or percentage; the 0–1 family clamps like CSS), `hue-rotate()`
-(degrees), **`blur(r)`** and **`drop-shadow(dx dy [r] [#color])`** (user units; these two *bleed*,
-so their `<filter>` region inflates to ±50% of the bbox — a spill beyond half the element's size
-clips, the one bound a bbox-relative region can express), the xsvg extension
+(degrees), **`blur(r)`** and **`drop-shadow(dx dy [r] [#color])`** (user units; these two *bleed* — on a
+plain shape the `<filter>` region is computed **exactly** as a `userSpaceOnUse` box grown by 3σ
+per blur, the shadow offset, and half the stroke width; on unmeasurable content such as groups it
+falls back to ±50% of the bbox), the xsvg extension
 **`-x-levels(black white [gamma])`** (Photoshop *Levels*: remap the input range, then gamma),
 plus **`-x-curve(x0 y0, x1 y1, …)`** — a Photoshop-style tone curve
 through control points in [0, 1]² (≥ 2 points, x strictly increasing), interpolated
@@ -824,7 +826,8 @@ joins the faces into one region (a mismatch is a crack, as always).
 
 **v1 limits.** `image-rendering` must remain default (smooth) for the reconstruction to hold;
 alpha interpolates in straight (unpremultiplied) form — a steep alpha cliff against a strongly
-different color can fringe slightly at extreme zoom.
+different color can fringe slightly at extreme zoom (measured to be the *better* side of the
+trade: fitting premultiplied loses at every grid size — [Bench.md](Bench.md) §2).
 
 #### SVG 2 / Inkscape `<meshgradient>` compatibility [implemented: v1]
 
@@ -884,14 +887,15 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
-| Pixel adjustments — `blur()` / `drop-shadow()` (inflated regions) + `-x-levels()` | implemented |
+| Pixel adjustments — `blur()` / `drop-shadow()` (exact userSpaceOnUse regions on shapes) + `-x-levels()` | implemented |
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha / feathering (`#rrggbbaa`, `stop-opacity`, RGBA texel PNGs) | implemented |
 | `<x:mesh>` — smooth-interior T-junctions (color-consistent hanging nodes join regions) | implemented |
 | SVG 2 `<meshgradient>` — `objectBoundingBox` units + `type="bicubic"` (eased approximation) | implemented |
-| `<x:boolean>` — stroke expansion (operand stroke ink joins its region; kurbo stroke-to-fill) | implemented |
+| `<x:boolean>` — stroke expansion incl. dashes; evenodd operands pre-resolve fill ∪ stroke | implemented |
+| Mesh grid fits — banded conjugate-gradient solver (fidelity-identical, no dense-solve cliff — [Bench.md](Bench.md)) | implemented |
 | Static-subset enforcement — script/animation elements dropped, `on*` attributes stripped (Plan R6) | implemented |
 | `<x:mesh>` — `.qmesh` binary import (belongs to vtracer's exporter; indexed syntax is its 1:1 target) | deferred |
 | Text on a path — native `<textPath>` non-deforming follow | planned |

@@ -555,13 +555,34 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
 fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> {
     let fns = parse_filter_functions(node.attribute("filter")?)?;
     let id = format!("x-flt-{}", node.range().start);
-    // pointwise functions need only the stroke margin; blur/drop-shadow spill,
-    // so the region inflates to half the bbox on every side (percent units are
-    // all a bbox-relative filter has — spills beyond bbox/2 clip, documented)
-    let region = if fns.iter().any(|f| f.bleeds()) {
-        " x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\""
+    // pointwise functions need only the stroke margin. Blur/drop-shadow spill:
+    // on a plain shape the spill is computed EXACTLY (3σ per blur + the shadow
+    // offset + half the stroke width) as a userSpaceOnUse region; on
+    // unmeasurable content (groups) the region falls back to ±50% of the bbox
+    // — the one bound a bbox-relative region can express.
+    let bleeds = fns.iter().any(|f| f.bleeds());
+    let region = if !bleeds {
+        " x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\"".to_string()
+    } else if let Some(bb) = shape_to_path_d(node).and_then(|d| svg_path_bbox(&d)) {
+        let mut m = attr_num(node, "stroke-width", 1.0) / 2.0;
+        for f in &fns {
+            m += match f {
+                xsvg_core::AdjustFn::Blur(r) => 3.0 * r,
+                xsvg_core::AdjustFn::DropShadow { dx, dy, r, .. } => {
+                    3.0 * r + dx.abs().max(dy.abs())
+                }
+                _ => 0.0,
+            };
+        }
+        format!(
+            " filterUnits=\"userSpaceOnUse\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            fmt(bb.x0 - m),
+            fmt(bb.y0 - m),
+            fmt(bb.width() + 2.0 * m),
+            fmt(bb.height() + 2.0 * m)
+        )
     } else {
-        " x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\""
+        " x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"".to_string()
     };
     out.push_str(&format!(
         "<filter id=\"{id}\" color-interpolation-filters=\"sRGB\"{region}>{}</filter>",
@@ -1241,9 +1262,30 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                             .0
                             .push_str(&format!("<path d=\"{stroke_d}\"/>"));
                     }
-                    Some(_) => markers.push_str(
-                        "<!-- xsvg: <x:boolean> stroke on an evenodd operand ignored -->",
-                    ),
+                    Some(stroke_d) => {
+                        // evenodd operand: resolve fill (evenodd) ∪ stroke
+                        // (nonzero) NOW so the mixed rules never meet
+                        let m = &markups.last().unwrap().0;
+                        let fill_paths: Vec<&str> = find_path_d_ranges(m)
+                            .into_iter()
+                            .map(|(a, b)| &m[a..b])
+                            .collect();
+                        let ops = [
+                            BoolOperand {
+                                paths: fill_paths,
+                                even_odd: true,
+                            },
+                            BoolOperand {
+                                paths: vec![&stroke_d],
+                                even_odd: false,
+                            },
+                        ];
+                        if let Some(d) =
+                            boolean_svg_paths(&ops, BoolOp::Union, ctx.quality.tolerance())
+                        {
+                            *markups.last_mut().unwrap() = (format!("<path d=\"{d}\"/>"), false);
+                        }
+                    }
                     None => {}
                 }
             }
@@ -2018,7 +2060,18 @@ fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Option<String
         Some("bevel") => Join::Bevel,
         _ => Join::Miter,
     };
-    let style = Stroke::new(width).with_caps(cap).with_join(join);
+    let mut style = Stroke::new(width).with_caps(cap).with_join(join);
+    if let Some(dashes) = child.attribute("stroke-dasharray") {
+        let pattern: Vec<f64> = dashes
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(parse_num)
+            .filter(|v| *v >= 0.0)
+            .collect();
+        if !pattern.is_empty() && pattern.iter().any(|&v| v > 0.0) {
+            style = style.with_dashes(attr_num(child, "stroke-dashoffset", 0.0), pattern);
+        }
+    }
     let out = stroke(path, &style, &StrokeOpts::default(), tolerance.max(0.01));
     Some(out.to_svg())
 }
@@ -3682,12 +3735,59 @@ mod tests {
             (bb.y0 - 5.0).abs() < 0.5 && (bb.y1 - 35.0).abs() < 0.5,
             "{bb:?}"
         );
-        // evenodd operands skip stroke ink with a marker
+        // evenodd operands resolve fill ∪ stroke instead of skipping (see
+        // evenodd_operands_resolve_their_stroke_via_union)
         let svg = format!(
             r##"{XW}<x:boolean op="union" fill="#123"><rect x="10" y="10" width="40" height="20" fill-rule="evenodd" stroke="#000" stroke-width="10"/></x:boolean></svg>"##
         );
         let out = compile_test(&svg);
-        assert!(out.contains("evenodd operand ignored"), "{out}");
+        assert!(!out.contains("<!-- xsvg:"), "{out}");
+        let bb2 = first_path(&out).bounding_box();
+        assert!(
+            (bb2.x0 - 5.0).abs() < 0.5 && (bb2.x1 - 55.0).abs() < 0.5,
+            "{bb2:?}"
+        );
+    }
+
+    #[test]
+    fn dashed_strokes_expand_as_dashes() {
+        // a dashed thick stroke covers roughly half the solid ring's area
+        let mk = |dash: &str| {
+            format!(
+                r##"{XW}<x:boolean op="union" fill="#123"><path d="M10,20 L110,20" fill="none" stroke="#000" stroke-width="8"{dash}/></x:boolean></svg>"##
+            )
+        };
+        use xsvg_core::kurbo::Shape;
+        let solid = first_path(&compile_test(&mk(""))).area().abs();
+        let dashed = first_path(&compile_test(&mk(r#" stroke-dasharray="10 10""#)))
+            .area()
+            .abs();
+        assert!((solid - 800.0).abs() < 20.0, "solid ~100x8: {solid}");
+        assert!(
+            dashed > 0.3 * solid && dashed < 0.7 * solid,
+            "dashes remove about half the ink: {dashed} vs {solid}"
+        );
+    }
+
+    #[test]
+    fn evenodd_operands_resolve_their_stroke_via_union() {
+        // an evenodd ring (two same-winding squares) with a stroke: the
+        // operand becomes fill-region ∪ stroke ink — no marker, and the
+        // stroke inflates the outer bound
+        let svg = format!(
+            r##"{XW}<x:boolean op="union" fill="#123"><path d="M10,10 h40 v40 h-40 Z M20,20 h20 v20 h-20 Z" fill-rule="evenodd" stroke="#000" stroke-width="4"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("evenodd operand ignored"), "{out}");
+        use xsvg_core::kurbo::Shape;
+        let p = first_path(&out);
+        let bb = p.bounding_box();
+        assert!(
+            (bb.x0 - 8.0).abs() < 0.5 && (bb.x1 - 52.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        // ring fill (1600-400) + stroke ink area; must exceed the bare ring
+        assert!(p.area().abs() > 1250.0, "{}", p.area());
     }
 
     #[test]
@@ -3932,13 +4032,24 @@ mod tests {
     }
 
     #[test]
-    fn bleeding_filters_get_an_inflated_region() {
+    fn bleeding_filters_get_an_exact_or_inflated_region() {
+        // a plain shape: the region is EXACT userSpaceOnUse — bbox grown by
+        // 3σ + the shadow offset + half the (default) stroke width
         let svg = format!(
             r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="drop-shadow(2 3 4 #123456)"/></svg>"##
         );
         let out = compile_test(&svg);
-        assert!(out.contains("x=\"-50%\""), "{out}");
+        assert!(out.contains("filterUnits=\"userSpaceOnUse\""), "{out}");
+        // margin = 0.5 (stroke) + 3*4 + max(2,3) = 15.5 → x = -15.5, w = 71
+        assert!(out.contains("x=\"-15.5\""), "{out}");
+        assert!(out.contains("width=\"71\""), "{out}");
         assert!(out.contains("<feDropShadow"), "{out}");
+        // unmeasurable content (a group) falls back to the ±50% region
+        let svg = format!(
+            r##"{XW}<g filter="blur(3)"><rect x="0" y="0" width="40" height="30" fill="#48a"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("x=\"-50%\""), "{out}");
         // pointwise lists keep the slim margin
         let svg = format!(
             r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="sepia(0.5)"/></svg>"##
