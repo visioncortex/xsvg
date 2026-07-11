@@ -1,24 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 640 220" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="640" height="220" fill="#ffffff"/>
-  <text x="20" y="26" font-size="13" font-weight="bold" fill="#0f172a">badges — text poured inside each outline (region flow)</text>
+     viewBox="0 0 720 280" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="280" fill="#ffffff"/>
+  <text x="20" y="28" font-size="13" font-weight="bold" fill="#0f172a">badges — text effects: curved rim text, an arched title, a glossy mesh medal</text>
 
-  <!-- hexagon (flat-top polygon) -->
-  <polygon id="hex" points="90,50 150,85 150,155 90,190 30,155 30,85"
-           fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
-  <x:textbox in="#hex" valign="middle" align="center" padding="6" font-size="13" font-weight="600" fill="#3730a3">TOP RATED SELLER</x:textbox>
+  <!-- 1. certified seal: text curved around the rim (textpath rainbow) + a
+          region-flowed tagline in the middle -->
+  <circle cx="140" cy="160" r="86" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+  <circle cx="140" cy="160" r="72" fill="none" stroke="#c7d2fe" stroke-width="1.5"/>
+  <path id="rim-top" d="M78,132 A62,62 0 0,1 202,132" fill="none"/>
+  <path id="rim-bot" d="M84,196 A56,56 0 0,0 196,196" fill="none"/>
+  <x:textpath in="#rim-top" effect="rainbow" align="middle"
+              font-family="-x-google-Anton" font-size="18" fill="#3730a3">★ CERTIFIED ★</x:textpath>
+  <x:textpath in="#rim-bot" effect="rainbow" align="middle"
+              font-family="-x-google-Anton" font-size="13" fill="#6366f1">AUTHENTIC</x:textpath>
+  <text x="140" y="172" text-anchor="middle" font-family="-x-google-Anton" font-size="46" fill="#4338ca">2026</text>
 
-  <!-- circle seal -->
-  <circle id="seal" cx="250" cy="120" r="70" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
-  <x:textbox in="#seal" valign="middle" align="center" padding="8" font-size="13" font-weight="600" fill="#065f46">VERIFIED SECURE CHECKOUT</x:textbox>
-
-  <!-- shield (curved path) -->
-  <path id="shield" d="M410,52 q60,-16 120,0 v70 q0,52 -60,76 q-60,-24 -60,-76 z"
+  <!-- 2. shield: an arched title baked with warp, subtitle region-flowed -->
+  <path id="shield" d="M300,78 q68,-18 136,0 v82 q0,58 -68,86 q-68,-28 -68,-86 z"
         fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
-  <x:textbox in="#shield" valign="middle" align="center" padding="8" font-size="13" font-weight="600" fill="#92400e">BEST IN CLASS SUPPORT</x:textbox>
+  <x:textbox in="#shield" valign="bottom" align="center" padding="14"
+             font-size="12" font-weight="600" fill="#92400e">bank-grade encryption, end to end</x:textbox>
+  <x:warp field="arch" bend="48">
+    <x:textbox x="300" y="118" width="136" height="46" align="center" valign="middle"
+               outline="true" font-family="-x-google-Anton" font-size="34" fill="#b45309">SECURE</x:textbox>
+  </x:warp>
 
-  <!-- pentagon -->
-  <polygon id="pent" points="588,54 632,90 615,152 561,152 544,90"
-           fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
-  <x:textbox in="#pent" valign="middle" align="center" padding="6" font-size="12" font-weight="600" fill="#991b1b">PREMIUM MEMBER</x:textbox>
+  <!-- 3. glossy medal: circle filled by an SVG2 meshgradient (a real gel no
+          browser renders), a highlight sweep, and a drop-shadowed label -->
+  <defs>
+    <meshgradient id="gold" x="498" y="78">
+      <meshrow>
+        <meshpatch>
+          <stop path="l 164,0" stop-color="#fef3c7"/>
+          <stop path="l 0,164" stop-color="#f59e0b"/>
+          <stop path="l -164,0" stop-color="#92400e"/>
+          <stop path="l 0,-164" stop-color="#fbbf24"/>
+        </meshpatch>
+      </meshrow>
+    </meshgradient>
+    <clipPath id="medal-clip"><circle cx="580" cy="160" r="82"/></clipPath>
+  </defs>
+  <circle cx="580" cy="160" r="82" fill="url(#gold)" stroke="#78350f" stroke-width="2.5"/>
+  <ellipse cx="580" cy="120" rx="66" ry="34" fill="#ffffff" opacity="0.28" clip-path="url(#medal-clip)"/>
+  <text x="580" y="176" text-anchor="middle" font-family="-x-google-Anton" font-size="44"
+        fill="#fffbeb" filter="drop-shadow(0 2 3 #78350fcc)">PRO</text>
 </svg>

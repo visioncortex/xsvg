@@ -59,8 +59,8 @@ export const CATALOG: Category[] = [
       },
       {
         file: "badges.xsvg",
-        title: "Shaped badges",
-        blurb: "Centered labels poured into a hexagon, circle seal, shield, and pentagon",
+        title: "Badges & text effects",
+        blurb: "A certified seal with text curved around the rim (textpath rainbow), a shield with a warp-arched title, and a glossy meshgradient medal with a drop-shadowed label",
       },
     ],
   },
