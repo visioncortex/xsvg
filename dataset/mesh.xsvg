@@ -42,7 +42,7 @@
 
   <!-- SVG 2 / Inkscape meshgradient: curved Coons patches no browser can draw,
        compiled through the same pipeline — the curved silhouette IS the mesh -->
-  <text x="48" y="522" font-size="11" fill="#94a3b8">SVG 2 / Inkscape meshgradient — curved Coons patches, compiled to the same tiny PNGs</text>
+  <text x="48" y="522" font-size="11" fill="#94a3b8">SVG 2 / Inkscape meshgradient — curved Coons patches (wireframe overlaid), compiled to the same tiny PNGs</text>
   <defs>
     <meshgradient id="ink" x="110" y="560">
       <meshrow>
@@ -61,4 +61,17 @@
     </meshgradient>
   </defs>
   <rect x="80" y="526" width="560" height="160" fill="url(#ink)"/>
+  <!-- the patch wireframe: the SAME edge cubics as the stops, drawn live -->
+  <g fill="none" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.8">
+    <path d="M110,560 c60,-30 170,30 230,10 c15,30 -15,60 5,88 c-60,30 -170,-30 -230,-8 c-10,-30 10,-60 -5,-90 Z"/>
+    <path d="M340,570 c60,-30 170,20 230,0 c15,25 -15,60 5,85 c-60,25 -170,-25 -230,3"/>
+  </g>
+  <g fill="#f8fafc" stroke="#0f172a" stroke-width="1">
+    <circle cx="110" cy="560" r="3"/>
+    <circle cx="340" cy="570" r="3"/>
+    <circle cx="570" cy="570" r="3"/>
+    <circle cx="575" cy="655" r="3"/>
+    <circle cx="345" cy="658" r="3"/>
+    <circle cx="115" cy="650" r="3"/>
+  </g>
 </svg>
