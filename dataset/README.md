@@ -83,6 +83,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
+| [aqua.xsvg](aqua.xsvg) | **The classic mesh use case**: macOS Aqua-style glossy pill buttons — top light, shine band with a **crack-edged** highlight cutoff, deep body, bottom bounce light, all in one opaque mesh (12 vertices, 6 faces per button), clipped to a capsule; no translucent overlays or layered gradients |
 | [mesh.xsvg](mesh.xsvg) | Indexed mesh gradients: a shared `points` list (SVG's polygon syntax) + `<x:face v fill>` quads/tris with per-corner colors — a seamless two-quad sky, the bilinear twist, a **crack** (shared edge, disagreeing colors → hard split), a barycentric triangle fan, the **grid sugar** form (`cols`/`rows` + one `fill` of vertex colors, no indices), and an **SVG 2 / Inkscape `<meshgradient>` fill** — curved Coons patches (which no browser renders) tessellated through the same pipeline, curved silhouette and all. Lowered by render→refit: each crack region is fitted with a seam-free grid field and serialized as a **texel-aligned tiny PNG** (often 2×2) whose stretch makes the renderer's own bilinear filter reconstruct the gradient, clipped by the exact face-polygon union |
 
 ## Pixel adjustments (§8)

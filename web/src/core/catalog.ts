@@ -218,6 +218,11 @@ export const CATALOG: Category[] = [
     note: "<x:mesh> — corner colors on a quad/tri mesh with cracks, fitted and lowered as texel-aligned tiny PNGs (§8.2).",
     samples: [
       {
+        file: "aqua.xsvg",
+        title: "Aqua buttons",
+        blurb: "the classic use case: glossy macOS-style pill buttons — shine band, crack-edged highlight, deep body, and bottom bounce light in one mesh of 12 vertices per button",
+      },
+      {
         file: "mesh.xsvg",
         title: "Mesh gradients",
         blurb: "a seamless two-quad sky, the bilinear twist, a hard crack, a barycentric fan, the grid-sugar glow, and an SVG2/Inkscape meshgradient fill — curved Coons patches no browser can draw, compiled to tiny PNGs",
