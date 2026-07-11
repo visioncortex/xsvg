@@ -285,7 +285,12 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
     let g = gx + 1;
     let nv = (gx + 1) * (gy + 1);
 
-    let mut mat = vec![vec![0f64; nv]; nv];
+    // The normal matrix couples a vertex only to the ≤9 vertices sharing a
+    // cell with it, so it assembles into a 9-diagonal band — kept sparse and
+    // solved by conjugate gradient (SPD thanks to the ridge). A dense
+    // Gauss–Jordan here is O(nv³): ~14 Gflop and a 46 MB matrix at the 48×48
+    // cap — the banded CG is linear in nv per iteration (see docs/Bench.md).
+    let mut band = Band::new(g, gy + 1);
     let mut rhs = vec![[0f64; 4]; nv];
     for &idx in indices {
         let i = idx as usize;
@@ -304,7 +309,7 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
         let wt = [(1.0 - s) * (1.0 - t), s * (1.0 - t), (1.0 - s) * t, s * t];
         for a in 0..4 {
             for b in 0..4 {
-                mat[vs[a]][vs[b]] += wt[a] * wt[b];
+                band.add(vs[a], vs[b], wt[a] * wt[b]);
             }
             for c in 0..4 {
                 rhs[vs[a]][c] += wt[a] * (rgba[i * 4 + c] as f64 / 255.0);
@@ -315,9 +320,9 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
     // region) finite; they don't affect any pixel's reconstruction.
     let ridge = 1e-6 * indices.len().max(1) as f64;
     for i in 0..nv {
-        mat[i][i] += ridge;
+        band.add(i, i, ridge);
     }
-    let sol = solve_dense(mat, rhs);
+    let sol = band.solve_cg(&rhs);
     let verts: Vec<[f32; 4]> = sol
         .iter()
         .map(|c| {
@@ -360,7 +365,7 @@ pub fn fit_grid_lin(w: usize, h: usize, lin: &[f32], gx: usize, gy: usize) -> Ve
     let (gx, gy) = (gx.max(1), gy.max(1));
     let g = gx + 1;
     let nv = (gx + 1) * (gy + 1);
-    let mut mat = vec![vec![0f64; nv]; nv];
+    let mut band = Band::new(g, gy + 1);
     let mut rhs = vec![[0f64; 4]; nv];
     for y in 0..h {
         for x in 0..w {
@@ -379,7 +384,7 @@ pub fn fit_grid_lin(w: usize, h: usize, lin: &[f32], gx: usize, gy: usize) -> Ve
             let base = (y * w + x) * 3;
             for a in 0..4 {
                 for b in 0..4 {
-                    mat[vs[a]][vs[b]] += wt[a] * wt[b];
+                    band.add(vs[a], vs[b], wt[a] * wt[b]);
                 }
                 for c in 0..3 {
                     rhs[vs[a]][c] += wt[a] * lin[base + c] as f64;
@@ -389,53 +394,116 @@ pub fn fit_grid_lin(w: usize, h: usize, lin: &[f32], gx: usize, gy: usize) -> Ve
     }
     let ridge = 1e-6 * (w * h) as f64;
     for i in 0..nv {
-        mat[i][i] += ridge;
+        band.add(i, i, ridge);
     }
-    solve_dense(mat, rhs)
+    band.solve_cg(&rhs)
         .iter()
         .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
         .collect()
 }
 
-/// Gauss–Jordan solve of `A x = B` (`A` is `n×n`, `B` is `n×4`) with partial pivoting.
-fn solve_dense(mut a: Vec<Vec<f64>>, mut b: Vec<[f64; 4]>) -> Vec<[f64; 4]> {
-    let n = a.len();
-    for col in 0..n {
-        let mut piv = col;
-        for r in (col + 1)..n {
-            if a[r][col].abs() > a[piv][col].abs() {
-                piv = r;
-            }
-        }
-        a.swap(col, piv);
-        b.swap(col, piv);
-        let d = a[col][col];
-        if d.abs() < 1e-12 {
-            continue;
-        }
-        for k in col..n {
-            a[col][k] /= d;
-        }
-        for k in 0..4 {
-            b[col][k] /= d;
-        }
-        for r in 0..n {
-            if r == col {
-                continue;
-            }
-            let f = a[r][col];
-            if f == 0.0 {
-                continue;
-            }
-            for k in col..n {
-                a[r][k] -= f * a[col][k];
-            }
-            for k in 0..4 {
-                b[r][k] -= f * b[col][k];
-            }
+/// The grid fit's normal matrix, stored as a 9-point band over the
+/// `(gw × gh)`-vertex grid: entry `(v, u)` is nonzero only when `u` is one of
+/// `v`'s ≤9 cell-sharing neighbours, addressed by the offset `(du, dv) ∈
+/// {-1,0,1}²`. Symmetric positive definite once ridged, so conjugate gradient
+/// converges without pivoting — each iteration is a sparse matvec, linear in
+/// the vertex count.
+pub(crate) struct Band {
+    gw: usize,
+    gh: usize,
+    /// 9 diagonals, row-major per vertex: `diag[k][v]`, k = (dv+1)*3 + (du+1)
+    diag: Vec<Vec<f64>>,
+}
+
+impl Band {
+    pub(crate) fn new(gw: usize, gh: usize) -> Self {
+        Self {
+            gw,
+            gh,
+            diag: vec![vec![0f64; gw * gh]; 9],
         }
     }
-    b
+
+    #[inline]
+    pub(crate) fn add(&mut self, v: usize, u: usize, val: f64) {
+        let (vx, vy) = (v % self.gw, v / self.gw);
+        let (ux, uy) = (u % self.gw, u / self.gw);
+        let (du, dv) = (ux as i64 - vx as i64, uy as i64 - vy as i64);
+        debug_assert!(du.abs() <= 1 && dv.abs() <= 1, "outside the band");
+        let k = ((dv + 1) * 3 + (du + 1)) as usize;
+        self.diag[k][v] += val;
+    }
+
+    fn matvec(&self, x: &[f64], out: &mut [f64]) {
+        let (gw, gh) = (self.gw as i64, self.gh as i64);
+        for v in 0..x.len() {
+            let (vx, vy) = ((v % self.gw) as i64, (v / self.gw) as i64);
+            let mut acc = 0.0;
+            for dv in -1i64..=1 {
+                let uy = vy + dv;
+                if uy < 0 || uy >= gh {
+                    continue;
+                }
+                for du in -1i64..=1 {
+                    let ux = vx + du;
+                    if ux < 0 || ux >= gw {
+                        continue;
+                    }
+                    let k = ((dv + 1) * 3 + (du + 1)) as usize;
+                    acc += self.diag[k][v] * x[(uy * gw + ux) as usize];
+                }
+            }
+            out[v] = acc;
+        }
+    }
+
+    /// Conjugate gradient per channel; deterministic (fixed tolerance and
+    /// iteration cap), converging to the same solution the dense solve gave.
+    pub(crate) fn solve_cg(&self, rhs: &[[f64; 4]]) -> Vec<[f64; 4]> {
+        let n = rhs.len();
+        let mut sol = vec![[0f64; 4]; n];
+        let mut x = vec![0f64; n];
+        let mut r = vec![0f64; n];
+        let mut p = vec![0f64; n];
+        let mut ap = vec![0f64; n];
+        for c in 0..4 {
+            for v in 0..n {
+                x[v] = 0.0;
+                r[v] = rhs[v][c];
+                p[v] = r[v];
+            }
+            let b_norm: f64 = r.iter().map(|v| v * v).sum();
+            if b_norm <= 0.0 {
+                continue;
+            }
+            let mut rr: f64 = b_norm;
+            for _ in 0..(4 * n + 64) {
+                self.matvec(&p, &mut ap);
+                let pap: f64 = p.iter().zip(&ap).map(|(a, b)| a * b).sum();
+                if pap.abs() < 1e-300 {
+                    break;
+                }
+                let alpha = rr / pap;
+                for v in 0..n {
+                    x[v] += alpha * p[v];
+                    r[v] -= alpha * ap[v];
+                }
+                let rr_new: f64 = r.iter().map(|v| v * v).sum();
+                if rr_new <= 1e-20 * b_norm {
+                    break;
+                }
+                let beta = rr_new / rr;
+                rr = rr_new;
+                for v in 0..n {
+                    p[v] = r[v] + beta * p[v];
+                }
+            }
+            for v in 0..n {
+                sol[v][c] = x[v];
+            }
+        }
+        sol
+    }
 }
 
 #[cfg(test)]
