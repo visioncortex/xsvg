@@ -737,9 +737,13 @@ it to an equivalent **`<filter>` element graph** so the static subset (§9) gets
 <use href="#photo" filter="brightness(1.1) contrast(1.2) -x-curve(0 0, .3 .15, .7 .9, 1 1)"/>
 ```
 
-**Vocabulary (v1).** `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`,
+**Vocabulary.** `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`,
 `invert()`, `opacity()` (number or percentage; the 0–1 family clamps like CSS), `hue-rotate()`
-(degrees), plus the xsvg extension **`-x-curve(x0 y0, x1 y1, …)`** — a Photoshop-style tone curve
+(degrees), **`blur(r)`** and **`drop-shadow(dx dy [r] [#color])`** (user units; these two *bleed*,
+so their `<filter>` region inflates to ±50% of the bbox — a spill beyond half the element's size
+clips, the one bound a bbox-relative region can express), the xsvg extension
+**`-x-levels(black white [gamma])`** (Photoshop *Levels*: remap the input range, then gamma),
+plus **`-x-curve(x0 y0, x1 y1, …)`** — a Photoshop-style tone curve
 through control points in [0, 1]² (≥ 2 points, x strictly increasing), interpolated
 **monotone-cubically** (no overshoot) and sampled into a `feComponentTransfer` lookup table.
 `-x-curve-r/-g/-b/-a` target a single channel. Like other `-x-` vocabulary (§6's
@@ -756,8 +760,7 @@ survive; the v1 vocabulary is pointwise, so nothing bleeds further), one primiti
 `url(#…)`.
 
 **What passes through untouched:** `filter="url(#…)"` references, `none`, and any list the parser
-declines — an unknown function (`blur()`/`drop-shadow()` are **deferred**: they need region
-inflation the pointwise set doesn't) or an invalid argument — mirroring CSS's
+declines — an unknown function or an invalid argument — mirroring CSS's
 whole-declaration-invalid rule; browsers still honor those live.
 
 ### 8.2 Mesh gradients — `<x:mesh>` [implemented: v1]
@@ -862,7 +865,7 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
-| Pixel adjustments — `blur()` / `drop-shadow()` (region inflation) | planned |
+| Pixel adjustments — `blur()` / `drop-shadow()` (inflated regions) + `-x-levels()` | implemented |
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |

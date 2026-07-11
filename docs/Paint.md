@@ -16,6 +16,8 @@ free), and let the compiler lower it to the portable primitive form for static r
 | Capability | Design-tool analog | CSS | Lowered to | Status |
 |---|---|---|---|---|
 | Brightness | Exposure/Brightness | `brightness(k)` | `feComponentTransfer` linear, slope k | ✅ |
+| Blur / Drop shadow | Gaussian blur / layer shadow | `blur(r)`, `drop-shadow(…)` | `feGaussianBlur` / `feDropShadow`, inflated region | ✅ |
+| Levels | Levels (black/white/gamma) | `-x-levels(b w g)` | linear remap + gamma transfer | ✅ |
 | Contrast | Contrast | `contrast(k)` | linear, slope k, intercept 0.5(1−k) | ✅ |
 | Saturation | Vibrance/Saturation | `saturate(k)` | `feColorMatrix type="saturate"` | ✅ |
 | Grayscale | Black & White | `grayscale(k)` | saturate(1−k) | ✅ |
@@ -47,8 +49,7 @@ unfiltered until compiled — degradation, never breakage.
 
 | Capability | Why deferred | Plan |
 |---|---|---|
-| `blur()` / `drop-shadow()` | need **region inflation** (a blur bleeds past the bbox; the v1 set is pointwise) | lower with radius-derived region growth |
-| Levels (`-x-levels(black white gamma)`) | expressible today as a 3-point curve | sugar over `-x-curve` when demanded |
+| Filter regions beyond ±50% bbox | a bbox-relative `<filter>` region cannot size itself to an absolute blur radius | acceptable clip for sane radii; revisit if real content hits it |
 | `backdrop-filter` semantics | needs compositing context, not static-subset-able | out of scope |
 | Mesh feathering (per-corner alpha) + smooth-interior T-junctions + `.qmesh` import | v1 meshes are opaque RGB with crack-side T-junctions only | additive on the shipped §8.2 model |
 

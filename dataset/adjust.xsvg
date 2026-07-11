@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 760 560" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="760" height="560" fill="#0f172a"/>
+     viewBox="0 0 760 720" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="760" height="720" fill="#0f172a"/>
   <text x="28" y="34" font-size="14" font-weight="bold" fill="#e2e8f0">Pixel adjustments — CSS filter functions, compiled to portable &lt;filter&gt; primitives</text>
   <text x="28" y="52" font-size="11" fill="#94a3b8">one artwork, stamped with filter="…" — live in any browser as authored, static-renderer-safe once compiled; -x-curve() adds real tone curves</text>
 
@@ -43,4 +43,11 @@
   <use href="#art" x="280" y="408" filter="-x-curve(0 0, 0.3 0.15, 0.7 0.9, 1 1)"/>
   <text x="520" y="400" font-size="11" fill="#94a3b8">-x-curve-b(0 .25, 1 .9) + sepia — cool fade</text>
   <use href="#art" x="520" y="408" filter="sepia(0.35) -x-curve-b(0 0.25, 1 0.9)"/>
+
+  <text x="40" y="538" font-size="11" fill="#94a3b8">blur(2.5) — inflated filter region</text>
+  <use href="#art" x="40" y="546" filter="blur(2.5)"/>
+  <text x="280" y="538" font-size="11" fill="#94a3b8">drop-shadow(5 7 6 #020617)</text>
+  <use href="#art" x="280" y="546" filter="drop-shadow(5 7 6 #020617)"/>
+  <text x="520" y="538" font-size="11" fill="#94a3b8">-x-levels(50 205 1.3) — remap + gamma</text>
+  <use href="#art" x="520" y="546" filter="-x-levels(50 205 1.3)"/>
 </svg>

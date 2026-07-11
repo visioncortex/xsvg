@@ -30,6 +30,31 @@ pub enum AdjustFn {
         channel: CurveChannel,
         points: Vec<(f64, f64)>,
     },
+    /// `blur(r)` — Gaussian blur, radius in user units (`px` accepted). The
+    /// only non-pointwise function: the caller must inflate the filter region.
+    Blur(f64),
+    /// `drop-shadow(dx dy [r] [#color])` — offset shadow; also non-pointwise.
+    DropShadow {
+        dx: f64,
+        dy: f64,
+        r: f64,
+        color: String,
+    },
+    /// `-x-levels(black white [gamma])` — Photoshop Levels: remap the
+    /// [black..white] input range (0..255) to full range, then gamma.
+    Levels {
+        black: f64,
+        white: f64,
+        gamma: f64,
+    },
+}
+
+impl AdjustFn {
+    /// Whether this function samples NEIGHBORING pixels — the filter region
+    /// must be inflated beyond the pointwise ±10% margin to hold the spill.
+    pub fn bleeds(&self) -> bool {
+        matches!(self, AdjustFn::Blur(_) | AdjustFn::DropShadow { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,6 +113,64 @@ fn parse_fn(name: &str, args: &str) -> Option<AdjustFn> {
         let v = v * scale;
         (v.is_finite() && v >= 0.0).then(|| v.clamp(lo, hi))
     };
+    if name == "blur" {
+        let t = args.trim();
+        let t = t.strip_suffix("px").unwrap_or(t).trim();
+        let r: f64 = t.parse().ok()?;
+        return (r.is_finite() && r >= 0.0).then_some(AdjustFn::Blur(r));
+    }
+    if name == "drop-shadow" {
+        // tokens: numbers (px accepted) and at most one #color, any position
+        let mut nums: Vec<f64> = Vec::new();
+        let mut color: Option<String> = None;
+        for tok in args.split_whitespace() {
+            if let Some(hex) = tok.strip_prefix('#') {
+                if color.is_some() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return None;
+                }
+                color = Some(tok.to_string());
+            } else {
+                let t = tok.strip_suffix("px").unwrap_or(tok);
+                let v: f64 = t.parse().ok()?;
+                if !v.is_finite() {
+                    return None;
+                }
+                nums.push(v);
+            }
+        }
+        return match nums.as_slice() {
+            [dx, dy] => Some(AdjustFn::DropShadow {
+                dx: *dx,
+                dy: *dy,
+                r: 2.0,
+                color: color.unwrap_or_else(|| "#000000".into()),
+            }),
+            [dx, dy, r] if *r >= 0.0 => Some(AdjustFn::DropShadow {
+                dx: *dx,
+                dy: *dy,
+                r: *r,
+                color: color.unwrap_or_else(|| "#000000".into()),
+            }),
+            _ => None,
+        };
+    }
+    if name == "-x-levels" {
+        let nums: Vec<f64> = args
+            .split_whitespace()
+            .map(|t| t.parse::<f64>().ok().filter(|v| v.is_finite()))
+            .collect::<Option<Vec<_>>>()?;
+        let (black, white, gamma) = match nums.as_slice() {
+            [b, w] => (*b, *w, 1.0),
+            [b, w, g] => (*b, *w, *g),
+            _ => return None,
+        };
+        let ok = (0.0..255.0).contains(&black) && black < white && white <= 255.0 && gamma > 0.0;
+        return ok.then_some(AdjustFn::Levels {
+            black,
+            white,
+            gamma,
+        });
+    }
     Some(match name {
         "brightness" => AdjustFn::Brightness(amount(0.0, f64::MAX)?),
         "contrast" => AdjustFn::Contrast(amount(0.0, f64::MAX)?),
@@ -267,6 +350,40 @@ pub fn filter_primitives(fns: &[AdjustFn]) -> String {
                     fmt(*k)
                 );
             }
+            AdjustFn::Blur(r) => {
+                let _ = write!(out, "<feGaussianBlur stdDeviation=\"{}\"/>", fmt(*r));
+            }
+            AdjustFn::DropShadow { dx, dy, r, color } => {
+                let _ = write!(
+                    out,
+                    "<feDropShadow dx=\"{}\" dy=\"{}\" stdDeviation=\"{}\" flood-color=\"{color}\"/>",
+                    fmt(*dx),
+                    fmt(*dy),
+                    fmt(*r)
+                );
+            }
+            AdjustFn::Levels {
+                black,
+                white,
+                gamma,
+            } => {
+                // linear remap of [black..white] to full range, then gamma
+                let slope = 255.0 / (white - black);
+                let intercept = -black / (white - black);
+                rgb_linear(&mut out, slope, intercept);
+                if (gamma - 1.0).abs() > 1e-9 {
+                    let exp = fmt(1.0 / gamma);
+                    let _ = write!(
+                        out,
+                        "<feComponentTransfer>{}</feComponentTransfer>",
+                        ["R", "G", "B"]
+                            .map(|ch| format!(
+                                "<feFunc{ch} type=\"gamma\" amplitude=\"1\" exponent=\"{exp}\" offset=\"0\"/>"
+                            ))
+                            .join("")
+                    );
+                }
+            }
             AdjustFn::Curve { channel, points } => {
                 let table = sample_monotone_curve(points, CURVE_SAMPLES)
                     .iter()
@@ -332,7 +449,9 @@ mod tests {
     fn rejects_what_it_must_not_lower() {
         assert_eq!(parse_filter_functions("url(#f)"), None);
         assert_eq!(parse_filter_functions("none"), None);
-        assert_eq!(parse_filter_functions("blur(3px)"), None); // deferred
+        assert_eq!(parse_filter_functions("blur(-3)"), None);
+        assert_eq!(parse_filter_functions("-x-levels(200 100)"), None); // b >= w
+        assert_eq!(parse_filter_functions("drop-shadow(2)"), None);
         assert_eq!(parse_filter_functions("brightness(-1)"), None);
         assert_eq!(parse_filter_functions("brightness(1e999)"), None);
         assert_eq!(parse_filter_functions("brightness(1.2) url(#f)"), None);
@@ -365,6 +484,36 @@ mod tests {
         let b = p.find("feComponentTransfer").unwrap();
         let s = p.find("feColorMatrix").unwrap();
         assert!(b < s, "{p}");
+    }
+
+    #[test]
+    fn blur_shadow_and_levels_parse_and_lower() {
+        let fns = parse_filter_functions("blur(3px)").unwrap();
+        assert_eq!(fns, vec![AdjustFn::Blur(3.0)]);
+        assert!(fns[0].bleeds());
+        let p = filter_primitives(&fns);
+        assert!(p.contains("feGaussianBlur stdDeviation=\"3\""), "{p}");
+
+        let fns = parse_filter_functions("drop-shadow(2 4 3 #334155)").unwrap();
+        let p = filter_primitives(&fns);
+        assert!(
+            p.contains("feDropShadow dx=\"2\" dy=\"4\" stdDeviation=\"3\" flood-color=\"#334155\""),
+            "{p}"
+        );
+        // default radius and color
+        let fns = parse_filter_functions("drop-shadow(1 1)").unwrap();
+        assert!(filter_primitives(&fns).contains("flood-color=\"#000000\""));
+
+        // levels: [64..192] -> full range: slope 2, intercept -0.5; gamma tail
+        let fns = parse_filter_functions("-x-levels(64 192 2.2)").unwrap();
+        let p = filter_primitives(&fns);
+        assert!(
+            p.contains("slope=\"1.9922\"") || p.contains("slope=\"2\""),
+            "{p}"
+        );
+        assert!(p.contains("type=\"gamma\""), "{p}");
+        // pointwise functions do not bleed
+        assert!(!parse_filter_functions("contrast(1.2)").unwrap()[0].bleeds());
     }
 
     #[test]

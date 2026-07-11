@@ -555,8 +555,16 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
 fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> {
     let fns = parse_filter_functions(node.attribute("filter")?)?;
     let id = format!("x-flt-{}", node.range().start);
+    // pointwise functions need only the stroke margin; blur/drop-shadow spill,
+    // so the region inflates to half the bbox on every side (percent units are
+    // all a bbox-relative filter has — spills beyond bbox/2 clip, documented)
+    let region = if fns.iter().any(|f| f.bleeds()) {
+        " x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\""
+    } else {
+        " x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\""
+    };
     out.push_str(&format!(
-        "<filter id=\"{id}\" color-interpolation-filters=\"sRGB\" x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\">{}</filter>",
+        "<filter id=\"{id}\" color-interpolation-filters=\"sRGB\"{region}>{}</filter>",
         filter_primitives(&fns)
     ));
     Some(format!(" filter=\"url(#{id})\""))
@@ -3733,10 +3741,26 @@ mod tests {
     }
 
     #[test]
+    fn bleeding_filters_get_an_inflated_region() {
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="drop-shadow(2 3 4 #123456)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("x=\"-50%\""), "{out}");
+        assert!(out.contains("<feDropShadow"), "{out}");
+        // pointwise lists keep the slim margin
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="40" height="30" fill="#48a" filter="sepia(0.5)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("x=\"-10%\""), "{out}");
+    }
+
+    #[test]
     fn filter_references_and_unknown_functions_pass_through() {
-        // url() references and functions we do not lower (blur, for now) stay
-        // exactly as authored — browsers still honor them live
-        for f in ["url(#soft)", "blur(3px)", "none"] {
+        // url() references and unknown lists stay exactly as authored —
+        // browsers still honor them live
+        for f in ["url(#soft)", "none", "backdrop-blur(2)"] {
             let svg =
                 format!(r##"{XW}<rect x="0" y="0" width="10" height="10" filter="{f}"/></svg>"##);
             let out = compile_test(&svg);
