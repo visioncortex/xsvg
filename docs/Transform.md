@@ -170,8 +170,9 @@ op="union|intersect|subtract|exclude">` shares `<x:warp>`'s child lowering, flat
 the profile tolerance, and runs the ops **integer-exact and deterministically** on the
 [`i_overlay`](https://crates.io/crates/i_overlay) backend behind a swappable seam (`flo_curves`
 curve-exact / kurbo-native / Skia PathOps can slot in later). Composes with warps in both
-directions, and each operand's per-fill-rule resolve doubles as a self-intersection cleanup — the
-primitive §G's fold-over item needs.
+directions, each operand's per-fill-rule resolve doubles as a self-intersection cleanup — the
+primitive §G's fold-over item needs — and operand **stroke ink joins the algebra** (kurbo
+stroke-to-fill, Illustrator's expand-strokes-first behavior).
 
 Composition also goes beyond child nesting: **`in="#id"` on an `x:` target resolves its compiled
 output** ([Specification.md §4](Specification.md), *Reference resolution*) — flow a textbox inside

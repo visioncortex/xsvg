@@ -121,9 +121,9 @@ filters, gradients, masks, markers, `foreignObject`, future or unknown elements 
 is declared); `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`); **foreign-namespace
 elements and attributes** (editor metadata such as `sodipodi:`/`inkscape:`) are **dropped** —
 elements with a marker comment, attributes silently — since they cannot be re-emitted faithfully.
-*Known gap:* `<script>`/animation elements currently pass through despite §9's static-subset
-target; the concrete allow/deny enforcement is the pending [Plan.md](Plan.md) R6 deliverable
-(pinned as documented behavior by test until then).
+**Static-subset enforcement (Plan R6, shipped):** `<script>`, `<animate>`, `<animateMotion>`,
+`<animateTransform>`, `<set>`, and `<discard>` are **dropped with markers** — they cannot exist
+in the §9 output contract — and `on*` event attributes strip silently.
 
 ## 6. Text
 
@@ -713,8 +713,13 @@ never silently dropped from the algebra. An unknown `op` emits the children **un
 marker**. A legitimately **empty result** (e.g. a disjoint `intersect`) emits an empty `<g>`; an
 element with no usable geometry at all emits only a marker. Plain viewers skip the subtree (§3).
 
-**v1 limits.** Ops act on **fill regions** — strokes apply to the result, not the operand
-geometry (no *expand stroke* pre-pass yet); no multi-output Pathfinder modes (Divide/Trim/Merge).
+**Stroke expansion.** A plain-shape operand's **stroke ink joins its region** (Illustrator
+expands strokes before Pathfinder): the stroke is converted to fill geometry via kurbo's
+stroke-to-fill, honoring `stroke-width`, `stroke-linecap`, and `stroke-linejoin`. Limits: nonzero
+operands only (an evenodd operand's stroke is skipped with a marker — the overlap would XOR
+away), no dash patterns, and `<use>`/nested-`x:` operands stay geometry-only.
+
+**v1 limits.** No multi-output Pathfinder modes (Divide/Trim/Merge).
 Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable seam (curve-exact
 and kurbo-native backends can slot in later without surface changes).
 
@@ -811,10 +816,13 @@ transparency serializes an **RGBA** PNG (fully opaque regions stay RGB), so soft
 same texel-aligned reconstruction. Degradations (bad indices, color-count mismatch, degenerate
 extent) skip with markers (§3).
 
-**v1 limits.** T-junctions are supported **on cracks** (each side clips independently) but a
-hanging node interior to a *smooth* region is not; `image-rendering` must remain default (smooth)
-for the reconstruction to hold; alpha interpolates in straight (unpremultiplied) form — a steep
-alpha cliff against a strongly different color can fringe slightly at extreme zoom.
+**T-junctions** are supported on cracks (each side clips independently) **and inside smooth
+regions**: a hanging node whose color+alpha matches the coarse edge's interpolation at that point
+joins the faces into one region (a mismatch is a crack, as always).
+
+**v1 limits.** `image-rendering` must remain default (smooth) for the reconstruction to hold;
+alpha interpolates in straight (unpremultiplied) form — a steep alpha cliff against a strongly
+different color can fringe slightly at extreme zoom.
 
 #### SVG 2 / Inkscape `<meshgradient>` compatibility [implemented: v1]
 
@@ -827,17 +835,20 @@ coverage: `meshrow`/`meshpatch`/`stop` with one `c`/`C`/`l`/`L` edge per stop, `
 attribute or inside `style` (hex, alpha forms included) with **`stop-opacity`** honored
 (feathering), the standard edge/corner **inheritance** (a patch after the
 first inherits its left edge reversed from its neighbour, later rows inherit top edges from
-above), and `gradientTransform`. Adjacent patches join smoothly by construction (shared edges
-tessellate to shared vertices with matching colors). The reference is **compile-time baked**, so
-the incremental `dependents` scan treats `fill="url(#mesh)"` like an `in=` edge. Degradations:
-`gradientUnits="objectBoundingBox"` or an unparseable dialect leave the element as authored with a
-marker (unrendered live, exactly as in a browser); `type="bicubic"` renders as bilinear.
+above), `gradientTransform`, **`gradientUnits="objectBoundingBox"`** (patch coordinates in the
+shape's unit bbox), and **`type="bicubic"`** — approximated by smoothstep-easing `(u, v)` inside
+each patch, which zeroes the tangential derivative at every patch boundary so adjacent patches
+meet C¹ and the bilinear Mach bands at seams disappear. Adjacent patches join smoothly by
+construction (shared edges tessellate to shared vertices with matching colors). The reference is
+**compile-time baked**, so the incremental `dependents` scan treats `fill="url(#mesh)"` like an
+`in=` edge. An unparseable dialect leaves the element as authored with a marker (unrendered live,
+exactly as in a browser).
 
 ## 9. Lowering target [implemented]
 
 Output is the **static SVG subset** (resvg's scope): no script, animation, events, or `meshgradient`.
 Text lowers to `<text>`/`<tspan>` in v0 (browser-shaped), or to outlined `<path>` on demand (§6.12).
-The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md) R6).
+Enforced by the §5 deny list (script/animation elements drop with markers; `on*` attributes strip).
 
 ## Appendix A — Feature status
 
@@ -876,7 +887,11 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha / feathering (`#rrggbbaa`, `stop-opacity`, RGBA texel PNGs) | implemented |
-| `<x:mesh>` — smooth-interior T-junctions, `.qmesh` import | planned |
+| `<x:mesh>` — smooth-interior T-junctions (color-consistent hanging nodes join regions) | implemented |
+| SVG 2 `<meshgradient>` — `objectBoundingBox` units + `type="bicubic"` (eased approximation) | implemented |
+| `<x:boolean>` — stroke expansion (operand stroke ink joins its region; kurbo stroke-to-fill) | implemented |
+| Static-subset enforcement — script/animation elements dropped, `on*` attributes stripped (Plan R6) | implemented |
+| `<x:mesh>` — `.qmesh` binary import (belongs to vtracer's exporter; indexed syntax is its 1:1 target) | deferred |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

@@ -175,6 +175,92 @@ impl Mesh {
                 }
             }
         }
+        // ---- smooth-interior T-junction pass: an edge with no exact partner
+        // may face a CHAIN of finer edges whose vertices lie on it (hanging
+        // nodes). If the coarse side's interpolated color+alpha agrees with the
+        // fine side at both of the finer edge's endpoints, the junction is
+        // smooth and the faces join.
+        struct Side {
+            face: u32,
+            a: (f32, f32),
+            b: (f32, f32),
+            c_a: (LinRgb, f32),
+            c_b: (LinRgb, f32),
+        }
+        let unpartnered: Vec<Side> = {
+            let mut count: std::collections::HashMap<(u32, u32), u32> =
+                std::collections::HashMap::new();
+            for face in &self.faces {
+                let n = face.arity();
+                for c in 0..n {
+                    let (a, b) = (face.v[c], face.v[(c + 1) % n]);
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    *count.entry(key).or_insert(0) += 1;
+                }
+            }
+            let mut out = Vec::new();
+            for (f, face) in self.faces.iter().enumerate() {
+                let n = face.arity();
+                for c in 0..n {
+                    let (a, b) = (face.v[c], face.v[(c + 1) % n]);
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    if count[&key] == 1 {
+                        out.push(Side {
+                            face: f as u32,
+                            a: self.pos(a),
+                            b: self.pos(b),
+                            c_a: (face.colors[c], face.alpha[c]),
+                            c_b: (face.colors[(c + 1) % n], face.alpha[(c + 1) % n]),
+                        });
+                    }
+                }
+            }
+            out
+        };
+        let lerp_corner =
+            |a: (LinRgb, f32), b: (LinRgb, f32), t: f32| (a.0.lerp(b.0, t), a.1 + (b.1 - a.1) * t);
+        // is p on segment (a,b), strictly interior-ish? returns the parameter
+        let on_segment = |a: (f32, f32), b: (f32, f32), p: (f32, f32)| -> Option<f32> {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len2 = dx * dx + dy * dy;
+            if len2 < 1e-12 {
+                return None;
+            }
+            let t = ((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2;
+            if !(-1e-4..=1.0001).contains(&t) {
+                return None;
+            }
+            let (px, py) = (a.0 + t * dx, a.1 + t * dy);
+            let d2 = (p.0 - px).powi(2) + (p.1 - py).powi(2);
+            (d2 < 1e-4 * len2.max(1.0)).then_some(t)
+        };
+        for coarse in &unpartnered {
+            for fine in &unpartnered {
+                if coarse.face == fine.face {
+                    continue;
+                }
+                // both of the finer edge's endpoints must lie on the coarse edge
+                // (and it must genuinely be finer, not the same span)
+                let (Some(ta), Some(tb)) = (
+                    on_segment(coarse.a, coarse.b, fine.a),
+                    on_segment(coarse.a, coarse.b, fine.b),
+                ) else {
+                    continue;
+                };
+                if (tb - ta).abs() >= 0.9999 {
+                    continue;
+                }
+                let want_a = lerp_corner(coarse.c_a, coarse.c_b, ta);
+                let want_b = lerp_corner(coarse.c_a, coarse.c_b, tb);
+                if close(want_a, fine.c_a) && close(want_b, fine.c_b) {
+                    let (ra, rb) = (find(&mut parent, coarse.face), find(&mut parent, fine.face));
+                    if ra != rb {
+                        parent[ra as usize] = rb;
+                    }
+                }
+            }
+        }
+
         // compact roots to 0..count
         let mut label = vec![0u32; nf];
         let mut next = 0u32;
@@ -426,6 +512,42 @@ mod tests {
         m2.faces[1].colors[0] = red; // disagree at the shared edge's top end
         let (_, count) = m2.face_regions(1e-4);
         assert_eq!(count, 2, "color mismatch is a crack");
+    }
+
+    #[test]
+    fn smooth_t_junctions_join_regions_and_cracked_ones_split() {
+        // one coarse quad on the left; TWO stacked finer quads on the right
+        // sharing its right edge with a hanging node at the midpoint
+        let mut m = Mesh::default();
+        let v = [
+            m.add_vertex(0.0, 0.0),   // 0
+            m.add_vertex(10.0, 0.0),  // 1
+            m.add_vertex(10.0, 10.0), // 2
+            m.add_vertex(0.0, 10.0),  // 3
+            m.add_vertex(10.0, 5.0),  // 4: hanging node on edge 1-2
+            m.add_vertex(20.0, 0.0),  // 5
+            m.add_vertex(20.0, 5.0),  // 6
+            m.add_vertex(20.0, 10.0), // 7
+        ];
+        let (black, white) = (
+            RgbColor::new(0, 0, 0).to_linear(),
+            RgbColor::new(255, 255, 255).to_linear(),
+        );
+        let mid = black.lerp(white, 0.5);
+        // coarse: black at top-right corner, white at bottom-right
+        m.add_quad([v[0], v[1], v[2], v[3]], [black, black, white, white]);
+        // fine top: matches coarse's lerp at the hanging node (mid)
+        m.add_quad([v[1], v[5], v[6], v[4]], [black, black, mid, mid]);
+        // fine bottom
+        m.add_quad([v[4], v[6], v[7], v[2]], [mid, mid, white, white]);
+        let (_, count) = m.face_regions(1e-3);
+        assert_eq!(count, 1, "color-consistent T-junction is smooth");
+
+        // flip the hanging-node color: the junction cracks
+        let mut m2 = m.clone();
+        m2.faces[1].colors[3] = black; // fine-top's corner at the hanging node
+        let (_, count) = m2.face_regions(1e-3);
+        assert!(count >= 2, "mismatched hanging node must split");
     }
 
     #[test]

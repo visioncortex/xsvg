@@ -70,12 +70,23 @@ fn namespace_normalization_is_pinned() {
 }
 
 #[test]
-fn static_subset_gap_is_documented_behavior() {
-    // §8 promises a static output subset, but enforcement (the allow/deny list) is
-    // a pending deliverable — Plan.md R6. Today <script>/<animate> pass through;
-    // when sanitization lands, update this test deliberately.
-    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><script>alert(1)</script><animate attributeName="x"/></svg>"##;
+fn static_subset_is_enforced() {
+    // §9's static output subset, enforced (Plan.md R6): script and animation
+    // elements drop with markers, on* event attributes strip silently.
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><script>alert(1)</script><animate attributeName="x"/><rect x="1" y="1" width="2" height="2" rx="1" onclick="alert(2)" fill="#123"/><animateTransform attributeName="transform"/><set attributeName="y"/></svg>"##;
     let out = compile(svg);
-    assert!(out.contains("<script>alert(1)</script>"), "{out}");
-    assert!(out.contains("<animate attributeName=\"x\"/>"), "{out}");
+    assert!(!out.contains("alert"), "script payloads gone: {out}");
+    assert!(
+        !out.contains("attributeName"),
+        "animation attrs gone: {out}"
+    );
+    assert!(!out.contains("onclick"), "{out}");
+    assert!(
+        out.contains("<!-- xsvg: <script> outside the static subset — dropped -->"),
+        "{out}"
+    );
+    assert!(
+        out.contains("fill=\"#123\""),
+        "the element itself survives: {out}"
+    );
 }

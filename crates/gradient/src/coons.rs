@@ -36,6 +36,11 @@ pub struct CoonsPatch {
     pub colors: [LinRgb; 4],
     /// per-corner straight alpha [TL, TR, BR, BL] — SVG 2 `stop-opacity`
     pub alpha: [f32; 4],
+    /// SVG 2 `type="bicubic"` approximation: ease `(u, v)` with smoothstep
+    /// before the corner blend. The tangential derivative is then zero at
+    /// every patch boundary — both sides — so adjacent patches meet C¹ and
+    /// the bilinear Mach bands at the seams disappear.
+    pub eased: bool,
 }
 
 impl CoonsPatch {
@@ -63,16 +68,28 @@ impl CoonsPatch {
         )
     }
 
-    /// Bilinear corner-color interpolation at `(u, v)`.
+    #[inline]
+    fn ease(&self, t: f32) -> f32 {
+        if self.eased {
+            t * t * (3.0 - 2.0 * t)
+        } else {
+            t
+        }
+    }
+
+    /// Corner-color interpolation at `(u, v)` — bilinear, or smoothstep-eased
+    /// when [`Self::eased`] (the `type="bicubic"` approximation).
     pub fn color(&self, u: f32, v: f32) -> LinRgb {
+        let (u, v) = (self.ease(u), self.ease(v));
         let [tl, tr, br, bl] = self.colors;
         let top = tl.lerp(tr, u);
         let bottom = bl.lerp(br, u);
         top.lerp(bottom, v)
     }
 
-    /// Bilinear corner-alpha interpolation at `(u, v)`.
+    /// Corner-alpha interpolation at `(u, v)` (same easing as [`Self::color`]).
     pub fn alpha_at(&self, u: f32, v: f32) -> f32 {
+        let (u, v) = (self.ease(u), self.ease(v));
         let [tl, tr, br, bl] = self.alpha;
         let top = tl + (tr - tl) * u;
         let bottom = bl + (br - bl) * u;
@@ -162,6 +179,7 @@ mod tests {
                 lin(255, 255, 0),
             ],
             alpha: [1.0; 4],
+            eased: false,
         }
     }
 
@@ -191,6 +209,25 @@ mod tests {
     }
 
     #[test]
+    fn eased_patches_flatten_the_gradient_at_their_edges() {
+        let mut p = flat_patch(100.0, 50.0);
+        // bilinear: color changes linearly near the edge; eased: derivative ~0
+        let lin_step = p.color(0.1, 0.0).r - p.color(0.0, 0.0).r;
+        p.eased = true;
+        let eased_step = p.color(0.1, 0.0).r - p.color(0.0, 0.0).r;
+        assert!(
+            eased_step.abs() < lin_step.abs() * 0.4,
+            "eased edge must be flatter: {eased_step} vs {lin_step}"
+        );
+        // center value unchanged (smoothstep(0.5) = 0.5)
+        p.eased = false;
+        let mid_lin = p.color(0.5, 0.5);
+        p.eased = true;
+        let mid_eased = p.color(0.5, 0.5);
+        assert!((mid_lin.r - mid_eased.r).abs() < 1e-6);
+    }
+
+    #[test]
     fn tessellation_dedups_shared_edges_between_patches() {
         // two flat patches side by side sharing the vertical edge; the second
         // stores the shared edge REVERSED (the inheritance convention)
@@ -206,6 +243,7 @@ mod tests {
             ],
             colors: a.colors,
             alpha: [1.0; 4],
+            eased: false,
         };
         let mut mesh = Mesh::default();
         let mut dedup = HashMap::new();

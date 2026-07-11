@@ -581,7 +581,7 @@ Output: normalized SVG where `<rect>` became a `<path>`, the stroked curve becam
 | R7 | **v0 `<text>` output is not self-contained** (depends on viewer fonts) and typography is browser-only until 2b | Accepted v0 trade-off; native outlining (2b) produces font-independent `<path>` output for headless/portable use |
 | R4 | **kurbo stroker robustness tail** (still hardening through 2026) | Pin versions; golden tests catch regressions; treat as evolving dep |
 | R5 | **Mesh "cracks" semantics** undefined | Design explicit patch-adjacency + tear model in Phase 3 |
-| R6 | **Concrete SVG subset** not yet enumerated | Phase 5 deliverable; start from usvg's node set, validate cross-browser |
+| R6 | ~~Concrete SVG subset not yet enumerated~~ **shipped**: script/animation elements drop with markers, `on*` attributes strip ([Specification.md §5](Specification.md)) | done |
 | D1 | Parley vs cosmic-text | Deferred to Phase 2b (v0 needs neither); decide post-spike (R2); bias Parley for shared-kurbo + control |
 | D2 | vello vs custom wgpu for reference renderer | Defer to Phase 4; vello if its scene model fits, else thin custom |
 | D3 | Module interface: `wasm-bindgen` + binary interchange vs WebAssembly Component Model / WIT | §1.5; start pragmatic (`wasm-bindgen`), watch component-model tooling maturity (`jco`); only matters once a 2nd module exists (Phase 2b+) |

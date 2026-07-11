@@ -612,6 +612,19 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         other => other,
     };
 
+    // The static-subset deny list (§9, Plan R6): script and animation cannot
+    // exist in the output contract, so they drop with a marker instead of
+    // passing through.
+    if matches!(
+        name,
+        "script" | "animate" | "animateMotion" | "animateTransform" | "set" | "discard"
+    ) {
+        out.push_str(&format!(
+            "<!-- xsvg: <{name}> outside the static subset — dropped -->"
+        ));
+        return;
+    }
+
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);
         return;
@@ -1215,7 +1228,25 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             continue;
         }
         match warp_child_markup(child, ctx) {
-            Ok(m) => markups.push((m, even_odd)),
+            Ok(m) => {
+                markups.push((m, even_odd));
+                // stroke ink joins the operand's region (Illustrator expands
+                // strokes before Pathfinder); nonzero operands only — evenodd
+                // would XOR the overlap away
+                match child_stroke_outline(child, ctx.quality.tolerance()) {
+                    Some(stroke_d) if !even_odd => {
+                        markups
+                            .last_mut()
+                            .unwrap()
+                            .0
+                            .push_str(&format!("<path d=\"{stroke_d}\"/>"));
+                    }
+                    Some(_) => markers.push_str(
+                        "<!-- xsvg: <x:boolean> stroke on an evenodd operand ignored -->",
+                    ),
+                    None => {}
+                }
+            }
             Err(why) => markers.push_str(&format!(
                 "<!-- xsvg: <x:boolean> skipped <{}>: {why} -->",
                 child.tag_name().name()
@@ -1587,10 +1618,19 @@ fn emit_meshgradient_fill(
         QualityProfile::Balanced => 12,
         QualityProfile::Highest | QualityProfile::Raster => 20,
     };
-    let Some(mesh) = parse_meshgradient(mg, tess) else {
-        out.push_str(
-            "<!-- xsvg: meshgradient fill left live (unsupported or malformed dialect) -->",
-        );
+    // objectBoundingBox units: patch coordinates live in the unit square of
+    // the shape's bbox
+    let unit_map = if mg.attribute("gradientUnits") == Some("objectBoundingBox") {
+        let Some(bb) = svg_path_bbox(&shape_d) else {
+            return false;
+        };
+        xsvg_core::kurbo::Affine::translate((bb.x0, bb.y0))
+            * xsvg_core::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
+    } else {
+        xsvg_core::kurbo::Affine::IDENTITY
+    };
+    let Some(mesh) = parse_meshgradient(mg, tess, unit_map) else {
+        out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
         return false;
     };
     let pos = node.range().start;
@@ -1634,16 +1674,18 @@ fn emit_meshgradient_fill(
 /// corner elsewhere (inherited corners win). `gradientTransform` is honored;
 /// `gradientUnits="objectBoundingBox"` and `type="bicubic"` degrade (bicubic
 /// renders as bilinear). Returns `None` if anything fails to parse.
-fn parse_meshgradient(mg: roxmltree::Node, tess: usize) -> Option<xsvg_core::gradient::Mesh> {
+fn parse_meshgradient(
+    mg: roxmltree::Node,
+    tess: usize,
+    unit_map: xsvg_core::kurbo::Affine,
+) -> Option<xsvg_core::gradient::Mesh> {
     use xsvg_core::gradient::{reverse_edge, CoonsPatch, LinRgb, Mesh};
-    if mg.attribute("gradientUnits") == Some("objectBoundingBox") {
-        return None;
-    }
+    let eased = mg.attribute("type") == Some("bicubic");
     let origin = (attr_num(mg, "x", 0.0) as f32, attr_num(mg, "y", 0.0) as f32);
-    let affine = mg
-        .attribute("gradientTransform")
-        .map(parse_transform)
-        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+    let affine = unit_map
+        * mg.attribute("gradientTransform")
+            .map(parse_transform)
+            .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
 
     let mut rows: Vec<Vec<CoonsPatch>> = Vec::new();
     for row_el in mg
@@ -1718,6 +1760,7 @@ fn parse_meshgradient(mg: roxmltree::Node, tess: usize) -> Option<xsvg_core::gra
                 edges: [edges[0]?, edges[1]?, edges[2]?, edges[3]?],
                 colors: [colors[0]?.0, colors[1]?.0, colors[2]?.0, colors[3]?.0],
                 alpha: [colors[0]?.1, colors[1]?.1, colors[2]?.1, colors[3]?.1],
+                eased,
             });
         }
         if row.is_empty() {
@@ -1917,6 +1960,39 @@ fn transform_d(d: &str, a: xsvg_core::kurbo::Affine) -> Option<String> {
     let mut p = xsvg_core::kurbo::BezPath::from_svg(d).ok()?;
     p.apply_affine(a);
     Some(p.to_svg())
+}
+
+/// A plain-shape boolean operand's stroke ink, expanded to fill geometry via
+/// kurbo's stroke-to-fill (caps and joins from the attributes; dashes are not
+/// supported). `None` when the child has no stroke to expand.
+fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Option<String> {
+    if child.tag_name().namespace() == Some(XSVG_NS) {
+        return None;
+    }
+    let paint = child.attribute("stroke")?;
+    if paint == "none" {
+        return None;
+    }
+    let width = attr_num(child, "stroke-width", 1.0);
+    if width <= 0.0 {
+        return None;
+    }
+    let d = shape_to_path_d(child)?;
+    let path = xsvg_core::kurbo::BezPath::from_svg(&d).ok()?;
+    use xsvg_core::kurbo::{stroke, Cap, Join, Stroke, StrokeOpts};
+    let cap = match child.attribute("stroke-linecap") {
+        Some("round") => Cap::Round,
+        Some("square") => Cap::Square,
+        _ => Cap::Butt,
+    };
+    let join = match child.attribute("stroke-linejoin") {
+        Some("round") => Join::Round,
+        Some("bevel") => Join::Bevel,
+        _ => Join::Miter,
+    };
+    let style = Stroke::new(width).with_caps(cap).with_join(join);
+    let out = stroke(path, &style, &StrokeOpts::default(), tolerance.max(0.01));
+    Some(out.to_svg())
 }
 
 /// A `<use>` operand's placement: its `transform` composed with the extra
@@ -2608,6 +2684,10 @@ const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     for attr in node.attributes() {
         if skip.contains(&attr.name()) {
+            continue;
+        }
+        // event handlers are outside the static subset (§9, Plan R6)
+        if attr.name().starts_with("on") && attr.namespace().is_none() {
             continue;
         }
         let prefix = match attr.namespace() {
@@ -3557,6 +3637,32 @@ mod tests {
     }
 
     #[test]
+    fn boolean_operands_include_their_stroke_ink() {
+        // a stroked rect operand: the union covers fill + expanded stroke,
+        // so the bbox inflates by half the stroke width on every side
+        let svg = format!(
+            r##"{XW}<x:boolean op="union" fill="#123"><rect x="10" y="10" width="40" height="20" stroke="#000" stroke-width="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!(
+            (bb.x0 - 5.0).abs() < 0.5 && (bb.x1 - 55.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        assert!(
+            (bb.y0 - 5.0).abs() < 0.5 && (bb.y1 - 35.0).abs() < 0.5,
+            "{bb:?}"
+        );
+        // evenodd operands skip stroke ink with a marker
+        let svg = format!(
+            r##"{XW}<x:boolean op="union" fill="#123"><rect x="10" y="10" width="40" height="20" fill-rule="evenodd" stroke="#000" stroke-width="10"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("evenodd operand ignored"), "{out}");
+    }
+
+    #[test]
     fn boolean_use_children_are_operands_by_reference() {
         // venn lens: two circles referenced by <use> — both keep rendering,
         // and the intersect gets their geometry without consuming them
@@ -3870,6 +3976,40 @@ mod tests {
                 .unwrap()
         };
         assert!(y < 0.0, "curved bulge must lift the raster: y={y}");
+    }
+
+    #[test]
+    fn meshgradient_object_bounding_box_units_scale_to_the_shape() {
+        // unit-square patch + oBB units on a 200x80 rect: the image placement
+        // must span (most of) the rect, not the unit square
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0" gradientUnits="objectBoundingBox"><meshrow><meshpatch><stop path="l 1,0" stop-color="#e11"/><stop path="l 0,1" stop-color="#fa0"/><stop path="l -1,0" stop-color="#3b7"/><stop path="l 0,-1" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="200" height="80" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<image"), "{out}");
+        let k = out.find("<image").unwrap();
+        let attr = |name: &str| -> f64 {
+            let j = out[k..].find(&format!(" {name}=\"")).unwrap() + k + name.len() + 3;
+            out[j..j + out[j..].find('"').unwrap()].parse().unwrap()
+        };
+        assert!(attr("width") > 150.0, "oBB mesh must span the shape: {out}");
+    }
+
+    #[test]
+    fn bicubic_meshgradients_differ_from_bilinear() {
+        let mk = |ty: &str| {
+            format!(
+                r##"{XW}<meshgradient id="m" x="0" y="0"{ty}><meshrow><meshpatch><stop path="l 100,0" stop-color="#000"/><stop path="l 0,50" stop-color="#000"/><stop path="l -100,0" stop-color="#fff"/><stop path="l 0,-50" stop-color="#fff"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="100" height="50" fill="url(#m)"/></svg>"##
+            )
+        };
+        let bilinear = compile_test(&mk(""));
+        let bicubic = compile_test(&mk(r##" type="bicubic""##));
+        assert!(bicubic.contains("<image"), "{bicubic}");
+        let uri = |o: &str| {
+            let k = o.find("base64,").unwrap();
+            o[k..k + o[k..].find('"').unwrap()].to_string()
+        };
+        assert_ne!(uri(&bilinear), uri(&bicubic), "easing must change the fit");
     }
 
     #[test]

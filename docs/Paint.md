@@ -51,7 +51,7 @@ unfiltered until compiled — degradation, never breakage.
 |---|---|---|
 | Filter regions beyond ±50% bbox | a bbox-relative `<filter>` region cannot size itself to an absolute blur radius | acceptable clip for sane radii; revisit if real content hits it |
 | `backdrop-filter` semantics | needs compositing context, not static-subset-able | out of scope |
-| Smooth-interior mesh T-junctions + `.qmesh` import | crack-side T-junctions only; binary import belongs to vtracer's exporter (the indexed `<x:mesh>` syntax is its 1:1 target) | additive on the shipped §8.2 model |
+| `.qmesh` binary import | belongs to vtracer's exporter — the indexed `<x:mesh>` syntax is its 1:1 text target | out of compiler scope |
 
 ## D. Mesh gradients — `<x:mesh>` ✅ shipped (v1)
 
