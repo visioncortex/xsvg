@@ -220,7 +220,7 @@ export const CATALOG: Category[] = [
       {
         file: "aqua.xsvg",
         title: "Aqua buttons",
-        blurb: "the classic use case: glossy macOS-style pill buttons — shine band, crack-edged highlight, deep body, and bottom bounce light in one mesh of 12 vertices per button",
+        blurb: "the classic use case: gel pill buttons as two patches — an opaque body mesh under a FEATHERED gloss layer (per-vertex alpha, meridian-warped lens), grounded by a compiled drop-shadow()",
       },
       {
         file: "mesh.xsvg",

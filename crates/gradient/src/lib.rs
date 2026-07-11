@@ -39,3 +39,4 @@ pub use coons::{cubic, line_edge, reverse_edge, CoonsPatch};
 pub use emit::texel_placement;
 pub use field::{fit_field, fit_grid, fit_grid_lin, ColorField, Dof, GridField, Rect};
 pub use mesh::{Face, Mesh, Raster};
+pub use png::{encode_rgb_png, encode_rgba_png};

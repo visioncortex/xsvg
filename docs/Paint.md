@@ -51,7 +51,7 @@ unfiltered until compiled — degradation, never breakage.
 |---|---|---|
 | Filter regions beyond ±50% bbox | a bbox-relative `<filter>` region cannot size itself to an absolute blur radius | acceptable clip for sane radii; revisit if real content hits it |
 | `backdrop-filter` semantics | needs compositing context, not static-subset-able | out of scope |
-| Mesh feathering (per-corner alpha) + smooth-interior T-junctions + `.qmesh` import | v1 meshes are opaque RGB with crack-side T-junctions only | additive on the shipped §8.2 model |
+| Smooth-interior mesh T-junctions + `.qmesh` import | crack-side T-junctions only; binary import belongs to vtracer's exporter (the indexed `<x:mesh>` syntax is its 1:1 target) | additive on the shipped §8.2 model |
 
 ## D. Mesh gradients — `<x:mesh>` ✅ shipped (v1)
 
@@ -63,6 +63,10 @@ each region as a **texel-aligned tiny PNG** — placed so its texel centers land
 vertices, the renderer's own bilinear image filter reconstructs the field exactly (a single patch
 is literally a stretched 2×2). Engine: the workspace `gradient` crate, extracted from vtracer's
 quadmesh/gradient work.
+
+**Feathering shipped**: per-corner alpha (`#rgba`/`#rrggbbaa`, `stop-opacity`) is a fourth fitted
+channel — translucent regions serialize RGBA texel PNGs, so soft fades and glossy overlays are
+first-class (the aqua sample's gloss is a feathered mesh layered over an opaque gel body).
 
 **SVG 2 / Inkscape `<meshgradient>` fills compile too**: Coons patches (cubic edges) tessellate
 into the same straight-quad mesh — polycurve → points — making Inkscape mesh files renderable

@@ -7,22 +7,32 @@
 
 /// Encode an interleaved RGB8 image (`w*h*3` bytes) as a PNG file.
 pub fn encode_rgb_png(w: u32, h: u32, rgb: &[u8]) -> Vec<u8> {
-    assert_eq!(rgb.len(), (w * h * 3) as usize);
-    let mut out = Vec::with_capacity(64 + rgb.len() + h as usize);
+    encode_png(w, h, rgb, 3)
+}
+
+/// Encode an interleaved RGBA8 image (`w*h*4` bytes, straight alpha) as a PNG.
+pub fn encode_rgba_png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+    encode_png(w, h, rgba, 4)
+}
+
+fn encode_png(w: u32, h: u32, px: &[u8], ch: u32) -> Vec<u8> {
+    assert_eq!(px.len(), (w * h * ch) as usize);
+    let mut out = Vec::with_capacity(64 + px.len() + h as usize);
     out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
 
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&w.to_be_bytes());
     ihdr.extend_from_slice(&h.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // 8-bit, color type 2 (RGB)
+    // 8-bit; color type 2 (RGB) or 6 (RGBA)
+    ihdr.extend_from_slice(&[8, if ch == 4 { 6 } else { 2 }, 0, 0, 0]);
     chunk(&mut out, b"IHDR", &ihdr);
 
     // raw scanlines with filter byte 0
-    let stride = (w * 3) as usize;
+    let stride = (w * ch) as usize;
     let mut raw = Vec::with_capacity((stride + 1) * h as usize);
     for row in 0..h as usize {
         raw.push(0);
-        raw.extend_from_slice(&rgb[row * stride..(row + 1) * stride]);
+        raw.extend_from_slice(&px[row * stride..(row + 1) * stride]);
     }
     chunk(&mut out, b"IDAT", &zlib_stored(&raw));
     chunk(&mut out, b"IEND", &[]);
@@ -93,6 +103,17 @@ mod tests {
     #[test]
     fn adler32_matches_the_zlib_check_value() {
         assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
+    }
+
+    #[test]
+    fn rgba_png_declares_color_type_six() {
+        let rgba = [255u8, 0, 0, 128, 0, 255, 0, 255];
+        let png = encode_rgba_png(2, 1, &rgba);
+        assert_eq!(png[25], 6, "color type must be RGBA");
+        let idat_len = u32::from_be_bytes(png[33..37].try_into().unwrap()) as usize;
+        let z = &png[41..41 + idat_len];
+        let raw = &z[7..z.len() - 4];
+        assert_eq!(raw, &[0, 255, 0, 0, 128, 0, 255, 0, 255]);
     }
 
     #[test]

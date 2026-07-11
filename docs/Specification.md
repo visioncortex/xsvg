@@ -721,8 +721,8 @@ and kurbo-native backends can slot in later without surface changes).
 ### 7.5 Remaining pillars & deferred [planned]
 
 - **Pillar 3 — paint & pixels.** Pixel adjustments (§8) and **`<x:mesh>` mesh gradients with
-  cracks (§8.2) shipped**. Remaining: per-corner alpha (feathering / fade), smooth-interior
-  T-junctions, `.qmesh` import from the vtracer pipeline.
+  cracks and feathering (§8.2) shipped**. Remaining: smooth-interior T-junctions, `.qmesh`
+  import from the vtracer pipeline.
 - **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
   (research retained in [Research.md §1](Research.md)).
 
@@ -779,10 +779,11 @@ The Pillar 3 headline: **corner colors on a quad-dominant mesh**, the representa
 
 **Model (normative).** The `points` attribute holds the shared vertices in SVG's own
 `<polygon points>` syntax (`x,y` pairs, comma or whitespace separated); each `<x:face v="…">` names 3 or 4 CCW vertex indices and the same number
-of corner colors in `fill` (`#rgb`/`#rrggbb`; one color replicates to all corners). Quad corners
+of corner colors in `fill` (`#rgb`/`#rrggbb`, or with **alpha** as `#rgba`/`#rrggbbaa` — per-corner
+transparency is **feathering**; one color replicates to all corners). Quad corners
 map to local `(u,v)` as `0→(0,0) 1→(1,0) 2→(1,1) 3→(0,1)`; color interpolates bilinearly
 (inverse-bilinear for non-rectangular quads), barycentrically for triangles, in **linear-light
-RGB**. An edge shared by two faces is **smooth** iff both agree on the color at each shared
+RGB**. An edge shared by two faces is **smooth** iff both agree on the color *and alpha* at each shared
 endpoint — a mismatch is a **crack**, a hard discontinuity; a *region* is a maximal set of faces
 connected through smooth edges. Cracks need no extra markup: they fall out of the colors.
 
@@ -804,12 +805,16 @@ the region's bbox span `s`, offset by half a texel-interval — the renderer's o
 image filter then interpolates the exact tensor-product basis of the fitted field. Fitting happens
 in the encoded (sRGB) domain because that is the space image samplers interpolate in. Each region
 is clipped by the **exact union of its face polygons** (nonzero), so cracks stay geometry-sharp at
-any zoom; a region whose fit collapses to a constant emits a plain `<path fill>`. Degradations
-(bad indices, color-count mismatch, degenerate extent) skip with markers (§3).
+any zoom; a region whose fit collapses to a constant emits a plain `<path fill>` (with `fill-opacity` when
+translucent). **Feathering**: alpha is a fourth fitted channel — a region carrying any
+transparency serializes an **RGBA** PNG (fully opaque regions stay RGB), so soft fades ride the
+same texel-aligned reconstruction. Degradations (bad indices, color-count mismatch, degenerate
+extent) skip with markers (§3).
 
-**v1 limits.** Opaque RGB (no per-corner alpha/feathering yet); T-junctions are supported **on
-cracks** (each side clips independently) but a hanging node interior to a *smooth* region is not;
-`image-rendering` must remain default (smooth) for the reconstruction to hold.
+**v1 limits.** T-junctions are supported **on cracks** (each side clips independently) but a
+hanging node interior to a *smooth* region is not; `image-rendering` must remain default (smooth)
+for the reconstruction to hold; alpha interpolates in straight (unpremultiplied) form — a steep
+alpha cliff against a strongly different color can fringe slightly at extreme zoom.
 
 #### SVG 2 / Inkscape `<meshgradient>` compatibility [implemented: v1]
 
@@ -819,7 +824,8 @@ pipeline: each Coons patch (four cubic edges, four corner colors) **tessellates 
 straight-quad mesh** (polycurve → points, at a profile-graded density of 8/12/20 cells per patch
 axis), the shape's geometry becomes the clip, and the stroke (if any) re-emits on top. Dialect
 coverage: `meshrow`/`meshpatch`/`stop` with one `c`/`C`/`l`/`L` edge per stop, `stop-color` as an
-attribute or inside `style` (hex), the standard edge/corner **inheritance** (a patch after the
+attribute or inside `style` (hex, alpha forms included) with **`stop-opacity`** honored
+(feathering), the standard edge/corner **inheritance** (a patch after the
 first inherits its left edge reversed from its neighbour, later rows inherit top edges from
 above), and `gradientTransform`. Adjacent patches join smoothly by construction (shared edges
 tessellate to shared vertices with matching colors). The reference is **compile-time baked**, so
@@ -869,7 +875,8 @@ The concrete allow/deny feature list is a pending deliverable ([Plan.md](Plan.md
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
-| `<x:mesh>` — per-corner alpha (feathering), smooth-interior T-junctions, `.qmesh` import | planned |
+| `<x:mesh>` — per-corner alpha / feathering (`#rrggbbaa`, `stop-opacity`, RGBA texel PNGs) | implemented |
+| `<x:mesh>` — smooth-interior T-junctions, `.qmesh` import | planned |
 | Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |

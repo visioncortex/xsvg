@@ -21,6 +21,8 @@ pub const NONE: u32 = u32::MAX;
 pub struct Face {
     pub v: [u32; 4],
     pub colors: [LinRgb; 4],
+    /// per-corner straight alpha in [0,1] — feathering; 1.0 = opaque
+    pub alpha: [f32; 4],
 }
 
 impl Face {
@@ -55,6 +57,8 @@ pub struct Raster {
     /// region label per face (the labeling the pixels were painted with) —
     /// callers build exact per-region clip geometry from the face polygons
     pub face_regions: Vec<u32>,
+    /// straight alpha per pixel, [0,1]
+    pub alpha: Vec<f32>,
 }
 
 impl Raster {
@@ -66,6 +70,26 @@ impl Raster {
             .map(|&v| crate::color::linear_to_srgb8(v))
             .collect()
     }
+
+    /// Interleaved sRGB8 + straight alpha (`w*h*4`).
+    pub fn to_rgba8(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.w * self.h * 4);
+        for i in 0..self.w * self.h {
+            for c in 0..3 {
+                out.push(crate::color::linear_to_srgb8(self.lin[i * 3 + c]));
+            }
+            out.push((self.alpha[i] * 255.0 + 0.5).clamp(0.0, 255.0) as u8);
+        }
+        out
+    }
+
+    /// Whether every covered pixel is fully opaque (within 1/255).
+    pub fn fully_opaque(&self) -> bool {
+        self.labels
+            .iter()
+            .zip(&self.alpha)
+            .all(|(&l, &a)| l == NONE || a >= 254.5 / 255.0)
+    }
 }
 
 impl Mesh {
@@ -75,13 +99,22 @@ impl Mesh {
     }
 
     pub fn add_quad(&mut self, v: [u32; 4], colors: [LinRgb; 4]) {
-        self.faces.push(Face { v, colors });
+        self.add_quad_a(v, colors, [1.0; 4]);
+    }
+
+    pub fn add_quad_a(&mut self, v: [u32; 4], colors: [LinRgb; 4], alpha: [f32; 4]) {
+        self.faces.push(Face { v, colors, alpha });
     }
 
     pub fn add_tri(&mut self, v: [u32; 3], colors: [LinRgb; 3]) {
+        self.add_tri_a(v, colors, [1.0; 3]);
+    }
+
+    pub fn add_tri_a(&mut self, v: [u32; 3], colors: [LinRgb; 3], alpha: [f32; 3]) {
         self.faces.push(Face {
             v: [v[0], v[1], v[2], NONE],
             colors: [colors[0], colors[1], colors[2], LinRgb::default()],
+            alpha: [alpha[0], alpha[1], alpha[2], 1.0],
         });
     }
 
@@ -104,22 +137,28 @@ impl Mesh {
             }
             x
         }
-        let close = |a: LinRgb, b: LinRgb| {
-            (a.r - b.r).abs() <= eps && (a.g - b.g).abs() <= eps && (a.b - b.b).abs() <= eps
+        let close = |a: (LinRgb, f32), b: (LinRgb, f32)| {
+            (a.0.r - b.0.r).abs() <= eps
+                && (a.0.g - b.0.g).abs() <= eps
+                && (a.0.b - b.0.b).abs() <= eps
+                && (a.1 - b.1).abs() <= eps
         };
 
-        // edge key -> (face, corner color at lo end, at hi end)
-        let mut seen: std::collections::HashMap<(u32, u32), (u32, LinRgb, LinRgb)> =
+        // edge key -> (face, corner color+alpha at lo end, at hi end)
+        type Corner = (LinRgb, f32);
+        let mut seen: std::collections::HashMap<(u32, u32), (u32, Corner, Corner)> =
             std::collections::HashMap::new();
         for (f, face) in self.faces.iter().enumerate() {
             let n = face.arity();
             for c in 0..n {
                 let a = face.v[c];
                 let b = face.v[(c + 1) % n];
+                let ca = (face.colors[c], face.alpha[c]);
+                let cb = (face.colors[(c + 1) % n], face.alpha[(c + 1) % n]);
                 let (lo, hi, c_lo, c_hi) = if a < b {
-                    (a, b, face.colors[c], face.colors[(c + 1) % n])
+                    (a, b, ca, cb)
                 } else {
-                    (b, a, face.colors[(c + 1) % n], face.colors[c])
+                    (b, a, cb, ca)
                 };
                 match seen.get(&(lo, hi)) {
                     None => {
@@ -152,11 +191,12 @@ impl Mesh {
         (label, next as usize)
     }
 
-    /// Face color at point `p` (linear RGB): inverse-bilinear `uv` for quads,
-    /// barycentric for triangles.
-    pub fn eval_face(&self, f: usize, p: (f32, f32)) -> LinRgb {
+    /// Face color + alpha at point `p` (linear RGB, straight alpha):
+    /// inverse-bilinear `uv` for quads, barycentric for triangles.
+    pub fn eval_face(&self, f: usize, p: (f32, f32)) -> (LinRgb, f32) {
         let face = &self.faces[f];
         let c = &face.colors;
+        let al = &face.alpha;
         if face.arity() == 4 {
             let (u, v) = inverse_bilinear(
                 self.pos(face.v[0]),
@@ -168,7 +208,9 @@ impl Mesh {
             let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
             let bottom = c[0].lerp(c[1], u);
             let top = c[3].lerp(c[2], u);
-            bottom.lerp(top, v)
+            let ab = al[0] + (al[1] - al[0]) * u;
+            let at = al[3] + (al[2] - al[3]) * u;
+            (bottom.lerp(top, v), ab + (at - ab) * v)
         } else {
             let (w0, w1, w2) = barycentric(
                 self.pos(face.v[0]),
@@ -176,10 +218,13 @@ impl Mesh {
                 self.pos(face.v[2]),
                 p,
             );
-            LinRgb::new(
-                c[0].r * w0 + c[1].r * w1 + c[2].r * w2,
-                c[0].g * w0 + c[1].g * w1 + c[2].g * w2,
-                c[0].b * w0 + c[1].b * w1 + c[2].b * w2,
+            (
+                LinRgb::new(
+                    c[0].r * w0 + c[1].r * w1 + c[2].r * w2,
+                    c[0].g * w0 + c[1].g * w1 + c[2].g * w2,
+                    c[0].b * w0 + c[1].b * w1 + c[2].b * w2,
+                ),
+                al[0] * w0 + al[1] * w1 + al[2] * w2,
             )
         }
     }
@@ -199,6 +244,7 @@ impl Mesh {
     ) -> Raster {
         let (face_region, regions) = self.face_regions(eps);
         let mut lin = vec![0f32; w * h * 3];
+        let mut alpha = vec![0f32; w * h];
         let mut labels = vec![NONE; w * h];
         let face_regions_out = face_region.clone();
 
@@ -235,11 +281,12 @@ impl Mesh {
                     let mut x = px0 as isize;
                     while x <= px1 {
                         let mx = origin.0 + (x as f32 + 0.5) * scale;
-                        let c = self.eval_face(f, (mx, my));
+                        let (c, a) = self.eval_face(f, (mx, my));
                         let o = (y * w + x as usize) * 3;
                         lin[o] = c.r;
                         lin[o + 1] = c.g;
                         lin[o + 2] = c.b;
+                        alpha[y * w + x as usize] = a;
                         labels[y * w + x as usize] = face_region[f];
                         x += 1;
                     }
@@ -254,6 +301,7 @@ impl Mesh {
             labels,
             regions,
             face_regions: face_regions_out,
+            alpha,
         }
     }
 }

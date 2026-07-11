@@ -34,6 +34,8 @@ pub fn cubic(p: [(f32, f32); 4], t: f32) -> (f32, f32) {
 pub struct CoonsPatch {
     pub edges: [[(f32, f32); 4]; 4],
     pub colors: [LinRgb; 4],
+    /// per-corner straight alpha [TL, TR, BR, BL] — SVG 2 `stop-opacity`
+    pub alpha: [f32; 4],
 }
 
 impl CoonsPatch {
@@ -69,6 +71,14 @@ impl CoonsPatch {
         top.lerp(bottom, v)
     }
 
+    /// Bilinear corner-alpha interpolation at `(u, v)`.
+    pub fn alpha_at(&self, u: f32, v: f32) -> f32 {
+        let [tl, tr, br, bl] = self.alpha;
+        let top = tl + (tr - tl) * u;
+        let bottom = bl + (br - bl) * u;
+        top + (bottom - top) * v
+    }
+
     /// Tessellate into `n × n` straight quads appended to `mesh`, deduplicating
     /// vertices through `dedup` (position quantized to 1e-3) so adjacent
     /// patches sharing an edge curve share the mesh vertices too.
@@ -89,7 +99,8 @@ impl CoonsPatch {
             for i in 0..n {
                 let uv = |i: usize, j: usize| (i as f32 / n as f32, j as f32 / n as f32);
                 let c = |(u, v): (f32, f32)| self.color(u, v);
-                mesh.add_quad(
+                let a = |(u, v): (f32, f32)| self.alpha_at(u, v);
+                mesh.add_quad_a(
                     [
                         ids[j * (n + 1) + i],
                         ids[j * (n + 1) + i + 1],
@@ -101,6 +112,12 @@ impl CoonsPatch {
                         c(uv(i + 1, j)),
                         c(uv(i + 1, j + 1)),
                         c(uv(i, j + 1)),
+                    ],
+                    [
+                        a(uv(i, j)),
+                        a(uv(i + 1, j)),
+                        a(uv(i + 1, j + 1)),
+                        a(uv(i, j + 1)),
                     ],
                 );
             }
@@ -144,6 +161,7 @@ mod tests {
                 lin(0, 0, 255),
                 lin(255, 255, 0),
             ],
+            alpha: [1.0; 4],
         }
     }
 
@@ -187,6 +205,7 @@ mod tests {
                 reverse_edge(shared),
             ],
             colors: a.colors,
+            alpha: [1.0; 4],
         };
         let mut mesh = Mesh::default();
         let mut dedup = HashMap::new();

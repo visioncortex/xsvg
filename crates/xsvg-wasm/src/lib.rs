@@ -1300,7 +1300,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let (gx, gy) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
         let (gw, gh) = (attr_num(node, "width", 0.0), attr_num(node, "height", 0.0));
         let cols_ok = (1..=64).contains(&cols) && (1..=64).contains(&rows);
-        let vcols: Vec<xsvg_core::gradient::LinRgb> = node
+        let vcols: Vec<(xsvg_core::gradient::LinRgb, f32)> = node
             .attribute("fill")
             .unwrap_or("")
             .split_whitespace()
@@ -1323,13 +1323,20 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let vid = |i: usize, j: usize| (j * (cols + 1) + i) as u32;
         for j in 0..rows {
             for i in 0..cols {
-                mesh.add_quad(
-                    [vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)],
+                let q = [vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)];
+                mesh.add_quad_a(
+                    q,
                     [
-                        vcols[vid(i, j) as usize],
-                        vcols[vid(i + 1, j) as usize],
-                        vcols[vid(i + 1, j + 1) as usize],
-                        vcols[vid(i, j + 1) as usize],
+                        vcols[q[0] as usize].0,
+                        vcols[q[1] as usize].0,
+                        vcols[q[2] as usize].0,
+                        vcols[q[3] as usize].0,
+                    ],
+                    [
+                        vcols[q[0] as usize].1,
+                        vcols[q[1] as usize].1,
+                        vcols[q[2] as usize].1,
+                        vcols[q[3] as usize].1,
                     ],
                 );
             }
@@ -1359,7 +1366,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        let cols: Vec<xsvg_core::gradient::LinRgb> = child
+        let cols: Vec<(xsvg_core::gradient::LinRgb, f32)> = child
             .attribute("fill")
             .unwrap_or("")
             .split_whitespace()
@@ -1373,12 +1380,17 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         }
         let col = |k: usize| if cols.len() == 1 { cols[0] } else { cols[k] };
         if idx.len() == 4 {
-            mesh.add_quad(
+            mesh.add_quad_a(
                 [idx[0], idx[1], idx[2], idx[3]],
-                [col(0), col(1), col(2), col(3)],
+                [col(0).0, col(1).0, col(2).0, col(3).0],
+                [col(0).1, col(1).1, col(2).1, col(3).1],
             );
         } else {
-            mesh.add_tri([idx[0], idx[1], idx[2]], [col(0), col(1), col(2)]);
+            mesh.add_tri_a(
+                [idx[0], idx[1], idx[2]],
+                [col(0).0, col(1).0, col(2).0],
+                [col(0).1, col(1).1, col(2).1],
+            );
         }
     }
     out.push_str(&markers);
@@ -1436,7 +1448,8 @@ fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, c
         (((y1 - y0) / scale).ceil() as usize).max(1),
     );
     let raster = mesh.rasterize(w, h, (x0, y0), scale, 1e-3);
-    let srgb = raster.to_srgb8();
+    let rgba = raster.to_rgba8();
+    let opaque = raster.fully_opaque();
 
     // per-region pixel index lists + pixel bboxes
     let mut region_px: Vec<Vec<u32>> = vec![Vec::new(); raster.regions];
@@ -1480,11 +1493,17 @@ fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, c
             clip_d.push('Z');
         }
 
-        let single = fit_field(&region_px[r], w, &srgb, 2.0);
+        let single = fit_field(&region_px[r], w, &rgba, 2.0);
         if single.dof == Dof::Solid {
             let c = single.corners[0];
+            let a = (c[3] / 255.0).clamp(0.0, 1.0);
+            let opacity = if a < 254.5 / 255.0 {
+                format!(" fill-opacity=\"{}\"", fmt(a as f64))
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
-                "<path fill=\"#{:02x}{:02x}{:02x}\" d=\"{clip_d}\"/>",
+                "<path fill=\"#{:02x}{:02x}{:02x}\"{opacity} d=\"{clip_d}\"/>",
                 c[0].round().clamp(0.0, 255.0) as u8,
                 c[1].round().clamp(0.0, 255.0) as u8,
                 c[2].round().clamp(0.0, 255.0) as u8
@@ -1499,7 +1518,7 @@ fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, c
         for g in [1usize, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48] {
             let gx = ((g as f32 * ar.sqrt()).round() as usize).clamp(1, cap);
             let gy = ((g as f32 / ar.sqrt()).round() as usize).clamp(1, cap);
-            let grid = fit_grid(&region_px[r], w, &srgb, gx, gy);
+            let grid = fit_grid(&region_px[r], w, &rgba, gx, gy);
             let done = grid.rmse <= tol || g >= cap;
             best = Some(grid);
             if done {
@@ -1508,15 +1527,21 @@ fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, c
         }
         let grid = best.unwrap();
 
-        // tiny PNG: (gx+1)×(gy+1) texels, one per grid vertex
+        // tiny PNG: (gx+1)×(gy+1) texels, one per grid vertex; opaque meshes
+        // stay RGB, feathered ones carry the alpha channel
         let (tw, th) = (grid.gx + 1, grid.gy + 1);
-        let mut rgb = Vec::with_capacity(tw * th * 3);
+        let ch = if opaque { 3 } else { 4 };
+        let mut px = Vec::with_capacity(tw * th * ch);
         for vert in &grid.verts {
-            for c in 0..3 {
-                rgb.push(vert[c].round().clamp(0.0, 255.0) as u8);
+            for c in 0..ch {
+                px.push(vert[c].round().clamp(0.0, 255.0) as u8);
             }
         }
-        let png = gradient::png::encode_rgb_png(tw as u32, th as u32, &rgb);
+        let png = if opaque {
+            gradient::png::encode_rgb_png(tw as u32, th as u32, &px)
+        } else {
+            gradient::png::encode_rgba_png(tw as u32, th as u32, &px)
+        };
         let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
         // raster pixel space -> user units
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
@@ -1642,14 +1667,14 @@ fn parse_meshgradient(mg: roxmltree::Node, tess: usize) -> Option<xsvg_core::gra
 
             let mut edges: [Option<[(f32, f32); 4]>; 4] = [top, None, None, left];
             // corners [TL, TR, BR, BL]; inherited ones are fixed
-            let mut colors: [Option<LinRgb>; 4] = [None; 4];
+            let mut colors: [Option<(LinRgb, f32)>; 4] = [None; 4];
             if let Some(p) = above {
-                colors[0] = Some(p.colors[3]); // our TL = above BL
-                colors[1] = Some(p.colors[2]); // our TR = above BR
+                colors[0] = Some((p.colors[3], p.alpha[3])); // our TL = above BL
+                colors[1] = Some((p.colors[2], p.alpha[2])); // our TR = above BR
             }
             if let Some(p) = prev {
-                colors[0] = Some(p.colors[1]); // our TL = prev TR
-                colors[3] = Some(p.colors[2]); // our BL = prev BR
+                colors[0] = Some((p.colors[1], p.alpha[1])); // our TL = prev TR
+                colors[3] = Some((p.colors[2], p.alpha[2])); // our BL = prev BR
             }
 
             let missing: Vec<usize> = (0..4).filter(|&k| edges[k].is_none()).collect();
@@ -1691,7 +1716,8 @@ fn parse_meshgradient(mg: roxmltree::Node, tess: usize) -> Option<xsvg_core::gra
             }
             row.push(CoonsPatch {
                 edges: [edges[0]?, edges[1]?, edges[2]?, edges[3]?],
-                colors: [colors[0]?, colors[1]?, colors[2]?, colors[3]?],
+                colors: [colors[0]?.0, colors[1]?.0, colors[2]?.0, colors[3]?.0],
+                alpha: [colors[0]?.1, colors[1]?.1, colors[2]?.1, colors[3]?.1],
             });
         }
         if row.is_empty() {
@@ -1755,24 +1781,37 @@ fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 4], (f32, f
     }
 }
 
-/// A mesh `<stop>`'s color: the `stop-color` attribute, or the `style`
-/// attribute's `stop-color` declaration (Inkscape's habit).
-fn stop_color(stop: roxmltree::Node) -> Option<xsvg_core::gradient::LinRgb> {
-    if let Some(c) = stop.attribute("stop-color") {
-        return parse_hex_color(c.trim());
-    }
-    stop.attribute("style")?.split(';').find_map(|kv| {
-        let (k, v) = kv.split_once(':')?;
-        if k.trim() == "stop-color" {
-            parse_hex_color(v.trim())
-        } else {
-            None
+/// A mesh `<stop>`'s color + alpha: `stop-color` (attribute or `style`
+/// declaration — Inkscape's habit), with `stop-opacity` multiplied in.
+fn stop_color(stop: roxmltree::Node) -> Option<(xsvg_core::gradient::LinRgb, f32)> {
+    let style_prop = |name: &str| {
+        stop.attribute("style")?.split(';').find_map(|kv| {
+            let (k, v) = kv.split_once(':')?;
+            (k.trim() == name).then(|| v.trim().to_string())
+        })
+    };
+    let color = stop
+        .attribute("stop-color")
+        .map(str::to_string)
+        .or_else(|| style_prop("stop-color"))?;
+    let (rgb, mut a) = parse_hex_color(color.trim())?;
+    if let Some(op) = stop
+        .attribute("stop-opacity")
+        .map(str::to_string)
+        .or_else(|| style_prop("stop-opacity"))
+    {
+        let v: f32 = op.trim().parse().ok()?;
+        if !v.is_finite() {
+            return None;
         }
-    })
+        a *= v.clamp(0.0, 1.0);
+    }
+    Some((rgb, a))
 }
 
-/// `#rgb` / `#rrggbb` → linear-light RGB.
-fn parse_hex_color(s: &str) -> Option<xsvg_core::gradient::LinRgb> {
+/// `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` → linear-light RGB + straight
+/// alpha in [0,1] (the CSS Color 4 hex-alpha forms — mesh feathering's syntax).
+fn parse_hex_color(s: &str) -> Option<(xsvg_core::gradient::LinRgb, f32)> {
     let hex = s.strip_prefix('#')?;
     let byte = |a: u8, b: u8| {
         let hi = (a as char).to_digit(16)?;
@@ -1780,12 +1819,27 @@ fn parse_hex_color(s: &str) -> Option<xsvg_core::gradient::LinRgb> {
         Some((hi * 16 + lo) as u8)
     };
     let b = hex.as_bytes();
-    let (r, g, bl) = match b.len() {
-        3 => (byte(b[0], b[0])?, byte(b[1], b[1])?, byte(b[2], b[2])?),
-        6 => (byte(b[0], b[1])?, byte(b[2], b[3])?, byte(b[4], b[5])?),
+    let (r, g, bl, a) = match b.len() {
+        3 => (byte(b[0], b[0])?, byte(b[1], b[1])?, byte(b[2], b[2])?, 255),
+        4 => (
+            byte(b[0], b[0])?,
+            byte(b[1], b[1])?,
+            byte(b[2], b[2])?,
+            byte(b[3], b[3])?,
+        ),
+        6 => (byte(b[0], b[1])?, byte(b[2], b[3])?, byte(b[4], b[5])?, 255),
+        8 => (
+            byte(b[0], b[1])?,
+            byte(b[2], b[3])?,
+            byte(b[4], b[5])?,
+            byte(b[6], b[7])?,
+        ),
         _ => return None,
     };
-    Some(xsvg_core::gradient::RgbColor::new(r, g, bl).to_linear())
+    Some((
+        xsvg_core::gradient::RgbColor::new(r, g, bl).to_linear(),
+        a as f32 / 255.0,
+    ))
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -3622,6 +3676,9 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile alpha: 5-digit hex, garbage stop-opacity
+            r##"<x:mesh points="0,0 10,0 10,10 0,10"><x:face v="0 1 2 3" fill="#ff000"/></x:mesh>"##,
+            r##"<meshgradient id="ga" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11" stop-opacity="soon"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="9" height="9" fill="url(#ga)"/>"##,
             // hostile meshgradient: bare stop, empty gradient, referenced fills
             r##"<meshgradient id="gm"><meshrow><meshpatch><stop path="l 5,0"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="10" height="10" fill="url(#gm)"/>"##,
             r##"<meshgradient id="gm2" x="0" y="0"/><circle cx="5" cy="5" r="5" fill="url(#gm2)"/>"##,
@@ -3838,6 +3895,65 @@ mod tests {
         assert!(out.contains("meshgradient fill left live"), "{out}");
         assert!(out.contains("fill=\"url(#m)\""), "{out}");
         assert!(!out.contains("<image"), "{out}");
+    }
+
+    /// Decode enough base64 to inspect a data-URI PNG's header.
+    fn b64_prefix(out: &str, n: usize) -> Vec<u8> {
+        const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let k = out.find("base64,").unwrap() + 7;
+        let mut bytes = Vec::new();
+        let mut buf = 0u32;
+        let mut bits = 0;
+        for &c in out[k..].as_bytes() {
+            if c == b'"' || bytes.len() >= n {
+                break;
+            }
+            let v = T.iter().position(|&t| t == c).unwrap() as u32;
+            buf = (buf << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                bytes.push((buf >> bits) as u8);
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn feathered_meshes_carry_alpha() {
+        // a fade-to-transparent mesh (feathering): the tiny PNG must be RGBA
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#ff3300ff #ff330000 #ff330000 #ff3300ff"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(out.matches("<image").count(), 1, "{out}");
+        let png = b64_prefix(&out, 26);
+        assert_eq!(png[25], 6, "feathered mesh must emit an RGBA PNG");
+        // an opaque mesh stays RGB (color type 2)
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        let png = b64_prefix(&out, 26);
+        assert_eq!(png[25], 2, "opaque mesh stays RGB");
+        // a constant semi-transparent region collapses to fill-opacity
+        let svg = format!(
+            r##"{XW}<x:mesh points="0,0 40,0 40,40 0,40"><x:face v="0 1 2 3" fill="#3b82f680"/></x:mesh></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("fill-opacity=\"0.50"), "{out}");
+        assert!(!out.contains("<image"), "{out}");
+    }
+
+    #[test]
+    fn meshgradient_stop_opacity_feathers() {
+        let svg = format!(
+            r##"{XW}<meshgradient id="m" x="0" y="0"><meshrow><meshpatch><stop path="l 40,0" stop-color="#e11"/><stop path="l 0,30" stop-color="#fa0" stop-opacity="0"/><stop path="l -40,0" style="stop-color:#3b7;stop-opacity:0.25"/><stop path="l 0,-30" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="40" height="30" fill="url(#m)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("<image"), "{out}");
+        let png = b64_prefix(&out, 26);
+        assert_eq!(png[25], 6, "stop-opacity must produce an RGBA PNG");
     }
 
     #[test]
