@@ -60,6 +60,15 @@
 .stage.grabbing {
   cursor: grabbing;
 }
+/* space held: whole stage (content included) is a pan surface */
+.stage.space-pan,
+.stage.space-pan .content {
+  cursor: grab;
+}
+.stage.space-pan.grabbing,
+.stage.space-pan.grabbing .content {
+  cursor: grabbing;
+}
 .stage.drag {
   outline: 3px dashed #6366f1;
   outline-offset: -6px;

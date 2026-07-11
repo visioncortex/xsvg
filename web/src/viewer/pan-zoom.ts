@@ -33,6 +33,8 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   let tx = 0;
   let ty = 0;
   let dragging = false;
+  let bgClickCandidate = false; // this drag could still be a deselect click
+  let spaceDown = false; // space held → left-drag pans from anywhere
   let lastX = 0;
   let lastY = 0;
   let startX = 0;
@@ -72,16 +74,46 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   };
 
   const onPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0) return;
-    // Only the empty background pans; a press on the content (the svg) is a click,
-    // so the inspector can select the element under the pointer.
-    if (e.target !== viewport) return;
+    const middle = e.button === 1;
+    const spacePan = e.button === 0 && spaceDown;
+    // A plain left press on the empty background pans (and may be a deselect
+    // click); a press on the content is normally a click so the inspector can
+    // select the element — but middle-drag and space+drag pan from anywhere.
+    const bgPan = e.button === 0 && e.target === viewport;
+    if (!(middle || spacePan || bgPan)) return;
+    if (middle || spacePan) e.preventDefault(); // no text-selection / autoscroll
     dragging = true;
+    bgClickCandidate = bgPan;
     pointerId = e.pointerId;
     startX = lastX = e.clientX;
     startY = lastY = e.clientY;
     viewport.setPointerCapture(pointerId);
     viewport.classList.add("grabbing");
+  };
+
+  // Chrome/Edge start middle-button autoscroll on the compatibility mousedown,
+  // which preventDefault on pointerdown does not suppress — kill it here.
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.button === 1) e.preventDefault();
+  };
+
+  const editable = (el: Element | null): boolean =>
+    !!el &&
+    (el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      (el as HTMLElement).isContentEditable);
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.code === "Space" && !spaceDown && !editable(document.activeElement)) {
+      spaceDown = true;
+      viewport.classList.add("space-pan");
+      e.preventDefault(); // don't scroll / activate a focused button
+    }
+  };
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code === "Space") {
+      spaceDown = false;
+      viewport.classList.remove("space-pan");
+    }
   };
 
   const onPointerMove = (e: PointerEvent) => {
@@ -100,8 +132,9 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
       viewport.releasePointerCapture(pointerId);
     }
     viewport.classList.remove("grabbing");
-    // A background press that barely moved is a click, not a pan → notify (deselect).
-    if (Math.hypot(e.clientX - startX, e.clientY - startY) < 4) {
+    // A background press that barely moved is a click, not a pan → notify
+    // (deselect). Middle/space pans never deselect, even if they don't move.
+    if (bgClickCandidate && Math.hypot(e.clientX - startX, e.clientY - startY) < 4) {
       bgClickListeners.forEach((cb) => cb());
     }
   };
@@ -130,9 +163,12 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
 
   viewport.addEventListener("wheel", onWheel, { passive: false });
   viewport.addEventListener("pointerdown", onPointerDown);
+  viewport.addEventListener("mousedown", onMouseDown);
   viewport.addEventListener("pointermove", onPointerMove);
   viewport.addEventListener("pointerup", onPointerUp);
   viewport.addEventListener("pointercancel", onPointerUp);
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
 
   return {
     reset,
@@ -151,9 +187,13 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     destroy: () => {
       viewport.removeEventListener("wheel", onWheel);
       viewport.removeEventListener("pointerdown", onPointerDown);
+      viewport.removeEventListener("mousedown", onMouseDown);
       viewport.removeEventListener("pointermove", onPointerMove);
       viewport.removeEventListener("pointerup", onPointerUp);
       viewport.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      viewport.classList.remove("space-pan");
       listeners.clear();
       bgClickListeners.clear();
     },
