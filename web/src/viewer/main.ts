@@ -109,6 +109,59 @@ byId("code-btn").addEventListener("click", () => {
 });
 byId("zoom-btn-plus").addEventListener("click", () => panzoom?.zoomIn());
 byId("zoom-btn-minus").addEventListener("click", () => panzoom?.zoomOut());
+
+// Collapsible panes: clicking a section header toggles its body.
+document.querySelectorAll<HTMLElement>(".pane > h2").forEach((h2) => {
+  h2.addEventListener("click", () => {
+    const pane = h2.parentElement!;
+    const collapsing = pane.classList.toggle("collapsed");
+    // CodeMirror must re-measure when the source pane becomes visible again
+    if (!collapsing && pane.classList.contains("source-pane")) editor.view.requestMeasure();
+  });
+});
+
+// Draggable sidebar width: a guide line tracks the pointer while dragging and
+// the width is committed only on release, so the reflow happens once.
+// Double-click the handle to snap back to the CSS default width.
+const sidebar = document.querySelector(".sidebar") as HTMLElement;
+byId("sidebar-resize").addEventListener("dblclick", () => {
+  sidebar.style.removeProperty("flex-basis");
+  sidebar.style.removeProperty("width");
+  if (fitted) panzoom?.fit();
+  editor.view.requestMeasure();
+});
+byId("sidebar-resize").addEventListener("pointerdown", (e: PointerEvent) => {
+  e.preventDefault();
+  const startX = e.clientX;
+  let moved = false;
+  let guide: HTMLElement | null = null;
+  const move = (ev: PointerEvent) => {
+    // ignore a stationary click (its pointerup must NOT resize — that would
+    // creep the width by the gutter and eat the double-click-to-reset)
+    if (!moved && Math.abs(ev.clientX - startX) < 3) return;
+    moved = true;
+    if (!guide) {
+      guide = document.createElement("div");
+      guide.className = "resize-guide";
+      document.body.appendChild(guide);
+    }
+    guide.style.left = `${ev.clientX}px`;
+  };
+  const up = (ev: PointerEvent) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    guide?.remove();
+    if (!moved) return; // a click, not a drag — leave the width alone
+    // sidebar hugs the right edge, so its width is the distance from the pointer
+    const w = Math.max(240, Math.min(window.innerWidth - 320, window.innerWidth - ev.clientX));
+    sidebar.style.flexBasis = `${w}px`;
+    sidebar.style.width = `${w}px`;
+    if (fitted) panzoom?.fit(); // keep the diagram framed as the stage resizes
+    editor.view.requestMeasure();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+});
 byId("fit-btn").addEventListener("click", () => {
   if (!panzoom) return;
   if (fitted) panzoom.reset();
