@@ -98,6 +98,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [compose.xsvg](compose.xsvg) | `in="#id"` pointing at an `x:` element resolves its **compiled output**: a textbox flows inside a boolean union's merged silhouette; type rides the arched spine an `x:warp` emitted; and a `path → x:warp bend → x:textpath` chain gives three linked elements one edit point |
 
+## Layers — compile-time z-order (§5.1)
+
+| File | Shows |
+|---|---|
+| [layers.xsvg](layers.xsvg) | `x:layer="background"`/`"foreground"` buckets restacking a watermark, card, grid, and badge at compile time — with `x:order` refining within a band and `x:hidden` dropping a debug overlay. The layer-ness is ignorable `x:` attributes on plain `<g>`s (Inkscape's model), so the uncompiled file still renders in any viewer |
+
 ## Edge cases & invariants
 
 | File | Shows |

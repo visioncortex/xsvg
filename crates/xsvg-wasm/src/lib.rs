@@ -591,6 +591,24 @@ fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> 
     Some(format!(" filter=\"url(#{id})\""))
 }
 
+/// The compile-time z-band of a layer (§5.1): `x:layer="background"` sinks
+/// behind everything (−1), `"foreground"` floats in front (+1), any other
+/// value is the content band (0). `None` when the element carries no
+/// `x:layer` attribute at all.
+fn layer_band(node: roxmltree::Node) -> Option<i32> {
+    node.attribute((XSVG_NS, "layer")).map(|v| match v {
+        "background" => -1,
+        "foreground" => 1,
+        _ => 0,
+    })
+}
+
+/// The layer visibility toggle: `x:hidden` (any value but `false`) compiles
+/// the element and its subtree to nothing — hide a layer without deleting it.
+fn is_hidden(node: roxmltree::Node) -> bool {
+    matches!(node.attribute((XSVG_NS, "hidden")), Some(v) if v != "false")
+}
+
 fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) {
     if !node.is_element() {
         if node.is_text() {
@@ -599,6 +617,12 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             }
         }
         return; // comments, PIs, etc. are dropped
+    }
+
+    // x:hidden (§5.1) — the layer eyeball toggle; the subtree compiles to
+    // nothing (never the root).
+    if !is_root && is_hidden(node) {
+        return;
     }
 
     // xsvg extension elements.
@@ -690,8 +714,37 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 
     if node.has_children() {
         out.push('>');
-        for child in node.children() {
-            serialize(child, out, false, ctx);
+        let elems: Vec<roxmltree::Node> = node.children().filter(|c| c.is_element()).collect();
+        let restack = elems.iter().any(|c| {
+            c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()
+        });
+        if restack {
+            // Layer restacking (§5.1): stable-sort direct children by
+            // (band, order, document index). Loose content is band 0 / order
+            // 0, so it keeps its place and only bucketed or explicitly-ordered
+            // layers move. Non-element nodes (whitespace) drop in a restacked
+            // container — insignificant for a group.
+            let mut idx: Vec<usize> = (0..elems.len()).collect();
+            idx.sort_by(|&a, &b| {
+                let ka = (
+                    layer_band(elems[a]).unwrap_or(0),
+                    attr_num_ns(elems[a], "order", 0.0),
+                );
+                let kb = (
+                    layer_band(elems[b]).unwrap_or(0),
+                    attr_num_ns(elems[b], "order", 0.0),
+                );
+                ka.0.cmp(&kb.0)
+                    .then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .then(a.cmp(&b))
+            });
+            for &i in &idx {
+                serialize(elems[i], out, false, ctx);
+            }
+        } else {
+            for child in node.children() {
+                serialize(child, out, false, ctx);
+            }
         }
         out.push_str(&format!("</{name}>"));
     } else {
@@ -2953,6 +3006,69 @@ mod tests {
     /// Compile with the source map on (`data-xsvg-pos` attributes emitted).
     fn compile_mapped(svg: &str) -> String {
         compile_impl(svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap()
+    }
+
+    #[test]
+    fn layers_restack_by_band_and_order_and_strip_metadata() {
+        // authored order: foreground, loose, background — compiled paint order
+        // must be background → loose → foreground (each rect keeps its fill)
+        let svg = format!(
+            r##"{XW}<g x:layer="foreground" x:label="top"><rect x="0" y="0" width="9" height="9" fill="#ff0000"/></g><rect x="0" y="0" width="9" height="9" fill="#00cc00"/><g x:layer="background"><rect x="0" y="0" width="9" height="9" fill="#0000ff"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        let pos = |hex: &str| out.find(hex).unwrap();
+        assert!(
+            pos("#0000ff") < pos("#00cc00") && pos("#00cc00") < pos("#ff0000"),
+            "expected bg → loose → fg: {out}"
+        );
+        // the x: metadata is stripped; the layers emit as plain <g>
+        assert!(
+            !out.contains("x:layer") && !out.contains("x:label"),
+            "{out}"
+        );
+        assert!(out.contains("<g>"), "{out}");
+    }
+
+    #[test]
+    fn layer_order_breaks_ties_within_a_band() {
+        // two backgrounds, authored 5 then 1: order 1 paints first
+        let svg = format!(
+            r##"{XW}<g x:layer="background" x:order="5"><rect x="0" y="0" width="9" height="9" fill="#aa0000"/></g><g x:layer="background" x:order="1"><rect x="0" y="0" width="9" height="9" fill="#00aa00"/></g></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.find("#00aa00").unwrap() < out.find("#aa0000").unwrap(),
+            "{out}"
+        );
+        // x:order alone (no x:layer) also restacks — a plain z-index
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="9" height="9" fill="#111" x:order="3"/><rect x="0" y="0" width="9" height="9" fill="#222" x:order="1"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.find("#222").unwrap() < out.find("#111").unwrap(),
+            "{out}"
+        );
+        assert!(!out.contains("x:order"), "{out}");
+    }
+
+    #[test]
+    fn hidden_layers_compile_to_nothing() {
+        let svg = format!(
+            r##"{XW}<g x:layer="foreground" x:hidden="true"><rect x="0" y="0" width="9" height="9" fill="#ff0000"/></g><rect x="0" y="0" width="9" height="9" fill="#00cc00"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            !out.contains("#ff0000"),
+            "hidden subtree must vanish: {out}"
+        );
+        assert!(out.contains("#00cc00"), "{out}");
+        assert!(!out.contains("x:hidden"), "{out}");
+        // x:hidden="false" is NOT hidden
+        let svg = format!(
+            r##"{XW}<rect x="0" y="0" width="9" height="9" fill="#ff0000" x:hidden="false"/></svg>"##
+        );
+        assert!(compile_test(&svg).contains("#ff0000"));
     }
 
     #[test]

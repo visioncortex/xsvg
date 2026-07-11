@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 360" font-family="'Helvetica Neue', Arial, sans-serif">
+  <!-- Compile-time z-order: x:layer buckets restack at compile, but the file
+       stays valid SVG that renders (in document order) in any plain viewer —
+       the layer-ness lives in ignorable x: attributes, exactly like Inkscape's
+       inkscape:groupmode. Authored order here is watermark, card, grid, badge;
+       compiled paint order is grid (bg) → card → badge → watermark (fg). -->
+
+  <!-- authored FIRST, but x:layer="foreground" floats it on top -->
+  <g x:layer="foreground" x:label="Watermark">
+    <text x="360" y="196" text-anchor="middle" font-size="120" font-weight="700"
+          fill="#0f172a" opacity="0.06">DRAFT</text>
+  </g>
+
+  <!-- content band (no x:layer) — stays at its document position -->
+  <g x:label="Card">
+    <rect x="120" y="90" width="480" height="180" rx="18" fill="#ffffff"
+          stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="150" y="140" font-size="20" font-weight="700" fill="#1e293b">Release notes</text>
+    <text x="150" y="172" font-size="13" fill="#64748b">Compile-time layers via x:layer — background, content, foreground.</text>
+    <text x="150" y="194" font-size="13" fill="#64748b">Reordered by the compiler; still plain SVG in any viewer.</text>
+  </g>
+
+  <!-- authored THIRD, but x:layer="background" sinks it behind the card -->
+  <g x:layer="background" x:label="Grid">
+    <rect x="0" y="0" width="720" height="360" fill="#eef2f7"/>
+    <g stroke="#dbe3ec" stroke-width="1">
+      <line x1="0" y1="60" x2="720" y2="60"/><line x1="0" y1="120" x2="720" y2="120"/>
+      <line x1="0" y1="180" x2="720" y2="180"/><line x1="0" y1="240" x2="720" y2="240"/>
+      <line x1="0" y1="300" x2="720" y2="300"/>
+      <line x1="120" y1="0" x2="120" y2="360"/><line x1="240" y1="0" x2="240" y2="360"/>
+      <line x1="360" y1="0" x2="360" y2="360"/><line x1="480" y1="0" x2="480" y2="360"/>
+      <line x1="600" y1="0" x2="600" y2="360"/>
+    </g>
+  </g>
+
+  <!-- two foreground layers: x:order refines within the front band -->
+  <g x:layer="foreground" x:order="10" x:label="Badge">
+    <circle cx="588" cy="108" r="26" fill="#16a34a"/>
+    <text x="588" y="113" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">NEW</text>
+  </g>
+
+  <!-- a hidden layer: present in the source, compiles to nothing -->
+  <g x:layer="foreground" x:hidden="true" x:label="Debug overlay">
+    <rect x="120" y="90" width="480" height="180" fill="#ff0000" opacity="0.4"/>
+  </g>
+</svg>

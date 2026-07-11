@@ -252,6 +252,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Layers — compile-time z-order",
+    note: "x:layer=\"background|foreground\" on a <g> restacks at compile; still plain SVG uncompiled (§5.1).",
+    samples: [
+      {
+        file: "layers.xsvg",
+        title: "Compile-time layers",
+        blurb: "x:layer background/foreground buckets restack a watermark, card, grid, and badge; x:order refines within a band, x:hidden drops a debug overlay — all ignorable x: attributes on plain groups",
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

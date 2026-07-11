@@ -65,7 +65,11 @@ enough that one edit re-lowers one feature's worth of work.
    (`<template>`/`createContextualFragment` inside an `<svg>`), and replace the mapped DOM node.
 4. Fall back to a full compile when: the fragment previously emitted no element (marker-only
    output has no DOM anchor), the edit touches the root element's own tag/attributes, fonts
-   finish loading (outline availability changes output globally), or bookkeeping is lost.
+   finish loading (outline availability changes output globally), or bookkeeping is lost, **or an
+   edit changes an `x:layer`/`x:order` value** — layer restacking (§5.1) reorders a parent's
+   children, so top-level fragments appear in *sorted* order and their positions shift (each
+   fragment is still byte-verbatim; only its placement moves). Editing *within* a layer is a
+   normal in-place re-emit.
 
 ## 5. Known limits (v1)
 

@@ -125,6 +125,35 @@ elements with a marker comment, attributes silently — since they cannot be re-
 `<animateTransform>`, `<set>`, and `<discard>` are **dropped with markers** — they cannot exist
 in the §9 output contract — and `on*` event attributes strip silently.
 
+### 5.1 Layers — compile-time z-order [implemented]
+
+SVG has no layers, only document order (§ painter's algorithm). xsvg adds **compile-time
+restacking** the degradation-safe way — as `x:`-prefixed attributes on a plain `<g>` (§2), exactly
+the shape of Inkscape's `inkscape:groupmode="layer"`. A layered file is **valid SVG that renders
+in any plain viewer** (in document order); the compiler reorders and strips the metadata.
+
+```xml
+<g x:layer="foreground" x:label="Badge" x:order="10"> … </g>   <!-- floats in front -->
+<g x:label="Card"> … </g>                                       <!-- content band, stays put -->
+<g x:layer="background"> … </g>                                 <!-- sinks behind -->
+```
+
+| Attribute | Meaning |
+|---|---|
+| `x:layer` | z-band: **`background`** sinks (−1), **`foreground`** floats (+1), any other value is the content band (0) |
+| `x:order` | within-band z-key (number, default 0); also works standalone as a plain z-index on any sibling |
+| `x:label` | human name — authoring metadata, stripped |
+| `x:hidden` | any value but `false` → the element and its subtree **compile to nothing** (the eyeball toggle) |
+
+**Model (normative).** Within a parent, direct children stable-sort by the key
+`(band, x:order, document-index)`. Loose (non-layer) content is band 0 / order 0, so it keeps its
+document position and only bucketed or explicitly-ordered elements move. Restacking triggers when
+any direct child carries `x:layer` or `x:order`; in a restacked container, insignificant
+whitespace text nodes are dropped. The `x:` attributes are stripped on emit (a layer becomes a
+plain `<g>`), so the output carries no trace of the layering. Because `<x:layer>` as an *element*
+would hide its content in an uncompiled viewer (§3 skips unknown elements with their subtree), the
+**attribute-on-`<g>` form is the primitive** — it never degrades to empty.
+
 ## 6. Text
 
 ### 6.1 Common layout primitives [implemented]
@@ -861,6 +890,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 |---|---|
 | Namespaces, prefix policy, degradation contract | implemented |
 | `<rect>` → `<path>` | implemented |
+| Layers — `x:layer` (background/foreground) + `x:order`/`x:label`/`x:hidden` compile-time z-order (§5.1) | implemented |
 | `<text inline-size>` wrap flow | implemented |
 | `<textArea>` (text-align, display-align, line-increment, auto sizing, clip) | implemented |
 | `<tbreak/>` forced line break | implemented |
