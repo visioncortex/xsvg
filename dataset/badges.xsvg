@@ -3,23 +3,32 @@
   <rect x="0" y="0" width="720" height="280" fill="#ffffff"/>
   <text x="20" y="28" font-size="13" font-weight="bold" fill="#0f172a">badges — text effects: curved rim text, an arched title, a glossy mesh medal</text>
 
-  <!-- 1. certified seal: text curved around the rim (textpath rainbow) + a
-          region-flowed tagline in the middle -->
+  <!-- 1. certified seal: text curved around the rim (textpath rainbow). Both
+          arcs are concentric with the seal (center 140,160, radius 60) so the
+          rim text sits just inside the ring. The stars are real SVG shapes —
+          a display font like Anton has no ★ glyph, so an outlined run would
+          render .notdef boxes; drawn geometry is sharp and font-independent. -->
+  <defs>
+    <path id="star" d="M0,-7 L1.7,-2.4 L6.7,-2.2 L2.8,0.9 L4.1,5.7 L0,2.9 L-4.1,5.7 L-2.8,0.9 L-6.7,-2.2 L-1.7,-2.4 Z"/>
+  </defs>
   <circle cx="140" cy="160" r="86" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
   <circle cx="140" cy="160" r="72" fill="none" stroke="#c7d2fe" stroke-width="1.5"/>
-  <path id="rim-top" d="M78,132 A62,62 0 0,1 202,132" fill="none"/>
-  <path id="rim-bot" d="M84,196 A56,56 0 0,0 196,196" fill="none"/>
+  <path id="rim-top" d="M85.6,134.6 A60,60 0 0,1 194.4,134.6" fill="none"/>
+  <path id="rim-bot" d="M90.9,194.4 A60,60 0 0,0 189.1,194.4" fill="none"/>
   <x:textpath in="#rim-top" effect="rainbow" align="middle"
-              font-family="-x-google-Anton" font-size="18" fill="#3730a3">★ CERTIFIED ★</x:textpath>
+              font-family="-x-google-Anton" font-size="18" fill="#3730a3">CERTIFIED</x:textpath>
   <x:textpath in="#rim-bot" effect="rainbow" align="middle"
               font-family="-x-google-Anton" font-size="13" fill="#6366f1">AUTHENTIC</x:textpath>
-  <text x="140" y="172" text-anchor="middle" font-family="-x-google-Anton" font-size="46" fill="#4338ca">2026</text>
+  <use href="#star" x="74" y="160" fill="#6366f1"/>
+  <use href="#star" x="206" y="160" fill="#6366f1"/>
+  <text x="140" y="176" text-anchor="middle" font-family="-x-google-Anton" font-size="46" fill="#4338ca">2026</text>
 
   <!-- 2. shield: an arched title baked with warp, subtitle region-flowed -->
   <path id="shield" d="M300,78 q68,-18 136,0 v82 q0,58 -68,86 q-68,-28 -68,-86 z"
         fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
-  <x:textbox in="#shield" valign="bottom" align="center" padding="14"
-             font-size="12" font-weight="600" fill="#92400e">bank-grade encryption, end to end</x:textbox>
+  <x:textbox in="#shield" valign="bottom" align="center" padding="16" outline="true"
+             font-family="-x-google-Anton" font-size="15" fill="#fde68a"
+             stroke="#7c2d12" stroke-width="0.7">BANK-GRADE ENCRYPTION</x:textbox>
   <x:warp field="arch" bend="48">
     <x:textbox x="300" y="118" width="136" height="46" align="center" valign="middle"
                outline="true" font-family="-x-google-Anton" font-size="34" fill="#b45309">SECURE</x:textbox>
