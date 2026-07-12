@@ -33,7 +33,7 @@
       <x:li>Text that wraps, fits, justifies, and flows into any shape</x:li>
       <x:li>Warps, mesh gradients, boolean path algebra</x:li>
       <x:li>Connectors, layers, and these very slides</x:li>
-      <x:li indent="1">…authored in plain XML, compiled ahead of time</x:li>
+      <x:li indent="1">…all authored in plain XML, compiled to plain SVG</x:li>
     </x:list>
   </g>
 
@@ -326,10 +326,10 @@
     <circle cx="96" cy="118" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
     <path d="M80,118 l12,12 l22,-26" fill="none" stroke="#34d399" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="152" y="130" font-size="46" font-weight="800" fill="#f8fafc">Ship it.</text>
-    <x:list x="154" y="176" width="500" list="number" marker-fill="#38bdf8"
+    <x:list x="154" y="176" width="540" list="number" marker-fill="#38bdf8"
             font-size="19" line-height="1.4" item-spacing="10" fill="#cbd5e1">
-      <x:li>Write plain XML with x: extensions</x:li>
-      <x:li>Compile ahead of time to the static SVG subset</x:li>
+      <x:li>Write plain XML — the x: tags are just extensions</x:li>
+      <x:li>Compile to plain SVG — warps, meshes &amp; layout baked in</x:li>
       <x:li>Ship one self-contained file — no runtime, no editor</x:li>
     </x:list>
     <text x="154" y="372" font-size="16" fill="#64748b">xsvg — hello@visioncortex.org</text>
