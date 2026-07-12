@@ -65,25 +65,33 @@
   <!-- 4 — Type on a path: rainbow deform + native follow -->
   <g x:artboard="Path" x:frame="2520 0 720 405" transform="translate(2520,0)">
     <rect x="0" y="0" width="720" height="405" fill="#0f172a"/>
-    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6">TYPE ON A PATH</text>
-    <text x="56" y="104" font-size="32" font-weight="800" fill="#f8fafc">Type rides the curve</text>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6">TEXT EFFECTS</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#f8fafc">Type, transformed</text>
 
-    <!-- hero: a rainbow ARC, then x:offset OUTSETS the warped word into a halo —
-         two geometry ops composing (the offset paints first, behind the text) -->
-    <path id="arc4" d="M112,238 C250,150 470,150 608,238" fill="none" stroke="#312e4e" stroke-width="2"/>
-    <x:offset in="#arcword" distance="6" join="round" fill="#f472b6"/>
-    <x:textpath id="arcword" in="#arc4" effect="rainbow" align="middle"
-                font-family="-x-google-Anton" font-size="58" fill="#38bdf8">CURVE</x:textpath>
-    <text x="360" y="286" text-anchor="middle" font-size="12" fill="#94a3b8">rainbow arc + x:offset halo — effects compose</text>
+    <!-- upper-left: rainbow — glyphs rotate and bend along a path -->
+    <text x="48" y="150" font-size="11" fill="#94a3b8">effect="rainbow" — deformed along a path</text>
+    <path id="arc4" d="M52,236 C138,172 262,172 348,236" fill="none" stroke="#312e4e" stroke-width="2"/>
+    <x:textpath in="#arc4" effect="rainbow" align="middle"
+                font-family="-x-google-Anton" font-size="34" fill="#38bdf8">RAINBOW</x:textpath>
 
-    <!-- skew: verticals stay upright, the baseline rides a wave -->
-    <text x="60" y="322" font-size="11" fill="#64748b">effect="skew"</text>
-    <path id="sk4" d="M60,384 C130,346 205,410 300,366" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- upper-right: arch-warped bordered text + an x:offset outline = a double
+         border (the offset traces the arched word's silhouette, 8u out) -->
+    <text x="392" y="150" font-size="11" fill="#94a3b8">field="arch" + x:offset — a double border</text>
+    <x:offset in="#archword" distance="8" join="round" fill="none" stroke="#f472b6" stroke-width="3"/>
+    <x:warp id="archword" field="arch" bend="52">
+      <x:textbox x="392" y="176" width="300" height="86" align="center" valign="middle"
+                 outline="true" font-family="-x-google-Anton" font-size="42"
+                 fill="#38bdf8" stroke="#ffffff" stroke-width="2">ARCH</x:textbox>
+    </x:warp>
+
+    <!-- lower-left: skew — verticals stay upright, the baseline rides a wave -->
+    <text x="48" y="312" font-size="11" fill="#94a3b8">effect="skew" — upright on a wave</text>
+    <path id="sk4" d="M52,372 C128,334 205,398 300,356" fill="none" stroke="#1e293b" stroke-width="1.5"/>
     <x:textpath in="#sk4" effect="skew" font-family="-x-google-Anton" font-size="30" fill="#a78bfa">SKEW</x:textpath>
 
-    <!-- follow: SVG's own textPath — live, selectable, undeformed -->
-    <text x="398" y="322" font-size="11" fill="#64748b">effect="follow" — live &amp; selectable</text>
-    <path id="fol4" d="M398,378 C498,352 590,398 662,362" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- lower-right: follow — SVG's own textPath, live and selectable -->
+    <text x="392" y="312" font-size="11" fill="#94a3b8">effect="follow" — live &amp; selectable</text>
+    <path id="fol4" d="M392,368 C492,344 582,390 660,356" fill="none" stroke="#1e293b" stroke-width="1.5"/>
     <x:textpath in="#fol4" effect="follow" align="middle" baseline-shift="6"
                 font-size="16" fill="#4ade80">still real text</x:textpath>
   </g>
