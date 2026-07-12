@@ -72,6 +72,12 @@ Realistic composites that combine several features into one artifact.
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
 | [warp-bend.xsvg](warp-bend.xsvg) | `field="bend" in="#spine"` flows a whole group along a path — the envelope midline rides the spine, `align`/`start` place it by arc length (Inkscape's *LPE Bend*); `field="roughen" bend detail` jitters outlines with **deterministic** seeded value noise |
 
+## Connectors — `<x:connector>` (§7.6)
+
+| File | Shows |
+|---|---|
+| [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`) tint to the stroke; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
+
 ## Path algebra — `<x:boolean>` (§7.4)
 
 | File | Shows |

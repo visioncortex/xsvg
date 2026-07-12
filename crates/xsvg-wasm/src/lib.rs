@@ -450,14 +450,20 @@ pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)>
 /// in="#w">`, and so on to a fixpoint. Live references (`href`, `url(#…)`
 /// paints) re-resolve in the DOM and are deliberately NOT reported. Results are
 /// in document order.
-/// The reference this node **bakes** at compile time, if any: an `in="#id"`
+/// The references this node **bakes** at compile time: an `in="#id"`
 /// attribute (textbox / textpath / warp bend), or the `href` of a `<use>` that
 /// is a direct child of `<x:boolean>` (an operand by reference — §7.4). A
 /// passthrough `<use>` anywhere else is a live reference the browser resolves,
 /// so it is deliberately not reported.
-fn baked_ref<'a>(n: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+fn baked_refs<'a>(n: roxmltree::Node<'a, 'a>) -> Vec<&'a str> {
+    let mut out = Vec::new();
     if let Some(r) = n.attribute("in") {
-        return Some(r);
+        out.push(r);
+    }
+    // <x:connector from to> bakes both endpoint boxes into the routed path (§7.6)
+    if n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "connector" {
+        out.extend(n.attribute("from"));
+        out.extend(n.attribute("to"));
     }
     if n.tag_name().name() == "use"
         && n.tag_name().namespace() != Some(XSVG_NS)
@@ -465,9 +471,10 @@ fn baked_ref<'a>(n: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
             p.tag_name().namespace() == Some(XSVG_NS) && p.tag_name().name() == "boolean"
         })
     {
-        return n
-            .attribute("href")
-            .or_else(|| n.attribute((XLINK_NS, "href")));
+        out.extend(
+            n.attribute("href")
+                .or_else(|| n.attribute((XLINK_NS, "href"))),
+        );
     }
     // a fill referencing a <meshgradient> is compiled, not live (§8.2)
     if let Some(id) = n
@@ -476,10 +483,10 @@ fn baked_ref<'a>(n: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
         .and_then(|f| f.strip_suffix(')'))
     {
         if resolve_ref(n, id).is_some_and(|t| t.tag_name().name() == "meshgradient") {
-            return Some(id);
+            out.push(id);
         }
     }
-    None
+    out
 }
 
 pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
@@ -510,9 +517,9 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
                 continue;
             }
             let refs_live = tl.descendants().any(|n| {
-                baked_ref(n)
-                    .map(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
-                    .unwrap_or(false)
+                baked_refs(n)
+                    .iter()
+                    .any(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
             });
             if refs_live {
                 included[i] = true;
@@ -609,6 +616,133 @@ fn is_hidden(node: roxmltree::Node) -> bool {
     matches!(node.attribute((XSVG_NS, "hidden")), Some(v) if v != "false")
 }
 
+/// `<x:connector from="#a" to="#b" route="…" arrow="…">` (§7.6): a line routed
+/// between two elements' bounding boxes, lowered to a `<path>` with the
+/// connector's own stroke. `route` ∈ straight | x-major | y-major | curve;
+/// `arrow` ∈ end | start | both | none (default end). Endpoints resolve like
+/// any reference (§4) and the route is recomputed from their boxes, so moving
+/// an endpoint re-emits the connector (baked reference).
+fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    use xsvg_core::kurbo::{Point, Rect};
+    let bbox = |attr: &str| -> Option<Rect> {
+        let r = node.attribute(attr)?;
+        ref_geometry(node, r, ctx)
+            .ok()
+            .and_then(|d| svg_path_bbox(&d))
+    };
+    let (Some(a), Some(b)) = (bbox("from"), bbox("to")) else {
+        out.push_str("<!-- xsvg: <x:connector> endpoint not found or not geometry -->");
+        return;
+    };
+    let (ca, cb) = (a.center(), b.center());
+    // point on rect `r`'s edge along the ray from its center toward `t`
+    let edge = |r: Rect, t: Point| -> Point {
+        let c = r.center();
+        let (dx, dy) = (t.x - c.x, t.y - c.y);
+        if dx == 0.0 && dy == 0.0 {
+            return c;
+        }
+        let sx = if dx != 0.0 {
+            r.width() / 2.0 / dx.abs()
+        } else {
+            f64::INFINITY
+        };
+        let sy = if dy != 0.0 {
+            r.height() / 2.0 / dy.abs()
+        } else {
+            f64::INFINITY
+        };
+        let s = sx.min(sy);
+        Point::new(c.x + dx * s, c.y + dy * s)
+    };
+    let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
+
+    let d = match node.attribute("route").unwrap_or("straight") {
+        "x-major" => {
+            // horizontal-first orthogonal rail: exit the facing side, elbow at
+            // the horizontal midpoint
+            let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
+            let ax = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
+            let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
+            let mx = (ax.x + bx.x) / 2.0;
+            format!(
+                "M{} L{} L{} L{}",
+                p(ax),
+                p(Point::new(mx, ax.y)),
+                p(Point::new(mx, bx.y)),
+                p(bx)
+            )
+        }
+        "y-major" => {
+            let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
+            let ay = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
+            let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
+            let my = (ay.y + by.y) / 2.0;
+            format!(
+                "M{} L{} L{} L{}",
+                p(ay),
+                p(Point::new(ay.x, my)),
+                p(Point::new(by.x, my)),
+                p(by)
+            )
+        }
+        "curve" => {
+            let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
+            if horiz {
+                let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
+                let ax = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
+                let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
+                let k = ((bx.x - ax.x).abs() * 0.5).max(36.0);
+                format!(
+                    "M{} C{} {} {}",
+                    p(ax),
+                    p(Point::new(ax.x + dir * k, ax.y)),
+                    p(Point::new(bx.x - dir * k, bx.y)),
+                    p(bx)
+                )
+            } else {
+                let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
+                let ay = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
+                let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
+                let k = ((by.y - ay.y).abs() * 0.5).max(36.0);
+                format!(
+                    "M{} C{} {} {}",
+                    p(ay),
+                    p(Point::new(ay.x, ay.y + dir * k)),
+                    p(Point::new(by.x, by.y - dir * k)),
+                    p(by)
+                )
+            }
+        }
+        _ => {
+            // straight: clip the center-to-center line to each box edge
+            format!("M{} L{}", p(edge(a, cb)), p(edge(b, ca)))
+        }
+    };
+
+    // arrowhead marker(s), tinted to the stroke
+    let stroke = node.attribute("stroke").unwrap_or("#334155");
+    let arrow = node.attribute("arrow").unwrap_or("end");
+    let (mut mstart, mut mend) = (String::new(), String::new());
+    if arrow != "none" {
+        let mid = format!("x-con-{}", node.range().start);
+        out.push_str(&format!(
+            "<marker id=\"{mid}\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"{stroke}\"/></marker>"
+        ));
+        if arrow == "end" || arrow == "both" {
+            mend = format!(" marker-end=\"url(#{mid})\"");
+        }
+        if arrow == "start" || arrow == "both" {
+            mstart = format!(" marker-start=\"url(#{mid})\"");
+        }
+    }
+
+    out.push_str("<path");
+    copy_attrs(node, out, &["from", "to", "route", "arrow", "fill"]);
+    out.push_str(&pos_attr(node, ctx));
+    out.push_str(&format!(" fill=\"none\"{mstart}{mend} d=\"{d}\"/>"));
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -665,6 +799,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "warp" => emit_warp(node, out, ctx),
             "boolean" => emit_boolean(node, out, ctx),
             "mesh" => emit_mesh(node, out, ctx),
+            "connector" => emit_connector(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -3044,6 +3179,77 @@ mod tests {
     }
 
     #[test]
+    fn connectors_route_between_two_boxes() {
+        // two rects; a straight connector's path runs between their facing edges
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b" stroke="#111"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("fill=\"none\""), "{out}");
+        assert!(
+            out.contains("marker-end="),
+            "default arrow at the end: {out}"
+        );
+        assert!(out.contains("<marker id=\"x-con-"), "{out}");
+        // straight edge-clipped: starts at a's right edge (x=40), ends at b's left (x=120)
+        use xsvg_core::kurbo::Shape;
+        let bb = first_path(&out).bounding_box();
+        assert!(
+            (bb.x0 - 40.0).abs() < 0.5 && (bb.x1 - 120.0).abs() < 0.5,
+            "{bb:?}"
+        );
+
+        // x-major rail: a Z of three segments (M + 3 L), elbow at the mid-x
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="80" width="40" height="40"/><x:connector from="#a" to="#b" route="x-major" arrow="none"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            !out.contains("<marker"),
+            "arrow=none emits no marker: {out}"
+        );
+        let d = {
+            let k = out.rfind(" d=\"").unwrap() + 4;
+            &out[k..k + out[k..].find('"').unwrap()]
+        };
+        assert_eq!(d.matches('L').count(), 3, "x-major is H-V-H: {d}");
+        // exits a's right edge (x=40) at a's center y (20)
+        assert!(d.starts_with("M40,20"), "{d}");
+
+        // curve emits a cubic
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="160" y="10" width="40" height="40"/><x:connector from="#a" to="#b" route="curve"/></svg>"##
+        );
+        assert!(
+            compile_test(&svg).contains(" d=\"M40,20 C"),
+            "{}",
+            compile_test(&svg)
+        );
+
+        // missing endpoint degrades with a marker
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="10" height="10"/><x:connector from="#a" to="#ghost"/></svg>"##
+        );
+        assert!(
+            compile_test(&svg).contains("endpoint not found"),
+            "{}",
+            compile_test(&svg)
+        );
+    }
+
+    #[test]
+    fn connectors_are_baked_references() {
+        // editing box #a re-emits the connector that routes from it
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b"/></svg>"##
+        );
+        let offs = top_level_offsets(&svg);
+        let deps = dependents_impl(&svg, offs[0]); // edit #a
+        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(deps[0].0, offs[2], "the connector re-emits: {deps:?}");
+    }
+
+    #[test]
     fn artboards_carry_data_attributes_and_stay_plain_groups() {
         let svg = format!(
             r##"{XW}<g x:artboard="Slide 1" x:frame="0 0 720 405"><rect x="0" y="0" width="10" height="10" fill="#111"/></g><g x:artboard="Slide 2"><rect x="800" y="0" width="10" height="10" fill="#222"/></g></svg>"##
@@ -4088,6 +4294,10 @@ mod tests {
             r##"<x:warp field="arch" bend="40"><path d="garbage" fill="#000"/></x:warp>"##,
             // evenodd output that cancels to nothing
             r##"<x:warp id="t" field="arch" bend="0"><path d="M0,0 h10 v10 h-10 Z M0,0 h10 v10 h-10 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:textpath in="#t" effect="stair" font-size="10">x</x:textpath>"##,
+            // hostile connectors: missing endpoints, self, bad route
+            r##"<x:connector/>"##,
+            r##"<rect id="c" x="0" y="0" width="9" height="9"/><x:connector from="#c" to="#c" route="curve"/>"##,
+            r##"<rect id="c1" x="0" y="0" width="9" height="9"/><rect id="c2" x="9" y="0" width="9" height="9"/><x:connector from="#c1" to="#c2" route="nonsense"/>"##,
             // degenerate meshgradient extent + non-finite stop-opacity
             r##"<meshgradient id="gz" x="5" y="5"><meshrow><meshpatch><stop path="l 0,0" stop-color="#e11"/><stop path="l 0,0" stop-color="#fa0"/><stop path="l 0,0" stop-color="#3b7"/><stop path="l 0,0" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="10" height="10" fill="url(#gz)"/>"##,
             r##"<meshgradient id="gi" x="0" y="0"><meshrow><meshpatch><stop path="l 9,0" stop-color="#e11" stop-opacity="inf"/><stop path="l 0,9" stop-color="#fa0"/><stop path="l -9,0" stop-color="#3b7"/><stop path="l 0,-9" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="0" width="9" height="9" fill="url(#gi)"/>"##,

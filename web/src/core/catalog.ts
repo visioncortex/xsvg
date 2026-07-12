@@ -198,6 +198,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Connectors — diagramming",
+    note: "<x:connector from to route> — lines routed between two boxes' edges (§7.6).",
+    samples: [
+      {
+        file: "connectors.xsvg",
+        title: "Connectors",
+        blurb: "lines bound to two boxes, routed four ways — straight (edge-clipped), x-major and y-major orthogonal rails, and a smooth curve; arrowheads tint to the stroke, and the route re-derives when an endpoint moves",
+      },
+    ],
+  },
+  {
     name: "Path algebra — booleans",
     note: '<x:boolean op="union|intersect|subtract|exclude"> — Pathfinder ops baked to one <path> (§7.4).',
     samples: [

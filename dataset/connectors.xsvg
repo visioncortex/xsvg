@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 420" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="420" fill="#ffffff"/>
+  <text x="28" y="32" font-size="14" font-weight="bold" fill="#0f172a">x:connector — lines routed between two boxes' edges, re-derived when they move</text>
+
+  <!-- reusable node style -->
+  <defs>
+    <style>
+      .node { fill: #eef2ff; stroke: #6366f1; stroke-width: 1.5; }
+      .lbl { font-size: 13px; font-weight: 600; fill: #3730a3; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <!-- straight: edge-clipped direct line -->
+  <text x="48" y="70" font-size="11" fill="#94a3b8">route="straight"</text>
+  <rect id="s1" class="node" x="48" y="86" width="110" height="52" rx="8"/>
+  <text class="lbl" x="103" y="117">Source</text>
+  <rect id="s2" class="node" x="250" y="150" width="110" height="52" rx="8"/>
+  <text class="lbl" x="305" y="181">Target</text>
+  <x:connector from="#s1" to="#s2" stroke="#475569" stroke-width="2"/>
+
+  <!-- x-major: horizontal-first orthogonal rail -->
+  <text x="440" y="70" font-size="11" fill="#94a3b8">route="x-major" (H–V–H rail)</text>
+  <rect id="x1" class="node" x="440" y="86" width="100" height="48" rx="8"/>
+  <text class="lbl" x="490" y="115">A</text>
+  <rect id="x2" class="node" x="600" y="170" width="100" height="48" rx="8"/>
+  <text class="lbl" x="650" y="199">B</text>
+  <x:connector from="#x1" to="#x2" route="x-major" stroke="#0ea5e9" stroke-width="2"/>
+
+  <!-- y-major: vertical-first rail, into a decision -->
+  <text x="48" y="250" font-size="11" fill="#94a3b8">route="y-major" (V–H–V rail)</text>
+  <rect id="y1" class="node" x="70" y="266" width="120" height="48" rx="8"/>
+  <text class="lbl" x="130" y="295">Start</text>
+  <rect id="y2" class="node" x="240" y="352" width="120" height="48" rx="8"/>
+  <text class="lbl" x="300" y="381">Next</text>
+  <x:connector from="#y1" to="#y2" route="y-major" arrow="both" stroke="#16a34a" stroke-width="2"/>
+
+  <!-- curve: smooth cubic between two nodes -->
+  <text x="440" y="250" font-size="11" fill="#94a3b8">route="curve"</text>
+  <rect id="c1" class="node" x="440" y="266" width="100" height="48" rx="24"/>
+  <text class="lbl" x="490" y="295">In</text>
+  <rect id="c2" class="node" x="600" y="352" width="100" height="48" rx="24"/>
+  <text class="lbl" x="650" y="381">Out</text>
+  <x:connector from="#c1" to="#c2" route="curve" stroke="#e11d48" stroke-width="2.5"/>
+</svg>

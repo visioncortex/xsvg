@@ -781,6 +781,31 @@ and kurbo-native backends can slot in later without surface changes).
 - **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
   (research retained in [Research.md §1](Research.md)).
 
+### 7.6 Connectors — routed lines between elements [implemented]
+
+A `<x:connector from="#a" to="#b">` is a line bound to two elements — the diagramming primitive
+Google Draw has and SVG lacks. It resolves each endpoint to a **bounding box** (any referenceable
+element per §4 — a shape, a group, or an `x:` element's compiled output), computes a route, and
+lowers to a plain `<path>` carrying the connector's own stroke.
+
+```xml
+<rect id="a" .../> <rect id="b" .../>
+<x:connector from="#a" to="#b" route="x-major" arrow="end" stroke="#475569" stroke-width="2"/>
+```
+
+| Attribute | Values | Route |
+|---|---|---|
+| `route` | `straight` *(default)* | direct line, endpoints clipped to each box's edge along the center-to-center ray |
+| | `x-major` | orthogonal rail, **horizontal-first** — exits the facing side, elbows at the horizontal midpoint (H–V–H) |
+| | `y-major` | orthogonal rail, **vertical-first** — exits top/bottom, elbows at the vertical midpoint (V–H–V) |
+| | `curve` | a cubic with tangents along the dominant axis (horizontal when the boxes are side-by-side, vertical when stacked) |
+| `arrow` | `end` *(default)* / `start` / `both` / `none` | an auto-oriented `<marker>` (tinted to the stroke) emitted at the chosen ends |
+
+**Baked reference (normative).** The route is recomputed from the endpoints' boxes, so a connector
+is a compile-time reference like `in="#id"`: moving or resizing an endpoint re-emits the connector
+(the incremental `dependents` scan covers both `from` and `to` — [Incremental.md](Incremental.md)).
+A missing or non-geometry endpoint degrades with a marker (§3).
+
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
 The first slice of Pillar 3 (*paint & pixels* — capability catalog: [Paint.md](Paint.md)). The
@@ -935,6 +960,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:warp field="roughen">` — deterministic seeded-noise jitter (`bend` amplitude, `detail` frequency) | implemented |
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
+| Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
