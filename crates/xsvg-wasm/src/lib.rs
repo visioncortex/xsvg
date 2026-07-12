@@ -996,7 +996,6 @@ fn resolve_cols(spec: Option<&str>, ncols: usize, total: f64) -> Vec<f64> {
 fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node);
-    let size = style.size;
     let text_fill = resolve_var(node.attribute("fill").unwrap_or("#0f172a")).into_owned();
     let grid = resolve_var(node.attribute("stroke").unwrap_or("#cbd5e1")).into_owned();
     let grid_w = attr_num(node, "stroke-width", 1.0).max(0.0);
@@ -1004,6 +1003,11 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .attribute("cell-fill")
         .map(|v| resolve_var(v).into_owned());
     let header_bg = resolve_var(node.attribute("header-fill").unwrap_or("#f1f5f9")).into_owned();
+    // zebra striping: an alternate background for every other BODY row (rows with
+    // no header cell); the first data row is unstriped.
+    let stripe = node
+        .attribute("stripe")
+        .map(|v| resolve_var(v).into_owned());
     let pad = attr_num(node, "cell-padding", 8.0).max(0.0);
     let default_align = node.attribute("align").unwrap_or("start");
     let default_valign = node.attribute("valign").unwrap_or("middle");
@@ -1049,10 +1053,35 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
 
     // per-cell text style: bold for header cells, else the table style
+    // per-cell text style: the table style, with `<x:th>` defaulting to bold and
+    // any explicit font-* on the cell overriding the table.
     let cell_style = |cell: roxmltree::Node| {
         let mut st = style.clone();
-        if cell.tag_name().name() == "th" && cell.attribute("font-weight").is_none() {
+        if cell.tag_name().name() == "th" {
             st.weight = "700".to_string();
+        }
+        if let Some(v) = cell.attribute("font-family") {
+            st.family = v.to_string();
+        }
+        if let Some(v) = cell
+            .attribute("font-size")
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+        {
+            st.size = v;
+        }
+        if let Some(v) = cell.attribute("font-weight") {
+            st.weight = v.to_string();
+        }
+        if let Some(v) = cell.attribute("font-style") {
+            st.style = v.to_string();
+        }
+        if let Some(v) = cell
+            .attribute("line-height")
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+        {
+            st.line_height = v;
         }
         st
     };
@@ -1071,24 +1100,25 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         text_indent: 0.0,
     };
 
-    let fm = m.font_metrics(&style, size);
-    let advance = size * style.line_height;
-
-    // pass 1: row heights = tallest wrapped cell + padding, floored
+    // pass 1: row heights = tallest wrapped cell + padding, floored. Each cell
+    // measures with its own (possibly overridden) font metrics.
     let mut row_h = Vec::with_capacity(rows.len());
     for row in &rows {
         let mut h = 0.0f64;
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
+            let cst = cell_style(cell);
+            let cfm = m.font_metrics(&cst, cst.size);
             let text = collect_text(cell);
             let lines = if text.trim().is_empty() || content_w(ci) <= 0.0 {
                 1
             } else {
-                layout_area(&text, &cell_style(cell), &measure_spec(ci), m)
+                layout_area(&text, &cst, &measure_spec(ci), m)
                     .lines
                     .len()
                     .max(1)
             };
-            let bh = fm.cap_height + fm.descent + (lines - 1) as f64 * advance;
+            let bh =
+                cfm.cap_height + cfm.descent + (lines - 1) as f64 * (cst.size * cst.line_height);
             h = h.max(bh + 2.0 * pad);
         }
         row_h.push(h.max(row_min));
@@ -1098,13 +1128,22 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         rowy[i + 1] = rowy[i] + row_h[i];
     }
 
-    // pass 2: emit cell rects (bg + grid) then cell text
-    out.push_str("<g");
-    out.push_str(&pos_attr(node, ctx));
-    out.push('>');
+    // Pass 2: one `<g>` per cell (background rect + its text), so the source map
+    // resolves a click to the individual `<x:td>`/`<x:th>` — not the whole table.
+    // Cells don't overlap, so emitting each cell's bg then text keeps the paint
+    // order correct without a separate backgrounds pass.
+    out.push_str("<g>");
     let base = [EmitAttrs::default()];
-    let mut cells_out = String::new();
+    let mut body_row = 0usize;
     for (ri, row) in rows.iter().enumerate() {
+        let header_row = row
+            .children()
+            .filter(is_cell)
+            .any(|c| c.tag_name().name() == "th");
+        let striped = stripe.is_some() && !header_row && body_row % 2 == 1;
+        if !header_row {
+            body_row += 1;
+        }
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
             let header = cell.tag_name().name() == "th";
             let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
@@ -1114,10 +1153,15 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 .or_else(|| {
                     if header {
                         Some(header_bg.clone())
+                    } else if striped {
+                        stripe.clone()
                     } else {
                         body_bg.clone()
                     }
                 });
+            out.push_str("<g");
+            out.push_str(&pos_attr(cell, ctx));
+            out.push('>');
             out.push_str(&format!(
                 "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"",
                 fmt(cx),
@@ -1135,37 +1179,36 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             out.push_str("/>");
 
             let text = collect_text(cell);
-            if text.trim().is_empty() {
-                continue;
+            if !text.trim().is_empty() {
+                let st = cell_style(cell);
+                let fill = cell
+                    .attribute("fill")
+                    .map(|v| resolve_var(v).into_owned())
+                    .unwrap_or_else(|| text_fill.clone());
+                let spec = AreaSpec {
+                    x: cx,
+                    y: cy,
+                    width: cw,
+                    height: ch,
+                    padding: pad,
+                    align: Align::parse(cell.attribute("align").unwrap_or(default_align)),
+                    valign: VAlign::parse(cell.attribute("valign").unwrap_or(default_valign)),
+                    fit: Fit::None,
+                    text_overflow: TextOverflow::Clip,
+                    text_indent: 0.0,
+                };
+                let layout = layout_area(&text, &st, &spec, m);
+                out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
+                push_font_attrs(out, &st, layout.font_size, &fill);
+                out.push('>');
+                for line in &layout.lines {
+                    emit_line(out, line, &st, layout.font_size, 1.0, m, &base);
+                }
+                out.push_str("</text>");
             }
-            let st = cell_style(cell);
-            let fill = cell
-                .attribute("fill")
-                .map(|v| resolve_var(v).into_owned())
-                .unwrap_or_else(|| text_fill.clone());
-            let spec = AreaSpec {
-                x: cx,
-                y: cy,
-                width: cw,
-                height: ch,
-                padding: pad,
-                align: Align::parse(cell.attribute("align").unwrap_or(default_align)),
-                valign: VAlign::parse(cell.attribute("valign").unwrap_or(default_valign)),
-                fit: Fit::None,
-                text_overflow: TextOverflow::Clip,
-                text_indent: 0.0,
-            };
-            let layout = layout_area(&text, &st, &spec, m);
-            cells_out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
-            push_font_attrs(&mut cells_out, &st, layout.font_size, &fill);
-            cells_out.push('>');
-            for line in &layout.lines {
-                emit_line(&mut cells_out, line, &st, layout.font_size, 1.0, m, &base);
-            }
-            cells_out.push_str("</text>");
+            out.push_str("</g>");
         }
     }
-    out.push_str(&cells_out); // text paints on top of the cell backgrounds
     out.push_str("</g>");
 }
 
@@ -4389,6 +4432,43 @@ mod tests {
         assert!(
             compile_test(&empty).contains("<!-- xsvg: <x:table"),
             "an empty table degrades with a marker"
+        );
+        // per-cell font-* actually applies
+        let f = format!(
+            r##"{XW}<x:table x="0" y="0" width="80" font-weight="400"><x:tr><x:td font-weight="600">hi</x:td></x:tr></x:table></svg>"##
+        );
+        assert!(
+            compile_test(&f).contains("font-weight=\"600\""),
+            "per-cell font-weight overrides the table"
+        );
+    }
+
+    #[test]
+    fn table_source_map_is_per_cell() {
+        // each <x:td>/<x:th> becomes its own source node (a <g data-xsvg-pos>),
+        // so a viewer resolves a click to the cell, not the whole table
+        let svg = format!(
+            r##"{XW}<x:table x="0" y="0" width="100"><x:tr><x:td>a</x:td><x:td>b</x:td></x:tr></x:table></svg>"##
+        );
+        let out = compile_impl(&svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
+        assert_eq!(
+            out.matches("<g data-xsvg-pos").count(),
+            2,
+            "one source-mapped <g> per cell: {out}"
+        );
+    }
+
+    #[test]
+    fn table_stripe_alternates_body_rows() {
+        // header + 3 body rows; the stripe lands on the 2nd body row only
+        let svg = format!(
+            r##"{XW}<x:table x="0" y="0" width="60" stripe="#eeeeee"><x:tr><x:th>H</x:th></x:tr><x:tr><x:td>r0</x:td></x:tr><x:tr><x:td>r1</x:td></x:tr><x:tr><x:td>r2</x:td></x:tr></x:table></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(
+            out.matches("fill=\"#eeeeee\"").count(),
+            1,
+            "exactly one striped body row: {out}"
         );
     }
 

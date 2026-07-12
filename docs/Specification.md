@@ -686,11 +686,15 @@ It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` �
 | `row-min-height` | length (0) | floor for a row's computed height |
 | `stroke` / `stroke-width` | color / length | grid line color and width (`0` = no lines) |
 | `cell-fill` / `header-fill` | color | default background for `<x:td>` / `<x:th>` cells |
+| `stripe` | color | zebra background for every other **body** row (rows with no header cell); the first data row is unstriped |
 | `fill`, `align`, `valign`, `font-*` | as §6.1 | default text color, alignment, and style for all cells |
 
 `<x:th>` cells default to **bold** and the `header-fill` background. Any cell (`td`/`th`) may override
-`align` / `valign` / `fill` (text color) / `bg` (background) / `font-*` per cell. The table
-**auto-heights** to its content (rows stack top-down).
+`align` / `valign` / `fill` (text color) / `bg` (background) / `font-*` (family/size/weight/style/
+line-height — a per-cell font-size also grows its row) per cell. Background precedence is
+`bg` › header › stripe › `cell-fill`. The table **auto-heights** to its content (rows stack top-down).
+Each cell compiles to its own `<g>` carrying the source range of its `<x:td>`/`<x:th>` — so a viewer's
+inspector resolves a click to the individual **cell**, not the whole table.
 
 **v0 limits.** No `colspan`/`rowspan` (merged cells) and no **content-driven column widths** — columns
 are author-set, exactly as the presentation tools do; both are deliberate scope choices, not
