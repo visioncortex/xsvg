@@ -9,6 +9,7 @@ import "./playground.css";
 import { CATALOG, SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
 import { createPreview } from "../core/preview";
+import { downloadSvg } from "../core/download";
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -109,6 +110,12 @@ byId("copy-link").addEventListener("click", async () => {
   } catch {
     flash(btn, "Link in URL");
   }
+});
+
+// ---- download the compiled plain SVG ---------------------------------------
+byId<HTMLAnchorElement>("download-svg").addEventListener("click", (e) => {
+  e.preventDefault();
+  void downloadSvg(editor.getDoc(), sampleSelect.value || "drawing");
 });
 
 function flash(btn: HTMLButtonElement, text: string): void {

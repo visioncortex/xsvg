@@ -14,6 +14,7 @@ import { createEditor } from "../core/editor";
 import { createPanZoom, type PanZoom } from "./pan-zoom";
 import { createInspector, type Inspector } from "./inspector";
 import { findArtboards, makeThumb } from "../core/artboards";
+import { downloadSvg } from "../core/download";
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -175,23 +176,10 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowRight" || e.key === "PageDown") deckSelect(deckActive + 1);
 });
 
-// Download the compiled plain SVG. Recompile without the source map so the file
-// is clean (no data-xsvg-* attributes), then save it via a transient blob URL.
-downloadLink.addEventListener("click", async (e) => {
+// Download the compiled plain SVG (compiled clean, without the source map).
+downloadLink.addEventListener("click", (e) => {
   e.preventDefault();
-  if (!currentSource) return;
-  let svg: string;
-  try {
-    svg = await compileXsvg(currentSource);
-  } catch {
-    return; // the open() error box already explains why it won't compile
-  }
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = currentName.replace(/\.[^./]+$/, "") + ".svg";
-  a.click();
-  URL.revokeObjectURL(url);
+  if (currentSource) void downloadSvg(currentSource, currentName);
 });
 
 // Floating controls: code toggle, zoom, fit/1:1 toggle.
