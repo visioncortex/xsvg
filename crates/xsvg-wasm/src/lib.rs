@@ -1339,12 +1339,14 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let size = style.size;
     let advance = size * style.line_height;
 
-    // Block geometry: an `in="#rect"` reference (its bbox), else x/y/width.
+    // Block geometry: an `in="#rect"` reference (its bbox), else x/y/width; the
+    // height (rect bbox or explicit `height`) is only used for vertical align.
     let (mut x, mut y, mut width) = (
         attr_num(node, "x", 0.0),
         attr_num(node, "y", 0.0),
         attr_num(node, "width", 320.0),
     );
+    let mut avail_h = dim_attr(node, "height");
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
             .ok()
@@ -1353,19 +1355,32 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             x = bb.x0;
             y = bb.y0;
             width = bb.width();
+            avail_h = Some(bb.height());
         }
     }
     let indent_step = attr_num(node, "indent", size * 1.5).max(0.0);
     let marker_gap = attr_num(node, "marker-gap", size * 0.5);
     let item_spacing = attr_num(node, "item-spacing", size * 0.35);
     let list_kind = node.attribute("list").unwrap_or("bullet");
+    let marker_scale = attr_num(node, "marker-size", 1.0).max(0.0);
+    let marker_fill = node.attribute("marker-fill").unwrap_or(fill);
+    let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
+    // disc radius: a fraction of the em, so bullets track the type size
+    let r = size * 0.16 * marker_scale;
 
     let fm = m.font_metrics(&style, size);
-    let mut baseline = y + fm.cap_height; // treat `y` as the block's top edge
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
 
-    let mut body = String::new();
-    let base = [EmitAttrs::default()];
+    // Pass 1: resolve each item's marker and wrap its text, with baselines laid
+    // out relative to a zero origin (0, advance, 2·advance, …). The absolute
+    // vertical offset is applied in pass 2 once the block height is known.
+    struct Item {
+        col: f64,
+        marker: Marker,
+        lines: Vec<PlacedLine>,
+    }
+    let mut items: Vec<Item> = Vec::new();
+    let mut rel = 0.0; // running baseline in the relative frame
     for li in node
         .children()
         .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
@@ -1375,6 +1390,7 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let text = collect_text(li);
         let text_x = x + (level as f64 + 1.0) * indent_step;
         let max_w = (x + width - text_x).max(1.0);
+        let col = text_x - marker_gap; // markers' right-edge column
 
         // outline counters: extend to this level, drop any deeper ones (a pop
         // restarts sublists), then advance this level's number
@@ -1384,39 +1400,176 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         counters.truncate(level + 1);
         counters[level] += 1;
 
-        let marker = match kind {
-            "none" => None,
-            "number" => Some(number_marker(level, counters[level])),
-            _ => Some(bullet_glyph(level).to_string()),
+        // resolve the marker: an explicit `marker` (item, then list) wins — a
+        // named shape (disc/circle/square/dash) draws a shape, anything else is
+        // a literal text marker; otherwise the list kind decides.
+        let marker_attr = li.attribute("marker").or_else(|| node.attribute("marker"));
+        let marker = match marker_attr {
+            Some(mk) => match shape_token(mk) {
+                Some(tok) => Marker::Shape(tok),
+                None => Marker::Text(mk.to_string()),
+            },
+            None => match kind {
+                "none" => Marker::None,
+                "number" => Marker::Text(number_marker(level, counters[level])),
+                _ => Marker::Shape(bullet_shape(level)),
+            },
         };
-        if let Some(mk) = marker {
-            // right-aligned into the gutter so "1." and "10." share a column edge
-            body.push_str(&format!(
-                "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\">",
-                fmt(text_x - marker_gap),
-                fmt(baseline)
-            ));
-            push_escaped(&mut body, &mk, false);
-            body.push_str("</tspan>");
-        }
 
         let lines = if text.trim().is_empty() {
             Vec::new()
         } else {
-            layout_flow(&text, &style, text_x, baseline, max_w, m)
+            layout_flow(&text, &style, text_x, rel, max_w, m)
         };
-        for line in &lines {
-            emit_line(&mut body, line, &style, size, 1.0, m, &base);
-        }
-        baseline += lines.len().max(1) as f64 * advance + item_spacing;
+        let span = lines.len().max(1) as f64 * advance;
+        items.push(Item { col, marker, lines });
+        rel += span + item_spacing;
     }
 
-    out.push_str("<text text-anchor=\"start\"");
-    push_font_attrs(out, &style, size, fill);
+    // Block height = first cap-top → last descent. In the relative frame the
+    // first baseline is 0, and the last line's baseline works out to
+    // rel − item_spacing − advance (the trailing item-spacing and the last
+    // item's own first-line offset cancel). Place per `valign` within the
+    // available height (top otherwise).
+    let block_h = if items.is_empty() {
+        0.0
+    } else {
+        (rel - item_spacing - advance) + fm.cap_height + fm.descent
+    };
+    let block_top = match (valign, avail_h) {
+        (VAlign::Middle, Some(h)) => y + (h - block_h) / 2.0,
+        (VAlign::Bottom, Some(h)) => y + (h - block_h),
+        _ => y, // top, or no height to align within
+    };
+    let offset = block_top + fm.cap_height; // relative baseline 0 → this y
+
+    // Pass 2: emit, shifting every relative baseline by `offset`.
+    let mut shapes = String::new(); // drawn bullet markers (siblings of the text)
+    let mut body = String::new(); // the <text> block: item lines + text markers
+    let base = [EmitAttrs::default()];
+    for it in &items {
+        let item_baseline = it.lines.first().map(|l| l.baseline).unwrap_or(0.0) + offset;
+        match &it.marker {
+            Marker::None => {}
+            Marker::Shape(tok) => {
+                // centre on the middle of lowercase (x-height), right edge at `col`
+                let cy = item_baseline - fm.x_height * 0.5;
+                shapes.push_str(&shape_marker(tok, it.col, cy, r, marker_fill));
+            }
+            Marker::Text(mk) => {
+                // right-aligned into the gutter so "1." and "10." share a column edge
+                body.push_str(&format!(
+                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\">",
+                    fmt(it.col),
+                    fmt(item_baseline),
+                    marker_fill
+                ));
+                push_escaped(&mut body, mk, false);
+                body.push_str("</tspan>");
+            }
+        }
+        for line in &it.lines {
+            let mut l = line.clone();
+            l.baseline += offset;
+            emit_line(&mut body, &l, &style, size, 1.0, m, &base);
+        }
+    }
+
+    // wrap in a <g> so the block position/transform covers both the drawn
+    // markers and the text
+    out.push_str("<g");
     out.push_str(&pos);
     out.push('>');
+    out.push_str(&shapes);
+    out.push_str("<text text-anchor=\"start\"");
+    push_font_attrs(out, &style, size, fill);
+    out.push('>');
     out.push_str(&body);
-    out.push_str("</text>");
+    out.push_str("</text></g>");
+}
+
+/// A resolved `<x:li>` marker: a drawn shape token, a literal text string
+/// (numbers or a custom character), or nothing.
+enum Marker {
+    None,
+    Shape(&'static str),
+    Text(String),
+}
+
+/// Map a `marker` attribute to a drawn-shape token, or `None` if it should be
+/// taken as a literal text marker (e.g. "▸", "—", "★").
+fn shape_token(s: &str) -> Option<&'static str> {
+    match s {
+        "disc" | "dot" | "bullet" => Some("disc"),
+        "circle" | "ring" | "hollow" | "open" => Some("ring"),
+        "square" => Some("square"),
+        "dash" => Some("dash"),
+        _ => None,
+    }
+}
+
+/// The default bullet shape for a nesting level: filled disc, hollow ring, then
+/// filled square — cycling every three levels.
+fn bullet_shape(level: usize) -> &'static str {
+    match level % 3 {
+        0 => "disc",
+        1 => "ring",
+        _ => "square",
+    }
+}
+
+/// One drawn bullet marker, its right edge at `col` and centre at `cy`. `r` is
+/// the disc radius; the square is sized to equal the disc's AREA (side = r·√π,
+/// so its diagonal is smaller than the disc's diameter — optical compensation),
+/// and the ring's stroke straddles so its outer edge matches the disc.
+fn shape_marker(tok: &str, col: f64, cy: f64, r: f64, fill: &str) -> String {
+    match tok {
+        "ring" => {
+            // a hollow ring reads lighter/smaller than a filled disc of equal
+            // diameter, so enlarge its outer edge ~12% to match the disc's weight
+            let outer = r * 1.12;
+            let sw = r * 0.45;
+            let pr = outer - sw / 2.0; // outer edge = pr + sw/2 = outer
+            format!(
+                "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\"/>",
+                fmt(col - outer),
+                fmt(cy),
+                fmt(pr),
+                fill,
+                fmt(sw)
+            )
+        }
+        "square" => {
+            let s = std::f64::consts::PI.sqrt() * r; // equal area to the disc
+            format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+                fmt(col - s),
+                fmt(cy - s / 2.0),
+                fmt(s),
+                fmt(s),
+                fill
+            )
+        }
+        "dash" => {
+            let (w, t) = (r * 2.8, r * 0.55);
+            format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{}\"/>",
+                fmt(col - w),
+                fmt(cy - t / 2.0),
+                fmt(w),
+                fmt(t),
+                fmt(t / 2.0),
+                fill
+            )
+        }
+        _ => format!(
+            "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\"/>",
+            fmt(col - r),
+            fmt(cy),
+            fmt(r),
+            fill
+        ),
+    }
 }
 
 /// The `<x:list list="number">` marker for a 1-based counter at a nesting level:
@@ -1426,15 +1579,6 @@ fn number_marker(level: usize, n: u32) -> String {
         0 => format!("{n}."),
         1 => format!("{}.", alpha_lower(n)),
         _ => format!("{}.", roman_lower(n)),
-    }
-}
-
-/// The bullet glyph for a nesting level: • ◦ ▪, cycling every three levels.
-fn bullet_glyph(level: usize) -> &'static str {
-    match level % 3 {
-        0 => "\u{2022}",
-        1 => "\u{25E6}",
-        _ => "\u{25AA}",
     }
 }
 
@@ -3590,22 +3734,40 @@ mod tests {
             r##"{XW}<x:list x="10" y="10" width="200" font-size="10" line-height="1.2"><x:li>Alpha</x:li><x:li indent="1">Beta</x:li></x:list></svg>"##
         );
         let out = compile_test(&svg);
-        // one plain <text> block, left-anchored
+        // wrapped in a <g>, with a left-anchored <text> block
+        assert!(out.contains("<g>"), "{out}");
         assert!(out.contains("<text text-anchor=\"start\""), "{out}");
-        // markers are right-aligned into the gutter
+        // bullets are DRAWN shapes, not glyphs: level-0 filled disc, level-1 ring
         assert!(
-            out.contains("text-anchor=\"end\">\u{2022}</tspan>"),
-            "{out}"
+            out.contains("<circle") && out.contains("fill=\"#111827\""),
+            "disc: {out}"
         );
         assert!(
-            out.contains("text-anchor=\"end\">\u{25E6}</tspan>"),
-            "{out}"
+            out.contains("fill=\"none\" stroke=\"#111827\""),
+            "ring: {out}"
         );
         // hanging indent: level-0 text at x=10+15=25, level-1 at x=10+30=40
         assert!(out.contains("<tspan x=\"25\""), "level-0 column: {out}");
         assert!(out.contains("<tspan x=\"40\""), "level-1 column: {out}");
         // the x: source is fully lowered
         assert!(!out.contains("x:list") && !out.contains("x:li"), "{out}");
+    }
+
+    #[test]
+    fn list_custom_markers() {
+        // a named shape overrides the default cycle; a literal char is verbatim
+        let svg = format!(
+            r##"{XW}<x:list x="0" y="0" width="200" font-size="10" marker="square" marker-fill="#e11d48"><x:li>a</x:li><x:li marker="▸">b</x:li></x:list></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("<rect") && out.contains("fill=\"#e11d48\""),
+            "square shape marker: {out}"
+        );
+        assert!(
+            out.contains(">\u{25B8}</tspan>"),
+            "literal char marker: {out}"
+        );
     }
 
     #[test]
@@ -3651,8 +3813,13 @@ mod tests {
         assert_eq!(number_marker(0, 3), "3.");
         assert_eq!(number_marker(1, 2), "b.");
         assert_eq!(number_marker(2, 4), "iv.");
-        assert_eq!(bullet_glyph(0), "\u{2022}");
-        assert_eq!(bullet_glyph(3), "\u{2022}"); // cycles every 3 levels
+        assert_eq!(bullet_shape(0), "disc");
+        assert_eq!(bullet_shape(1), "ring");
+        assert_eq!(bullet_shape(2), "square");
+        assert_eq!(bullet_shape(3), "disc"); // cycles every 3 levels
+        assert_eq!(shape_token("circle"), Some("ring"));
+        assert_eq!(shape_token("square"), Some("square"));
+        assert_eq!(shape_token("\u{2605}"), None); // ★ → literal text marker
     }
 
     #[test]

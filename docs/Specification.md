@@ -582,7 +582,8 @@ native-`<textPath>` non-deforming follow is future work.
 A `<x:list>` is a vertical stack of `<x:li>` items, each flowed and wrapped like a mini
 `<x:textbox>` but with a **hanging indent**: the marker sits in the gutter and continuation lines
 align to the text column, not back under the marker. It is the ordered/unordered list SVG never
-got, and lowers to one plain `<text>` of positioned `<tspan>`s — live and selectable.
+got, and lowers to a `<g>` of drawn bullet shapes plus one plain `<text>` of positioned `<tspan>`s
+(item text + number/character markers) — live and selectable.
 
 ```xml
 <x:list x="40" y="80" width="300" list="bullet" font-size="14" item-spacing="5">
@@ -595,23 +596,33 @@ got, and lowers to one plain `<text>` of positioned `<tspan>`s — live and sele
 | Attribute (on `<x:list>`) | Values | Meaning |
 |---|---|---|
 | `list` | `bullet` *(default)* / `number` / `none` | marker style for the whole list (an `<x:li>` may override its own) |
-| `x` `y` `width` | length | the block's left edge, **top**, and content width; or take all three from `in="#rect"`'s bbox |
-| `in` | `#id` | bind geometry to a referenced shape's bounding box (a baked reference, §4) |
+| `marker` | `disc` / `circle` / `square` / `dash`, or any literal string | force a marker: a named **drawn shape**, else a literal text marker (`▸`, `—`, `★`, …); overrides the `list` cycle |
+| `marker-size` | number (default `1`) | scale factor on the drawn bullet shapes |
+| `marker-fill` | color (default = `fill`) | marker color (shapes and number/character markers) |
+| `x` `y` `width` | length | the block's left edge, **top**, and content width; or take them from `in="#rect"`'s bbox |
+| `in` | `#id` | bind geometry to a referenced shape's bounding box (a baked reference, §4); also supplies the height for `valign` |
+| `valign` | `top` *(default)* / `middle` / `bottom` | vertical placement within the height (from `in="#rect"` or an explicit `height`) |
 | `indent` | length (default `1.5em`) | the per-level indent step |
 | `marker-gap` | length (default `0.5em`) | gap between the marker and the text column |
 | `item-spacing` | length (default `0.35em`) | extra vertical gap between items |
 | `font-*`, `line-height`, `fill` | as §6.1 | base style for every item |
 
 Each **`<x:li>`** is one item; `indent="N"` sets its **nesting level** (0 = top). Every level steps
-the text column right by `indent` and **cycles the marker**: bullets run `•` `◦` `▪`, numbers run
-decimal → lower-alpha → lower-roman, repeating every three levels. Numbered items keep an **outline
-counter per level**, restarted whenever nesting pops back to a shallower level (so `1. 2. a. b. 3.`),
-and the marker is right-aligned into the gutter so `1.` and `10.` share a column edge. An empty item
-still advances one line. `list="none"` suppresses the marker but keeps the indent.
+the text column right by `indent` and **cycles the marker**. Bullet markers are **drawn shapes**, not
+font glyphs (so they don't vary by font, and are optically balanced): a filled **disc**, a hollow
+**ring**, then a filled **square**, repeating every three levels. The shapes are **area-compensated** —
+the square's side is `r·√π` so its area equals the disc's (its diagonal stays inside the disc's
+diameter), and the ring's outer diameter is enlarged ~12% since a hollow mark reads lighter than a
+filled one. Numbers cycle decimal → lower-alpha → lower-roman and keep an **outline counter per
+level**, restarted whenever nesting pops back to a shallower level (so `1. 2. a. b. 3.`), right-aligned
+into the gutter so `1.` and `10.` share a column edge. An `<x:li marker="…">` (or `marker` on the
+list) overrides with a named shape or a literal character. An empty item still advances one line;
+`list="none"` suppresses the marker but keeps the indent.
 
 **v0 limits.** Base style per item (inline `<tspan>` styling is not yet applied inside an item); no
-shrink-to-fit or height clipping — the list flows downward from its top; markers are live text (the
-bullet/roman glyphs must exist in the font, else the viewer shows its own missing-glyph box).
+shrink-to-fit or height clipping — the list flows from `valign` within the height but doesn't shrink
+to fit it; number/roman/character markers are live text (the glyphs must exist in the font), while
+bullet shapes are drawn and font-independent.
 
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 

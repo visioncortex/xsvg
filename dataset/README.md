@@ -82,7 +82,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [lists.xsvg](lists.xsvg) | `list="bullet"` and `list="number"` stacks of `<x:li>` items with a **hanging indent** — long items wrap under the text column, not the marker. `indent="N"` sets the nesting level: bullets cycle •◦▪ and numbers run decimal→lower-alpha→lower-roman by depth, with the outline counter **restarting when nesting pops** (`1. 2. a. b. 3.`). A third list uses `in="#card"` to take its `x`/`y`/`width` from a referenced rect's box |
+| [lists.xsvg](lists.xsvg) | `list="bullet"` and `list="number"` stacks of `<x:li>` items with a **hanging indent** — long items wrap under the text column, not the marker. `indent="N"` sets the nesting level: bullet markers are **drawn shapes** (filled disc → hollow ring → filled square, area-compensated so they read at equal weight) and numbers run decimal→lower-alpha→lower-roman by depth, with the outline counter **restarting when nesting pops** (`1. 2. a. b. 3.`). A third list uses `in="#card"` to take its `x`/`y`/`width` from a referenced rect's box and `valign="middle"` to center within it; markers are customizable via `marker`/`marker-size`/`marker-fill` |
 
 ## Path algebra — `<x:boolean>` (§7.4)
 
@@ -114,7 +114,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [artboards.xsvg](artboards.xsvg) | Three `<g x:artboard="…" x:frame="…">` **slides** in one file (title, bar chart, closing card). They render side by side in any plain viewer; the standalone **preview** pages through them with a `‹ ›` nav + slide counter, and the interactive **viewer** zooms to the first artboard on load. The tagging is ignorable `x:` attributes echoed as `data-xsvg-artboard`/`data-xsvg-frame`, so the file never breaks |
+| [artboards.xsvg](artboards.xsvg) | Four `<g x:artboard="…" x:frame="…">` **slides** in one file (title, a bulleted `<x:list>` agenda, bar chart, closing card). They render side by side in any plain viewer; the standalone **preview** pages through them with a `‹ ›` nav + slide counter, and the interactive **viewer** zooms to the first artboard on load. The tagging is ignorable `x:` attributes echoed as `data-xsvg-artboard`/`data-xsvg-frame`, so the file never breaks |
 
 ## Layers — compile-time z-order (§5.1)
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 2400 405" font-family="'Helvetica Neue', Arial, sans-serif">
-  <!-- Three artboards (slides): each is a plain <g> tagged x:artboard with an
+     viewBox="0 0 3240 405" font-family="'Helvetica Neue', Arial, sans-serif">
+  <!-- Four artboards (slides): each is a plain <g> tagged x:artboard with an
        explicit x:frame, its content authored in local 0..720 space and placed
        by a translate — so slides sit 720 apart with a 120-unit gutter between
        them. In any viewer they render side by side with a transparent gutter
@@ -14,7 +14,21 @@
     <text x="60" y="372" font-size="15" fill="#38bdf8">▸ press the arrows to advance</text>
   </g>
 
-  <g x:artboard="Chart" x:frame="840 0 720 405" transform="translate(840,0)">
+  <g x:artboard="Agenda" x:frame="840 0 720 405" transform="translate(840,0)">
+    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+    <rect x="0" y="0" width="10" height="405" fill="#6366f1"/>
+    <text x="60" y="86" font-size="30" font-weight="700" fill="#0f172a">What ships in v0</text>
+    <x:list x="60" y="118" width="600" list="bullet" marker="disc" marker-fill="#6366f1"
+            font-size="20" line-height="1.35" item-spacing="11" fill="#334155">
+      <x:li>Text layout — wrap, fit, justify, flow into any shape</x:li>
+      <x:li>Warps, mesh gradients, boolean path algebra</x:li>
+      <x:li>Connectors, layers, and these very artboards</x:li>
+      <x:li>Bulleted &amp; numbered lists with hanging indents</x:li>
+      <x:li indent="1">…exactly like the slide you're reading</x:li>
+    </x:list>
+  </g>
+
+  <g x:artboard="Chart" x:frame="1680 0 720 405" transform="translate(1680,0)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
     <text x="60" y="80" font-size="30" font-weight="700" fill="#0f172a">Quarterly growth</text>
     <g fill="#6366f1">
@@ -34,7 +48,7 @@
     </g>
   </g>
 
-  <g x:artboard="Thanks" x:frame="1680 0 720 405" transform="translate(1680,0)">
+  <g x:artboard="Thanks" x:frame="2520 0 720 405" transform="translate(2520,0)">
     <rect x="0" y="0" width="720" height="405" fill="#111827"/>
     <circle cx="360" cy="150" r="52" fill="none" stroke="#34d399" stroke-width="6"/>
     <path d="M335,150 l18,18 l34,-40" fill="none" stroke="#34d399" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
