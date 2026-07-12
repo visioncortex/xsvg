@@ -854,9 +854,10 @@ promise. **`distort-h` / `distort-v`** compose a center-anchored projective tape
 offsets from the frame center divide by `w = 1 − (dh/2)·nx − (dv/2)·ny` (clamped away from zero) —
 positive `distort-h` grows the right side, positive `distort-v` the bottom.
 
-**Degradation (normative).** A child that cannot become path geometry (live `<text>`, rounded
-`<rect>`, `<line>`, `<image>`, `<use>`) is **skipped with a marker comment** — a warp MUST NOT
-silently emit unwarped content. An unknown or absent `field`, or no usable geometry, emits the
+**Degradation (normative).** A child that cannot become path geometry (live `<text>`, `<line>`,
+`<image>`, `<use>`) is **skipped with a marker comment** — a warp MUST NOT
+silently emit unwarped content. Basic shapes convert directly, including a **rounded `<rect>`**
+(its `rx`/`ry` corners lower to an arc path). An unknown or absent `field`, or no usable geometry, emits the
 children **unwarped behind a marker**. A path that fails to bake keeps its original geometry, and
 non-finite coordinates never reach the output (§4).
 

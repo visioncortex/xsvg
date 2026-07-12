@@ -2611,8 +2611,8 @@ fn stepped_text(
 /// `<x:warp field="…" bend="…" axis="h|v">` (§7.3): the generic geometry-warp
 /// front-end. Children lower to pure `<path>` geometry, their union bbox builds the
 /// field's envelope frame, and every path bakes through the §7.1 pipeline at the
-/// quality tolerance. Children that cannot become path geometry (live text, rounded
-/// rects, lines, images) are skipped with a marker — a warp never *silently* emits
+/// quality tolerance. Children that cannot become path geometry (live text, lines,
+/// images) are skipped with a marker — a warp never *silently* emits
 /// unwarped content; an unknown/absent field or empty geometry emits the children
 /// unwarped behind a marker. The element's own paint / `transform` ride on the
 /// emitted `<g>` (an affine `transform` composes after the bake for free).
@@ -2747,18 +2747,27 @@ fn parse_corners(node: roxmltree::Node) -> Option<[xsvg_core::kurbo::Point; 4]> 
 }
 
 /// Lower one `<x:warp>` child to pre-warp markup whose geometry is all `<path d>`:
-/// basic shapes convert directly (the sharp-`rect` pass and `shape_to_path_d`),
-/// everything else runs through the normal pipeline (so `outline="true"` text and
-/// nested `<x:warp>`s compose). `Err(reason)` when the result still contains
-/// geometry the bake cannot warp.
+/// basic shapes (rect — sharp or rounded — circle, ellipse, polygon, polyline)
+/// convert directly via `shape_to_path_d`, everything else runs through the normal
+/// pipeline (so `outline="true"` text and nested `<x:warp>`s compose). `Err(reason)`
+/// when the result still contains geometry the bake cannot warp.
 fn warp_child_markup(child: roxmltree::Node, ctx: &Ctx) -> Result<String, String> {
     let name = child.tag_name().name();
     if child.tag_name().namespace() != Some(XSVG_NS)
-        && matches!(name, "circle" | "ellipse" | "polygon" | "polyline")
+        && matches!(name, "rect" | "circle" | "ellipse" | "polygon" | "polyline")
     {
+        // shape_to_path_d handles a rounded rect too (rx/ry → arc path), so a
+        // <rect rx> converts here rather than falling through to a <rect> the
+        // bake can't warp — it used to be dropped behind a skip marker.
         let d = shape_to_path_d(child).ok_or("degenerate shape")?;
         let mut s = String::from("<path");
-        copy_attrs(child, &mut s, &["cx", "cy", "r", "rx", "ry", "points"]);
+        copy_attrs(
+            child,
+            &mut s,
+            &[
+                "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
+            ],
+        );
         s.push_str(&pos_attr(child, ctx));
         s.push_str(&format!(" d=\"{d}\"/>"));
         return Ok(s);
@@ -5458,6 +5467,36 @@ mod tests {
         );
         assert!(out.contains("rx=\"2\""));
         assert!(!out.contains("<path"));
+    }
+
+    #[test]
+    fn rounded_rect_is_an_operand_not_skipped() {
+        // Regression: a rounded <rect> inside <x:boolean>/<x:warp> used to fall
+        // through to a <rect> the bake can't take and get dropped behind a skip
+        // marker. shape_to_path_d lowers its rx corners to an arc path, so it now
+        // participates like any other operand.
+        let svg = format!(
+            r##"{XW}<x:boolean op="union" fill="#111"><rect x="0" y="0" width="60" height="40" rx="10"/><circle cx="70" cy="20" r="20"/></x:boolean></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            !out.contains("skipped"),
+            "rounded rect operand must not be skipped: {out}"
+        );
+        assert!(
+            out.contains("<path") && out.contains("fill=\"#111\""),
+            "boolean of a rounded rect + circle bakes to a filled path: {out}"
+        );
+
+        // and the same rect warps rather than being skipped
+        let svg = format!(
+            r##"{XW}<x:warp field="arc" bend="20" fill="#222"><rect x="0" y="0" width="80" height="30" rx="8"/></x:warp></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            !out.contains("skipped") && out.contains("<path"),
+            "rounded rect warps to a path: {out}"
+        );
     }
 
     #[test]
