@@ -84,10 +84,11 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [table.xsvg](table.xsvg) | A `<x:table>` with a fixed `150` label column and two flexible columns (`cols="150 * *"`); `<x:th>` header cells (bold + `header-fill`); body cells that **wrap to their column and grow their row to fit** — the tallest cell sets the row height (the Google Slides/Canva model, not HTML auto-layout). Per-cell `bg`, `align`, `font-weight` overrides; the whole thing bakes to plain rects + text |
 
-## Charts — `<x:pie>` (§7.8)
+## Charts — `<x:plot>` (§7.9) & `<x:pie>` (§7.8)
 
 | File | Shows |
 |---|---|
+| [plot.xsvg](plot.xsvg) | `<x:plot>` as a linear data coordinate frame: a **bar chart** (`y-domain="0 100"`, `y-ticks` gridlines + value labels, `<x:bar value label>` bottom-aligned and evenly spread, one bar recolored) and a **line chart** (`y-domain="20 25"` so 22.5 lands mid-height, `<x:line points>` with dot markers and an area fill). Values map to pixels while stroke/marker sizes stay in pixels — a coordinate system, not a charting library |
 | [pie.xsvg](pie.xsvg) | `<x:pie>` as a chart coordinate primitive: a pie where `value` sets each slice's **angle**, with one slice **grown** (`grow`) and **exploded** (`explode`) for emphasis; a **donut** (`inner-radius` + `gap`); and a **polar-area / Nightingale rose** — the same primitive with equal angles (slices omit `value`) and per-slice `r` encoding the datum. Each slice bakes to a sector `<path>` and maps to its own source range |
 
 ## Theming — `<x:theme>` (§4.1)

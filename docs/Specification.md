@@ -1035,6 +1035,46 @@ feature: omit `value` (equal angles) and drive each slice's `r` from the datum. 
 value→angle only, no labels/legends (draw those yourself), and radius maps to length not area — for
 perceptually honest area encoding scale `r` by `√value` yourself.
 
+### 7.9 Plots — `<x:plot>` (bars & lines) [implemented]
+
+`<x:plot>` is a **linear data coordinate frame** — the cartesian counterpart to `<x:pie>`. It maps a
+data domain onto a pixel box (y inverted, so larger is up) and **keeps stroke/marker sizes in
+pixels** — unlike a `<g transform>`, which would stretch a 2px line into a slab. You express marks in
+*data* units; the compiler bakes them to plain shapes.
+
+```xml
+<x:plot x="90" y="92" width="270" height="220" y-domain="0 100" y-ticks="5">
+  <x:bars fill="#6366f1" gap="0.35" radius="3">
+    <x:bar value="45" label="Q1"/>
+    <x:bar value="90" label="Q4" fill="#0ea5e9"/>
+  </x:bars>
+</x:plot>
+
+<x:plot x="450" y="92" width="240" height="220" x-domain="0 6" y-domain="20 25" y-ticks="5">
+  <x:line points="0,21.2 1,22 2,23.4 3,22.6" stroke="#0ea5e9" marker="dot" area="#0ea5e9"/>
+</x:plot>
+```
+
+| Attribute | On | Meaning |
+|---|---|---|
+| `x` `y` `width` `height` | `<x:plot>` | the pixel box (or take it from `in="#rect"`) |
+| `x-domain` / `y-domain` | `<x:plot>` | `"lo hi"` data range, or `auto`/absent → the marks' extent (bars include a 0 baseline) |
+| `y-ticks` | `<x:plot>` | draw N+1 horizontal gridlines with value labels |
+| `grid-color` / `grid-width` | `<x:plot>` | gridline color and stroke width |
+| `label-fill` / `label-size` | `<x:plot>` | axis-label color and size |
+| `fill` `gap` `radius` | `<x:bars>` | bar color, inter-bar gap (fraction of the band), corner radius |
+| `value` `label` `fill` | `<x:bar>` | height (mapped, bottom-aligned), an x-axis label, per-bar color |
+| `points` | `<x:line>` | `"x,y …"` data points → mapped polyline |
+| `stroke` / `stroke-width` | `<x:line>` | line color and width |
+| `marker` / `marker-size` / `marker-fill` | `<x:line>` | `marker` (any value) drops dots at each point; size and color (default = `stroke`) |
+| `area` | `<x:line>` | `"#color"` fills under the line to the baseline |
+
+Bars spread evenly across the width and are always bottom-aligned (base at the domain floor). Lines
+map each point through both scales. Each `<x:bar>` / `<x:line>` maps to its own source range. **v0
+limits:** linear scales only (no log/time/ordinal), a single y-axis, and axis rendering is minimal
+(y-gridlines + labels, bar labels) — richer axes/legends you compose yourself. It's a *coordinate
+system*, not a charting library.
+
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
 The first slice of Pillar 3 (*paint & pixels* — capability catalog: [Paint.md](Paint.md)). The
@@ -1192,6 +1232,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
 | Inset / outset — `<x:offset in distance join>` Minkowski grow/shrink (stroke⊕boolean, round/miter/bevel), baked reference (§7.7) | implemented |
 | Pie / donut charts — `<x:pie>`/`<x:slice>` per-slice angle (value), radius (r/grow), explode; donut + polar-area from one primitive (§7.8) | implemented |
+| Plots — `<x:plot>` linear data frame (x/y domains → pixels, sizes stay in px) with `<x:bars>`/`<x:line>` marks + gridlines (§7.9) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
 | Tables — `<x:table>`/`<x:tr>`/`<x:td>`/`<x:th>` author-set columns + content-driven row heights (Slides/Canva model), baked to rects + text (§6.15) | implemented |

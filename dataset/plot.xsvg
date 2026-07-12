@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 380" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="380" fill="#ffffff"/>
+  <text x="28" y="32" font-size="14" font-weight="bold" fill="#0f172a">x:plot — a data coordinate frame: map values to pixels, draw the marks yourself (bars &amp; lines)</text>
+
+  <!-- bar chart: y-domain 0..100, five gridlines, bars bottom-aligned + labeled -->
+  <text x="60" y="72" font-size="11" fill="#94a3b8">bars · y-domain "0 100", y-ticks, labels</text>
+  <x:plot x="90" y="92" width="270" height="220" y-domain="0 100" y-ticks="5">
+    <x:bars fill="#6366f1" gap="0.35" radius="3">
+      <x:bar value="45" label="Q1"/>
+      <x:bar value="72" label="Q2"/>
+      <x:bar value="58" label="Q3"/>
+      <x:bar value="90" label="Q4"/>
+      <x:bar value="66" label="Q5" fill="#0ea5e9"/>
+    </x:bars>
+  </x:plot>
+
+  <!-- line chart: x-domain 0..6, y-domain 20..25 (22.5 lands mid), area + dots -->
+  <text x="420" y="72" font-size="11" fill="#94a3b8">line · y-domain "20 25" (so 22.5 is mid), area + dots</text>
+  <x:plot x="450" y="92" width="240" height="220" x-domain="0 6" y-domain="20 25" y-ticks="5">
+    <x:line points="0,21.2 1,22.0 2,23.4 3,22.6 4,24.1 5,23.2 6,24.6"
+            stroke="#0ea5e9" stroke-width="2.5" marker="dot" marker-size="4.5" marker-fill="#0369a1" area="#0ea5e9"/>
+  </x:plot>
+</svg>

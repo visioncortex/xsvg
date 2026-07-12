@@ -1395,6 +1395,223 @@ fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("</g>");
 }
 
+/// Parse a `<x:plot>` domain attribute (`"20 25"`) into `(lo, hi)`; `auto`/absent/
+/// malformed → the data extent (`data` min…max, padded when flat/empty).
+fn parse_domain(node: roxmltree::Node, attr: &str, data: &[f64]) -> (f64, f64) {
+    if let Some(s) = node.attribute(attr) {
+        if s != "auto" {
+            let n: Vec<f64> = s.split_whitespace().filter_map(parse_num).collect();
+            if n.len() == 2 && n[0] != n[1] {
+                return (n[0], n[1]);
+            }
+        }
+    }
+    if data.is_empty() {
+        return (0.0, 1.0);
+    }
+    let lo = data.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if lo == hi {
+        (lo, lo + 1.0)
+    } else {
+        (lo, hi)
+    }
+}
+
+/// Parse `"x,y x,y …"` data points into pixel-mappable pairs.
+fn parse_points(s: &str) -> Vec<(f64, f64)> {
+    s.split_whitespace()
+        .filter_map(|p| {
+            let (a, b) = p.split_once(',')?;
+            Some((parse_num(a)?, parse_num(b)?))
+        })
+        .collect()
+}
+
+/// `<x:plot>` (§7.9): a linear data coordinate frame. Maps `x-domain`/`y-domain`
+/// (each explicit or `auto`) onto the pixel box, y inverted so larger is up, and
+/// keeps stroke/marker sizes in pixels (unlike a `<g transform>`). Children:
+/// `<x:bars>` of `<x:bar value label>` (bottom-aligned, mapped heights, evenly
+/// spread) and `<x:line points>` (polyline + optional dots / area). `y-ticks`
+/// draws gridlines with value labels.
+fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let (mut px, mut py) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    let (mut pw, mut ph) = (
+        attr_num(node, "width", 400.0),
+        attr_num(node, "height", 200.0),
+    );
+    if let Some(r) = node.attribute("in") {
+        if let Some(bb) = ref_geometry(node, r, ctx)
+            .ok()
+            .and_then(|d| svg_path_bbox(&d))
+        {
+            px = bb.x0;
+            py = bb.y0;
+            pw = bb.width();
+            ph = bb.height();
+        }
+    }
+    let is_x = |c: roxmltree::Node, name: &str| {
+        c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == name
+    };
+    let bar_series: Vec<roxmltree::Node> = node.children().filter(|c| is_x(*c, "bars")).collect();
+    let line_series: Vec<roxmltree::Node> = node.children().filter(|c| is_x(*c, "line")).collect();
+    let bars_of = |bs: roxmltree::Node| bs.children().filter(move |c| is_x(*c, "bar")).count();
+
+    // gather data extents for auto domains
+    let (mut xs, mut ys): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
+    let mut has_bars = false;
+    for &bs in &bar_series {
+        for bar in bs.children().filter(|c| is_x(*c, "bar")) {
+            ys.push(attr_num(bar, "value", 0.0));
+            has_bars = true;
+        }
+    }
+    for &ls in &line_series {
+        for (x, y) in parse_points(ls.attribute("points").unwrap_or("")) {
+            xs.push(x);
+            ys.push(y);
+        }
+    }
+    if has_bars {
+        ys.push(0.0); // bars are measured from a zero baseline
+    }
+    let (yd0, yd1) = parse_domain(node, "y-domain", &ys);
+    let (xd0, xd1) = parse_domain(node, "x-domain", &xs);
+    let mapx = |dx: f64| px + (dx - xd0) / (xd1 - xd0) * pw;
+    let mapy = |dy: f64| py + ph - (dy - yd0) / (yd1 - yd0) * ph;
+    let clamp_y = |y: f64| y.clamp(py, py + ph);
+
+    let grid = resolve_var(node.attribute("grid-color").unwrap_or("#e2e8f0")).into_owned();
+    let grid_w = attr_num(node, "grid-width", 1.0).max(0.0);
+    let label_fill = resolve_var(node.attribute("label-fill").unwrap_or("#64748b")).into_owned();
+    let label_size = attr_num(node, "label-size", 11.0);
+
+    out.push_str("<g");
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+
+    // y gridlines + value labels
+    let yticks = attr_num(node, "y-ticks", 0.0).max(0.0) as usize;
+    if yticks >= 1 {
+        for k in 0..=yticks {
+            let v = yd0 + (yd1 - yd0) * k as f64 / yticks as f64;
+            let gy = mapy(v);
+            out.push_str(&format!(
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{grid}\" stroke-width=\"{}\"/>",
+                fmt(px),
+                fmt(gy),
+                fmt(px + pw),
+                fmt(gy),
+                fmt(grid_w)
+            ));
+            out.push_str(&format!(
+                "<text x=\"{}\" y=\"{}\" text-anchor=\"end\" font-size=\"{}\" fill=\"{label_fill}\">{}</text>",
+                fmt(px - 8.0),
+                fmt(gy + label_size * 0.35),
+                fmt(label_size),
+                fmt(v)
+            ));
+        }
+    }
+
+    // bar series: bars fill their band, bottom-aligned, evenly spread
+    for &bs in &bar_series {
+        let n = bars_of(bs);
+        if n == 0 {
+            continue;
+        }
+        let gapf = attr_num(bs, "gap", 0.25).clamp(0.0, 0.95);
+        let default_fill = bs.attribute("fill").unwrap_or("#6366f1");
+        let band = pw / n as f64;
+        let bw = band * (1.0 - gapf);
+        for (i, bar) in bs.children().filter(|c| is_x(*c, "bar")).enumerate() {
+            let v = attr_num(bar, "value", 0.0);
+            let cxb = px + (i as f64 + 0.5) * band;
+            let top = clamp_y(mapy(v));
+            let bot = py + ph;
+            let fill = bar
+                .attribute("fill")
+                .map(|x| resolve_var(x).into_owned())
+                .unwrap_or_else(|| resolve_var(default_fill).into_owned());
+            out.push_str("<g");
+            out.push_str(&pos_attr(bar, ctx));
+            out.push('>');
+            out.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{fill}\"/>",
+                fmt(cxb - bw / 2.0),
+                fmt(top),
+                fmt(bw),
+                fmt((bot - top).max(0.0)),
+                fmt(attr_num(bs, "radius", 0.0))
+            ));
+            if let Some(label) = bar.attribute("label") {
+                out.push_str(&format!(
+                    "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"{label_fill}\">",
+                    fmt(cxb),
+                    fmt(bot + label_size + 4.0),
+                    fmt(label_size)
+                ));
+                push_escaped(out, label, false);
+                out.push_str("</text>");
+            }
+            out.push_str("</g>");
+        }
+    }
+
+    // line series: mapped polyline + optional area fill + point markers
+    for &ls in &line_series {
+        let pts = parse_points(ls.attribute("points").unwrap_or(""));
+        if pts.is_empty() {
+            continue;
+        }
+        let mapped: Vec<(f64, f64)> = pts.iter().map(|&(x, y)| (mapx(x), mapy(y))).collect();
+        let stroke = resolve_var(ls.attribute("stroke").unwrap_or("#0ea5e9")).into_owned();
+        let sw = attr_num(ls, "stroke-width", 2.0);
+        let poly = mapped
+            .iter()
+            .map(|&(x, y)| format!("{},{}", fmt(x), fmt(y)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str("<g");
+        out.push_str(&pos_attr(ls, ctx));
+        out.push('>');
+        if let Some(area) = ls.attribute("area") {
+            let fill = resolve_var(area).into_owned();
+            let base = py + ph;
+            out.push_str(&format!(
+                "<path fill=\"{fill}\" d=\"M{},{} L{poly} L{},{} Z\" fill-opacity=\"0.15\"/>",
+                fmt(mapped[0].0),
+                fmt(base),
+                fmt(mapped[mapped.len() - 1].0),
+                fmt(base)
+            ));
+        }
+        out.push_str(&format!(
+            "<polyline fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\" points=\"{poly}\"/>",
+            fmt(sw)
+        ));
+        if ls.attribute("marker").is_some() {
+            let mr = attr_num(ls, "marker-size", sw * 1.8);
+            let dot = ls
+                .attribute("marker-fill")
+                .map(|v| resolve_var(v).into_owned())
+                .unwrap_or_else(|| stroke.clone());
+            for &(x, y) in &mapped {
+                out.push_str(&format!(
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{dot}\"/>",
+                    fmt(x),
+                    fmt(y),
+                    fmt(mr)
+                ));
+            }
+        }
+        out.push_str("</g>");
+    }
+
+    out.push_str("</g>");
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -1456,6 +1673,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "list" => emit_list(node, out, ctx),
             "table" => emit_table(node, out, ctx),
             "pie" => emit_pie(node, out, ctx),
+            "plot" => emit_plot(node, out, ctx),
             "theme" => {} // §4.1 definitions — loaded up front, emit nothing
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
@@ -4884,6 +5102,55 @@ mod tests {
             ))
             .contains("<!-- xsvg: <x:pie"),
             "empty pie marker"
+        );
+    }
+
+    #[test]
+    fn plot_maps_bars_and_lines() {
+        // plot (0,0) 100×200, y-domain 0..100 → a value-50 bar is bottom-aligned
+        // with its top at mapy(50)=100 and height 100
+        let svg = format!(
+            r##"{XW}<x:plot x="0" y="0" width="100" height="200" y-domain="0 100"><x:bars><x:bar value="50"/></x:bars></x:plot></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("y=\"100\"") && out.contains("height=\"100\""),
+            "bar height maps from the domain: {out}"
+        );
+
+        // a line point (5,100) with x-domain 0..10, y-domain 0..100 maps to
+        // (mid-width 50, top 0)
+        let svg = format!(
+            r##"{XW}<x:plot x="0" y="0" width="100" height="200" x-domain="0 10" y-domain="0 100"><x:line points="5,100 10,0"/></x:plot></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("points=\"50,0 100,200\""),
+            "line points map: {out}"
+        );
+
+        // y-ticks draws N+1 gridlines
+        let svg = format!(
+            r##"{XW}<x:plot x="0" y="0" width="100" height="200" y-domain="0 100" y-ticks="4"><x:bars><x:bar value="50"/></x:bars></x:plot></svg>"##
+        );
+        assert_eq!(
+            compile_test(&svg).matches("<line ").count(),
+            5,
+            "y-ticks=4 → 5 gridlines"
+        );
+
+        // grid-width, and a line's marker-fill overriding the dot color
+        let svg = format!(
+            r##"{XW}<x:plot x="0" y="0" width="100" height="200" y-domain="0 100" y-ticks="1" grid-width="2"><x:line points="0,50" stroke="#111" marker="dot" marker-fill="#f00"/></x:plot></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("<line ") && out.contains("stroke-width=\"2\""),
+            "grid-width: {out}"
+        );
+        assert!(
+            out.contains("<circle") && out.contains("fill=\"#f00\""),
+            "marker-fill: {out}"
         );
     }
 

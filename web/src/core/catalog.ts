@@ -241,13 +241,18 @@ export const CATALOG: Category[] = [
     ],
   },
   {
-    name: "Charts — pie / donut / polar-area",
-    note: "<x:pie>/<x:slice> — a chart coordinate primitive: per-slice angle (value), radius (r/grow), and explode, baked to sector paths (§7.8).",
+    name: "Charts — plots & pie",
+    note: "<x:plot> a linear data frame (bars & lines) and <x:pie> an angular one — coordinate systems, not a charting library (§7.8–7.9).",
     samples: [
+      {
+        file: "plot.xsvg",
+        title: "Bar & line plots",
+        blurb: "<x:plot> maps a data domain to a pixel box (y inverted, sizes stay in px): a bar chart with y-ticks, gridlines, labels and bottom-aligned <x:bar>s, and a line chart whose y-domain \"20 25\" puts 22.5 mid-height, with dot markers and an area fill",
+      },
       {
         file: "pie.xsvg",
         title: "Pie, donut & polar-area",
-        blurb: "value sets each slice's angle, with one slice grown and exploded for emphasis; a donut via inner-radius + gap; and a Nightingale polar-area rose — equal angles with per-slice radius encoding the datum — all from the one primitive, baked to sector paths",
+        blurb: "value sets each slice's angle, with one slice grown and exploded for emphasis; a donut via inner-radius + a constant-width parallel gap; and a Nightingale polar-area rose — equal angles with per-slice radius encoding the datum — all from one primitive, baked to sector paths",
       },
     ],
   },
