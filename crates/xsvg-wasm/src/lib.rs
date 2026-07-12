@@ -1212,6 +1212,189 @@ fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("</g>");
 }
 
+/// One pie/donut sector as SVG path data: outer radius `ro`, inner `ri` (0 = full
+/// pie), proportional angles `a0`/`a1` (degrees, clockwise) about `(cx, cy)`, with
+/// a **constant-width** `gap` between slices. The gap is a perpendicular offset of
+/// each straight edge (not an angular inset), so adjacent slices leave a parallel
+/// channel that points at the centre — instead of a wedge that flares outward. A
+/// near-full span emits a circle/ring (avoiding SVG's degenerate 360° arc); a
+/// slice the gap fully consumes returns "".
+fn sector_path(cx: f64, cy: f64, ro: f64, ri: f64, a0deg: f64, a1deg: f64, gap: f64) -> String {
+    use std::f64::consts::{PI, TAU};
+    let d2r = PI / 180.0;
+    if a1deg - a0deg >= 359.999 {
+        // full circle / ring (outer CW + inner CCW → nonzero leaves the ring)
+        let ring = |r: f64, sweep: u8| {
+            format!(
+                "M{},{} A{r},{r} 0 1 {sweep} {},{} A{r},{r} 0 1 {sweep} {},{} Z",
+                fmt(cx - r),
+                fmt(cy),
+                fmt(cx + r),
+                fmt(cy),
+                fmt(cx - r),
+                fmt(cy),
+                r = fmt(r),
+                sweep = sweep
+            )
+        };
+        return if ri > 0.0 {
+            format!("{} {}", ring(ro, 1), ring(ri, 0))
+        } else {
+            ring(ro, 1)
+        };
+    }
+    let h = (gap / 2.0).max(0.0);
+    let (a0, a1) = (a0deg * d2r, a1deg * d2r);
+    let (u0, u1) = ((a0.cos(), a0.sin()), (a1.cos(), a1.sin()));
+    let n0 = (-u0.1, u0.0); // perpendicular into the slice, off the leading edge
+    let n1 = (u1.1, -u1.0); // …off the trailing edge
+                            // an edge point at signed radial distance `t`, shifted `h` off the radial
+    let mk =
+        |t: f64, u: (f64, f64), n: (f64, f64)| (cx + t * u.0 + h * n.0, cy + t * u.1 + h * n.1);
+    let to = (ro * ro - h * h).max(0.0).sqrt(); // radial reach of the outer end
+    let ti = if ri > h {
+        (ri * ri - h * h).sqrt()
+    } else {
+        0.0
+    };
+    let (o0, o1) = (mk(to, u0, n0), mk(to, u1, n1));
+    let (i0, i1) = (mk(ti, u0, n0), mk(ti, u1, n1));
+    let ang = |p: (f64, f64)| (p.1 - cy).atan2(p.0 - cx);
+    let pos = |mut d: f64| {
+        while d < 0.0 {
+            d += TAU;
+        }
+        d
+    };
+    let span_o = pos(ang(o1) - ang(o0));
+    if span_o <= 1e-6 {
+        return String::new(); // the gap consumed the slice
+    }
+    let large_o = u8::from(span_o > PI);
+    if ri > h {
+        // inner arc runs i1 → i0 the other way (sweep 0), so its span is i1−i0
+        let large_i = u8::from(pos(ang(i1) - ang(i0)) > PI);
+        format!(
+            "M{},{} L{},{} A{ro},{ro} 0 {large_o} 1 {},{} L{},{} A{ri},{ri} 0 {large_i} 0 {},{} Z",
+            fmt(i0.0),
+            fmt(i0.1),
+            fmt(o0.0),
+            fmt(o0.1),
+            fmt(o1.0),
+            fmt(o1.1),
+            fmt(i1.0),
+            fmt(i1.1),
+            fmt(i0.0),
+            fmt(i0.1),
+            ro = fmt(ro),
+            ri = fmt(ri),
+            large_o = large_o,
+            large_i = large_i
+        )
+    } else {
+        // full pie: the offset edges converge to a tiny notch (distance h) near
+        // the centre rather than a single point
+        format!(
+            "M{},{} L{},{} A{ro},{ro} 0 {large_o} 1 {},{} L{},{} Z",
+            fmt(i0.0),
+            fmt(i0.1),
+            fmt(o0.0),
+            fmt(o0.1),
+            fmt(o1.0),
+            fmt(o1.1),
+            fmt(i1.0),
+            fmt(i1.1),
+            ro = fmt(ro),
+            large_o = large_o
+        )
+    }
+}
+
+/// `<x:pie>` (§6.17): a pie/donut chart. Each `<x:slice>` gets an angular share
+/// from `value` (default 1 → equal), an outer radius from the pie `r` overridable
+/// per slice (`r` absolute or `grow` factor), and an `explode` offset out along
+/// its bisector. `inner-radius` makes a donut; `gap` is the constant-width channel
+/// between slices (a perpendicular edge offset, so it stays parallel, not a wedge);
+/// `start` sets the first slice's angle (default −90°, top). Each slice bakes to
+/// one `<path>` sector carrying its own source range.
+fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let cx = attr_num(node, "cx", 0.0);
+    let cy = attr_num(node, "cy", 0.0);
+    let r = attr_num(node, "r", 100.0).max(0.0);
+    let inner = attr_num(node, "inner-radius", 0.0).max(0.0).min(r);
+    let start = attr_num(node, "start", -90.0);
+    let gap = attr_num(node, "gap", 0.0).max(0.0);
+    let pie_stroke = node.attribute("stroke");
+    let pie_sw = attr_num(node, "stroke-width", 0.0);
+
+    let slices: Vec<roxmltree::Node> = node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "slice")
+        .collect();
+    if slices.is_empty() {
+        out.push_str("<!-- xsvg: <x:pie> has no slices -->");
+        return;
+    }
+    let total: f64 = slices
+        .iter()
+        .map(|s| attr_num(*s, "value", 1.0).max(0.0))
+        .sum();
+    let total = if total > 0.0 {
+        total
+    } else {
+        slices.len() as f64
+    };
+
+    // a categorical default palette for slices without an explicit fill
+    const PALETTE: [&str; 8] = [
+        "#6366f1", "#0ea5e9", "#f59e0b", "#10b981", "#e11d48", "#8b5cf6", "#14b8a6", "#f472b6",
+    ];
+    let d2r = std::f64::consts::PI / 180.0;
+
+    out.push_str("<g>"); // per-slice source mapping (each slice carries its own range)
+    let mut angle = start;
+    for (i, &s) in slices.iter().enumerate() {
+        let value = attr_num(s, "value", 1.0).max(0.0);
+        let (a0, a1) = (angle, angle + value / total * 360.0);
+        angle = a1;
+        // radius: explicit `r`, else pie r × `grow`
+        let rr = match s.attribute("r").and_then(parse_num) {
+            Some(v) => v.max(0.0),
+            None => r * attr_num(s, "grow", 1.0).max(0.0),
+        };
+        // explode out along the slice's proportional bisector
+        let ex = attr_num(s, "explode", 0.0);
+        let mid = (a0 + a1) / 2.0 * d2r;
+        let (ccx, ccy) = (cx + ex * mid.cos(), cy + ex * mid.sin());
+        let fill = s
+            .attribute("fill")
+            .map(|v| resolve_var(v).into_owned())
+            .unwrap_or_else(|| PALETTE[i % PALETTE.len()].to_string());
+        let d = sector_path(ccx, ccy, rr, inner.min(rr), a0, a1, gap);
+        if d.is_empty() {
+            continue; // the gap consumed this slice
+        }
+
+        out.push_str("<g");
+        out.push_str(&pos_attr(s, ctx));
+        out.push('>');
+        out.push_str(&format!("<path fill=\"{fill}\" d=\"{d}\""));
+        let (stroke, sw) = (
+            s.attribute("stroke").or(pie_stroke),
+            attr_num(s, "stroke-width", pie_sw),
+        );
+        if let (Some(stroke), true) = (stroke, sw > 0.0) {
+            out.push_str(&format!(
+                " stroke=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\"",
+                resolve_var(stroke),
+                fmt(sw)
+            ));
+        }
+        out.push_str("/></g>");
+    }
+    out.push_str("</g>");
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -1272,6 +1455,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "offset" => emit_offset(node, out, ctx),
             "list" => emit_list(node, out, ctx),
             "table" => emit_table(node, out, ctx),
+            "pie" => emit_pie(node, out, ctx),
             "theme" => {} // §4.1 definitions — loaded up front, emit nothing
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
@@ -4648,6 +4832,58 @@ mod tests {
             out.matches("fill=\"#eeeeee\"").count(),
             1,
             "exactly one striped body row: {out}"
+        );
+    }
+
+    #[test]
+    fn pie_geometry_and_per_slice() {
+        // three slices → three sector <path>s, each its own source node
+        let svg = format!(
+            r##"{XW}<x:pie cx="100" cy="100" r="80"><x:slice value="1"/><x:slice value="1"/><x:slice value="1"/></x:pie></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(
+            out.matches("<path fill=").count(),
+            3,
+            "one path per slice: {out}"
+        );
+        let sm = compile_impl(&svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
+        assert_eq!(
+            sm.matches("<g data-xsvg-pos").count(),
+            3,
+            "per-slice source map: {sm}"
+        );
+
+        // per-slice radius: explicit `r` and a `grow` factor both set the arc radius
+        let svg = format!(
+            r##"{XW}<x:pie cx="0" cy="0" r="100"><x:slice value="1" r="50"/><x:slice value="1" grow="1.5"/></x:pie></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("A50,50"), "explicit slice radius: {out}");
+        assert!(
+            out.contains("A150,150"),
+            "grow scales the pie radius: {out}"
+        );
+
+        // donut: inner-radius → annular sectors (two arcs per slice)
+        let svg = format!(
+            r##"{XW}<x:pie cx="0" cy="0" r="100" inner-radius="40"><x:slice value="1"/><x:slice value="1"/></x:pie></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(
+            out.matches('A').count(),
+            4,
+            "two arcs per donut slice: {out}"
+        );
+        assert!(out.contains("40,40"), "inner-radius arc: {out}");
+
+        // empty pie degrades with a marker
+        assert!(
+            compile_test(&format!(
+                r##"{XW}<x:pie cx="0" cy="0" r="50"></x:pie></svg>"##
+            ))
+            .contains("<!-- xsvg: <x:pie"),
+            "empty pie marker"
         );
     }
 

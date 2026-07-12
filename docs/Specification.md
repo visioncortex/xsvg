@@ -1000,6 +1000,41 @@ offset's self-overlaps at concave corners. Curves flatten at the profile toleran
 `<g>`); a missing or non-geometry reference degrades with a marker (§3). Stacking several
 `<x:offset>` at increasing distances builds concentric rings and sticker halos.
 
+### 7.8 Pie / donut charts — `<x:pie>` [implemented]
+
+`<x:pie>` is a **chart coordinate primitive**, not a charting library: it maps values to sectors so
+you draw the marks, and it bakes to plain `<path>`s. A pie is a ring of `<x:slice>` children, each
+with **three independent channels** — angle, radius, and radial offset — which is what lets one
+primitive express a pie, a donut, an emphasized slice, and a polar-area (Nightingale rose) chart.
+
+```xml
+<x:pie cx="140" cy="140" r="90" start="-90" gap="1.5" inner-radius="0">
+  <x:slice value="40" grow="1.12" explode="16"/>   <!-- fatter AND popped out -->
+  <x:slice value="25"/>
+  <x:slice value="35"/>
+</x:pie>
+```
+
+| Attribute | On | Meaning |
+|---|---|---|
+| `cx` `cy` `r` | `<x:pie>` | center and base radius |
+| `start` | `<x:pie>` | first slice's start angle in degrees (default `-90` = top; clockwise) |
+| `gap` | `<x:pie>` | degrees of padding inset between slices (proportions unchanged) |
+| `inner-radius` | `<x:pie>` | hole radius → donut (annular sectors) |
+| `stroke` / `stroke-width` | either | slice border (per-slice overrides the pie) |
+| `value` | `<x:slice>` | **angle** = this slice's share of the total (default `1` → equal angles) |
+| `r` / `grow` | `<x:slice>` | **radius** — an absolute outer radius, or a factor on the pie `r` |
+| `explode` | `<x:slice>` | **offset** — push the slice out along its bisector by this distance |
+| `fill` | `<x:slice>` | color; a categorical palette cycles when omitted |
+
+An exploded slice is the same sector drawn about a translated apex (`center + explode·(cos, sin)` of
+the bisector), so explode and radius compose freely. A slice thinner than `gap` is dropped; a slice
+spanning the full circle emits a circle/ring (avoiding SVG's degenerate 360° arc). Each `<x:slice>`
+compiles to its own `<g>` carrying its source range. **Polar-area / rose** falls out with no extra
+feature: omit `value` (equal angles) and drive each slice's `r` from the datum. **v0 limits:** linear
+value→angle only, no labels/legends (draw those yourself), and radius maps to length not area — for
+perceptually honest area encoding scale `r` by `√value` yourself.
+
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
 The first slice of Pillar 3 (*paint & pixels* — capability catalog: [Paint.md](Paint.md)). The
@@ -1156,6 +1191,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
 | Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
 | Inset / outset — `<x:offset in distance join>` Minkowski grow/shrink (stroke⊕boolean, round/miter/bevel), baked reference (§7.7) | implemented |
+| Pie / donut charts — `<x:pie>`/`<x:slice>` per-slice angle (value), radius (r/grow), explode; donut + polar-area from one primitive (§7.8) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
 | Tables — `<x:table>`/`<x:tr>`/`<x:td>`/`<x:th>` author-set columns + content-driven row heights (Slides/Canva model), baked to rects + text (§6.15) | implemented |

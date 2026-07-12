@@ -174,6 +174,7 @@ sketches live in [Plan.md](Plan.md):
 - **`<x:boolean op="…">`** — live boolean shape operators ([§2.5](Plan.md))
 - **`<x:connector from to route arrow>`** — lines routed between two elements' boxes ([§7.6](Specification.md))
 - **`<x:offset in distance join>`** — grow / shrink a region by a distance (inset & outset) ([§7.7](Specification.md))
+- **`<x:pie>`** / **`<x:slice>`** — pie / donut / polar-area charts: per-slice angle, radius, explode ([§7.8](Specification.md))
 - **`<x:theme>`** — compile-time design tokens: `<x:color>` (`var(name)` in any paint) + `<x:font>` (`x:font="name"`) ([§4.1](Specification.md))
 - **`<x:list list="…">`** / **`<x:li indent="N">`** — hanging-indent lists with cycling markers ([§6.14](Specification.md))
 - **`<x:table>`** / **`<x:tr>`** / **`<x:td>`** / **`<x:th>`** — grid with author-set columns and content-driven row heights ([§6.15](Specification.md))

@@ -241,6 +241,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Charts — pie / donut / polar-area",
+    note: "<x:pie>/<x:slice> — a chart coordinate primitive: per-slice angle (value), radius (r/grow), and explode, baked to sector paths (§7.8).",
+    samples: [
+      {
+        file: "pie.xsvg",
+        title: "Pie, donut & polar-area",
+        blurb: "value sets each slice's angle, with one slice grown and exploded for emphasis; a donut via inner-radius + gap; and a Nightingale polar-area rose — equal angles with per-slice radius encoding the datum — all from the one primitive, baked to sector paths",
+      },
+    ],
+  },
+  {
     name: "Inset & outset — path offsetting",
     note: "<x:offset in distance join> — grow/shrink a region by a Minkowski offset, baked to one <path> (§7.7).",
     samples: [
