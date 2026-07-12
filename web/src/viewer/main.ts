@@ -29,6 +29,7 @@ const errorBox = byId("error");
 const docName = byId("doc-name");
 const dropHint = byId("drop-hint");
 const playgroundLink = byId("open-playground") as HTMLAnchorElement;
+const downloadLink = byId("download-svg") as HTMLAnchorElement;
 
 const editor = createEditor({ parent: byId("source"), readOnly: true });
 let panzoom: PanZoom | null = null;
@@ -61,8 +62,15 @@ function sizeToViewBox(svg: SVGSVGElement): void {
   svg.setAttribute("height", String(h));
 }
 
+// The currently-open document, so "Download SVG" can recompile it cleanly.
+let currentSource: string | null = null;
+let currentName = "drawing";
+
 async function open(name: string, source: string): Promise<void> {
   docName.textContent = name;
+  currentSource = source;
+  currentName = name;
+  downloadLink.hidden = false;
   dropHint.hidden = true; // a document is loaded now — drop the hint
   // The filename links to its bare preview (only bundled samples have a /preview/
   // route; a dropped file stays plain text).
@@ -165,6 +173,25 @@ window.addEventListener("keydown", (e) => {
     return;
   if (e.key === "ArrowLeft" || e.key === "PageUp") deckSelect(deckActive - 1);
   else if (e.key === "ArrowRight" || e.key === "PageDown") deckSelect(deckActive + 1);
+});
+
+// Download the compiled plain SVG. Recompile without the source map so the file
+// is clean (no data-xsvg-* attributes), then save it via a transient blob URL.
+downloadLink.addEventListener("click", async (e) => {
+  e.preventDefault();
+  if (!currentSource) return;
+  let svg: string;
+  try {
+    svg = await compileXsvg(currentSource);
+  } catch {
+    return; // the open() error box already explains why it won't compile
+  }
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = currentName.replace(/\.[^./]+$/, "") + ".svg";
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 // Floating controls: code toggle, zoom, fit/1:1 toggle.
