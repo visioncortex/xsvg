@@ -621,10 +621,12 @@ diameter), and the ring's outer diameter is enlarged ~12% since a hollow mark re
 filled one. Numbers cycle decimal → lower-alpha → lower-roman and keep an **outline counter per
 level**, restarted whenever nesting pops back to a shallower level (so `1. 2. a. b. 3.`), right-aligned
 into the gutter so `1.` and `10.` share a column edge. An `<x:li marker="…">` (or `marker` on the
-list) overrides with a named shape or a literal character. An empty item still advances one line;
-`list="none"` suppresses the marker but keeps the indent.
+list) overrides with a named shape or a literal character, and an `<x:li font-size="…">` overrides
+just that item's size (a smaller sub-point) — it inherits the list's size and line-height otherwise,
+and its marker scales to match. An empty item still advances one line; `list="none"` suppresses the
+marker but keeps the indent.
 
-**v0 limits.** Base style per item (inline `<tspan>` styling is not yet applied inside an item); no
+**v0 limits.** One style per item beyond `font-size` (inline `<tspan>` fill/weight styling is not yet applied inside an item); no
 shrink-to-fit or height clipping — the list flows from `valign` within the height but doesn't shrink
 to fit it; number/roman/character markers are live text (the glyphs must exist in the font), while
 bullet shapes are drawn and font-independent.

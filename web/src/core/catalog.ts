@@ -137,6 +137,11 @@ export const CATALOG: Category[] = [
         title: "Styled runs",
         blurb: "<tspan> runs: per-run fill / weight / style flowing and wrapping inline",
       },
+      {
+        file: "lists.xsvg",
+        title: "Bullet & numbered lists",
+        blurb: "<x:list> / <x:li indent='N'>: hanging-indent items whose drawn bullet shapes (disc / ring / square, optically balanced) and decimal→alpha→roman numbers cycle by depth, with the outer counter resuming after each sublist; a third list flows inside a referenced card (§6.14)",
+      },
     ],
   },
   {
@@ -216,17 +221,6 @@ export const CATALOG: Category[] = [
         file: "offset.xsvg",
         title: "Inset & outset",
         blurb: "concentric ripples from one blob, a self-intersecting pentagram outset (evenodd, overlaps cleaned by the boolean pass), a spiky star inset and outset, and stacked outsets behind outlined text as a sticker halo — round/miter/bevel joins, all baked references",
-      },
-    ],
-  },
-  {
-    name: "Lists & indentation",
-    note: "<x:list list='bullet|number'> with <x:li indent='N'> — hanging-indent items with cycling markers and outline counters (§6.14).",
-    samples: [
-      {
-        file: "lists.xsvg",
-        title: "Bullet & numbered lists",
-        blurb: "bullets cycle •◦▪ by nesting depth while long items wrap under a hanging indent; a numbered column runs decimal→alpha→roman with the outer counter resuming after each sublist; and a list flowed inside a referenced card",
       },
     ],
   },

@@ -1421,8 +1421,6 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let marker_scale = attr_num(node, "marker-size", 1.0).max(0.0);
     let marker_fill = node.attribute("marker-fill").unwrap_or(fill);
     let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
-    // disc radius: a fraction of the em, so bullets track the type size
-    let r = size * 0.16 * marker_scale;
 
     let fm = m.font_metrics(&style, size);
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
@@ -1434,6 +1432,7 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         col: f64,
         marker: Marker,
         lines: Vec<PlacedLine>,
+        size: f64, // per-item font size (defaults to the list's)
     }
     let mut items: Vec<Item> = Vec::new();
     let mut rel = 0.0; // running baseline in the relative frame
@@ -1447,6 +1446,14 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let text_x = x + (level as f64 + 1.0) * indent_step;
         let max_w = (x + width - text_x).max(1.0);
         let col = text_x - marker_gap; // markers' right-edge column
+                                       // an <x:li> may override the font size (e.g. a smaller sub-point); it
+                                       // inherits the list's size otherwise, keeping the list's line-height
+        let item_size = attr_pos(li, "font-size", size);
+        let item_style = TextStyle {
+            size: item_size,
+            ..style.clone()
+        };
+        let item_advance = item_size * style.line_height;
 
         // outline counters: extend to this level, drop any deeper ones (a pop
         // restarts sublists), then advance this level's number
@@ -1475,10 +1482,15 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let lines = if text.trim().is_empty() {
             Vec::new()
         } else {
-            layout_flow(&text, &style, text_x, rel, max_w, m)
+            layout_flow(&text, &item_style, text_x, rel, max_w, m)
         };
-        let span = lines.len().max(1) as f64 * advance;
-        items.push(Item { col, marker, lines });
+        let span = lines.len().max(1) as f64 * item_advance;
+        items.push(Item {
+            col,
+            marker,
+            lines,
+            size: item_size,
+        });
         rel += span + item_spacing;
     }
 
@@ -1499,35 +1511,56 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     };
     let offset = block_top + fm.cap_height; // relative baseline 0 → this y
 
-    // Pass 2: emit, shifting every relative baseline by `offset`.
+    // Pass 2: emit, shifting every relative baseline by `offset`. Markers and text
+    // scale with the item's own size; a per-line `font-size` overrides the <text>
+    // base only when the item differs from the list size.
     let mut shapes = String::new(); // drawn bullet markers (siblings of the text)
     let mut body = String::new(); // the <text> block: item lines + text markers
-    let base = [EmitAttrs::default()];
     for it in &items {
         let item_baseline = it.lines.first().map(|l| l.baseline).unwrap_or(0.0) + offset;
+        let item_fm = m.font_metrics(
+            &TextStyle {
+                size: it.size,
+                ..style.clone()
+            },
+            it.size,
+        );
+        let item_r = it.size * 0.16 * marker_scale;
+        let fs = if (it.size - size).abs() > 1e-6 {
+            format!(" font-size=\"{}\"", fmt(it.size))
+        } else {
+            String::new()
+        };
         match &it.marker {
             Marker::None => {}
             Marker::Shape(tok) => {
                 // centre on the middle of lowercase (x-height), right edge at `col`
-                let cy = item_baseline - fm.x_height * 0.5;
-                shapes.push_str(&shape_marker(tok, it.col, cy, r, marker_fill));
+                let cy = item_baseline - item_fm.x_height * 0.5;
+                shapes.push_str(&shape_marker(tok, it.col, cy, item_r, marker_fill));
             }
             Marker::Text(mk) => {
                 // right-aligned into the gutter so "1." and "10." share a column edge
                 body.push_str(&format!(
-                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\">",
+                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\"{}>",
                     fmt(it.col),
                     fmt(item_baseline),
-                    marker_fill
+                    marker_fill,
+                    fs
                 ));
                 push_escaped(&mut body, mk, false);
                 body.push_str("</tspan>");
             }
         }
+        // list items are single-style plain text — one positioned <tspan> per line
         for line in &it.lines {
-            let mut l = line.clone();
-            l.baseline += offset;
-            emit_line(&mut body, &l, &style, size, 1.0, m, &base);
+            body.push_str(&format!(
+                "<tspan x=\"{}\" y=\"{}\"{}>",
+                fmt(line.x),
+                fmt(line.baseline + offset),
+                fs
+            ));
+            push_escaped(&mut body, &line.text, false);
+            body.push_str("</tspan>");
         }
     }
 
@@ -3881,6 +3914,20 @@ mod tests {
         assert!(
             out.contains(">\u{25B8}</tspan>"),
             "literal char marker: {out}"
+        );
+    }
+
+    #[test]
+    fn list_item_font_size_override() {
+        // an <x:li font-size> shrinks just that item; it inherits the list size otherwise
+        let svg = format!(
+            r##"{XW}<x:list x="0" y="0" width="200" font-size="20"><x:li>big</x:li><x:li font-size="10">small</x:li></x:list></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("font-size=\"20\""), "base <text> size: {out}");
+        assert!(
+            out.contains("font-size=\"10\">small</tspan>"),
+            "the smaller item's line overrides the size: {out}"
         );
     }
 
