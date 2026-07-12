@@ -670,11 +670,11 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         )
     };
     // Walk the ACTUAL cubic back from the tip endpoint until the straight-line
-    // (chord) distance to the tip equals `size`, and return that on-curve point.
-    // Used as the arrowhead's base midpoint, so the triangle's base sits exactly
-    // on the curve and its axis follows the visible approach — not the control
-    // handle's tangent. `from_end` picks which endpoint is the tip.
-    let chord_back = |p0: Point, p1: Point, p2: Point, p3: Point, from_end: bool| -> Point {
+    // (chord) distance to the tip equals `size`, and return that on-curve point
+    // with its parameter t. Used as the arrowhead's base midpoint (so the base
+    // sits on the curve and its axis follows the visible approach) and as the
+    // split point that trims the line back to the base. `from_end` picks the tip.
+    let chord_back = |p0: Point, p1: Point, p2: Point, p3: Point, from_end: bool| -> (Point, f64) {
         let tip = if from_end { p3 } else { p0 };
         let dist = |q: Point| ((q.x - tip.x).powi(2) + (q.y - tip.y).powi(2)).sqrt();
         let n = 96;
@@ -691,21 +691,72 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 } else {
                     (size - dprev) / (d - dprev)
                 };
-                return cubic_at(p0, p1, p2, p3, prev_t + (t - prev_t) * frac);
+                let tt = prev_t + (t - prev_t) * frac;
+                return (cubic_at(p0, p1, p2, p3, tt), tt);
             }
             prev_t = t;
             prev = pt;
         }
+        // curve shorter than the arrowhead: collapse to the far endpoint
         if from_end {
-            p0
+            (p0, 0.0)
         } else {
-            p3
-        } // curve shorter than the arrowhead
+            (p3, 1.0)
+        }
+    };
+    // The sub-cubic covering [t0, t1] of (p0..p3), as its own four control
+    // points — de Casteljau twice. Lets us trim the drawn line back to where the
+    // arrowhead begins so the stroke never protrudes past the sharp tip.
+    let subcubic = |p0: Point, p1: Point, p2: Point, p3: Point, t0: f64, t1: f64| -> [Point; 4] {
+        let lerp =
+            |u: Point, v: Point, t: f64| Point::new(u.x + (v.x - u.x) * t, u.y + (v.y - u.y) * t);
+        // clip to [t0, 1] first
+        let (q0, q1, q2, q3) = if t0 > 0.0 {
+            let a = lerp(p0, p1, t0);
+            let b = lerp(p1, p2, t0);
+            let c = lerp(p2, p3, t0);
+            let d = lerp(a, b, t0);
+            let e = lerp(b, c, t0);
+            let f = lerp(d, e, t0);
+            (f, e, c, p3)
+        } else {
+            (p0, p1, p2, p3)
+        };
+        // then take [0, s] of that, where s maps t1 into the clipped range
+        let s = if t1 >= 1.0 {
+            1.0
+        } else {
+            (t1 - t0) / (1.0 - t0)
+        };
+        let a = lerp(q0, q1, s);
+        let b = lerp(q1, q2, s);
+        let c = lerp(q2, q3, s);
+        let d = lerp(a, b, s);
+        let e = lerp(b, c, s);
+        let f = lerp(d, e, s);
+        [q0, a, d, f]
     };
 
-    // Each route yields its path plus the two endpoint tangents as (tip, adj)
-    // pairs: `adj` is the neighbouring path point, so unit(tip − adj) is the
-    // direction the line travels OUT of that end — the way its arrowhead points.
+    let arrow = node.attribute("arrow").unwrap_or("end");
+    let arrow_start = arrow == "start" || arrow == "both";
+    let arrow_end = arrow == "end" || arrow == "both";
+    // Trim `from` toward `toward` by the arrowhead height, so the stroked line
+    // stops at the triangle's base instead of running under (and past) the tip.
+    // Clamped to the segment so a short segment doesn't invert.
+    let trim = |from: Point, toward: Point| -> Point {
+        let (dx, dy) = (toward.x - from.x, toward.y - from.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-6 {
+            return from;
+        }
+        let s = (size / len).min(1.0);
+        Point::new(from.x + dx * s, from.y + dy * s)
+    };
+
+    // Each route yields its drawn path (already trimmed where an arrowhead sits)
+    // plus the two endpoint tangents as (tip, adj) pairs: `adj` is the
+    // neighbouring path point, so unit(tip − adj) is the direction the line
+    // travels OUT of that end — the way its arrowhead points.
     let (d, start_tip, start_adj, end_tip, end_adj) =
         match node.attribute("route").unwrap_or("straight") {
             "x-major" => {
@@ -714,8 +765,10 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
                 let mx = (ax.x + bx.x) / 2.0;
                 let (p1, p2) = (Point::new(mx, ax.y), Point::new(mx, bx.y));
+                let s = if arrow_start { trim(ax, p1) } else { ax };
+                let e = if arrow_end { trim(bx, p2) } else { bx };
                 (
-                    format!("M{} L{} L{} L{}", p(ax), p(p1), p(p2), p(bx)),
+                    format!("M{} L{} L{} L{}", p(s), p(p1), p(p2), p(e)),
                     ax,
                     p1,
                     bx,
@@ -728,8 +781,10 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
                 let my = (ay.y + by.y) / 2.0;
                 let (p1, p2) = (Point::new(ay.x, my), Point::new(by.x, my));
+                let s = if arrow_start { trim(ay, p1) } else { ay };
+                let e = if arrow_end { trim(by, p2) } else { by };
                 (
-                    format!("M{} L{} L{} L{}", p(ay), p(p1), p(p2), p(by)),
+                    format!("M{} L{} L{} L{}", p(s), p(p1), p(p2), p(e)),
                     ay,
                     p1,
                     by,
@@ -761,26 +816,40 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                         b0,
                     )
                 };
-                (
-                    format!("M{} C{} {} {}", p(a0), p(c1), p(c2), p(b0)),
+                let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
+                let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
+                // draw only the middle of the cubic, between the two bases
+                let [q0, q1, q2, q3] = subcubic(
                     a0,
-                    chord_back(a0, c1, c2, b0, false),
+                    c1,
+                    c2,
                     b0,
-                    chord_back(a0, c1, c2, b0, true),
+                    if arrow_start { t0 } else { 0.0 },
+                    if arrow_end { t1 } else { 1.0 },
+                );
+                (
+                    format!("M{} C{} {} {}", p(q0), p(q1), p(q2), p(q3)),
+                    a0,
+                    s_base,
+                    b0,
+                    e_base,
                 )
             }
             _ => {
                 // straight: clip the center-to-center line to each box edge
                 let a0 = edge(a, cb);
                 let b0 = edge(b, ca);
-                (format!("M{} L{}", p(a0), p(b0)), a0, b0, b0, a0)
+                let s = if arrow_start { trim(a0, b0) } else { a0 };
+                let e = if arrow_end { trim(b0, a0) } else { b0 };
+                (format!("M{} L{}", p(s), p(e)), a0, b0, b0, a0)
             }
         };
 
     // Arrowhead as a computed triangle: tip AT the endpoint (no penetration),
     // base midpoint at `adj` (for the curve, an on-curve point at chord distance
     // `size` — so the base sits on the curve; for straight/orthogonal routes, a
-    // point back along the segment).
+    // point back along the segment). The drawn line stops at that base, so the
+    // triangle alone forms the sharp tip.
     let head = |tip: Point, adj: Point| -> Option<String> {
         let (dx, dy) = (tip.x - adj.x, tip.y - adj.y);
         let len = (dx * dx + dy * dy).sqrt();
@@ -799,14 +868,13 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             fmt(base.y - py)
         ))
     };
-    let arrow = node.attribute("arrow").unwrap_or("end");
     let mut heads = String::new();
-    if arrow == "start" || arrow == "both" {
+    if arrow_start {
         if let Some(h) = head(start_tip, start_adj) {
             heads.push_str(&h);
         }
     }
-    if arrow == "end" || arrow == "both" {
+    if arrow_end {
         if let Some(h) = head(end_tip, end_adj) {
             heads.push_str(&h);
         }
@@ -3271,13 +3339,14 @@ mod tests {
             out[out.find("fill=\"none\"").unwrap()..].contains("<path fill=\"#111\""),
             "arrowhead after the route: {out}"
         );
-        // the route ends at b's left edge (x=120), NOT inside it (no penetration)
+        // the line stops at the arrowhead's base (one arrow height back from b's
+        // edge x=120, default size 7), so the stroke never protrudes past the tip
         use xsvg_core::kurbo::Shape;
         let bb = xsvg_core::kurbo::BezPath::from_svg(route_d(&out))
             .unwrap()
             .bounding_box();
         assert!(
-            (bb.x0 - 40.0).abs() < 0.5 && (bb.x1 - 120.0).abs() < 0.5,
+            (bb.x0 - 40.0).abs() < 0.5 && (bb.x1 - 113.0).abs() < 0.5,
             "{bb:?}"
         );
         // the arrowhead is a triangle whose TIP sits exactly on b's edge (x=120)
