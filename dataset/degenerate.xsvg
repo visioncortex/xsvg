@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 590 660" font-family="sans-serif">
+  <rect x="0" y="0" width="590" height="660" fill="#ffffff"/>
   <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">degenerate inputs — must stay sane, never panic</text>
 
   <!-- empty text -->

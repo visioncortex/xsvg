@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 380 280" font-family="sans-serif">
+  <rect x="0" y="0" width="380" height="280" fill="#ffffff"/>
   <text x="20" y="22" font-size="13" font-weight="bold" fill="#0f172a">descenders don't move the baseline</text>
 
   <!-- valign=bottom: the red line is the shared baseline; "Gg" fills the descent below it -->

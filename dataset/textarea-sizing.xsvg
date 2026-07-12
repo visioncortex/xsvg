@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 600 380" font-family="sans-serif">
+  <rect x="0" y="0" width="600" height="380" fill="#ffffff"/>
   <text x="20" y="24" font-size="13" font-weight="bold" fill="#0f172a">&lt;textArea&gt; sizing &amp; line-increment</text>
 
   <!-- width=auto → no wrapping (single line) -->

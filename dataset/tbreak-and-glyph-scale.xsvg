@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 580 320" font-family="sans-serif">
+  <rect x="0" y="0" width="580" height="320" fill="#ffffff"/>
   <text x="20" y="24" font-size="13" font-weight="bold" fill="#0f172a">&lt;tbreak/&gt; forced breaks · x:glyph-x-scale width scaling</text>
 
   <!-- tbreak: an address block that must break exactly where authored -->
