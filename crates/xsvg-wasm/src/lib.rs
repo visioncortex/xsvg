@@ -657,6 +657,52 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     };
     let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
 
+    let stroke = node.attribute("stroke").unwrap_or("#334155");
+    let sw = attr_num(node, "stroke-width", 1.0);
+    let size = attr_num(node, "arrow-size", (sw * 3.5).max(7.0)).max(0.0);
+
+    let cubic_at = |p0: Point, p1: Point, p2: Point, p3: Point, t: f64| -> Point {
+        let mt = 1.0 - t;
+        let (a, b, c, d) = (mt * mt * mt, 3.0 * mt * mt * t, 3.0 * mt * t * t, t * t * t);
+        Point::new(
+            a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+            a * p0.y + b * p1.y + c * p2.y + d * p3.y,
+        )
+    };
+    // Walk the ACTUAL cubic back from the tip endpoint until the straight-line
+    // (chord) distance to the tip equals `size`, and return that on-curve point.
+    // Used as the arrowhead's base midpoint, so the triangle's base sits exactly
+    // on the curve and its axis follows the visible approach — not the control
+    // handle's tangent. `from_end` picks which endpoint is the tip.
+    let chord_back = |p0: Point, p1: Point, p2: Point, p3: Point, from_end: bool| -> Point {
+        let tip = if from_end { p3 } else { p0 };
+        let dist = |q: Point| ((q.x - tip.x).powi(2) + (q.y - tip.y).powi(2)).sqrt();
+        let n = 96;
+        let (mut prev_t, mut prev) = (if from_end { 1.0 } else { 0.0 }, tip);
+        for i in 1..=n {
+            let f = i as f64 / n as f64;
+            let t = if from_end { 1.0 - f } else { f };
+            let pt = cubic_at(p0, p1, p2, p3, t);
+            let d = dist(pt);
+            if d >= size {
+                let dprev = dist(prev);
+                let frac = if (d - dprev).abs() < 1e-9 {
+                    0.0
+                } else {
+                    (size - dprev) / (d - dprev)
+                };
+                return cubic_at(p0, p1, p2, p3, prev_t + (t - prev_t) * frac);
+            }
+            prev_t = t;
+            prev = pt;
+        }
+        if from_end {
+            p0
+        } else {
+            p3
+        } // curve shorter than the arrowhead
+    };
+
     // Each route yields its path plus the two endpoint tangents as (tip, adj)
     // pairs: `adj` is the neighbouring path point, so unit(tip − adj) is the
     // direction the line travels OUT of that end — the way its arrowhead points.
@@ -718,9 +764,9 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 (
                     format!("M{} C{} {} {}", p(a0), p(c1), p(c2), p(b0)),
                     a0,
-                    c1,
+                    chord_back(a0, c1, c2, b0, false),
                     b0,
-                    c2,
+                    chord_back(a0, c1, c2, b0, true),
                 )
             }
             _ => {
@@ -732,11 +778,9 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         };
 
     // Arrowhead as a computed triangle: tip AT the endpoint (no penetration),
-    // base shot back along the tangent by the arrow height, so it follows the
-    // true (curve) tangent and its size is a plain attribute.
-    let stroke = node.attribute("stroke").unwrap_or("#334155");
-    let sw = attr_num(node, "stroke-width", 1.0);
-    let size = attr_num(node, "arrow-size", (sw * 3.5).max(7.0)).max(0.0);
+    // base midpoint at `adj` (for the curve, an on-curve point at chord distance
+    // `size` — so the base sits on the curve; for straight/orthogonal routes, a
+    // point back along the segment).
     let head = |tip: Point, adj: Point| -> Option<String> {
         let (dx, dy) = (tip.x - adj.x, tip.y - adj.y);
         let len = (dx * dx + dy * dy).sqrt();
