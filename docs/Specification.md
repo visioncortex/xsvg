@@ -116,9 +116,9 @@ resolve live.
 ```xml
 <x:theme>
   <x:color name="accent" value="#6366f1"/>
-  <x:type  name="title" font-family="Georgia" font-size="40" font-weight="800" line-height="1.05"/>
+  <x:font  name="title" font-family="Georgia" font-size="40" font-weight="800" line-height="1.05"/>
 </x:theme>
-<text x:type="title" fill="var(accent)">Themed</text>
+<text x:font="title" fill="var(accent)">Themed</text>
 ```
 
 - **Color tokens** — `<x:color name value>`. Referenced from **any paint attribute** (`fill`,
@@ -127,13 +127,13 @@ resolve live.
   every emitted attribute value, so it also reaches standard SVG elements and mesh stops. An unknown
   token uses its fallback, else is left verbatim (renders as the property's initial value, like a
   dangling CSS variable).
-- **Type tokens** — `<x:type name font-family font-size font-weight font-style line-height
-  letter-spacing word-spacing>`. Applied by **`x:type="name"`** on any text element (`<text>`,
-  `<textArea>`, `<x:textbox>`, `<x:list>`, and inherited by `<g x:type>`). It is an **overridable
-  base**: the element's own `font-*` attributes win over the token; unset ones fall to the token,
-  then to the built-in defaults.
+- **Font tokens** — `<x:font name font-family font-size font-weight font-style line-height
+  letter-spacing word-spacing>`, a named CSS-`font`-shorthand-like bundle. Applied by
+  **`x:font="name"`** on any text element (`<text>`, `<textArea>`, `<x:textbox>`, `<x:list>`, and
+  inherited by `<g x:font>`). It is an **overridable base**: the element's own `font-*` attributes
+  win over the token; unset ones fall to the token, then to the built-in defaults.
 
-`<x:theme>` itself compiles to nothing (definitions), and `x:type` is stripped on emit — so an
+`<x:theme>` itself compiles to nothing (definitions), and `x:font` is stripped on emit — so an
 uncompiled document degrades cleanly (§3): a plain viewer just sees whatever literal fills/fonts the
 author also set, or the defaults. Tokens are loaded once per compile; forward references work (a
 `var()` may precede its `<x:theme>`).
@@ -1090,7 +1090,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
 | Inset / outset — `<x:offset in distance join>` Minkowski grow/shrink (stroke⊕boolean, round/miter/bevel), baked reference (§7.7) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
-| Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + type tokens (`x:type` overridable base), degrade-safe (§4.1) | implemented |
+| Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |

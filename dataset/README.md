@@ -76,7 +76,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [theme.xsvg](theme.xsvg) | `<x:theme>` declares a palette of `<x:color>` tokens and a `<x:type>` scale; the page references them with `fill="var(name)"` (accent bar, swatches, button, outlined chip, list markers) and `x:type="name"` (kicker / title / heading / body). Type tokens are an overridable base — a list item overrides `font-size`/`fill` per element. Both resolve at compile time, so a plain viewer never sees a `var()` |
+| [theme.xsvg](theme.xsvg) | `<x:theme>` declares a palette of `<x:color>` tokens and an `<x:font>` type scale; the page references them with `fill="var(name)"` (accent bar, swatches, button, outlined chip, list markers) and `x:font="name"` (kicker / title / heading / body). Font tokens are an overridable base — a list item overrides `font-size`/`fill` per element. Both resolve at compile time, so a plain viewer never sees a `var()` |
 
 ## Connectors — `<x:connector>` (§7.6)
 

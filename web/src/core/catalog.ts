@@ -215,12 +215,12 @@ export const CATALOG: Category[] = [
   },
   {
     name: "Theming — design tokens",
-    note: "<x:theme> compile-time color tokens (var(name) in any paint) + type tokens (x:type, an overridable base) — §4.1.",
+    note: "<x:theme> compile-time color tokens (var(name) in any paint) + font tokens (x:font, an overridable base) — §4.1.",
     samples: [
       {
         file: "theme.xsvg",
         title: "Design tokens",
-        blurb: "a palette of <x:color> tokens and an <x:type> scale referenced by fill=\"var(name)\" (accent bar, swatches, button, list markers) and x:type=\"name\" (kicker/title/heading/body); type tokens are an overridable base, and everything resolves at compile time",
+        blurb: "a palette of <x:color> tokens and an <x:font> scale referenced by fill=\"var(name)\" (accent bar, swatches, button, list markers) and x:font=\"name\" (kicker/title/heading/body); font tokens are an overridable base, and everything resolves at compile time",
       },
     ],
   },

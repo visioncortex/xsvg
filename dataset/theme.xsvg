@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 720 440" font-family="'Helvetica Neue', Arial, sans-serif">
   <!-- x:theme (§4.1): a palette of color tokens + a type scale. Everything below
-       references them — fill="var(name)" for color, x:type="name" for typography —
+       references them — fill="var(name)" for color, x:font="name" for typography —
        and they resolve at compile time. Change a token here and the whole
        document restyles; unknown viewers never see var() (it's already resolved). -->
   <x:theme>
@@ -12,30 +12,30 @@
     <x:color name="accent" value="#6366f1"/>
     <x:color name="teal" value="#0ea5e9"/>
     <x:color name="rose" value="#e11d48"/>
-    <x:type name="kicker" font-size="12" font-weight="700" letter-spacing="2"/>
-    <x:type name="title" font-size="40" font-weight="800" line-height="1.05"/>
-    <x:type name="heading" font-size="18" font-weight="700"/>
-    <x:type name="body" font-size="15" line-height="1.5"/>
+    <x:font name="kicker" font-size="12" font-weight="700" letter-spacing="2"/>
+    <x:font name="title" font-size="40" font-weight="800" line-height="1.05"/>
+    <x:font name="heading" font-size="18" font-weight="700"/>
+    <x:font name="body" font-size="15" line-height="1.5"/>
   </x:theme>
 
   <rect x="0" y="0" width="720" height="440" fill="var(surface)"/>
   <rect x="0" y="0" width="8" height="440" fill="var(accent)"/>
 
-  <text x="56" y="58" x:type="kicker" fill="var(accent)">DESIGN TOKENS</text>
-  <text x="56" y="102" x:type="title" fill="var(ink)">Themed by tokens</text>
-  <x:textbox x="56" y="120" width="364" height="120" x:type="body" fill="var(muted)">Colors and type resolve at compile time. Every fill references var(name); headings and body pull from one shared type scale — edit a token in x:theme and the whole document restyles.</x:textbox>
+  <text x="56" y="58" x:font="kicker" fill="var(accent)">DESIGN TOKENS</text>
+  <text x="56" y="102" x:font="title" fill="var(ink)">Themed by tokens</text>
+  <x:textbox x="56" y="120" width="364" height="120" x:font="body" fill="var(muted)">Colors and type resolve at compile time. Every fill references var(name); headings and body pull from one shared type scale — edit a token in x:theme and the whole document restyles.</x:textbox>
 
   <!-- a themed list: token color + token marker, with a per-item override -->
-  <x:list x="56" y="252" width="364" x:type="body" fill="var(ink)" marker-fill="var(accent)" item-spacing="8">
+  <x:list x="56" y="252" width="364" x:font="body" fill="var(ink)" marker-fill="var(accent)" item-spacing="8">
     <x:li>fill="var(accent)" paints from the palette</x:li>
-    <x:li>x:type="heading" pulls the type scale</x:li>
+    <x:li>x:font="heading" pulls the type scale</x:li>
     <x:li font-size="12" fill="var(muted)">per-element overrides still win over a token</x:li>
   </x:list>
 
   <!-- palette card on the right, itself token-styled -->
   <rect x="452" y="58" width="212" height="212" rx="16" fill="var(panel)"/>
-  <text x="476" y="92" x:type="heading" fill="var(ink)">Palette</text>
-  <g x:type="body" fill="var(ink)">
+  <text x="476" y="92" x:font="heading" fill="var(ink)">Palette</text>
+  <g x:font="body" fill="var(ink)">
     <rect x="476" y="110" width="26" height="26" rx="6" fill="var(accent)"/>
     <text x="514" y="128">accent</text>
     <rect x="476" y="146" width="26" height="26" rx="6" fill="var(teal)"/>
@@ -48,7 +48,7 @@
 
   <!-- a token-filled button + a soft chip -->
   <rect x="452" y="296" width="150" height="48" rx="24" fill="var(accent)"/>
-  <text x="527" y="326" text-anchor="middle" x:type="heading" fill="var(surface)">Accent</text>
+  <text x="527" y="326" text-anchor="middle" x:font="heading" fill="var(surface)">Accent</text>
   <rect x="614" y="296" width="50" height="48" rx="24" fill="none" stroke="var(accent)" stroke-width="2"/>
-  <text x="639" y="326" text-anchor="middle" x:type="heading" fill="var(accent)">•</text>
+  <text x="639" y="326" text-anchor="middle" x:font="heading" fill="var(accent)">•</text>
 </svg>

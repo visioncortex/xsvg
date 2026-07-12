@@ -3373,9 +3373,9 @@ fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
 // ---- helpers ---------------------------------------------------------------
 
 fn style_from(node: roxmltree::Node) -> TextStyle {
-    // A `<x:type>` token (via `x:type="name"`) supplies OVERRIDABLE defaults —
+    // A `<x:font>` token (via `x:font="name"`) supplies OVERRIDABLE defaults —
     // the element's own `font-*` attributes win over the token (§4.1).
-    let tok = type_props(node).unwrap_or_default();
+    let tok = font_props(node).unwrap_or_default();
     let t = |k: &str| tok.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
     let s = |k: &str, d: &str| node.attribute(k).or_else(|| t(k)).unwrap_or(d).to_string();
     let num = |k: &str, d: f64| {
@@ -3550,13 +3550,14 @@ const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 // ---- Theming (§4.1): compile-time color & type tokens ---------------------
 
 /// A `<x:theme>`'s tokens, loaded once per compile. `colors` map a name to any
-/// paint value (referenced as `var(name)`); `types` map a name to an ordered set
-/// of font-ish properties applied as an OVERRIDABLE base on text carrying
-/// `x:type="name"` (the element's own `font-*` wins).
+/// paint value (referenced as `var(name)`); `fonts` map a name to an ordered set
+/// of font-ish properties (a CSS-`font`-shorthand-like bundle) applied as an
+/// OVERRIDABLE base on text carrying `x:font="name"` (the element's own `font-*`
+/// wins).
 #[derive(Default)]
 struct Theme {
     colors: std::collections::HashMap<String, String>,
-    types: std::collections::HashMap<String, Vec<(String, String)>>,
+    fonts: std::collections::HashMap<String, Vec<(String, String)>>,
 }
 
 thread_local! {
@@ -3565,8 +3566,8 @@ thread_local! {
     static THEME: std::cell::RefCell<Theme> = std::cell::RefCell::new(Theme::default());
 }
 
-/// The font-ish properties an `<x:type>` token may carry.
-const TYPE_PROPS: [&str; 7] = [
+/// The font-ish properties an `<x:font>` token may carry.
+const FONT_PROPS: [&str; 7] = [
     "font-family",
     "font-size",
     "font-weight",
@@ -3576,7 +3577,7 @@ const TYPE_PROPS: [&str; 7] = [
     "word-spacing",
 ];
 
-/// Load `<x:theme>`'s `<x:color>` / `<x:type>` tokens into [`THEME`] (clearing any
+/// Load `<x:theme>`'s `<x:color>` / `<x:font>` tokens into [`THEME`] (clearing any
 /// prior compile's). Called once before serialization.
 fn load_theme(doc: &roxmltree::Document) {
     let mut theme = Theme::default();
@@ -3591,13 +3592,13 @@ fn load_theme(doc: &roxmltree::Document) {
                         theme.colors.insert(name.to_string(), val.to_string());
                     }
                 }
-                "type" => {
+                "font" => {
                     if let Some(name) = c.attribute("name") {
-                        let props = TYPE_PROPS
+                        let props = FONT_PROPS
                             .iter()
                             .filter_map(|&p| c.attribute(p).map(|v| (p.to_string(), v.to_string())))
                             .collect();
-                        theme.types.insert(name.to_string(), props);
+                        theme.fonts.insert(name.to_string(), props);
                     }
                 }
                 _ => {}
@@ -3645,10 +3646,10 @@ fn resolve_var(v: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
-/// The `<x:type>` token's font properties named by an element's `x:type`, if any.
-fn type_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
-    let name = node.attribute((XSVG_NS, "type"))?;
-    THEME.with(|t| t.borrow().types.get(name).cloned())
+/// The `<x:font>` token's properties named by an element's `x:font`, if any.
+fn font_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
+    let name = node.attribute((XSVG_NS, "font"))?;
+    THEME.with(|t| t.borrow().fonts.get(name).cloned())
 }
 
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
@@ -3673,10 +3674,10 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
         push_escaped(out, &resolve_var(attr.value()), true);
         out.push('"');
     }
-    // Type token (§4.1): apply the named `<x:type>`'s font props the element did
-    // not set itself — an overridable base. (Only fires when `x:type` is present;
+    // Font token (§4.1): apply the named `<x:font>`'s props the element did not
+    // set itself — an overridable base. (Only fires when `x:font` is present;
     // harmless on non-text elements, which ignore font-*.)
-    if let Some(props) = type_props(node) {
+    if let Some(props) = font_props(node) {
         for (k, v) in props {
             if node.attribute(k.as_str()).is_none() && !skip.contains(&k.as_str()) {
                 out.push(' ');
@@ -4088,9 +4089,9 @@ mod tests {
     }
 
     #[test]
-    fn theme_type_token_is_an_overridable_base() {
+    fn theme_font_token_is_an_overridable_base() {
         let svg = format!(
-            r##"{XW}<x:theme><x:type name="title" font-family="Georgia" font-size="40" font-weight="700"/></x:theme><text x="0" y="20" x:type="title">Hi</text><text x="0" y="60" x:type="title" font-size="18">Small</text></svg>"##
+            r##"{XW}<x:theme><x:font name="title" font-family="Georgia" font-size="40" font-weight="700"/></x:theme><text x="0" y="20" x:font="title">Hi</text><text x="0" y="60" x:font="title" font-size="18">Small</text></svg>"##
         );
         let out = compile_test(&svg);
         assert!(
@@ -4105,7 +4106,7 @@ mod tests {
             out.contains("font-size=\"18\""),
             "element font-size overrides the token: {out}"
         );
-        assert!(!out.contains("x:type"), "x:type is stripped: {out}");
+        assert!(!out.contains("x:font"), "x:font is stripped: {out}");
     }
 
     #[test]
