@@ -1393,7 +1393,6 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let fill = node.attribute("fill").unwrap_or("#111827");
     let pos = pos_attr(node, ctx);
     let size = style.size;
-    let advance = size * style.line_height;
 
     // Block geometry: an `in="#rect"` reference (its bbox), else x/y/width; the
     // height (rect bbox or explicit `height`) is only used for vertical align.
@@ -1435,7 +1434,8 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         size: f64, // per-item font size (defaults to the list's)
     }
     let mut items: Vec<Item> = Vec::new();
-    let mut rel = 0.0; // running baseline in the relative frame
+    let mut last_baseline = 0.0; // baseline of the last line placed (relative frame)
+    let mut first = true;
     for li in node
         .children()
         .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
@@ -1479,30 +1479,36 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             },
         };
 
+        // the gap INTO this item uses THIS item's leading (item_advance), so a
+        // smaller item tucks up under its parent instead of inheriting the
+        // previous — larger — item's line height
+        let first_baseline = if first {
+            0.0
+        } else {
+            last_baseline + item_advance + item_spacing
+        };
         let lines = if text.trim().is_empty() {
             Vec::new()
         } else {
-            layout_flow(&text, &item_style, text_x, rel, max_w, m)
+            layout_flow(&text, &item_style, text_x, first_baseline, max_w, m)
         };
-        let span = lines.len().max(1) as f64 * item_advance;
+        last_baseline = lines.last().map(|l| l.baseline).unwrap_or(first_baseline);
         items.push(Item {
             col,
             marker,
             lines,
             size: item_size,
         });
-        rel += span + item_spacing;
+        first = false;
     }
 
-    // Block height = first cap-top → last descent. In the relative frame the
-    // first baseline is 0, and the last line's baseline works out to
-    // rel − item_spacing − advance (the trailing item-spacing and the last
-    // item's own first-line offset cancel). Place per `valign` within the
-    // available height (top otherwise).
+    // Block height = first cap-top → last descent. In the relative frame the first
+    // baseline is 0 (so cap-top is −cap_height) and the last baseline is
+    // `last_baseline`. Place per `valign` within the available height (top else).
     let block_h = if items.is_empty() {
         0.0
     } else {
-        (rel - item_spacing - advance) + fm.cap_height + fm.descent
+        last_baseline + fm.cap_height + fm.descent
     };
     let block_top = match (valign, avail_h) {
         (VAlign::Middle, Some(h)) => y + (h - block_h) / 2.0,
