@@ -170,7 +170,8 @@ group's bounding box.
 
 **Tooling.** The bundled tools treat artboards as **slides**: the standalone preview shows a
 `‹ ›` nav with a slide counter when a document has multiple artboards, paging by reframing the SVG
-`viewBox` to each frame; the interactive viewer **zooms to the first artboard** on load. Both read
+`viewBox` to each frame (deep-linkable with a 1-based `#n` URL hash); the interactive viewer
+**zooms to the first artboard** on load. Both read
 the frames from the emitted `data-` attributes (`web/src/core/artboards.ts`). The compiler itself
 only tags and passes through — artboards do not reorder or clip content.
 

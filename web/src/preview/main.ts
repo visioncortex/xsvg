@@ -71,7 +71,13 @@ function setupDeck(svg: SVGSVGElement): void {
     if (e.key === "ArrowLeft" || e.key === "PageUp") show(i - 1);
     else if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") show(i + 1);
   });
-  show(0);
+  // Deep-link to a slide with a 1-based #hash (e.g. …#3), and follow hash changes.
+  const fromHash = () => {
+    const n = parseInt(location.hash.slice(1), 10);
+    return Number.isFinite(n) ? n - 1 : 0;
+  };
+  window.addEventListener("hashchange", () => show(fromHash()));
+  show(fromHash());
 }
 
 void (async () => {

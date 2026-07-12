@@ -1,58 +1,205 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 3240 405" font-family="'Helvetica Neue', Arial, sans-serif">
-  <!-- Four artboards (slides): each is a plain <g> tagged x:artboard with an
-       explicit x:frame, its content authored in local 0..720 space and placed
-       by a translate — so slides sit 720 apart with a 120-unit gutter between
-       them. In any viewer they render side by side with a transparent gutter
-       between; the preview pages through them, the viewer zooms to the first.
-       The tagging is ignorable x: attributes, so the file never breaks. -->
+     viewBox="0 0 6600 405" font-family="'Helvetica Neue', Arial, sans-serif">
+  <!-- An eight-slide deck in one file: each slide is a <g x:artboard> with an
+       explicit x:frame, authored in local 0..720 space and placed by a translate
+       (slides sit 720 apart with a 120-unit gutter). Every slide showcases a
+       real xsvg extension LIVE — lists, textbox flow, type on a path, warps,
+       mesh gradients, connectors, boolean algebra. In a plain viewer the slides
+       render side by side; the preview pages through them, the viewer zooms to
+       the first. The x: tagging is ignorable, so the file never breaks. -->
+
+  <!-- 1 — Title: a mesh-gradient hero band over a dark cover -->
   <g x:artboard="Title" x:frame="0 0 720 405">
-    <rect x="0" y="0" width="720" height="405" fill="#0f172a"/>
-    <rect x="0" y="330" width="720" height="6" fill="#38bdf8"/>
-    <text x="60" y="180" font-size="58" font-weight="800" fill="#f8fafc">xsvg decks</text>
-    <text x="62" y="230" font-size="22" fill="#94a3b8">artboards are slides — one file, paged by the preview</text>
-    <text x="60" y="372" font-size="15" fill="#38bdf8">▸ press the arrows to advance</text>
+    <rect x="0" y="0" width="720" height="405" fill="#0b1020"/>
+    <x:mesh points="0,0 360,0 720,0 0,170 360,170 720,170">
+      <x:face v="0 1 4 3" fill="#6366f1 #8b5cf6 #ec4899 #6366f1"/>
+      <x:face v="1 2 5 4" fill="#8b5cf6 #38bdf8 #22d3ee #ec4899"/>
+    </x:mesh>
+    <text x="56" y="268" font-size="78" font-weight="800" fill="#f8fafc">xsvg</text>
+    <text x="60" y="312" font-size="22" fill="#94a3b8">an XML graphics format that compiles to plain SVG</text>
+    <text x="60" y="376" font-size="15" fill="#38bdf8">▸ the text layout, warps &amp; gradient meshes SVG never got</text>
   </g>
 
-  <g x:artboard="Agenda" x:frame="840 0 720 405" transform="translate(840,0)">
+  <!-- 2 — The pitch: a bulleted <x:list> -->
+  <g x:artboard="Why" x:frame="840 0 720 405" transform="translate(840,0)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
-    <rect x="0" y="0" width="10" height="405" fill="#6366f1"/>
-    <text x="60" y="86" font-size="30" font-weight="700" fill="#0f172a">What ships in v0</text>
-    <x:list x="60" y="118" width="600" list="bullet" marker="disc" marker-fill="#6366f1"
-            font-size="20" line-height="1.35" item-spacing="11" fill="#334155">
-      <x:li>Text layout — wrap, fit, justify, flow into any shape</x:li>
+    <rect x="0" y="0" width="8" height="405" fill="#6366f1"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#6366f1">THE PITCH</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">One file. Every feature.</text>
+    <x:list x="56" y="150" width="600" list="bullet" marker="disc" marker-fill="#6366f1"
+            font-size="20" line-height="1.35" item-spacing="12" fill="#334155">
+      <x:li>Every x: extension degrades to plain SVG — unknown viewers just skip it</x:li>
+      <x:li>Text that wraps, fits, justifies, and flows into any shape</x:li>
       <x:li>Warps, mesh gradients, boolean path algebra</x:li>
-      <x:li>Connectors, layers, and these very artboards</x:li>
-      <x:li>Bulleted &amp; numbered lists with hanging indents</x:li>
-      <x:li indent="1">…exactly like the slide you're reading</x:li>
+      <x:li>Connectors, layers, and these very slides</x:li>
+      <x:li indent="1">…authored in plain XML, compiled ahead of time</x:li>
     </x:list>
   </g>
 
-  <g x:artboard="Chart" x:frame="1680 0 720 405" transform="translate(1680,0)">
+  <!-- 3 — Text layout: justify + shape-bound region flow -->
+  <g x:artboard="Text" x:frame="1680 0 720 405" transform="translate(1680,0)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
-    <text x="60" y="80" font-size="30" font-weight="700" fill="#0f172a">Quarterly growth</text>
-    <g fill="#6366f1">
-      <rect x="80" y="300" width="70" height="40"/>
-      <rect x="190" y="250" width="70" height="90"/>
-      <rect x="300" y="190" width="70" height="150"/>
-      <rect x="410" y="120" width="70" height="220"/>
-      <rect x="520" y="150" width="70" height="190"/>
-    </g>
-    <line x1="60" y1="340" x2="640" y2="340" stroke="#cbd5e1" stroke-width="2"/>
-    <g font-size="15" fill="#64748b" text-anchor="middle">
-      <text x="115" y="366">Q1</text>
-      <text x="225" y="366">Q2</text>
-      <text x="335" y="366">Q3</text>
-      <text x="445" y="366">Q4</text>
-      <text x="555" y="366">Q5</text>
-    </g>
+    <rect x="0" y="0" width="8" height="405" fill="#0ea5e9"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#0ea5e9">TEXT LAYOUT</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Wrap · fit · justify · flow</text>
+
+    <!-- tile 1: full justification -->
+    <text x="56" y="152" font-size="11" fill="#64748b">align="justify"</text>
+    <x:textbox x="56" y="162" width="200" height="184" align="justify" valign="top"
+               font-size="12.5" line-height="1.5" fill="#334155">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — live, selectable tspans.</x:textbox>
+
+    <!-- tile 2: shrink-to-fit — the same box, text autosized down until it fits -->
+    <text x="272" y="152" font-size="11" fill="#64748b">fit="shrink" — autosized to the box</text>
+    <rect x="272" y="162" width="200" height="184" rx="8" fill="#f1f5f9"/>
+    <x:textbox x="272" y="162" width="200" height="184" align="center" valign="middle"
+               fit="shrink" fit-min="10" font-size="60" line-height="1.15" font-weight="700"
+               fill="#0ea5e9">This whole sentence shrinks until it fits.</x:textbox>
+
+    <!-- tile 3: flow inside any shape's outline -->
+    <text x="488" y="152" font-size="11" fill="#64748b">in="#circle" — flow in a shape</text>
+    <circle id="flow3" cx="576" cy="256" r="86" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="2"/>
+    <x:textbox in="#flow3" align="center" valign="middle" padding="16"
+               font-size="13" line-height="1.4" fill="#075985">text flows inside any outline — here, a circle</x:textbox>
   </g>
 
-  <g x:artboard="Thanks" x:frame="2520 0 720 405" transform="translate(2520,0)">
-    <rect x="0" y="0" width="720" height="405" fill="#111827"/>
-    <circle cx="360" cy="150" r="52" fill="none" stroke="#34d399" stroke-width="6"/>
-    <path d="M335,150 l18,18 l34,-40" fill="none" stroke="#34d399" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="360" y="270" text-anchor="middle" font-size="40" font-weight="800" fill="#f9fafb">Thank you</text>
-    <text x="360" y="312" text-anchor="middle" font-size="18" fill="#9ca3af">questions? hello@visioncortex.org</text>
+  <!-- 4 — Type on a path: rainbow deform + native follow -->
+  <g x:artboard="Path" x:frame="2520 0 720 405" transform="translate(2520,0)">
+    <rect x="0" y="0" width="720" height="405" fill="#0f172a"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6">TYPE ON A PATH</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#f8fafc">Type rides the curve</text>
+    <path id="arc4" d="M70,250 C210,150 470,150 650,250" fill="none" stroke="#334155" stroke-width="2"/>
+    <x:textpath in="#arc4" effect="rainbow" align="middle"
+                font-family="-x-google-Anton" font-size="46" fill="#38bdf8">RAINBOW</x:textpath>
+    <path id="fol4" d="M70,330 C260,290 470,360 650,320" fill="none" stroke="#1e293b" stroke-width="2"/>
+    <x:textpath in="#fol4" effect="follow" align="middle" baseline-shift="7"
+                font-size="19" fill="#4ade80">…and native follow keeps it live &amp; selectable</x:textpath>
+  </g>
+
+  <!-- 5 — Envelope warps: presets baked to plain paths -->
+  <g x:artboard="Warp" x:frame="3360 0 720 405" transform="translate(3360,0)">
+    <rect x="0" y="0" width="720" height="405" fill="#faf5ff"/>
+    <rect x="0" y="0" width="8" height="405" fill="#a855f7"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#a855f7">ENVELOPE WARPS</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Bend the geometry</text>
+
+    <!-- a plain square grid, bulged by a fisheye lens -->
+    <text x="86" y="156" font-size="12" fill="#6b7280">field="fisheye" — a grid through a lens</text>
+    <rect x="86" y="168" width="200" height="160" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1"/>
+    <x:warp field="fisheye" bend="62">
+      <path fill="none" stroke="#7c3aed" stroke-width="2.5" d="M96,178 L96,318 M121,178 L121,318 M146,178 L146,318 M171,178 L171,318 M196,178 L196,318 M221,178 L221,318 M246,178 L246,318 M271,178 L271,318 M96,178 L271,178 M96,201 L271,201 M96,224 L271,224 M96,248 L271,248 M96,271 L271,271 M96,294 L271,294 M96,318 L271,318"/>
+    </x:warp>
+
+    <!-- a filled star, swirled by twist -->
+    <text x="420" y="156" font-size="12" fill="#6b7280">field="twist" — a star given a swirl</text>
+    <x:warp field="twist" bend="58">
+      <polygon fill="#db2777" points="520,180 539,224 587,227 549,257 562,304 520,278 478,304 491,257 453,227 501,224"/>
+    </x:warp>
+
+    <x:textbox x="56" y="338" width="600" height="54" font-size="15" line-height="1.35" fill="#6b21a8">arbitrary geometry — paths, polygons, shapes — bent by arc, bulge, wave, twist, fisheye, and baked to static paths</x:textbox>
+  </g>
+
+  <!-- 6 — Mesh gradients: a full-bleed abstract wallpaper — one 4×3 mesh whose
+       dozen corner colors blend smoothly across the whole slide (Big Sur style) -->
+  <g x:artboard="Mesh" x:frame="4200 0 720 405" transform="translate(4200,0)">
+    <!-- a real SVG2 meshgradient: a dense 3×3 grid of Coons patches with CURVED
+         interior edges and many colour poles (blue, cyan, magenta, pink, violet)
+         pooling in different regions — the multi-focal iridescence no linear or
+         radial gradient can express, and no browser draws. xsvg bakes it. -->
+    <defs>
+      <meshgradient id="ridge6" x="0" y="0">
+        <meshrow>
+          <meshpatch>
+            <stop path="l 240,0" stop-color="#3b82f6"/>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#6366f1"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#8b5cf6"/>
+            <stop path="l 0,-135" stop-color="#22d3ee"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="l 240,0" stop-color="#d946ef"/>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#ec4899"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#8b5cf6"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="l 240,0" stop-color="#7c3aed"/>
+            <stop path="l 0,135" stop-color="#3b82f6"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#ec4899"/>
+          </meshpatch>
+        </meshrow>
+        <meshrow>
+          <meshpatch>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#e935c1"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#2563eb"/>
+            <stop path="l 0,-135" stop-color="#22d3ee"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#06b6d4"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#e935c1"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="l 0,135" stop-color="#a855f7"/>
+            <stop path="c -80,30 -160,-30 -240,0" stop-color="#06b6d4"/>
+          </meshpatch>
+        </meshrow>
+        <meshrow>
+          <meshpatch>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#7c3aed"/>
+            <stop path="l -240,0" stop-color="#1e40af"/>
+            <stop path="l 0,-135" stop-color="#2563eb"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="c 30,45 -30,90 0,135" stop-color="#c026d3"/>
+            <stop path="l -240,0" stop-color="#7c3aed"/>
+          </meshpatch>
+          <meshpatch>
+            <stop path="l 0,135" stop-color="#4c1d95"/>
+            <stop path="l -240,0" stop-color="#c026d3"/>
+          </meshpatch>
+        </meshrow>
+      </meshgradient>
+    </defs>
+    <rect x="0" y="0" width="720" height="405" fill="url(#ridge6)"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#c7d2fe">MESH GRADIENTS</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#ffffff">Smooth by nature</text>
+    <x:textbox x="56" y="342" width="620" height="54" font-size="15" line-height="1.35" fill="#e0e7ff">a real SVG 2 meshgradient — many colour poles on curved Coons patches; no linear or radial gradient can do this, and no browser draws it</x:textbox>
+  </g>
+
+  <!-- 7 — Diagrams: connectors between boxes + boolean union -->
+  <g x:artboard="Diagram" x:frame="5040 0 720 405" transform="translate(5040,0)">
+    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+    <rect x="0" y="0" width="8" height="405" fill="#16a34a"/>
+    <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a">DIAGRAMS</text>
+    <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Connectors &amp; path algebra</text>
+    <rect id="n1" x="70" y="170" width="130" height="60" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="135" y="205" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Author</text>
+    <rect id="n2" x="295" y="170" width="130" height="60" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="360" y="205" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Compile</text>
+    <rect id="n3" x="520" y="170" width="130" height="60" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="585" y="205" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Plain SVG</text>
+    <x:connector from="#n1" to="#n2" arrow="end" stroke="#475569" stroke-width="2"/>
+    <x:connector from="#n2" to="#n3" arrow="end" stroke="#475569" stroke-width="2"/>
+    <text x="72" y="290" font-size="12" fill="#64748b">op="union" — three circles, one outline</text>
+    <x:boolean op="union" fill="#dcfce7" stroke="#16a34a" stroke-width="2">
+      <circle cx="122" cy="352" r="30"/>
+      <circle cx="167" cy="340" r="38"/>
+      <circle cx="214" cy="353" r="28"/>
+    </x:boolean>
+    <text x="300" y="336" font-size="16" fill="#334155">Routes re-derive when a box moves.</text>
+    <text x="300" y="364" font-size="16" fill="#334155">Booleans bake to one plain path.</text>
+  </g>
+
+  <!-- 8 — Closing: a numbered <x:list> call-to-action -->
+  <g x:artboard="Ship it" x:frame="5880 0 720 405" transform="translate(5880,0)">
+    <rect x="0" y="0" width="720" height="405" fill="#0b1020"/>
+    <rect x="0" y="330" width="720" height="6" fill="#38bdf8"/>
+    <circle cx="96" cy="118" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
+    <path d="M80,118 l12,12 l22,-26" fill="none" stroke="#34d399" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="152" y="130" font-size="46" font-weight="800" fill="#f8fafc">Ship it.</text>
+    <x:list x="154" y="176" width="500" list="number" marker-fill="#38bdf8"
+            font-size="19" line-height="1.4" item-spacing="10" fill="#cbd5e1">
+      <x:li>Write plain XML with x: extensions</x:li>
+      <x:li>Compile ahead of time to the static SVG subset</x:li>
+      <x:li>Ship one self-contained file — no runtime, no editor</x:li>
+    </x:list>
+    <text x="154" y="372" font-size="16" fill="#64748b">xsvg — hello@visioncortex.org</text>
   </g>
 </svg>
