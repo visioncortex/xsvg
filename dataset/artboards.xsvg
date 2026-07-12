@@ -191,15 +191,18 @@
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a">DIAGRAMS</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Connectors &amp; path algebra</text>
 
-    <!-- pipeline flow: connectors re-route from box anchors, arrowheads baked -->
-    <rect id="n1" x="70" y="146" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <text x="135" y="179" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Author</text>
-    <rect id="n2" x="295" y="146" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <text x="360" y="179" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Compile</text>
-    <rect id="n3" x="520" y="146" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <text x="585" y="179" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Plain SVG</text>
-    <x:connector from="#n1" to="#n2" arrow="end" stroke="#475569" stroke-width="2"/>
-    <x:connector from="#n2" to="#n3" arrow="end" stroke="#475569" stroke-width="2"/>
+    <!-- pipeline flow: the Compile box sits lower so the two connectors can show
+         off different routes — an orthogonal rail in, a smooth curve out -->
+    <rect id="n1" x="70" y="138" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="135" y="171" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Author</text>
+    <rect id="n2" x="295" y="182" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="360" y="215" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Compile</text>
+    <rect id="n3" x="520" y="138" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="585" y="171" font-size="15" font-weight="600" fill="#3730a3" text-anchor="middle">Plain SVG</text>
+    <x:connector from="#n1" to="#n2" route="x-major" arrow="end" stroke="#475569" stroke-width="2"/>
+    <text x="240" y="150" font-size="10" fill="#94a3b8" text-anchor="middle">route="x-major"</text>
+    <x:connector from="#n2" to="#n3" route="curve" arrow="end" stroke="#475569" stroke-width="2"/>
+    <text x="480" y="150" font-size="10" fill="#94a3b8" text-anchor="middle">route="curve"</text>
 
     <!-- path algebra gallery: four operands-in / one-plain-path-out demos -->
     <text x="56" y="248" font-size="13" fill="#64748b">Path algebra &amp; offset — operands in, one plain path out</text>
@@ -212,12 +215,16 @@
     </x:boolean>
 
     <text x="256" y="288" font-size="11" fill="#94a3b8">op="subtract"</text>
+    <circle cx="278" cy="352" r="34" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
+    <circle cx="300" cy="343" r="30" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="subtract" fill="#16a34a">
       <circle cx="278" cy="352" r="34"/>
       <circle cx="300" cy="343" r="30"/>
     </x:boolean>
 
     <text x="418" y="288" font-size="11" fill="#94a3b8">op="intersect"</text>
+    <circle cx="444" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
+    <circle cx="486" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="intersect" fill="#15803d" stroke="#86efac" stroke-width="2">
       <circle cx="444" cy="352" r="38"/>
       <circle cx="486" cy="352" r="38"/>
