@@ -18,7 +18,7 @@
     </x:mesh>
     <text x="56" y="268" font-size="78" font-weight="800" fill="#f8fafc">xsvg</text>
     <text x="60" y="312" font-size="22" fill="#94a3b8">an XML graphics format that compiles to plain SVG</text>
-    <text x="60" y="376" font-size="15" fill="#38bdf8">▸ the text layout, warps &amp; gradient meshes SVG never got</text>
+    <text x="60" y="376" font-size="15" fill="#38bdf8">▸ the text layout, live diagrams &amp; mesh gradients SVG never shipped</text>
   </g>
 
   <!-- 2 — The pitch: a bulleted <x:list> -->
