@@ -78,6 +78,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`, size via `arrow-size`) are computed triangles tinted to the stroke — tip exactly on the box edge, with the base midpoint sampled **on the route** one arrow-height back (on a curve it lies on the curve) and the line **trimmed to that base** so the stroke never protrudes past the sharp tip; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
 
+## Inset / outset — `<x:offset>` (§7.7)
+
+| File | Shows |
+|---|---|
+| [offset.xsvg](offset.xsvg) | `<x:offset in distance join>` grows (`+`) or shrinks (`−`) a referenced region by a Minkowski offset (stroke the boundary by `2·distance`, then union/subtract — no new dependency). Stress cases: concentric ripples (one blob offset ×2 out + once in), a **self-intersecting pentagram** (`evenodd`) outset with the union cleaning up the overlaps, a spiky star inset **and** outset tracing every point and notch, and stacked outsets behind outlined text making a sticker halo. Baked references — edit the source and every ring re-flows |
+
 ## Lists — `<x:list>` / `<x:li>` (§6.14)
 
 | File | Shows |

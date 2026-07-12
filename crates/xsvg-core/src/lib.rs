@@ -5,11 +5,13 @@
 
 pub mod boolean;
 pub mod filter;
+pub mod offset;
 pub mod text;
 pub mod warp;
 
 pub use boolean::*;
 pub use filter::*;
+pub use offset::*;
 pub use text::*;
 pub use warp::*;
 

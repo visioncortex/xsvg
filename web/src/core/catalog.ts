@@ -209,6 +209,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Inset & outset — path offsetting",
+    note: "<x:offset in distance join> — grow/shrink a region by a Minkowski offset, baked to one <path> (§7.7).",
+    samples: [
+      {
+        file: "offset.xsvg",
+        title: "Inset & outset",
+        blurb: "concentric ripples from one blob, a self-intersecting pentagram outset (evenodd, overlaps cleaned by the boolean pass), a spiky star inset and outset, and stacked outsets behind outlined text as a sticker halo — round/miter/bevel joins, all baked references",
+      },
+    ],
+  },
+  {
     name: "Lists & indentation",
     note: "<x:list list='bullet|number'> with <x:li indent='N'> — hanging-indent items with cycling markers and outline counters (§6.14).",
     samples: [

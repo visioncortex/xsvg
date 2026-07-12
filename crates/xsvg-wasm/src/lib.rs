@@ -17,12 +17,12 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     boolean_svg_paths, filter_primitives, layout_area_measured, layout_flow, layout_region,
-    layout_text_area_runs, line_advance, measure_runs, parse_filter_functions, run_offset,
-    svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor, AreaLayout, AreaSpec,
-    BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FreeDistort,
-    GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine,
-    QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper, TextAlign,
-    TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    layout_text_area_runs, line_advance, measure_runs, offset_svg_paths, parse_filter_functions,
+    run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor, AreaLayout,
+    AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset, Field, Fit,
+    FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame,
+    PlacedLine, QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper,
+    TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -891,6 +891,61 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str(&heads); // arrowheads paint on top of the line
 }
 
+/// `<x:offset in="#id" distance="d" join="round|miter|bevel">` (§7.7): grow
+/// (positive `distance`) or shrink (negative) the referenced region by a
+/// Minkowski offset, baked to one plain `<path>`. Like `<x:boolean>`, it is a
+/// compile-time reference: `in` resolves to the target's compiled geometry, so
+/// editing the target re-emits the offset (`baked_refs` already covers `in`).
+fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    use xsvg_core::kurbo::Join;
+    let Some(reference) = node.attribute("in") else {
+        out.push_str("<!-- xsvg: <x:offset> requires in=\"#id\" -->");
+        return;
+    };
+    let d = match ref_geometry(node, reference, ctx) {
+        Ok(d) => d,
+        Err(f) => {
+            out.push_str(&format!(
+                "<!-- xsvg: <x:offset in> target not found or not geometry ({}) -->",
+                f.reason()
+            ));
+            return;
+        }
+    };
+    let distance = attr_num(node, "distance", 0.0);
+    let join = match node.attribute("join") {
+        Some("miter") => Join::Miter,
+        Some("bevel") => Join::Bevel,
+        _ => Join::Round, // round = the true disc offset
+    };
+    let miter_limit = attr_num(node, "miter-limit", 4.0);
+    let even_odd = node.attribute("fill-rule") == Some("evenodd");
+    let skip = &["in", "distance", "join", "miter-limit"];
+    match offset_svg_paths(
+        &[&d],
+        distance,
+        join,
+        miter_limit,
+        even_odd,
+        ctx.quality.tolerance(),
+    ) {
+        Some(od) if !od.is_empty() => {
+            out.push_str("<path");
+            copy_attrs(node, out, skip);
+            out.push_str(&pos_attr(node, ctx));
+            out.push_str(&format!(" d=\"{od}\"/>"));
+        }
+        Some(_) => {
+            // legitimately empty (e.g. an inset larger than the region)
+            out.push_str("<g");
+            copy_attrs(node, out, skip);
+            out.push_str(&pos_attr(node, ctx));
+            out.push_str("/>");
+        }
+        None => out.push_str("<!-- xsvg: <x:offset> no usable geometry -->"),
+    }
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -948,6 +1003,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "boolean" => emit_boolean(node, out, ctx),
             "mesh" => emit_mesh(node, out, ctx),
             "connector" => emit_connector(node, out, ctx),
+            "offset" => emit_offset(node, out, ctx),
             "list" => emit_list(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
@@ -3724,6 +3780,64 @@ mod tests {
         let deps = dependents_impl(&svg, offs[0]); // edit #a
         assert_eq!(deps.len(), 1, "{deps:?}");
         assert_eq!(deps[0].0, offs[2], "the connector re-emits: {deps:?}");
+    }
+
+    #[test]
+    fn offset_outsets_a_referenced_rect_and_is_baked() {
+        use xsvg_core::kurbo::Shape;
+        let svg = format!(
+            r##"{XW}<rect id="r" x="10" y="10" width="40" height="40"/><x:offset in="#r" distance="6" join="miter" fill="#111"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("<path fill=\"#111\""),
+            "offset emits a plain path: {out}"
+        );
+        // a miter outset grows the 40×40 rect by 6 on every side → bbox [4,4]..[56,56]
+        let d = out
+            .rsplit(" d=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let bb = xsvg_core::kurbo::BezPath::from_svg(d)
+            .unwrap()
+            .bounding_box();
+        assert!(
+            (bb.x0 - 4.0).abs() < 0.7
+                && (bb.y0 - 4.0).abs() < 0.7
+                && (bb.x1 - 56.0).abs() < 0.7
+                && (bb.y1 - 56.0).abs() < 0.7,
+            "grown bbox {bb:?}"
+        );
+        // baked reference: editing #r re-emits the offset
+        let offs = top_level_offsets(&svg);
+        let deps = dependents_impl(&svg, offs[0]);
+        assert_eq!(deps.len(), 1, "{deps:?}");
+        assert_eq!(
+            deps[0].0, offs[1],
+            "the offset re-emits when #r changes: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn offset_inset_and_degradations() {
+        // an inset larger than the region's half-thickness legitimately empties
+        let svg = format!(
+            r##"{XW}<rect id="r" x="0" y="0" width="40" height="40"/><x:offset in="#r" distance="-30" fill="#111"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            !out.contains("<path fill=\"#111\""),
+            "over-inset produces no filled offset path: {out}"
+        );
+        // a missing reference degrades with a marker, never a panic
+        let svg = format!(r##"{XW}<x:offset in="#nope" distance="4"/></svg>"##);
+        assert!(
+            compile_test(&svg).contains("<!-- xsvg: <x:offset"),
+            "missing ref → marker"
+        );
     }
 
     #[test]

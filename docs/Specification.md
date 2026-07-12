@@ -864,6 +864,37 @@ The drawn line is then **trimmed to that base** (the cubic is split with de Cast
 orthogonal segments are shortened by `arrow-size`), so the stroke never protrudes past the sharp
 tip regardless of its width.
 
+### 7.7 Inset / outset — `<x:offset>` [implemented]
+
+`<x:offset in="#id" distance="d">` grows (positive `distance`) or shrinks (negative) a referenced
+region by a **Minkowski offset** — the "Offset Path" (Illustrator) / "Inset & Outset" (Inkscape)
+operation SVG never got. Like `<x:boolean>` / `<x:connector>` it is a **baked reference**: `in`
+resolves to the target's compiled geometry (a shape, a group, or an `x:` element's output —
+referenced text auto-outlines, §4), so editing the target re-emits the offset. It lowers to one
+plain `<path>`.
+
+```xml
+<x:offset in="#logo" distance="6" join="round"/>    <!-- outset 6 -->
+<x:offset in="#logo" distance="-4" join="miter"/>   <!-- inset 4 -->
+```
+
+| Attribute | Values | Meaning |
+|---|---|---|
+| `in` | `#id` | the region to offset (baked reference, §4) |
+| `distance` | length | **+** outsets (grows), **−** insets (shrinks) |
+| `join` | `round` *(default)* / `miter` / `bevel` | corner style — `round` is the true disc offset, `miter` keeps corners sharp (to the limit), `bevel` cuts them flat |
+| `miter-limit` | number (default `4`) | miter → bevel fallback threshold |
+| `fill-rule` | `nonzero` *(default)* / `evenodd` | how the region's contours combine before offsetting |
+
+**How (normative).** No new dependency — it composes the two robust primitives already here. The
+region's boundary is **stroked** by `2·|distance|` (kurbo, at the §7.1 tolerance) into a band that
+reaches `distance` to each side; a **union** (outset) or **difference** (inset) of that band with the
+region (the §7.4 i_overlay engine) yields the result, and the boolean pass also cleans up the
+offset's self-overlaps at concave corners. Curves flatten at the profile tolerance, exactly as
+`<x:boolean>`. An inset larger than the region's half-thickness legitimately empties (an empty
+`<g>`); a missing or non-geometry reference degrades with a marker (§3). Stacking several
+`<x:offset>` at increasing distances builds concentric rings and sticker halos.
+
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
 The first slice of Pillar 3 (*paint & pixels* — capability catalog: [Paint.md](Paint.md)). The
@@ -1019,6 +1050,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
 | Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
+| Inset / outset — `<x:offset in distance join>` Minkowski grow/shrink (stroke⊕boolean, round/miter/bevel), baked reference (§7.7) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
