@@ -85,11 +85,14 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     // A plain left press on the empty background pans (and may be a deselect
     // click); a press on a painted element is a click so the inspector can
     // select it — but middle-drag and space+drag pan from anywhere. "Empty"
-    // includes the transparent parts of the content: the stage, the content
-    // box, or the <svg> root itself (a painted child would be the target
-    // instead), so a drag on a transparent artboard gutter pans.
+    // is the stage, the content box, or the drawing's own <svg> root (a
+    // painted child would be the target instead), so a drag on a transparent
+    // artboard gutter pans. It must be the DRAWING's svg — not a control-button
+    // icon <svg> — hence the parent check.
     const empty =
-      e.target === viewport || e.target === content || e.target instanceof SVGSVGElement;
+      e.target === viewport ||
+      e.target === content ||
+      (e.target instanceof SVGSVGElement && e.target.parentElement === content);
     const bgPan = e.button === 0 && empty;
     if (!(middle || spacePan || bgPan)) return;
     if (middle || spacePan) e.preventDefault(); // no text-selection / autoscroll
@@ -125,6 +128,12 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
       spaceDown = false;
       viewport.classList.remove("space-pan");
     }
+  };
+  // If focus leaves the window while space is held, the keyup is missed — clear
+  // it so clicks don't stay stuck in pan mode.
+  const onBlur = () => {
+    spaceDown = false;
+    viewport.classList.remove("space-pan");
   };
 
   const onPointerMove = (e: PointerEvent) => {
@@ -200,6 +209,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   viewport.addEventListener("pointercancel", onPointerUp);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
 
   return {
     reset,
@@ -226,6 +236,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
       viewport.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       viewport.classList.remove("space-pan");
       listeners.clear();
       bgClickListeners.clear();
