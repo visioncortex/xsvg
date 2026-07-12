@@ -208,7 +208,7 @@ Flowed text in a region, per the SVG Tiny 1.2 Recommendation.
 1.2 line-box height). `display-align` then positions the **cap-height ink band** (§6.5) —
 `before`=cap-top at the top edge, `center`=band centred, `after`=band bottom at the bottom edge — so
 centred text is optically centred, not biased low by the em box. With an explicit `height`, lines whose
-ink band falls outside the region are **not rendered** (clipped; see §6.6).
+**baseline** falls outside the region are **not rendered** (clipped; see §6.6).
 
 **`<tbreak/>`** [implemented] — a forced line break, per SVG Tiny 1.2. Each `<tbreak/>` child ends the
 current line and starts a new one; wrapping resumes independently on each side. Consecutive breaks
@@ -257,10 +257,14 @@ Applies to box-bound text (`<textArea>`, `<x:textbox>`); not to point text or `i
 than the content width (an unbreakable token).
 
 **Order.** Resolve font size (apply `fit` first) → wrap → compute the fitting line count `C` (lines
-whose box lies within the height; `C` = all if height is `auto`) → apply `text-overflow`:
+whose **baseline** lies within the content height; `C` = all if height is `auto`) → apply
+`text-overflow`. A line is counted by its baseline (block position), not its full ink band — so a
+line whose cap-top or descent merely grazes the edge (e.g. a lone line in a box a hair shorter than
+the type's ink band) **renders and visually overflows rather than vanishing**; only a baseline past
+the box is genuine block overflow.
 
-- **`clip`** — render lines `0 … C−1`; drop the rest. Inline overflow renders past the box (a clip
-  path MAY be emitted at higher quality).
+- **`clip`** — render lines `0 … C−1`; drop the rest. Inline overflow (and the ink of a grazing
+  line) renders past the box (a clip path MAY be emitted at higher quality).
 - **`ellipsis`** — render `0 … C−1`; if lines were dropped, the **last rendered line** is ellipsized;
   any rendered line wider than the content width is ellipsized. If `C = 0`, render nothing.
 

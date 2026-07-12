@@ -215,8 +215,11 @@ pub fn layout_area_measured(
     let mut dropped = false;
     for (i, pieces) in line_pieces.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * advance;
-        // clip to the content height by the line's ink band [cap-top, descent]
-        if baseline - fm.cap_height < cy - 1e-6 || baseline + fm.descent > cy + ch + 1e-6 {
+        // Keep a line by its BASELINE (its block position), not its full ink band:
+        // a lone line whose cap or descent merely grazes the edge should render and
+        // visually overflow, not vanish. Genuine block overflow — a baseline past
+        // the content box — still drops the line (and triggers ellipsis).
+        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
             dropped = true;
             continue;
         }
@@ -344,6 +347,23 @@ mod tests {
         for w in out.lines.windows(2) {
             assert!((w[1].baseline - w[0].baseline - adv).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn lone_line_barely_taller_than_box_renders_not_drops() {
+        // ink band = cap(0.7·20=14) + descent(0.2·20=4) = 18; box height 17 (< 18).
+        // The old ink-band clip dropped this sole centered line entirely; it must
+        // now render (and overflow) instead of vanishing.
+        let st = TextStyle {
+            size: 20.0,
+            ..Default::default()
+        };
+        let s = spec(200.0, 17.0, Align::Center, VAlign::Middle, Fit::None);
+        let out = layout_area("Hi", &st, &s, &Mono(0.1));
+        assert_eq!(out.lines.len(), 1, "sole line must render: {:?}", out.lines);
+        // and a line whose baseline is genuinely past the box is still dropped
+        let low = spec(200.0, 4.0, Align::Start, VAlign::Top, Fit::None);
+        assert!(layout_area("Hi", &st, &low, &Mono(0.1)).lines.is_empty());
     }
 
     #[test]

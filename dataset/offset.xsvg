@@ -29,6 +29,6 @@
   <text x="60" y="322" font-size="11" fill="#94a3b8">offset behind outlined text → a sticker halo (baked reference; edit the word and the halo re-flows)</text>
   <x:offset in="#word" distance="11" join="round" fill="#f59e0b"/>
   <x:offset in="#word" distance="5" join="round" fill="#ffffff"/>
-  <x:textbox id="word" x="140" y="336" width="440" height="126" align="center" valign="middle"
-             outline="true" font-family="-x-google-Anton" font-size="76" fill="#0f172a">OFFSET</x:textbox>
+  <x:textbox id="word" x="140" y="342" width="440" height="96" align="center" valign="middle"
+             outline="true" font-family="-x-google-Anton" font-size="82" fill="#0f172a">OFFSET</x:textbox>
 </svg>
