@@ -172,6 +172,8 @@ sketches live in [Plan.md](Plan.md):
 - **`<x:vstroke>`** — variable-width strokes ([§2.3](Plan.md))
 - **`<x:mesh>`** — Coons/tensor mesh gradients with transparency ([§2.4](Plan.md))
 - **`<x:boolean op="…">`** — live boolean shape operators ([§2.5](Plan.md))
+- **`<x:connector from to route arrow>`** — lines routed between two elements' boxes ([§7.6](Specification.md))
+- **`<x:list list="…">`** / **`<x:li indent="N">`** — hanging-indent lists with cycling markers ([§6.14](Specification.md))
 
 All obey the degradation contract: a plain viewer skips them; the compiler lowers them to the SVG
 subset.

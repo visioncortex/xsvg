@@ -76,7 +76,13 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`, size via `arrow-size`) are computed triangles tinted to the stroke — tip exactly on the box edge, base back along the true tangent; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
+| [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`, size via `arrow-size`) are computed triangles tinted to the stroke — tip exactly on the box edge, with the base midpoint sampled **on the route** one arrow-height back (on a curve it lies on the curve) and the line **trimmed to that base** so the stroke never protrudes past the sharp tip; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
+
+## Lists — `<x:list>` / `<x:li>` (§6.14)
+
+| File | Shows |
+|---|---|
+| [lists.xsvg](lists.xsvg) | `list="bullet"` and `list="number"` stacks of `<x:li>` items with a **hanging indent** — long items wrap under the text column, not the marker. `indent="N"` sets the nesting level: bullets cycle •◦▪ and numbers run decimal→lower-alpha→lower-roman by depth, with the outline counter **restarting when nesting pops** (`1. 2. a. b. 3.`). A third list uses `in="#card"` to take its `x`/`y`/`width` from a referenced rect's box |
 
 ## Path algebra — `<x:boolean>` (§7.4)
 
