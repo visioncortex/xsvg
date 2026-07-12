@@ -16,13 +16,14 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    boolean_svg_paths, filter_primitives, layout_area_measured, layout_flow, layout_region,
-    layout_text_area_runs, line_advance, measure_runs, offset_svg_paths, parse_filter_functions,
-    run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor, AreaLayout,
-    AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset, Field, Fit,
-    FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer, PathEffect, PathFrame,
-    PlacedLine, QualityProfile, RasterRegion, Rect, RegionSpec, RoughenField, Shaper, Taper,
-    TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    boolean_svg_paths, filter_primitives, layout_area, layout_area_measured, layout_flow,
+    layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
+    parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
+    Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
+    EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer,
+    PathEffect, PathFrame, PlacedLine, QualityProfile, RasterRegion, Rect, RegionSpec,
+    RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -947,6 +948,227 @@ fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
 }
 
+/// Resolve `<x:table cols>` into `ncols` pixel widths spanning `total`. Each token
+/// is a fixed length (`80`) or a flex weight (`*` = 1, `2*` = 2); flex columns
+/// split whatever remains after the fixed ones. Missing/blank tokens are flex-1,
+/// so no `cols` at all yields even columns.
+fn resolve_cols(spec: Option<&str>, ncols: usize, total: f64) -> Vec<f64> {
+    let mut fixed = vec![0.0f64; ncols];
+    let mut flex = vec![0.0f64; ncols];
+    if let Some(s) = spec {
+        for (i, tok) in s.split_whitespace().take(ncols).enumerate() {
+            if let Some(w) = tok.strip_suffix('*') {
+                flex[i] = if w.is_empty() {
+                    1.0
+                } else {
+                    parse_num(w).unwrap_or(1.0).max(0.0)
+                };
+            } else if let Some(px) = parse_num(tok) {
+                fixed[i] = px.max(0.0);
+            } else {
+                flex[i] = 1.0;
+            }
+        }
+    }
+    for i in 0..ncols {
+        if fixed[i] == 0.0 && flex[i] == 0.0 {
+            flex[i] = 1.0; // unspecified column → flex 1 (even split)
+        }
+    }
+    let fixed_sum: f64 = fixed.iter().sum();
+    let flex_sum: f64 = flex.iter().sum();
+    let remaining = (total - fixed_sum).max(0.0);
+    (0..ncols)
+        .map(|i| {
+            if flex[i] > 0.0 && flex_sum > 0.0 {
+                remaining * flex[i] / flex_sum
+            } else {
+                fixed[i]
+            }
+        })
+        .collect()
+}
+
+/// `<x:table>` (§6.15): a grid of `<x:tr>` rows of `<x:td>`/`<x:th>` cells. Column
+/// widths are author-set (`cols`, else even); **row heights grow to fit content** —
+/// each cell wraps its text to its column and the tallest cell sets the row — the
+/// presentation-table model (Slides/Canva), baked to plain `<rect>`s + `<text>`.
+fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let m = ctx.m;
+    let style = style_from(node);
+    let size = style.size;
+    let text_fill = resolve_var(node.attribute("fill").unwrap_or("#0f172a")).into_owned();
+    let grid = resolve_var(node.attribute("stroke").unwrap_or("#cbd5e1")).into_owned();
+    let grid_w = attr_num(node, "stroke-width", 1.0).max(0.0);
+    let body_bg = node
+        .attribute("cell-fill")
+        .map(|v| resolve_var(v).into_owned());
+    let header_bg = resolve_var(node.attribute("header-fill").unwrap_or("#f1f5f9")).into_owned();
+    let pad = attr_num(node, "cell-padding", 8.0).max(0.0);
+    let default_align = node.attribute("align").unwrap_or("start");
+    let default_valign = node.attribute("valign").unwrap_or("middle");
+    let row_min = attr_num(node, "row-min-height", 0.0);
+
+    // block geometry: `in="#rect"` bbox, else x/y/width
+    let (mut x, mut y, mut width) = (
+        attr_num(node, "x", 0.0),
+        attr_num(node, "y", 0.0),
+        attr_num(node, "width", 400.0),
+    );
+    if let Some(r) = node.attribute("in") {
+        if let Some(bb) = ref_geometry(node, r, ctx)
+            .ok()
+            .and_then(|d| svg_path_bbox(&d))
+        {
+            x = bb.x0;
+            y = bb.y0;
+            width = bb.width();
+        }
+    }
+
+    let is_cell = |c: &roxmltree::Node| {
+        c.tag_name().namespace() == Some(XSVG_NS) && matches!(c.tag_name().name(), "td" | "th")
+    };
+    let rows: Vec<roxmltree::Node> = node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "tr")
+        .collect();
+    let ncols = rows
+        .iter()
+        .map(|r| r.children().filter(is_cell).count())
+        .max()
+        .unwrap_or(0);
+    if ncols == 0 {
+        out.push_str("<!-- xsvg: <x:table> has no rows/cells -->");
+        return;
+    }
+    let colw = resolve_cols(node.attribute("cols"), ncols, width);
+    let mut colx = vec![x; ncols + 1];
+    for i in 0..ncols {
+        colx[i + 1] = colx[i] + colw[i];
+    }
+
+    // per-cell text style: bold for header cells, else the table style
+    let cell_style = |cell: roxmltree::Node| {
+        let mut st = style.clone();
+        if cell.tag_name().name() == "th" && cell.attribute("font-weight").is_none() {
+            st.weight = "700".to_string();
+        }
+        st
+    };
+    // content width available for a cell's text
+    let content_w = |ci: usize| (colw[ci] - 2.0 * pad).max(0.0);
+    let measure_spec = |ci: usize| AreaSpec {
+        x: 0.0,
+        y: 0.0,
+        width: colw[ci],
+        height: 1e5, // tall enough that nothing clips → true line count
+        padding: pad,
+        align: Align::Start,
+        valign: VAlign::Top,
+        fit: Fit::None,
+        text_overflow: TextOverflow::Clip,
+        text_indent: 0.0,
+    };
+
+    let fm = m.font_metrics(&style, size);
+    let advance = size * style.line_height;
+
+    // pass 1: row heights = tallest wrapped cell + padding, floored
+    let mut row_h = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let mut h = 0.0f64;
+        for (ci, cell) in row.children().filter(is_cell).enumerate() {
+            let text = collect_text(cell);
+            let lines = if text.trim().is_empty() || content_w(ci) <= 0.0 {
+                1
+            } else {
+                layout_area(&text, &cell_style(cell), &measure_spec(ci), m)
+                    .lines
+                    .len()
+                    .max(1)
+            };
+            let bh = fm.cap_height + fm.descent + (lines - 1) as f64 * advance;
+            h = h.max(bh + 2.0 * pad);
+        }
+        row_h.push(h.max(row_min));
+    }
+    let mut rowy = vec![y; rows.len() + 1];
+    for i in 0..rows.len() {
+        rowy[i + 1] = rowy[i] + row_h[i];
+    }
+
+    // pass 2: emit cell rects (bg + grid) then cell text
+    out.push_str("<g");
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    let base = [EmitAttrs::default()];
+    let mut cells_out = String::new();
+    for (ri, row) in rows.iter().enumerate() {
+        for (ci, cell) in row.children().filter(is_cell).enumerate() {
+            let header = cell.tag_name().name() == "th";
+            let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
+            let bg = cell
+                .attribute("bg")
+                .map(|v| resolve_var(v).into_owned())
+                .or_else(|| {
+                    if header {
+                        Some(header_bg.clone())
+                    } else {
+                        body_bg.clone()
+                    }
+                });
+            out.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"",
+                fmt(cx),
+                fmt(cy),
+                fmt(cw),
+                fmt(ch),
+                bg.as_deref().unwrap_or("none")
+            ));
+            if grid_w > 0.0 {
+                out.push_str(&format!(
+                    " stroke=\"{grid}\" stroke-width=\"{}\"",
+                    fmt(grid_w)
+                ));
+            }
+            out.push_str("/>");
+
+            let text = collect_text(cell);
+            if text.trim().is_empty() {
+                continue;
+            }
+            let st = cell_style(cell);
+            let fill = cell
+                .attribute("fill")
+                .map(|v| resolve_var(v).into_owned())
+                .unwrap_or_else(|| text_fill.clone());
+            let spec = AreaSpec {
+                x: cx,
+                y: cy,
+                width: cw,
+                height: ch,
+                padding: pad,
+                align: Align::parse(cell.attribute("align").unwrap_or(default_align)),
+                valign: VAlign::parse(cell.attribute("valign").unwrap_or(default_valign)),
+                fit: Fit::None,
+                text_overflow: TextOverflow::Clip,
+                text_indent: 0.0,
+            };
+            let layout = layout_area(&text, &st, &spec, m);
+            cells_out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
+            push_font_attrs(&mut cells_out, &st, layout.font_size, &fill);
+            cells_out.push('>');
+            for line in &layout.lines {
+                emit_line(&mut cells_out, line, &st, layout.font_size, 1.0, m, &base);
+            }
+            cells_out.push_str("</text>");
+        }
+    }
+    out.push_str(&cells_out); // text paints on top of the cell backgrounds
+    out.push_str("</g>");
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -1006,6 +1228,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "connector" => emit_connector(node, out, ctx),
             "offset" => emit_offset(node, out, ctx),
             "list" => emit_list(node, out, ctx),
+            "table" => emit_table(node, out, ctx),
             "theme" => {} // §4.1 definitions — loaded up front, emit nothing
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
@@ -3400,14 +3623,6 @@ fn style_from(node: roxmltree::Node) -> TextStyle {
     }
 }
 
-/// A `letter-spacing`/`word-spacing` value: `normal` or absent → 0, else a length.
-fn spacing_attr(node: roxmltree::Node, name: &str) -> f64 {
-    match node.attribute(name) {
-        None | Some("normal") => 0.0,
-        Some(v) => parse_num(v).unwrap_or(0.0),
-    }
-}
-
 /// Concatenate all descendant text content (styling flattened away). Used by the
 /// single-style paths: `<text inline-size>` and curved-shape region flow.
 fn collect_text(node: roxmltree::Node) -> String {
@@ -4125,6 +4340,55 @@ mod tests {
         assert!(
             out.contains("<tspan x=\"0\""),
             "later lines at the margin: {out}"
+        );
+    }
+
+    #[test]
+    fn table_columns_and_content_row_heights() {
+        // width 300, cols "100 * *" → 100 fixed + two flex of (200/2)=100 each.
+        // Mono char = 5 at size 10: the long cell wraps to 2 lines in a 100-wide
+        // column, so its row grows taller than the single-line header row.
+        let svg = format!(
+            r##"{XW}<x:table x="0" y="0" width="300" cols="100 * *" cell-padding="0" font-size="10" line-height="1.2" stroke="#111"><x:tr><x:th>A</x:th><x:th>B</x:th><x:th>C</x:th></x:tr><x:tr><x:td>short</x:td><x:td>a b c d e f g h i j k</x:td><x:td>x</x:td></x:tr></x:table></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("width=\"100\""),
+            "columns resolve to 100: {out}"
+        );
+        // header row = 1 line (cap 7 + descent 2 = 9); content row grew to 2 lines
+        // (9 + advance 12 = 21)
+        assert!(
+            out.contains("height=\"9\""),
+            "single-line header row: {out}"
+        );
+        assert!(
+            out.contains("height=\"21\""),
+            "content row grew to fit wrapping: {out}"
+        );
+        assert!(
+            out.contains("font-weight=\"700\""),
+            "th cells are bold: {out}"
+        );
+        assert!(
+            out.contains("fill=\"#f1f5f9\""),
+            "default header-fill: {out}"
+        );
+    }
+
+    #[test]
+    fn table_cell_bg_override_and_empty_degrades() {
+        let svg = format!(
+            r##"{XW}<x:table x="0" y="0" width="100"><x:tr><x:td bg="#abcdef">hi</x:td></x:tr></x:table></svg>"##
+        );
+        assert!(
+            compile_test(&svg).contains("fill=\"#abcdef\""),
+            "per-cell bg override"
+        );
+        let empty = format!(r##"{XW}<x:table x="0" y="0" width="100"></x:table></svg>"##);
+        assert!(
+            compile_test(&empty).contains("<!-- xsvg: <x:table"),
+            "an empty table degrades with a marker"
         );
     }
 

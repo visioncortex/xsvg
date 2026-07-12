@@ -663,6 +663,39 @@ shrink-to-fit or height clipping — the list flows from `valign` within the hei
 to fit it; number/roman/character markers are live text (the glyphs must exist in the font), while
 bullet shapes are drawn and font-independent.
 
+### 6.15 Tables — `<x:table>` / `<x:tr>` / `<x:td>` / `<x:th>` [implemented]
+
+A `<x:table>` is a grid of `<x:tr>` rows of `<x:td>` (body) / `<x:th>` (header) cells. It follows the
+**presentation-table model** — the one Google Slides/Draw and Canva use, and deliberately *not*
+HTML's auto-layout: **column widths are author-set, row heights grow to fit content.** Each cell
+wraps its text to its column width (the §6.4 area layout) and the tallest cell sets the row's height.
+It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` — no live table needed.
+
+```xml
+<x:table x="28" y="60" width="664" cols="150 * 2*" cell-padding="10" header-fill="#eef2ff">
+  <x:tr><x:th>Feature</x:th><x:th>What it does</x:th></x:tr>
+  <x:tr><x:td>Text layout</x:td><x:td>wraps, fits, justifies — this cell grows the row</x:td></x:tr>
+</x:table>
+```
+
+| Attribute (on `<x:table>`) | Values | Meaning |
+|---|---|---|
+| `x` `y` `width` | length | top-left and total width; or take them from `in="#rect"` |
+| `cols` | list | per-column width: a **length** (fixed) or a **flex weight** (`*` = 1, `2*` = 2). Flex columns split what remains after the fixed ones; a missing/blank column is flex-1, so no `cols` gives even columns |
+| `cell-padding` | length (8) | inset inside every cell |
+| `row-min-height` | length (0) | floor for a row's computed height |
+| `stroke` / `stroke-width` | color / length | grid line color and width (`0` = no lines) |
+| `cell-fill` / `header-fill` | color | default background for `<x:td>` / `<x:th>` cells |
+| `fill`, `align`, `valign`, `font-*` | as §6.1 | default text color, alignment, and style for all cells |
+
+`<x:th>` cells default to **bold** and the `header-fill` background. Any cell (`td`/`th`) may override
+`align` / `valign` / `fill` (text color) / `bg` (background) / `font-*` per cell. The table
+**auto-heights** to its content (rows stack top-down).
+
+**v0 limits.** No `colspan`/`rowspan` (merged cells) and no **content-driven column widths** — columns
+are author-set, exactly as the presentation tools do; both are deliberate scope choices, not
+oversights. One flattened paragraph per cell (no inline `<tspan>` runs inside a cell yet).
+
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,
@@ -1091,6 +1124,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Inset / outset — `<x:offset in distance join>` Minkowski grow/shrink (stroke⊕boolean, round/miter/bevel), baked reference (§7.7) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
+| Tables — `<x:table>`/`<x:tr>`/`<x:td>`/`<x:th>` author-set columns + content-driven row heights (Slides/Canva model), baked to rects + text (§6.15) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |

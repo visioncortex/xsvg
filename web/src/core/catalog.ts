@@ -214,6 +214,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Tables — content-driven rows",
+    note: "<x:table>/<x:tr>/<x:td>/<x:th> — author-set columns, row heights that grow to fit wrapped content (the Slides/Canva model), baked to rects + text (§6.15).",
+    samples: [
+      {
+        file: "table.xsvg",
+        title: "Tables",
+        blurb: "a fixed label column plus two flexible columns (cols=\"150 * *\"), bold header cells with a header-fill, and body cells that wrap to their column and grow the row to fit the tallest — content-driven row heights, not HTML auto-layout; per-cell bg/align/weight overrides, all baked to plain rects + text",
+      },
+    ],
+  },
+  {
     name: "Theming — design tokens",
     note: "<x:theme> compile-time color tokens (var(name) in any paint) + font tokens (x:font, an overridable base) — §4.1.",
     samples: [

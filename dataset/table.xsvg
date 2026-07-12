@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 420" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="420" fill="#ffffff"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#0f172a">x:table — author-set columns, row heights that grow to fit wrapped content (the Slides/Canva model)</text>
+
+  <!-- cols: fixed 150 label column, then two flexible columns sharing the rest.
+       th cells are the header row (bold + header-fill). Long cells wrap and grow
+       their row; the whole table bakes to plain rects + text. -->
+  <x:table x="28" y="60" width="664" cols="150 * *" cell-padding="10"
+           font-size="14" fill="#334155" stroke="#e2e8f0" stroke-width="1"
+           header-fill="#eef2ff" valign="middle">
+    <x:tr>
+      <x:th align="start">Feature</x:th>
+      <x:th>What it does</x:th>
+      <x:th>Degrades to</x:th>
+    </x:tr>
+    <x:tr>
+      <x:td font-weight="600" fill="#0f172a">Text layout</x:td>
+      <x:td>Greedy wrapping from real font metrics, shrink-to-fit, full justification, and flow inside any shape's outline</x:td>
+      <x:td>positioned tspans</x:td>
+    </x:tr>
+    <x:tr>
+      <x:td font-weight="600" fill="#0f172a">Mesh gradients</x:td>
+      <x:td>Corner colours on curved Coons patches — the smooth multi-focal blends no linear or radial gradient can express</x:td>
+      <x:td>texel-aligned PNG</x:td>
+    </x:tr>
+    <x:tr>
+      <x:td font-weight="600" fill="#0f172a">Offset</x:td>
+      <x:td>Grow or shrink a region by a Minkowski distance (inset &amp; outset)</x:td>
+      <x:td>one plain path</x:td>
+    </x:tr>
+    <x:tr>
+      <x:td font-weight="600" fill="#0f172a">This table</x:td>
+      <x:td>Fixed columns, content-driven row heights; each cell wraps to its column and the tallest sets the row</x:td>
+      <x:td bg="#dcfce7">rects + text</x:td>
+    </x:tr>
+  </x:table>
+</svg>
