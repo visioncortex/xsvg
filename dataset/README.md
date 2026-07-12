@@ -145,7 +145,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [artboards.xsvg](artboards.xsvg) | An **eight-slide feature showcase** in one file, each `<g x:artboard>` demoing a real extension live: a mesh-band title, a bulleted `<x:list>`, text layout (justify · `fit="shrink"` · shape flow), type on a path, envelope warps on shapes (fisheye grid, twisted star), an organic mesh-gradient wallpaper, connectors + boolean union, and a numbered-list close. They render side by side in any plain viewer; the standalone **preview** pages through them with a `‹ ›` nav + slide counter (deep-linkable via `#n`), and the interactive **viewer** zooms to the first artboard on load. The `x:` tagging is echoed as `data-xsvg-artboard`/`data-xsvg-frame`, so the file never breaks |
+| [artboards.xsvg](artboards.xsvg) | A **ten-slide feature showcase** in one file, each `<g x:artboard>` demoing a real extension live: a mesh-band title, a bulleted `<x:list>`, text layout (justify · `fit="shrink"` · shape flow), type on a path, envelope warps on shapes, an organic mesh-gradient wallpaper, connectors (rail + curve routes) with boolean path-algebra and `<x:offset>`, a paragraph + styled-run column beside an `<x:table>`, a `<x:plot>`/`<x:pie>` data-viz board, and a numbered-list close. The slides tile in a **4-across grid** (`x:frame` per board); they render as that grid in any plain viewer, while the standalone **preview** pages through them with a `‹ ›` nav + slide counter (deep-linkable via `#n`) and the interactive **viewer** zooms to the first artboard on load. The `x:` tagging is echoed as `data-xsvg-artboard`/`data-xsvg-frame`, so the file never breaks |
 
 ## Layers — compile-time z-order (§5.1)
 

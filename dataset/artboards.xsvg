@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 8280 405" font-family="'Helvetica Neue', Arial, sans-serif">
-  <!-- An eight-slide deck in one file: each slide is a <g x:artboard> with an
-       explicit x:frame, authored in local 0..720 space and placed by a translate
-       (slides sit 720 apart with a 120-unit gutter). Every slide showcases a
-       real xsvg extension LIVE — lists, textbox flow, type on a path, warps,
-       mesh gradients, connectors, boolean algebra. In a plain viewer the slides
-       render side by side; the preview pages through them, the viewer zooms to
-       the first. The x: tagging is ignorable, so the file never breaks. -->
+     viewBox="0 0 3240 1455" font-family="'Helvetica Neue', Arial, sans-serif">
+  <!-- A ten-slide deck in one file: each slide is a <g x:artboard> with an
+       explicit x:frame, authored in local 0..720 space and placed by a translate.
+       The slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
+       a 720x405 frame plus a 120-unit gutter). Every slide showcases a real xsvg
+       extension LIVE — lists, textbox flow, type on a path, warps, mesh gradients,
+       connectors, boolean algebra, tables, charts. In a plain viewer the slides
+       render as a grid; the preview pages through them, the viewer zooms to the
+       first. The x: tagging is ignorable, so the file never breaks. -->
 
   <!-- 1 — Title: a mesh-gradient hero band over a dark cover -->
   <g x:artboard="Title" x:frame="0 0 720 405">
@@ -97,7 +98,7 @@
   </g>
 
   <!-- 5 — Envelope warps: presets baked to plain paths -->
-  <g x:artboard="Warp" x:frame="3360 0 720 405" transform="translate(3360,0)">
+  <g x:artboard="Warp" x:frame="0 525 720 405" transform="translate(0,525)">
     <rect x="0" y="0" width="720" height="405" fill="#faf5ff"/>
     <rect x="0" y="0" width="8" height="405" fill="#a855f7"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#a855f7">ENVELOPE WARPS</text>
@@ -121,7 +122,7 @@
 
   <!-- 6 — Mesh gradients: a full-bleed abstract wallpaper — one 4×3 mesh whose
        dozen corner colors blend smoothly across the whole slide (Big Sur style) -->
-  <g x:artboard="Mesh" x:frame="4200 0 720 405" transform="translate(4200,0)">
+  <g x:artboard="Mesh" x:frame="840 525 720 405" transform="translate(840,525)">
     <!-- a real SVG2 meshgradient: a dense 3×3 grid of Coons patches with CURVED
          interior edges and many colour poles (blue, cyan, magenta, pink, violet)
          pooling in different regions — the multi-focal iridescence no linear or
@@ -185,7 +186,7 @@
   </g>
 
   <!-- 7 — Diagrams: connectors between boxes + boolean union -->
-  <g x:artboard="Diagram" x:frame="5040 0 720 405" transform="translate(5040,0)">
+  <g x:artboard="Diagram" x:frame="1680 525 720 405" transform="translate(1680,525)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
     <rect x="0" y="0" width="8" height="405" fill="#16a34a"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a">DIAGRAMS</text>
@@ -237,7 +238,7 @@
   </g>
 
   <!-- 8 — Words & data: paragraphs + styled runs on the left, a table on the right -->
-  <g x:artboard="Words" x:frame="5880 0 720 405" transform="translate(5880,0)">
+  <g x:artboard="Words" x:frame="2520 525 720 405" transform="translate(2520,525)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
     <rect x="0" y="0" width="8" height="405" fill="#a21caf"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#a21caf">TEXT &amp; TABLES</text>
@@ -282,7 +283,7 @@
   </g>
 
   <!-- 9 — Charts: a data coordinate frame — bars, a line graph, and a pie -->
-  <g x:artboard="Data viz" x:frame="6720 0 720 405" transform="translate(6720,0)">
+  <g x:artboard="Data viz" x:frame="0 1050 720 405" transform="translate(0,1050)">
     <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
     <rect x="0" y="0" width="8" height="405" fill="#0d9488"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#0d9488">DATA VISUALIZATION</text>
@@ -319,7 +320,7 @@
   </g>
 
   <!-- 10 — Closing: a numbered <x:list> call-to-action -->
-  <g x:artboard="Ship it" x:frame="7560 0 720 405" transform="translate(7560,0)">
+  <g x:artboard="Ship it" x:frame="840 1050 720 405" transform="translate(840,1050)">
     <rect x="0" y="0" width="720" height="405" fill="#0b1020"/>
     <rect x="0" y="330" width="720" height="6" fill="#38bdf8"/>
     <circle cx="96" cy="118" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
