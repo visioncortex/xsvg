@@ -577,6 +577,42 @@ run width used by `align` matches the geometry being placed: the outline advance
 letter/word-spacing, §6.12), the spacing-inclusive advance for the stepped fallback. The
 native-`<textPath>` non-deforming follow is future work.
 
+### 6.14 Lists — `<x:list>` / `<x:li>` [implemented]
+
+A `<x:list>` is a vertical stack of `<x:li>` items, each flowed and wrapped like a mini
+`<x:textbox>` but with a **hanging indent**: the marker sits in the gutter and continuation lines
+align to the text column, not back under the marker. It is the ordered/unordered list SVG never
+got, and lowers to one plain `<text>` of positioned `<tspan>`s — live and selectable.
+
+```xml
+<x:list x="40" y="80" width="300" list="bullet" font-size="14" item-spacing="5">
+  <x:li>Top-level item that wraps under its own text column</x:li>
+  <x:li indent="1">A nested item — one indent step in</x:li>
+  <x:li indent="2">Deeper still</x:li>
+</x:list>
+```
+
+| Attribute (on `<x:list>`) | Values | Meaning |
+|---|---|---|
+| `list` | `bullet` *(default)* / `number` / `none` | marker style for the whole list (an `<x:li>` may override its own) |
+| `x` `y` `width` | length | the block's left edge, **top**, and content width; or take all three from `in="#rect"`'s bbox |
+| `in` | `#id` | bind geometry to a referenced shape's bounding box (a baked reference, §4) |
+| `indent` | length (default `1.5em`) | the per-level indent step |
+| `marker-gap` | length (default `0.5em`) | gap between the marker and the text column |
+| `item-spacing` | length (default `0.35em`) | extra vertical gap between items |
+| `font-*`, `line-height`, `fill` | as §6.1 | base style for every item |
+
+Each **`<x:li>`** is one item; `indent="N"` sets its **nesting level** (0 = top). Every level steps
+the text column right by `indent` and **cycles the marker**: bullets run `•` `◦` `▪`, numbers run
+decimal → lower-alpha → lower-roman, repeating every three levels. Numbered items keep an **outline
+counter per level**, restarted whenever nesting pops back to a shallower level (so `1. 2. a. b. 3.`),
+and the marker is right-aligned into the gutter so `1.` and `10.` share a column edge. An empty item
+still advances one line. `list="none"` suppresses the marker but keeps the indent.
+
+**v0 limits.** Base style per item (inline `<tspan>` styling is not yet applied inside an item); no
+shrink-to-fit or height clipping — the list flows downward from its top; markers are live text (the
+bullet/roman glyphs must exist in the font, else the viewer shows its own missing-glyph box).
+
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,
@@ -808,8 +844,13 @@ is a compile-time reference like `in="#id"`: moving or resizing an endpoint re-e
 A missing or non-geometry endpoint degrades with a marker (§3).
 
 The arrowhead is a **computed triangle**, not an SVG `<marker>`: its tip sits exactly on the
-endpoint (no overshoot into the box) and its base is placed back along the segment's true tangent
-by `arrow-size` — so it follows a curve's actual exit angle and its size is a plain attribute.
+endpoint (no overshoot into the box) and its size is a plain attribute (`arrow-size`). The base
+midpoint is found by walking **the actual route back from the tip until the straight-line (chord)
+distance equals `arrow-size`** — for a curve that point lies *on the curve*, so the triangle's base
+sits on the stroke and its axis matches the visible exit angle (not the control-handle tangent).
+The drawn line is then **trimmed to that base** (the cubic is split with de Casteljau; straight and
+orthogonal segments are shortened by `arrow-size`), so the stroke never protrudes past the sharp
+tip regardless of its width.
 
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
@@ -966,6 +1007,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:boolean op="union\|intersect\|subtract\|exclude">` — Pathfinder path algebra (i_overlay backend, integer-exact) | implemented |
 | Composition by reference — `in="#id"` on an `x:` target resolves its **compiled output**; cycles degrade (§4) | implemented |
 | Connectors — `<x:connector from to route arrow>` routed lines (straight/x-major/y-major/curve), baked references (§7.6) | implemented |
+| Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |

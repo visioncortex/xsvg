@@ -948,6 +948,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "boolean" => emit_boolean(node, out, ctx),
             "mesh" => emit_mesh(node, out, ctx),
             "connector" => emit_connector(node, out, ctx),
+            "list" => emit_list(node, out, ctx),
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -1320,6 +1321,165 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push('>');
     push_escaped(out, &text, false);
     out.push_str("</text>");
+}
+
+/// `<x:list list="bullet|number|none">` (§6.14): a vertical stack of `<x:li>`
+/// items flowed top-down from the block's `x`/`y` (or the bbox of `in="#rect"`),
+/// each wrapped to the content width with a HANGING indent — the marker sits in
+/// the gutter and continuation lines align to the text column. `indent="N"` on an
+/// item sets its nesting level; each level steps the text column right by `indent`
+/// (default 1.5em) and cycles the marker style (bullet •◦▪ / number 1. a. i.).
+/// Numbered items keep an outline counter per level, restarted when nesting pops.
+/// Compiles to one plain `<text>` of positioned `<tspan>`s — live and selectable.
+fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let m = ctx.m;
+    let style = style_from(node);
+    let fill = node.attribute("fill").unwrap_or("#111827");
+    let pos = pos_attr(node, ctx);
+    let size = style.size;
+    let advance = size * style.line_height;
+
+    // Block geometry: an `in="#rect"` reference (its bbox), else x/y/width.
+    let (mut x, mut y, mut width) = (
+        attr_num(node, "x", 0.0),
+        attr_num(node, "y", 0.0),
+        attr_num(node, "width", 320.0),
+    );
+    if let Some(r) = node.attribute("in") {
+        if let Some(bb) = ref_geometry(node, r, ctx)
+            .ok()
+            .and_then(|d| svg_path_bbox(&d))
+        {
+            x = bb.x0;
+            y = bb.y0;
+            width = bb.width();
+        }
+    }
+    let indent_step = attr_num(node, "indent", size * 1.5).max(0.0);
+    let marker_gap = attr_num(node, "marker-gap", size * 0.5);
+    let item_spacing = attr_num(node, "item-spacing", size * 0.35);
+    let list_kind = node.attribute("list").unwrap_or("bullet");
+
+    let fm = m.font_metrics(&style, size);
+    let mut baseline = y + fm.cap_height; // treat `y` as the block's top edge
+    let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
+
+    let mut body = String::new();
+    let base = [EmitAttrs::default()];
+    for li in node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
+    {
+        let level = attr_num(li, "indent", 0.0).max(0.0) as usize;
+        let kind = li.attribute("list").unwrap_or(list_kind);
+        let text = collect_text(li);
+        let text_x = x + (level as f64 + 1.0) * indent_step;
+        let max_w = (x + width - text_x).max(1.0);
+
+        // outline counters: extend to this level, drop any deeper ones (a pop
+        // restarts sublists), then advance this level's number
+        if counters.len() <= level {
+            counters.resize(level + 1, 0);
+        }
+        counters.truncate(level + 1);
+        counters[level] += 1;
+
+        let marker = match kind {
+            "none" => None,
+            "number" => Some(number_marker(level, counters[level])),
+            _ => Some(bullet_glyph(level).to_string()),
+        };
+        if let Some(mk) = marker {
+            // right-aligned into the gutter so "1." and "10." share a column edge
+            body.push_str(&format!(
+                "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\">",
+                fmt(text_x - marker_gap),
+                fmt(baseline)
+            ));
+            push_escaped(&mut body, &mk, false);
+            body.push_str("</tspan>");
+        }
+
+        let lines = if text.trim().is_empty() {
+            Vec::new()
+        } else {
+            layout_flow(&text, &style, text_x, baseline, max_w, m)
+        };
+        for line in &lines {
+            emit_line(&mut body, line, &style, size, 1.0, m, &base);
+        }
+        baseline += lines.len().max(1) as f64 * advance + item_spacing;
+    }
+
+    out.push_str("<text text-anchor=\"start\"");
+    push_font_attrs(out, &style, size, fill);
+    out.push_str(&pos);
+    out.push('>');
+    out.push_str(&body);
+    out.push_str("</text>");
+}
+
+/// The `<x:list list="number">` marker for a 1-based counter at a nesting level:
+/// decimal, lower-alpha, then lower-roman, cycling every three levels.
+fn number_marker(level: usize, n: u32) -> String {
+    match level % 3 {
+        0 => format!("{n}."),
+        1 => format!("{}.", alpha_lower(n)),
+        _ => format!("{}.", roman_lower(n)),
+    }
+}
+
+/// The bullet glyph for a nesting level: • ◦ ▪, cycling every three levels.
+fn bullet_glyph(level: usize) -> &'static str {
+    match level % 3 {
+        0 => "\u{2022}",
+        1 => "\u{25E6}",
+        _ => "\u{25AA}",
+    }
+}
+
+/// Bijective base-26 letters: 1→a, 26→z, 27→aa (spreadsheet-column style).
+fn alpha_lower(mut n: u32) -> String {
+    let mut s = String::new();
+    while n > 0 {
+        n -= 1;
+        s.insert(0, (b'a' + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    if s.is_empty() {
+        s.push('0'); // n == 0 shouldn't occur, but never emit an empty marker
+    }
+    s
+}
+
+/// Lowercase Roman numerals for a positive counter (0 falls back to "0").
+fn roman_lower(mut n: u32) -> String {
+    if n == 0 {
+        return "0".to_string();
+    }
+    const TABLE: [(u32, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut s = String::new();
+    for (v, sym) in TABLE {
+        while n >= v {
+            s.push_str(sym);
+            n -= v;
+        }
+    }
+    s
 }
 
 /// The stepped-baseline degradation of skew (§6.13.1, Illustrator's *Stair Step*):
@@ -3420,6 +3580,79 @@ mod tests {
         let deps = dependents_impl(&svg, offs[0]); // edit #a
         assert_eq!(deps.len(), 1, "{deps:?}");
         assert_eq!(deps[0].0, offs[2], "the connector re-emits: {deps:?}");
+    }
+
+    #[test]
+    fn list_markers_and_hanging_indent() {
+        // bullet list: level-0 and level-1 items get distinct glyphs, and each
+        // level's text column steps right by one indent (default 1.5em)
+        let svg = format!(
+            r##"{XW}<x:list x="10" y="10" width="200" font-size="10" line-height="1.2"><x:li>Alpha</x:li><x:li indent="1">Beta</x:li></x:list></svg>"##
+        );
+        let out = compile_test(&svg);
+        // one plain <text> block, left-anchored
+        assert!(out.contains("<text text-anchor=\"start\""), "{out}");
+        // markers are right-aligned into the gutter
+        assert!(
+            out.contains("text-anchor=\"end\">\u{2022}</tspan>"),
+            "{out}"
+        );
+        assert!(
+            out.contains("text-anchor=\"end\">\u{25E6}</tspan>"),
+            "{out}"
+        );
+        // hanging indent: level-0 text at x=10+15=25, level-1 at x=10+30=40
+        assert!(out.contains("<tspan x=\"25\""), "level-0 column: {out}");
+        assert!(out.contains("<tspan x=\"40\""), "level-1 column: {out}");
+        // the x: source is fully lowered
+        assert!(!out.contains("x:list") && !out.contains("x:li"), "{out}");
+    }
+
+    #[test]
+    fn list_number_outline_counters_restart_on_pop() {
+        // decimal at level 0, lower-alpha at level 1; the sublist restarts and the
+        // outer counter resumes when nesting pops back
+        let svg = format!(
+            r##"{XW}<x:list list="number" x="0" y="0" width="200" font-size="10"><x:li>a</x:li><x:li>b</x:li><x:li indent="1">c</x:li><x:li indent="1">d</x:li><x:li>e</x:li></x:list></svg>"##
+        );
+        let out = compile_test(&svg);
+        for want in [
+            ">1.</tspan>",
+            ">2.</tspan>",
+            ">a.</tspan>",
+            ">b.</tspan>",
+            ">3.</tspan>",
+        ] {
+            assert!(out.contains(want), "missing {want}: {out}");
+        }
+    }
+
+    #[test]
+    fn list_marker_none_still_indents() {
+        let svg = format!(
+            r##"{XW}<x:list list="none" x="0" y="0" width="200" font-size="10"><x:li>solo</x:li></x:list></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(!out.contains("text-anchor=\"end\""), "no marker: {out}");
+        assert!(
+            out.contains("<tspan x=\"15\""),
+            "still indented one step: {out}"
+        );
+    }
+
+    #[test]
+    fn list_number_formats() {
+        assert_eq!(alpha_lower(1), "a");
+        assert_eq!(alpha_lower(26), "z");
+        assert_eq!(alpha_lower(27), "aa");
+        assert_eq!(roman_lower(1), "i");
+        assert_eq!(roman_lower(4), "iv");
+        assert_eq!(roman_lower(58), "lviii");
+        assert_eq!(number_marker(0, 3), "3.");
+        assert_eq!(number_marker(1, 2), "b.");
+        assert_eq!(number_marker(2, 4), "iv.");
+        assert_eq!(bullet_glyph(0), "\u{2022}");
+        assert_eq!(bullet_glyph(3), "\u{2022}"); // cycles every 3 levels
     }
 
     #[test]

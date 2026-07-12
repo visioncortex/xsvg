@@ -209,6 +209,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Lists & indentation",
+    note: "<x:list list='bullet|number'> with <x:li indent='N'> — hanging-indent items with cycling markers and outline counters (§6.14).",
+    samples: [
+      {
+        file: "lists.xsvg",
+        title: "Bullet & numbered lists",
+        blurb: "bullets cycle •◦▪ by nesting depth while long items wrap under a hanging indent; a numbered column runs decimal→alpha→roman with the outer counter resuming after each sublist; and a list flowed inside a referenced card",
+      },
+    ],
+  },
+  {
     name: "Path algebra — booleans",
     note: '<x:boolean op="union|intersect|subtract|exclude"> — Pathfinder ops baked to one <path> (§7.4).',
     samples: [

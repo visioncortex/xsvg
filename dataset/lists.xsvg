@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 720 470" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="720" height="470" fill="#ffffff"/>
+  <text x="28" y="34" font-size="15" font-weight="bold" fill="#0f172a">x:list — hanging-indent items, marker glyphs that cycle by depth, outline numbering</text>
+
+  <!-- bullet list: nesting cycles the glyph • ◦ ▪; long items wrap under the
+       text column (hanging indent), not back under the marker -->
+  <text x="40" y="72" font-size="11" fill="#94a3b8">list="bullet"</text>
+  <x:list x="40" y="84" width="300" list="bullet" font-size="14" line-height="1.35"
+          item-spacing="5" fill="#1e293b">
+    <x:li>Ship the format, not the editor</x:li>
+    <x:li>Every extension degrades to plain SVG — unknown viewers simply skip it</x:li>
+    <x:li indent="1">Text that runs past the content width wraps beneath the text column</x:li>
+    <x:li indent="1">Second sub-point</x:li>
+    <x:li indent="2">A third level, marked with a filled square</x:li>
+    <x:li>Back to the top level</x:li>
+  </x:list>
+
+  <!-- numbered list: decimal → lower-alpha → lower-roman by depth; the outer
+       counter resumes (3.) after the sublist pops -->
+  <text x="392" y="72" font-size="11" fill="#94a3b8">list="number"</text>
+  <x:list x="392" y="84" width="300" list="number" font-size="14" line-height="1.35"
+          item-spacing="5" fill="#1e293b">
+    <x:li>Parse the xsvg tree</x:li>
+    <x:li>Lower each extension</x:li>
+    <x:li indent="1">Resolve references and bake geometry</x:li>
+    <x:li indent="1">Flow and wrap text</x:li>
+    <x:li indent="2">Measure runs</x:li>
+    <x:li indent="2">Place lines</x:li>
+    <x:li>Serialize the static SVG</x:li>
+  </x:list>
+
+  <!-- a list flowed inside a referenced card: in="#card" takes the rect's bbox
+       for x / y / width -->
+  <text x="40" y="300" font-size="11" fill="#94a3b8">in="#card" — flow inside a shape's box</text>
+  <rect id="card" x="40" y="312" width="640" height="130" rx="14"
+        fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <x:list in="#card" list="number" font-size="14" line-height="1.4" indent="26"
+          item-spacing="6" fill="#334155">
+    <x:li>The block inherits the card's left edge, top, and width from its bounding box</x:li>
+    <x:li>Padding is just the indent step, so the first column clears the rounded corner</x:li>
+    <x:li indent="1">Nested items step in by one more indent and switch to lettered markers</x:li>
+  </x:list>
+</svg>
