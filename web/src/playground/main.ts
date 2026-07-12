@@ -6,9 +6,9 @@
 //   /playground/#src=<base64>      preload a shared document
 import "../base.css";
 import "./playground.css";
-import { compileXsvg } from "../core/compiler";
 import { CATALOG, SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
+import { createPreview } from "../core/preview";
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -16,7 +16,10 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   return el as T;
 }
 
-const preview = byId("preview");
+// The live preview is the same component the /preview page uses, so multi-artboard
+// documents get the slide deck (rail + nav) here for free. It keeps the last good
+// preview on a compile error; we surface the error in our own #error box.
+const preview = createPreview(byId("preview"));
 const errorBox = byId("error");
 const sampleSelect = byId<HTMLSelectElement>("sample");
 const viewerLink = byId<HTMLAnchorElement>("open-viewer");
@@ -43,16 +46,12 @@ function sharedDoc(): string | null {
 }
 
 // ---- live compile ----------------------------------------------------------
-let seq = 0;
 async function render(source: string): Promise<void> {
-  const mine = ++seq;
   try {
-    const svg = await compileXsvg(source);
-    if (mine !== seq) return; // a newer edit superseded this one
-    preview.innerHTML = svg;
+    const result = await preview.render(source);
+    if (result === "superseded") return; // a newer edit owns the final state
     errorBox.hidden = true;
   } catch (err) {
-    if (mine !== seq) return;
     errorBox.hidden = false;
     errorBox.textContent = String(err); // keep the last good preview visible
   }
