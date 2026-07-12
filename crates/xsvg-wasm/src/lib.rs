@@ -2741,6 +2741,7 @@ fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) -> AreaSpec {
         valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
         fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+        text_indent: attr_num(node, "text-indent", 0.0),
     }
 }
 
@@ -4105,6 +4106,25 @@ mod tests {
             "element font-size overrides the token: {out}"
         );
         assert!(!out.contains("x:type"), "x:type is stripped: {out}");
+    }
+
+    #[test]
+    fn textbox_first_line_indent() {
+        // Mono: char = 0.5·size. At size 10 in a width-80 box, "alpha beta gamma"
+        // fills the first line; a 30-unit first-line indent narrows it and offsets
+        // it 30 in, so later lines sit back at the margin.
+        let svg = format!(
+            r##"{XW}<x:textbox x="0" y="0" width="80" height="200" font-size="10" text-indent="30">alpha beta gamma delta</x:textbox></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("<tspan x=\"30\""),
+            "first line indented: {out}"
+        );
+        assert!(
+            out.contains("<tspan x=\"0\""),
+            "later lines at the margin: {out}"
+        );
     }
 
     #[test]

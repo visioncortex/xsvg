@@ -53,7 +53,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | **Justification limits**: word-spacing, letter-spacing, **glyph-scaling** each min/desired/max | AI | E | ❌ | the levers the composer adjusts to set lines |
 | **Leading / line spacing**: absolute + auto (% of size) | AI | C | ✅ | line advance in layout (`line-height` / `line-increment`) |
 | **Space before / after** paragraph | AI | C | ○ | layout gaps — one paragraph per element today |
-| **Indents**: left, right, first-line, last-line | AI | C | ◑ | per-item hanging indent shipped in lists (below); paragraph first-/last-line indents still to expose |
+| **Indents**: left, right, first-line, last-line | AI | C | ◑ | **first-line indent shipped** — `<x:textbox text-indent>` (negative outdents), plus per-item hanging indent in lists; left/right/last-line still to expose |
 | **Bulleted / numbered lists** (markers, nesting, hanging indent, outline counters) | AI/ID | C | ✅ | **shipped** — `<x:list>` / `<x:li indent="N">`: bullets •◦▪ and decimal→alpha→roman cycle by depth, counters restart on pop ([§6.14](Specification.md)) |
 | **Drop cap** (N lines, N characters) | AI | C | ○ | Vision item; oversized run, lines flow around it |
 | **Hyphenation** (min word len, after-first/before-last, consecutive limit, zone, hyphenate-caps) | AI | E | ❌ | needs a hyphenation dictionary (e.g. Liang/`hyphenation`) |

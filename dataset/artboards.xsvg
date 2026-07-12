@@ -44,9 +44,9 @@
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Wrap · fit · justify · flow</text>
 
     <!-- tile 1: full justification -->
-    <text x="56" y="152" font-size="11" fill="#64748b">align="justify"</text>
+    <text x="56" y="152" font-size="11" fill="#64748b">align="justify" · text-indent</text>
     <x:textbox x="56" y="162" width="200" height="184" align="justify" valign="top"
-               font-size="12.5" line-height="1.5" fill="#334155">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — live, selectable tspans.</x:textbox>
+               text-indent="18" font-size="12.5" line-height="1.5" fill="#334155">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — a first-line indent leads it in, live and selectable.</x:textbox>
 
     <!-- tile 2: shrink-to-fit — the same box, text autosized down until it fits -->
     <text x="272" y="152" font-size="11" fill="#64748b">fit="shrink" — autosized to the box</text>

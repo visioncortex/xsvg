@@ -6,7 +6,7 @@ use super::{
     measure::{measure_words, Measured, Measurer, Piece},
     style::TextStyle,
     truncate::{apply_ellipsis, TextOverflow},
-    wrap::wrap_pieces,
+    wrap::{fill_line, wrap_pieces},
 };
 
 /// Horizontal alignment within the content box.
@@ -97,6 +97,10 @@ pub struct AreaSpec {
     pub valign: VAlign,
     pub fit: Fit,
     pub text_overflow: TextOverflow,
+    /// First-line indent (§6.6): the first line wraps to `width − indent` and is
+    /// placed that far in from the start edge. Positive indents; negative outdents
+    /// (a hanging first line). Applies to start/justify alignment; 0 = none.
+    pub text_indent: f64,
 }
 
 /// A styled span within a placed line: contiguous text sharing one style, given as
@@ -183,7 +187,21 @@ pub fn layout_area_measured(
     } else {
         0.0
     };
-    let line_pieces = wrap_pieces(measured, cw, scale);
+    // First-line indent (§6.6): wrap the first line to the reduced width, the rest
+    // to the full content width. Only when there is text and a real indent.
+    let indent = spec.text_indent;
+    let line_pieces = if indent != 0.0 && cw > 0.0 && !measured.words.is_empty() {
+        let (first, mut i) = fill_line(measured, 0, (cw - indent).max(0.0), scale);
+        let mut ls = vec![first];
+        while i < measured.words.len() {
+            let (p, n) = fill_line(measured, i, cw, scale);
+            ls.push(p);
+            i = n;
+        }
+        ls
+    } else {
+        wrap_pieces(measured, cw, scale)
+    };
     let advance = size * style.line_height;
 
     let anchor = spec.align.anchor();
@@ -210,6 +228,9 @@ pub fn layout_area_measured(
     // has something to stretch (>1 word), and the box has a positive content width.
     let last = line_pieces.len().saturating_sub(1);
     let justify = spec.align == Align::Justify && cw > 0.0;
+    // the indent shifts only the first line, and only for start/justify (left-edge
+    // anchored) text — it is a start-edge inset, meaningless for centre/end.
+    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
 
     let mut lines = Vec::new();
     let mut dropped = false;
@@ -224,10 +245,11 @@ pub fn layout_area_measured(
             continue;
         }
         let (text, runs) = merge_pieces(pieces);
-        let justify_width = (justify && i < last && text.contains(' ')).then_some(cw);
+        let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
+        let justify_width = (justify && i < last && text.contains(' ')).then_some(line_w);
         lines.push(PlacedLine {
             text,
-            x: ax,
+            x: if i == 0 { ax + indent_x } else { ax },
             baseline,
             justify_width,
             runs,
@@ -288,6 +310,7 @@ mod tests {
             valign,
             fit,
             text_overflow: TextOverflow::Clip,
+            text_indent: 0.0,
         }
     }
 
@@ -364,6 +387,33 @@ mod tests {
         // and a line whose baseline is genuinely past the box is still dropped
         let low = spec(200.0, 4.0, Align::Start, VAlign::Top, Fit::None);
         assert!(layout_area("Hi", &st, &low, &Mono(0.1)).lines.is_empty());
+    }
+
+    #[test]
+    fn text_indent_offsets_and_narrows_the_first_line() {
+        // Mono(0.1) size 10: char=1, space=1. Content width 8 holds "aa bb cc"
+        // (2+1+2+1+2=8) on one line — but with a 4-unit first-line indent the first
+        // line only has room for "aa", so it breaks and starts 4 in.
+        let st = TextStyle {
+            size: 10.0,
+            ..Default::default()
+        };
+        let s = AreaSpec {
+            text_indent: 4.0,
+            ..spec(8.0, 200.0, Align::Start, VAlign::Top, Fit::None)
+        };
+        let out = layout_area("aa bb cc", &st, &s, &Mono(0.1));
+        assert_eq!(out.lines.len(), 2, "{:?}", out.lines);
+        assert_eq!(out.lines[0].text, "aa");
+        assert!(
+            (out.lines[0].x - 4.0).abs() < 1e-9,
+            "first line indented: {}",
+            out.lines[0].x
+        );
+        assert!(
+            (out.lines[1].x).abs() < 1e-9,
+            "later lines sit at the margin"
+        );
     }
 
     #[test]
@@ -532,6 +582,7 @@ mod tests {
             valign: VAlign::Middle,
             fit: Fit::Shrink { min: 5.0 },
             text_overflow: TextOverflow::Ellipsis,
+            text_indent: -8.0,
         };
         let out = layout_area("alpha beta gamma", &st, &neg, &Mono(0.2));
         for l in &out.lines {

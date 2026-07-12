@@ -115,6 +115,7 @@ fn shrink_to_fit_respects_box_in_every_font() {
             valign: VAlign::Middle,
             fit: Fit::Shrink { min: 6.0 },
             text_overflow: TextOverflow::Clip,
+            text_indent: 0.0,
         };
         let out = layout_area(text, &st, &spec, &font);
         assert!(
@@ -161,6 +162,7 @@ fn placement_uses_cap_height_and_centers() {
         valign: VAlign::Top,
         fit: Fit::None,
         text_overflow: TextOverflow::Clip,
+        text_indent: 0.0,
     };
     let out = layout_area("hi there", &st, &spec, &font);
     assert_eq!(out.anchor, Anchor::Middle);
@@ -239,6 +241,7 @@ fn degenerate_layouts_hold_across_fonts() {
             valign: VAlign::Middle,
             fit: Fit::None,
             text_overflow: TextOverflow::Clip,
+            text_indent: 0.0,
         };
 
         assert!(
@@ -296,6 +299,7 @@ fn descenders_do_not_shift_alignment() {
             valign,
             fit: Fit::None,
             text_overflow: TextOverflow::Clip,
+            text_indent: 0.0,
         };
         let plain = layout_area("Aa Bb", &st, &spec, &font);
         let desc = layout_area("Aa Gg", &st, &spec, &font);
@@ -328,6 +332,7 @@ fn ellipsis_truncates_in_every_font() {
             valign: VAlign::Top,
             fit: Fit::None,
             text_overflow: TextOverflow::Ellipsis,
+            text_indent: 0.0,
         };
         let out = layout_area(
             "wrapping produces several lines that cannot all fit this short box",
