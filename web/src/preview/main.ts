@@ -9,7 +9,7 @@
 // (the SVG's own preserveAspectRatio="meet" then letterboxes it to fit).
 import { compileXsvg } from "../core/compiler";
 import { SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
-import { findArtboards } from "../core/artboards";
+import { findArtboards, makeThumb } from "../core/artboards";
 
 const name = requestedSample() ?? DEFAULT_SAMPLE;
 document.title = `xsvg — ${name}`;
@@ -18,11 +18,24 @@ const app = document.getElementById("app")!;
 const escapeHtml = (s: string) =>
   s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
-/** Slide nav for a multi-artboard document: < prev, "n / N", next >. */
+/** Slide deck for a multi-artboard document: a PowerPoint-style thumbnail rail
+ *  on the left (toggled from the bottom-left button) plus a ‹ n/N › nav. */
 function setupDeck(svg: SVGSVGElement): void {
   const boards = findArtboards(svg);
   if (boards.length < 2) return;
 
+  // ---- thumbnail rail: each thumb is a clone of the SVG reframed to a slide
+  const rail = document.createElement("div");
+  rail.className = "deck-rail";
+  const thumbs: HTMLElement[] = boards.map((b, idx) => {
+    const thumb = makeThumb(svg, b);
+    thumb.addEventListener("click", () => show(idx));
+    rail.appendChild(thumb);
+    return thumb;
+  });
+  document.body.appendChild(rail);
+
+  // ---- bottom-center ‹ n/N › nav
   const nav = document.createElement("div");
   nav.className = "deck-nav";
   const prev = document.createElement("button");
@@ -34,6 +47,15 @@ function setupDeck(svg: SVGSVGElement): void {
   nav.append(prev, label, next);
   document.body.appendChild(nav);
 
+  // ---- bottom-left rail toggle
+  const toggle = document.createElement("button");
+  toggle.className = "deck-toggle";
+  toggle.title = "Toggle slides";
+  toggle.textContent = "▤";
+  toggle.addEventListener("click", () => document.body.classList.toggle("rail-open"));
+  document.body.appendChild(toggle);
+  document.body.classList.add("rail-open"); // decks open the rail by default
+
   let i = 0;
   const show = (n: number) => {
     i = Math.max(0, Math.min(boards.length - 1, n));
@@ -41,6 +63,7 @@ function setupDeck(svg: SVGSVGElement): void {
     label.textContent = `${i + 1} / ${boards.length} · ${boards[i].label}`;
     prev.disabled = i === 0;
     next.disabled = i === boards.length - 1;
+    thumbs.forEach((t, k) => t.classList.toggle("active", k === i));
   };
   prev.addEventListener("click", () => show(i - 1));
   next.addEventListener("click", () => show(i + 1));

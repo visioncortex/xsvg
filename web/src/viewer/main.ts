@@ -13,7 +13,7 @@ import { SAMPLES, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
 import { createPanZoom, type PanZoom } from "./pan-zoom";
 import { createInspector, type Inspector } from "./inspector";
-import { findArtboards } from "../core/artboards";
+import { findArtboards, makeThumb } from "../core/artboards";
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -84,13 +84,6 @@ async function open(name: string, source: string): Promise<void> {
     if (svgEl) {
       sizeToViewBox(svgEl as SVGSVGElement);
       panzoom = createPanZoom(stage, content);
-      // Zoom to the first artboard (§5.2) when the document has any; else fit
-      // the whole drawing.
-      const boards = findArtboards(svgEl as SVGSVGElement);
-      if (boards.length) panzoom.fitTo(...boards[0].frame);
-      else panzoom.fit();
-      fitted = true;
-      updateFitIcon();
       inspector = createInspector({
         svgRoot: svgEl as SVGSVGElement,
         panel,
@@ -98,6 +91,9 @@ async function open(name: string, source: string): Promise<void> {
         editor,
       });
       panzoom.onBackgroundClick(() => inspector?.clear()); // click empty area to deselect
+      // Artboards (§5.2): a left slide rail + zoom-to-first when the document
+      // has any; else fit the whole drawing.
+      setupDeck(svgEl as SVGSVGElement);
     }
   } catch (err) {
     content.innerHTML = "";
@@ -105,6 +101,63 @@ async function open(name: string, source: string): Promise<void> {
     errorBox.textContent = String(err);
   }
 }
+
+// Slide deck: a left thumbnail rail for multi-artboard documents; clicking a
+// thumb (or arrow keys) zooms the pan/zoom to that artboard.
+const deckRail = byId("deck-rail");
+const deckToggle = byId("deck-toggle");
+let deckSelect: ((i: number) => void) | null = null;
+let deckActive = 0;
+let deckFrame: [number, number, number, number] | null = null;
+
+function setupDeck(svg: SVGSVGElement): void {
+  deckRail.innerHTML = "";
+  deckSelect = null;
+  deckFrame = null;
+  const boards = findArtboards(svg);
+  deckToggle.hidden = boards.length < 2;
+  if (boards.length < 2) {
+    viewerEl.classList.remove("deck-open");
+    if (boards.length === 1) {
+      deckFrame = boards[0].frame; // single artboard: sizer still centers on it
+      panzoom!.fitTo(...deckFrame);
+    } else {
+      panzoom!.fit();
+    }
+    fitted = true;
+    updateFitIcon();
+    return;
+  }
+  const thumbs = boards.map((b, idx) => {
+    const t = makeThumb(svg, b);
+    t.addEventListener("click", () => deckSelect?.(idx));
+    deckRail.appendChild(t);
+    return t;
+  });
+  deckSelect = (i: number) => {
+    deckActive = Math.max(0, Math.min(boards.length - 1, i));
+    deckFrame = boards[deckActive].frame;
+    panzoom!.fitTo(...deckFrame);
+    thumbs.forEach((t, k) => t.classList.toggle("active", k === deckActive));
+    fitted = true;
+    updateFitIcon();
+  };
+  viewerEl.classList.add("deck-open");
+  deckSelect(0);
+}
+
+deckToggle.addEventListener("click", () => {
+  viewerEl.classList.toggle("deck-open");
+  deckSelect?.(deckActive); // refit the current slide as the stage resizes
+});
+window.addEventListener("keydown", (e) => {
+  if (!deckSelect) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable))
+    return;
+  if (e.key === "ArrowLeft" || e.key === "PageUp") deckSelect(deckActive - 1);
+  else if (e.key === "ArrowRight" || e.key === "PageDown") deckSelect(deckActive + 1);
+});
 
 // Floating controls: code toggle, zoom, fit/1:1 toggle.
 byId("code-btn").addEventListener("click", () => {
@@ -169,8 +222,17 @@ byId("sidebar-resize").addEventListener("pointerdown", (e: PointerEvent) => {
 });
 byId("fit-btn").addEventListener("click", () => {
   if (!panzoom) return;
-  if (fitted) panzoom.reset();
-  else panzoom.fit();
+  // In a deck, the sizer toggles around the ACTIVE slide: frame it, or 1:1
+  // centered on it — not the whole tiled drawing.
+  if (deckFrame) {
+    const [x, y, w, h] = deckFrame;
+    if (fitted) panzoom.resetTo(x + w / 2, y + h / 2);
+    else panzoom.fitTo(x, y, w, h);
+  } else if (fitted) {
+    panzoom.reset();
+  } else {
+    panzoom.fit();
+  }
   fitted = !fitted;
   updateFitIcon();
 });

@@ -13,6 +13,9 @@ function clamp(v: number, lo: number, hi: number): number {
 export interface PanZoom {
   /** Center the content at 1:1. */
   reset(): void;
+  /** Put content point (cx, cy) at the viewport center, at 1:1 — 1:1 on a
+   *  specific artboard rather than the whole drawing. */
+  resetTo(cx: number, cy: number): void;
   /** Scale the content to fill the viewport (with margin) and center it. */
   fit(): void;
   /** Frame a specific rect (content/SVG-user units) in the viewport, centered
@@ -80,9 +83,14 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     const middle = e.button === 1;
     const spacePan = e.button === 0 && spaceDown;
     // A plain left press on the empty background pans (and may be a deselect
-    // click); a press on the content is normally a click so the inspector can
-    // select the element — but middle-drag and space+drag pan from anywhere.
-    const bgPan = e.button === 0 && e.target === viewport;
+    // click); a press on a painted element is a click so the inspector can
+    // select it — but middle-drag and space+drag pan from anywhere. "Empty"
+    // includes the transparent parts of the content: the stage, the content
+    // box, or the <svg> root itself (a painted child would be the target
+    // instead), so a drag on a transparent artboard gutter pans.
+    const empty =
+      e.target === viewport || e.target === content || e.target instanceof SVGSVGElement;
+    const bgPan = e.button === 0 && empty;
     if (!(middle || spacePan || bgPan)) return;
     if (middle || spacePan) e.preventDefault(); // no text-selection / autoscroll
     dragging = true;
@@ -164,6 +172,13 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     apply();
   };
 
+  const resetTo = (cx: number, cy: number) => {
+    scale = 1;
+    tx = viewport.clientWidth / 2 - cx;
+    ty = viewport.clientHeight / 2 - cy;
+    apply();
+  };
+
   const fitTo = (x: number, y: number, w: number, h: number) => {
     const vw = viewport.clientWidth;
     const vh = viewport.clientHeight;
@@ -188,6 +203,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
 
   return {
     reset,
+    resetTo,
     fit,
     fitTo,
     zoomIn: () => zoomAtCenter(1.25),
