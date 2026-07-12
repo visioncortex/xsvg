@@ -72,6 +72,12 @@ Realistic composites that combine several features into one artifact.
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
 | [warp-bend.xsvg](warp-bend.xsvg) | `field="bend" in="#spine"` flows a whole group along a path — the envelope midline rides the spine, `align`/`start` place it by arc length (Inkscape's *LPE Bend*); `field="roughen" bend detail` jitters outlines with **deterministic** seeded value noise |
 
+## Theming — `<x:theme>` (§4.1)
+
+| File | Shows |
+|---|---|
+| [theme.xsvg](theme.xsvg) | `<x:theme>` declares a palette of `<x:color>` tokens and a `<x:type>` scale; the page references them with `fill="var(name)"` (accent bar, swatches, button, outlined chip, list markers) and `x:type="name"` (kicker / title / heading / body). Type tokens are an overridable base — a list item overrides `font-size`/`fill` per element. Both resolve at compile time, so a plain viewer never sees a `var()` |
+
 ## Connectors — `<x:connector>` (§7.6)
 
 | File | Shows |

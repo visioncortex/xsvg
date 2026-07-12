@@ -214,6 +214,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Theming — design tokens",
+    note: "<x:theme> compile-time color tokens (var(name) in any paint) + type tokens (x:type, an overridable base) — §4.1.",
+    samples: [
+      {
+        file: "theme.xsvg",
+        title: "Design tokens",
+        blurb: "a palette of <x:color> tokens and an <x:type> scale referenced by fill=\"var(name)\" (accent bar, swatches, button, list markers) and x:type=\"name\" (kicker/title/heading/body); type tokens are an overridable base, and everything resolves at compile time",
+      },
+    ],
+  },
+  {
     name: "Inset & outset — path offsetting",
     note: "<x:offset in distance join> — grow/shrink a region by a Minkowski offset, baked to one <path> (§7.7).",
     samples: [

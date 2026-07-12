@@ -349,6 +349,7 @@ pub fn compile_impl(
     let q = xsvg_core::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
+    load_theme(&doc); // §4.1 color/type tokens, resolved during serialization
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -657,7 +658,7 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     };
     let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
 
-    let stroke = node.attribute("stroke").unwrap_or("#334155");
+    let stroke = resolve_var(node.attribute("stroke").unwrap_or("#334155")).into_owned();
     let sw = attr_num(node, "stroke-width", 1.0);
     let size = attr_num(node, "arrow-size", (sw * 3.5).max(7.0)).max(0.0);
 
@@ -1005,6 +1006,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "connector" => emit_connector(node, out, ctx),
             "offset" => emit_offset(node, out, ctx),
             "list" => emit_list(node, out, ctx),
+            "theme" => {} // §4.1 definitions — loaded up front, emit nothing
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
@@ -1418,7 +1420,7 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let item_spacing = attr_num(node, "item-spacing", size * 0.35);
     let list_kind = node.attribute("list").unwrap_or("bullet");
     let marker_scale = attr_num(node, "marker-size", 1.0).max(0.0);
-    let marker_fill = node.attribute("marker-fill").unwrap_or(fill);
+    let marker_fill = resolve_var(node.attribute("marker-fill").unwrap_or(fill)).into_owned();
     let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
 
     let fm = m.font_metrics(&style, size);
@@ -1542,7 +1544,7 @@ fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             Marker::Shape(tok) => {
                 // centre on the middle of lowercase (x-height), right edge at `col`
                 let cy = item_baseline - item_fm.x_height * 0.5;
-                shapes.push_str(&shape_marker(tok, it.col, cy, item_r, marker_fill));
+                shapes.push_str(&shape_marker(tok, it.col, cy, item_r, &marker_fill));
             }
             Marker::Text(mk) => {
                 // right-aligned into the gutter so "1." and "10." share a column edge
@@ -2677,6 +2679,7 @@ fn stop_color(stop: roxmltree::Node) -> Option<(xsvg_core::gradient::LinRgb, f32
         .attribute("stop-color")
         .map(str::to_string)
         .or_else(|| style_prop("stop-color"))?;
+    let color = resolve_var(color.trim()); // §4.1 color token
     let (rgb, mut a) = parse_hex_color(color.trim())?;
     if let Some(op) = stop
         .attribute("stop-opacity")
@@ -3188,6 +3191,7 @@ fn outline_stroke_attrs(node: roxmltree::Node) -> String {
 /// output of create-outlines (§6.12) and text-on-path (§6.13). `paths` are the glyph
 /// path `d` strings (one per line for a box, one for a warped run).
 fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, paths: &[String]) {
+    let (fill, stroke) = (resolve_var(fill), resolve_var(stroke));
     out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
     for d in paths {
         out.push_str("<path d=\"");
@@ -3207,7 +3211,7 @@ fn push_font_attrs(out: &mut String, style: &TextStyle, size: f64, fill: &str) {
         fmt(size),
         style.weight,
         style.style,
-        fill
+        resolve_var(fill)
     ));
 }
 
@@ -3368,20 +3372,30 @@ fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
 // ---- helpers ---------------------------------------------------------------
 
 fn style_from(node: roxmltree::Node) -> TextStyle {
+    // A `<x:type>` token (via `x:type="name"`) supplies OVERRIDABLE defaults —
+    // the element's own `font-*` attributes win over the token (§4.1).
+    let tok = type_props(node).unwrap_or_default();
+    let t = |k: &str| tok.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
+    let s = |k: &str, d: &str| node.attribute(k).or_else(|| t(k)).unwrap_or(d).to_string();
+    let num = |k: &str, d: f64| {
+        node.attribute(k)
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+            .or_else(|| t(k).and_then(parse_num).filter(|n| *n > 0.0))
+            .unwrap_or(d)
+    };
+    let spacing = |k: &str| match node.attribute(k).or_else(|| t(k)) {
+        None | Some("normal") => 0.0,
+        Some(v) => parse_num(v).unwrap_or(0.0),
+    };
     TextStyle {
-        family: node
-            .attribute("font-family")
-            .unwrap_or("sans-serif")
-            .to_string(),
-        size: attr_pos(node, "font-size", 16.0),
-        weight: node
-            .attribute("font-weight")
-            .unwrap_or("normal")
-            .to_string(),
-        style: node.attribute("font-style").unwrap_or("normal").to_string(),
-        line_height: attr_pos(node, "line-height", 1.2),
-        letter_spacing: spacing_attr(node, "letter-spacing"),
-        word_spacing: spacing_attr(node, "word-spacing"),
+        family: s("font-family", "sans-serif"),
+        size: num("font-size", 16.0),
+        weight: s("font-weight", "normal"),
+        style: s("font-style", "normal"),
+        line_height: num("line-height", 1.2),
+        letter_spacing: spacing("letter-spacing"),
+        word_spacing: spacing("word-spacing"),
     }
 }
 
@@ -3532,6 +3546,110 @@ const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 /// `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`), and other foreign
 /// namespaces drop (editor metadata we can't re-emit faithfully). `skip` filters
 /// by local name.
+// ---- Theming (§4.1): compile-time color & type tokens ---------------------
+
+/// A `<x:theme>`'s tokens, loaded once per compile. `colors` map a name to any
+/// paint value (referenced as `var(name)`); `types` map a name to an ordered set
+/// of font-ish properties applied as an OVERRIDABLE base on text carrying
+/// `x:type="name"` (the element's own `font-*` wins).
+#[derive(Default)]
+struct Theme {
+    colors: std::collections::HashMap<String, String>,
+    types: std::collections::HashMap<String, Vec<(String, String)>>,
+}
+
+thread_local! {
+    // Per-compile theme. wasm is single-threaded and `compile_impl` reloads it at
+    // the top of every compile, so tokens never leak between documents or tests.
+    static THEME: std::cell::RefCell<Theme> = std::cell::RefCell::new(Theme::default());
+}
+
+/// The font-ish properties an `<x:type>` token may carry.
+const TYPE_PROPS: [&str; 7] = [
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+];
+
+/// Load `<x:theme>`'s `<x:color>` / `<x:type>` tokens into [`THEME`] (clearing any
+/// prior compile's). Called once before serialization.
+fn load_theme(doc: &roxmltree::Document) {
+    let mut theme = Theme::default();
+    for th in doc
+        .descendants()
+        .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "theme")
+    {
+        for c in th.children().filter(|c| c.is_element()) {
+            match c.tag_name().name() {
+                "color" => {
+                    if let (Some(name), Some(val)) = (c.attribute("name"), c.attribute("value")) {
+                        theme.colors.insert(name.to_string(), val.to_string());
+                    }
+                }
+                "type" => {
+                    if let Some(name) = c.attribute("name") {
+                        let props = TYPE_PROPS
+                            .iter()
+                            .filter_map(|&p| c.attribute(p).map(|v| (p.to_string(), v.to_string())))
+                            .collect();
+                        theme.types.insert(name.to_string(), props);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    THEME.with(|t| *t.borrow_mut() = theme);
+}
+
+/// Resolve every `var(name)` / `var(name, fallback)` in an attribute value against
+/// the theme's color tokens. An unknown token with no fallback is left verbatim
+/// (renders as the property's initial value, like a dangling CSS variable).
+fn resolve_var(v: &str) -> std::borrow::Cow<'_, str> {
+    if !v.contains("var(") {
+        return std::borrow::Cow::Borrowed(v);
+    }
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(i) = rest.find("var(") {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 4..];
+        let Some(close) = after.find(')') else {
+            out.push_str(&rest[i..]);
+            rest = "";
+            break;
+        };
+        let inner = &after[..close];
+        let mut parts = inner.splitn(2, ',');
+        let name = parts.next().unwrap_or("").trim().trim_start_matches("--");
+        let fallback = parts.next().map(str::trim);
+        let hit = THEME.with(|t| {
+            t.borrow()
+                .colors
+                .get(name)
+                .cloned()
+                .or_else(|| fallback.map(str::to_string))
+        });
+        match hit {
+            Some(val) => out.push_str(&val),
+            None => out.push_str(&rest[i..i + 4 + close + 1]), // leave var(...) verbatim
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
+}
+
+/// The `<x:type>` token's font properties named by an element's `x:type`, if any.
+fn type_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
+    let name = node.attribute((XSVG_NS, "type"))?;
+    THEME.with(|t| t.borrow().types.get(name).cloned())
+}
+
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     for attr in node.attributes() {
         if skip.contains(&attr.name()) {
@@ -3551,8 +3669,22 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
         out.push_str(prefix);
         out.push_str(attr.name());
         out.push_str("=\"");
-        push_escaped(out, attr.value(), true);
+        push_escaped(out, &resolve_var(attr.value()), true);
         out.push('"');
+    }
+    // Type token (§4.1): apply the named `<x:type>`'s font props the element did
+    // not set itself — an overridable base. (Only fires when `x:type` is present;
+    // harmless on non-text elements, which ignore font-*.)
+    if let Some(props) = type_props(node) {
+        for (k, v) in props {
+            if node.attribute(k.as_str()).is_none() && !skip.contains(&k.as_str()) {
+                out.push(' ');
+                out.push_str(&k);
+                out.push_str("=\"");
+                push_escaped(out, &resolve_var(&v), true);
+                out.push('"');
+            }
+        }
     }
 }
 
@@ -3935,6 +4067,44 @@ mod tests {
             out.contains("font-size=\"10\">small</tspan>"),
             "the smaller item's line overrides the size: {out}"
         );
+    }
+
+    #[test]
+    fn theme_color_tokens_resolve_in_paint() {
+        let svg = format!(
+            r##"{XW}<x:theme><x:color name="accent" value="#6366f1"/></x:theme><rect x="0" y="0" width="10" height="10" fill="var(accent)"/><circle cx="5" cy="5" r="3" fill="var(missing, #ff0000)"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(out.contains("fill=\"#6366f1\""), "token resolved: {out}");
+        assert!(
+            out.contains("fill=\"#ff0000\""),
+            "fallback used for a missing token: {out}"
+        );
+        assert!(
+            !out.contains("x:theme") && !out.contains("x:color") && !out.contains("var("),
+            "theme defs emit nothing and no var() leaks: {out}"
+        );
+    }
+
+    #[test]
+    fn theme_type_token_is_an_overridable_base() {
+        let svg = format!(
+            r##"{XW}<x:theme><x:type name="title" font-family="Georgia" font-size="40" font-weight="700"/></x:theme><text x="0" y="20" x:type="title">Hi</text><text x="0" y="60" x:type="title" font-size="18">Small</text></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(
+            out.contains("font-family=\"Georgia\"") && out.contains("font-weight=\"700\""),
+            "token supplies family/weight: {out}"
+        );
+        assert!(
+            out.contains("font-size=\"40\""),
+            "token size on the first text: {out}"
+        );
+        assert!(
+            out.contains("font-size=\"18\""),
+            "element font-size overrides the token: {out}"
+        );
+        assert!(!out.contains("x:type"), "x:type is stripped: {out}");
     }
 
     #[test]
