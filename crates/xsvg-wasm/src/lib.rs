@@ -657,90 +657,126 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     };
     let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
 
-    let d = match node.attribute("route").unwrap_or("straight") {
-        "x-major" => {
-            // horizontal-first orthogonal rail: exit the facing side, elbow at
-            // the horizontal midpoint
-            let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
-            let ax = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
-            let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
-            let mx = (ax.x + bx.x) / 2.0;
-            format!(
-                "M{} L{} L{} L{}",
-                p(ax),
-                p(Point::new(mx, ax.y)),
-                p(Point::new(mx, bx.y)),
-                p(bx)
-            )
-        }
-        "y-major" => {
-            let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
-            let ay = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
-            let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
-            let my = (ay.y + by.y) / 2.0;
-            format!(
-                "M{} L{} L{} L{}",
-                p(ay),
-                p(Point::new(ay.x, my)),
-                p(Point::new(by.x, my)),
-                p(by)
-            )
-        }
-        "curve" => {
-            let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
-            if horiz {
+    // Each route yields its path plus the two endpoint tangents as (tip, adj)
+    // pairs: `adj` is the neighbouring path point, so unit(tip − adj) is the
+    // direction the line travels OUT of that end — the way its arrowhead points.
+    let (d, start_tip, start_adj, end_tip, end_adj) =
+        match node.attribute("route").unwrap_or("straight") {
+            "x-major" => {
                 let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
                 let ax = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
                 let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
-                let k = ((bx.x - ax.x).abs() * 0.5).max(36.0);
-                format!(
-                    "M{} C{} {} {}",
-                    p(ax),
-                    p(Point::new(ax.x + dir * k, ax.y)),
-                    p(Point::new(bx.x - dir * k, bx.y)),
-                    p(bx)
+                let mx = (ax.x + bx.x) / 2.0;
+                let (p1, p2) = (Point::new(mx, ax.y), Point::new(mx, bx.y));
+                (
+                    format!("M{} L{} L{} L{}", p(ax), p(p1), p(p2), p(bx)),
+                    ax,
+                    p1,
+                    bx,
+                    p2,
                 )
-            } else {
+            }
+            "y-major" => {
                 let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
                 let ay = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
                 let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
-                let k = ((by.y - ay.y).abs() * 0.5).max(36.0);
-                format!(
-                    "M{} C{} {} {}",
-                    p(ay),
-                    p(Point::new(ay.x, ay.y + dir * k)),
-                    p(Point::new(by.x, by.y - dir * k)),
-                    p(by)
+                let my = (ay.y + by.y) / 2.0;
+                let (p1, p2) = (Point::new(ay.x, my), Point::new(by.x, my));
+                (
+                    format!("M{} L{} L{} L{}", p(ay), p(p1), p(p2), p(by)),
+                    ay,
+                    p1,
+                    by,
+                    p2,
                 )
             }
-        }
-        _ => {
-            // straight: clip the center-to-center line to each box edge
-            format!("M{} L{}", p(edge(a, cb)), p(edge(b, ca)))
-        }
-    };
+            "curve" => {
+                let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
+                let (a0, c1, c2, b0) = if horiz {
+                    let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
+                    let a0 = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
+                    let b0 = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
+                    let k = ((b0.x - a0.x).abs() * 0.5).max(36.0);
+                    (
+                        a0,
+                        Point::new(a0.x + dir * k, a0.y),
+                        Point::new(b0.x - dir * k, b0.y),
+                        b0,
+                    )
+                } else {
+                    let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
+                    let a0 = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
+                    let b0 = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
+                    let k = ((b0.y - a0.y).abs() * 0.5).max(36.0);
+                    (
+                        a0,
+                        Point::new(a0.x, a0.y + dir * k),
+                        Point::new(b0.x, b0.y - dir * k),
+                        b0,
+                    )
+                };
+                (
+                    format!("M{} C{} {} {}", p(a0), p(c1), p(c2), p(b0)),
+                    a0,
+                    c1,
+                    b0,
+                    c2,
+                )
+            }
+            _ => {
+                // straight: clip the center-to-center line to each box edge
+                let a0 = edge(a, cb);
+                let b0 = edge(b, ca);
+                (format!("M{} L{}", p(a0), p(b0)), a0, b0, b0, a0)
+            }
+        };
 
-    // arrowhead marker(s), tinted to the stroke
+    // Arrowhead as a computed triangle: tip AT the endpoint (no penetration),
+    // base shot back along the tangent by the arrow height, so it follows the
+    // true (curve) tangent and its size is a plain attribute.
     let stroke = node.attribute("stroke").unwrap_or("#334155");
-    let arrow = node.attribute("arrow").unwrap_or("end");
-    let (mut mstart, mut mend) = (String::new(), String::new());
-    if arrow != "none" {
-        let mid = format!("x-con-{}", node.range().start);
-        out.push_str(&format!(
-            "<marker id=\"{mid}\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"{stroke}\"/></marker>"
-        ));
-        if arrow == "end" || arrow == "both" {
-            mend = format!(" marker-end=\"url(#{mid})\"");
+    let sw = attr_num(node, "stroke-width", 1.0);
+    let size = attr_num(node, "arrow-size", (sw * 3.5).max(7.0)).max(0.0);
+    let head = |tip: Point, adj: Point| -> Option<String> {
+        let (dx, dy) = (tip.x - adj.x, tip.y - adj.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-6 || size <= 0.0 {
+            return None;
         }
-        if arrow == "start" || arrow == "both" {
-            mstart = format!(" marker-start=\"url(#{mid})\"");
+        let (ux, uy) = (dx / len, dy / len);
+        let base = Point::new(tip.x - ux * size, tip.y - uy * size);
+        let (px, py) = (-uy * size * 0.45, ux * size * 0.45);
+        Some(format!(
+            "<path fill=\"{stroke}\" d=\"M{} L{},{} L{},{} Z\"/>",
+            p(tip),
+            fmt(base.x + px),
+            fmt(base.y + py),
+            fmt(base.x - px),
+            fmt(base.y - py)
+        ))
+    };
+    let arrow = node.attribute("arrow").unwrap_or("end");
+    let mut heads = String::new();
+    if arrow == "start" || arrow == "both" {
+        if let Some(h) = head(start_tip, start_adj) {
+            heads.push_str(&h);
+        }
+    }
+    if arrow == "end" || arrow == "both" {
+        if let Some(h) = head(end_tip, end_adj) {
+            heads.push_str(&h);
         }
     }
 
     out.push_str("<path");
-    copy_attrs(node, out, &["from", "to", "route", "arrow", "fill"]);
+    copy_attrs(
+        node,
+        out,
+        &["from", "to", "route", "arrow", "arrow-size", "fill"],
+    );
     out.push_str(&pos_attr(node, ctx));
-    out.push_str(&format!(" fill=\"none\"{mstart}{mend} d=\"{d}\"/>"));
+    out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));
+    out.push_str(&heads); // arrowheads paint on top of the line
 }
 
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
@@ -3185,18 +3221,32 @@ mod tests {
             r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b" stroke="#111"/></svg>"##
         );
         let out = compile_test(&svg);
+        // the route path (fill=none) is followed by one arrowhead triangle
         assert!(out.contains("fill=\"none\""), "{out}");
         assert!(
-            out.contains("marker-end="),
-            "default arrow at the end: {out}"
+            out[out.find("fill=\"none\"").unwrap()..].contains("<path fill=\"#111\""),
+            "arrowhead after the route: {out}"
         );
-        assert!(out.contains("<marker id=\"x-con-"), "{out}");
-        // straight edge-clipped: starts at a's right edge (x=40), ends at b's left (x=120)
+        // the route ends at b's left edge (x=120), NOT inside it (no penetration)
         use xsvg_core::kurbo::Shape;
-        let bb = first_path(&out).bounding_box();
+        let bb = xsvg_core::kurbo::BezPath::from_svg(route_d(&out))
+            .unwrap()
+            .bounding_box();
         assert!(
             (bb.x0 - 40.0).abs() < 0.5 && (bb.x1 - 120.0).abs() < 0.5,
             "{bb:?}"
+        );
+        // the arrowhead is a triangle whose TIP sits exactly on b's edge (x=120)
+        let head = out
+            .rsplit(" d=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert!(
+            head.starts_with("M120,"),
+            "tip at the edge, not past it: {head}"
         );
 
         // x-major rail: a Z of three segments (M + 3 L), elbow at the mid-x
@@ -3205,25 +3255,35 @@ mod tests {
         );
         let out = compile_test(&svg);
         assert!(
-            !out.contains("<marker"),
-            "arrow=none emits no marker: {out}"
+            !out[out.find("fill=\"none\"").unwrap()..].contains("<path"),
+            "arrow=none emits no arrowhead after the route: {out}"
         );
-        let d = {
-            let k = out.rfind(" d=\"").unwrap() + 4;
-            &out[k..k + out[k..].find('"').unwrap()]
-        };
+        let d = route_d(&out);
         assert_eq!(d.matches('L').count(), 3, "x-major is H-V-H: {d}");
-        // exits a's right edge (x=40) at a's center y (20)
-        assert!(d.starts_with("M40,20"), "{d}");
-
-        // curve emits a cubic
-        let svg = format!(
-            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="160" y="10" width="40" height="40"/><x:connector from="#a" to="#b" route="curve"/></svg>"##
-        );
         assert!(
-            compile_test(&svg).contains(" d=\"M40,20 C"),
-            "{}",
-            compile_test(&svg)
+            d.starts_with("M40,20"),
+            "exits a's right edge at its center y: {d}"
+        );
+
+        // curve emits a cubic; arrow-size scales the head
+        let svg = format!(
+            r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="160" y="10" width="40" height="40"/><x:connector from="#a" to="#b" route="curve" arrow-size="20"/></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert!(route_d(&out).starts_with("M40,20 C"), "{out}");
+        let head = out
+            .rsplit(" d=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let hp = xsvg_core::kurbo::BezPath::from_svg(head)
+            .unwrap()
+            .bounding_box();
+        assert!(
+            hp.width().max(hp.height()) > 12.0,
+            "big head for arrow-size=20: {hp:?}"
         );
 
         // missing endpoint degrades with a marker
@@ -5129,6 +5189,13 @@ mod tests {
     /// Reparse the last emitted `d` attribute — the warped output (reference paths
     /// pass through first). The output is compact/relative, so geometry assertions
     /// go through kurbo rather than string matching.
+    /// The `d` of a connector's route path — the one with fill="none".
+    fn route_d(out: &str) -> &str {
+        let k = out.find("fill=\"none\"").unwrap();
+        let j = out[k..].find(" d=\"").unwrap() + k + 4;
+        &out[j..j + out[j..].find('"').unwrap()]
+    }
+
     fn first_path(out: &str) -> xsvg_core::kurbo::BezPath {
         let d = out
             .rsplit(" d=\"")

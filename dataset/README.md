@@ -76,7 +76,7 @@ Realistic composites that combine several features into one artifact.
 
 | File | Shows |
 |---|---|
-| [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`) tint to the stroke; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
+| [connectors.xsvg](connectors.xsvg) | Lines bound to two boxes by `from`/`to`, routed four ways: `straight` (edge-clipped direct line), `x-major` / `y-major` orthogonal rails (H–V–H / V–H–V), and a smooth `curve`. Arrowheads (`arrow="end\|start\|both\|none"`, size via `arrow-size`) are computed triangles tinted to the stroke — tip exactly on the box edge, base back along the true tangent; the route re-derives from the endpoints' boxes, so moving an endpoint re-emits the connector |
 
 ## Path algebra — `<x:boolean>` (§7.4)
 

@@ -799,12 +799,17 @@ lowers to a plain `<path>` carrying the connector's own stroke.
 | | `x-major` | orthogonal rail, **horizontal-first** — exits the facing side, elbows at the horizontal midpoint (H–V–H) |
 | | `y-major` | orthogonal rail, **vertical-first** — exits top/bottom, elbows at the vertical midpoint (V–H–V) |
 | | `curve` | a cubic with tangents along the dominant axis (horizontal when the boxes are side-by-side, vertical when stacked) |
-| `arrow` | `end` *(default)* / `start` / `both` / `none` | an auto-oriented `<marker>` (tinted to the stroke) emitted at the chosen ends |
+| `arrow` | `end` *(default)* / `start` / `both` / `none` | a filled triangle (tinted to the stroke) at the chosen ends |
+| `arrow-size` | length (default `max(3.5·stroke-width, 7)`) | the arrowhead height |
 
 **Baked reference (normative).** The route is recomputed from the endpoints' boxes, so a connector
 is a compile-time reference like `in="#id"`: moving or resizing an endpoint re-emits the connector
 (the incremental `dependents` scan covers both `from` and `to` — [Incremental.md](Incremental.md)).
 A missing or non-geometry endpoint degrades with a marker (§3).
+
+The arrowhead is a **computed triangle**, not an SVG `<marker>`: its tip sits exactly on the
+endpoint (no overshoot into the box) and its base is placed back along the segment's true tangent
+by `arrow-size` — so it follows a curve's actual exit angle and its size is a plain attribute.
 
 ## 8. Pixel adjustments — CSS filter functions [implemented]
 
