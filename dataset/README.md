@@ -72,6 +72,12 @@ Realistic composites that combine several features into one artifact.
 | [warp-perspective.xsvg](warp-perspective.xsvg) | `field="perspective" corners="…"` solves an 8-DOF homography from the envelope corners (straight lines stay straight — no wasted subdivision); `field="free"` blends corners bilinearly; `distort-h`/`distort-v` compose a projective taper after any preset |
 | [warp-bend.xsvg](warp-bend.xsvg) | `field="bend" in="#spine"` flows a whole group along a path — the envelope midline rides the spine, `align`/`start` place it by arc length (Inkscape's *LPE Bend*); `field="roughen" bend detail` jitters outlines with **deterministic** seeded value noise |
 
+## Paragraphs — `<x:p>` (§6.16)
+
+| File | Shows |
+|---|---|
+| [paragraphs.xsvg](paragraphs.xsvg) | `<x:p>` children turn a `<x:textbox>` into a multi-paragraph flow: a heading paragraph, body paragraphs stacked by `paragraph-spacing`, one led in by a `text-indent`, and a justified one — each keeping its gap. A second box is a vertically-centered pull-quote whose kicker / quote / caption are three paragraphs with their own `font-*`, `fill`, and `space-before`/`after` |
+
 ## Tables — `<x:table>` (§6.15)
 
 | File | Shows |

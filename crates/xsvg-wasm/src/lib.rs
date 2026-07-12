@@ -1447,6 +1447,25 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let stroke = outline_stroke_attrs(node);
     let pos = pos_attr(node, ctx);
 
+    // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
+    // space-before/after. Rectangular geometry only (own box or `in="#rect"`);
+    // curved region flow ignores `<x:p>` and falls through to a single flow.
+    let paras: Vec<roxmltree::Node> = node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "p")
+        .collect();
+    if !paras.is_empty() {
+        let geom = match node.attribute("in") {
+            Some(r) => resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            None => Some(node),
+        };
+        if let Some(geom) = geom {
+            let spec = textbox_area_spec(node, geom);
+            emit_paragraphs(node, &paras, &style, fill, gx, &spec, out, ctx);
+            return;
+        }
+    }
+
     if let Some(reference) = node.attribute("in") {
         let Some(target) = resolve_ref(node, reference) else {
             out.push_str("<!-- xsvg: <x:textbox in> target not found -->");
@@ -1539,6 +1558,141 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         outline,
         ctx.outliner,
     );
+}
+
+/// Paragraph flow (§6.16): lay each `<x:p>` as its own wrapped block, stacked
+/// top-down inside the box with the paragraph gaps, then `valign` the whole
+/// block. Each paragraph carries its own `align` / `text-indent` / `font-*` /
+/// `fill`, and maps to its own source range. Live text (create-outlines is not
+/// applied in paragraph mode).
+fn emit_paragraphs(
+    node: roxmltree::Node,
+    paras: &[roxmltree::Node],
+    base_style: &TextStyle,
+    base_fill: &str,
+    gx: f64,
+    spec: &AreaSpec,
+    out: &mut String,
+    ctx: &Ctx,
+) {
+    let m = ctx.m;
+    let cx = spec.x + spec.padding;
+    let cy = spec.y + spec.padding;
+    let cw = spec.width - 2.0 * spec.padding;
+    let ch = spec.height - 2.0 * spec.padding;
+    let default_align = node.attribute("align").unwrap_or("start");
+    let default_spacing = attr_num(node, "paragraph-spacing", 0.0);
+
+    // per-paragraph style: the box style, with any font-* on the `<x:p>` overriding
+    let para_style = |p: roxmltree::Node| {
+        let mut st = base_style.clone();
+        if let Some(v) = p.attribute("font-family") {
+            st.family = v.to_string();
+        }
+        if let Some(v) = p
+            .attribute("font-size")
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+        {
+            st.size = v;
+        }
+        if let Some(v) = p.attribute("font-weight") {
+            st.weight = v.to_string();
+        }
+        if let Some(v) = p.attribute("font-style") {
+            st.style = v.to_string();
+        }
+        if let Some(v) = p
+            .attribute("line-height")
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+        {
+            st.line_height = v;
+        }
+        st
+    };
+
+    struct Para<'a> {
+        lines: Vec<PlacedLine>,
+        style: TextStyle,
+        fill: &'a str,
+        anchor: &'static str,
+        src: roxmltree::Node<'a, 'a>,
+    }
+    // pass 1: lay each paragraph in a relative frame (para 0's cap-top at 0),
+    // accumulating the gaps
+    let mut items: Vec<Para> = Vec::with_capacity(paras.len());
+    let mut cursor = 0.0f64; // cap-top of the current paragraph
+    let mut prev_after = 0.0f64;
+    for (i, &p) in paras.iter().enumerate() {
+        let ptext = collect_text(p);
+        let pstyle = para_style(p);
+        let sb = attr_num(p, "space-before", 0.0);
+        let sa = attr_num(p, "space-after", default_spacing);
+        if i > 0 {
+            cursor += prev_after + sb;
+        }
+        let pspec = AreaSpec {
+            x: cx,
+            y: cursor,
+            width: cw,
+            height: 1e5, // tall → no clip; valign=top places lines from `cursor`
+            padding: 0.0,
+            align: Align::parse(p.attribute("align").unwrap_or(default_align)),
+            valign: VAlign::Top,
+            fit: Fit::None,
+            text_overflow: TextOverflow::Clip,
+            text_indent: attr_num(p, "text-indent", 0.0),
+        };
+        let layout = layout_area(&ptext, &pstyle, &pspec, m);
+        let pfm = m.font_metrics(&pstyle, pstyle.size);
+        let n = layout.lines.len().max(1);
+        let ph = pfm.cap_height + pfm.descent + (n - 1) as f64 * (pstyle.size * pstyle.line_height);
+        items.push(Para {
+            lines: layout.lines,
+            style: pstyle,
+            fill: p.attribute("fill").unwrap_or(base_fill),
+            anchor: layout.anchor.svg(),
+            src: p,
+        });
+        cursor += ph;
+        prev_after = sa;
+    }
+    let block_h = cursor;
+    let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
+    let block_top = match valign {
+        VAlign::Top => cy,
+        VAlign::Middle => cy + (ch - block_h) / 2.0,
+        VAlign::Bottom => cy + (ch - block_h),
+    };
+
+    // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
+    // <text> per paragraph
+    let base = [EmitAttrs::default()];
+    for para in &items {
+        let visible: Vec<PlacedLine> = para
+            .lines
+            .iter()
+            .filter(|l| {
+                let b = l.baseline + block_top;
+                b >= cy - 1e-6 && b <= cy + ch + 1e-6
+            })
+            .cloned()
+            .collect();
+        if visible.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
+        push_font_attrs(out, &para.style, para.style.size, para.fill);
+        out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
+        out.push('>');
+        for line in &visible {
+            let mut l = line.clone();
+            l.baseline += block_top;
+            emit_line(out, &l, &para.style, para.style.size, gx, m, &base);
+        }
+        out.push_str("</text>");
+    }
 }
 
 /// `<x:textpath in="#path" effect="skew|rainbow|stair">` (§6.13): outline the run flat
@@ -4383,6 +4537,31 @@ mod tests {
         assert!(
             out.contains("<tspan x=\"0\""),
             "later lines at the margin: {out}"
+        );
+    }
+
+    #[test]
+    fn textbox_paragraphs_stack_with_spacing() {
+        // Mono size 10: cap 7, descent 2, advance 12. Two 1-line paragraphs with a
+        // 20-unit paragraph-spacing: p0 baseline at cap (7); p1 pushed down by
+        // p0 height (9) + gap (20) + cap (7) = 36.
+        let svg = format!(
+            r##"{XW}<x:textbox x="0" y="0" width="200" height="200" font-size="10" line-height="1.2" paragraph-spacing="20"><x:p>one</x:p><x:p align="center">two</x:p></x:textbox></svg>"##
+        );
+        let out = compile_test(&svg);
+        assert_eq!(
+            out.matches("<text ").count(),
+            2,
+            "one <text> per paragraph: {out}"
+        );
+        assert!(out.contains("y=\"7\""), "first paragraph at the top: {out}");
+        assert!(
+            out.contains("y=\"36\""),
+            "second paragraph pushed down by the gap: {out}"
+        );
+        assert!(
+            out.contains("text-anchor=\"middle\""),
+            "per-paragraph align: {out}"
         );
     }
 

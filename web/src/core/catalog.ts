@@ -138,6 +138,11 @@ export const CATALOG: Category[] = [
         blurb: "<tspan> runs: per-run fill / weight / style flowing and wrapping inline",
       },
       {
+        file: "paragraphs.xsvg",
+        title: "Paragraphs",
+        blurb: "<x:p> children flow a <x:textbox> as stacked paragraphs — space-before/after (paragraph-spacing), per-paragraph align (justify), first-line indent, and per-paragraph font/fill — plus a vertically-centered pull-quote built from three styled paragraphs (§6.16)",
+      },
+      {
         file: "lists.xsvg",
         title: "Bullet & numbered lists",
         blurb: "<x:list> / <x:li indent='N'>: hanging-indent items whose drawn bullet shapes (disc / ring / square, optically balanced) and decimal→alpha→roman numbers cycle by depth, with the outer counter resuming after each sublist; a third list flows inside a referenced card (§6.14)",

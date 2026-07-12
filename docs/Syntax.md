@@ -177,6 +177,7 @@ sketches live in [Plan.md](Plan.md):
 - **`<x:theme>`** — compile-time design tokens: `<x:color>` (`var(name)` in any paint) + `<x:font>` (`x:font="name"`) ([§4.1](Specification.md))
 - **`<x:list list="…">`** / **`<x:li indent="N">`** — hanging-indent lists with cycling markers ([§6.14](Specification.md))
 - **`<x:table>`** / **`<x:tr>`** / **`<x:td>`** / **`<x:th>`** — grid with author-set columns and content-driven row heights ([§6.15](Specification.md))
+- **`<x:p>`** — paragraphs inside a `<x:textbox>` with space-before/after and per-paragraph style ([§6.16](Specification.md))
 
 All obey the degradation contract: a plain viewer skips them; the compiler lowers them to the SVG
 subset.

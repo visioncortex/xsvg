@@ -700,6 +700,36 @@ inspector resolves a click to the individual **cell**, not the whole table.
 are author-set, exactly as the presentation tools do; both are deliberate scope choices, not
 oversights. One flattened paragraph per cell (no inline `<tspan>` runs inside a cell yet).
 
+### 6.16 Paragraphs — `<x:p>` [implemented]
+
+A `<x:textbox>` whose children are `<x:p>` elements flows them as **separate paragraphs**, stacked
+top-down inside the box with vertical gaps — the multi-paragraph body real documents need, rather
+than one endless run. Each paragraph wraps to the content width and carries its own alignment,
+indent, style, and spacing.
+
+```xml
+<x:textbox x="40" y="60" width="384" height="360" font-size="14" paragraph-spacing="14">
+  <x:p font-size="22" font-weight="800" space-after="6">A heading paragraph</x:p>
+  <x:p text-indent="22">A body paragraph, led in by a first-line indent…</x:p>
+  <x:p align="justify">…and a justified one, keeping the paragraph gap above it.</x:p>
+</x:textbox>
+```
+
+| Attribute | On | Meaning |
+|---|---|---|
+| `paragraph-spacing` | `<x:textbox>` | default gap after each paragraph (its `space-after` default) |
+| `space-before` / `space-after` | `<x:p>` | extra gap above / below this paragraph (`space-after` defaults to `paragraph-spacing`) |
+| `align` | `<x:p>` | per-paragraph alignment (else the box's) |
+| `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
+| `font-*`, `fill` | `<x:p>` | per-paragraph style over the box defaults |
+
+The gap between two paragraphs is `space-after` of the first plus `space-before` of the second. The
+whole stacked block is then placed by the box's `valign` (top/middle/bottom), and lines whose
+baseline leaves the box are clipped. Each `<x:p>` compiles to its own `<text>` carrying its source
+range (a click resolves to the paragraph). **v0 limits:** paragraph mode is **live text** — no
+create-outlines (§6.12), no `<tspan>` runs inside a paragraph, and it applies to the **rectangular**
+box only (a curved `in="#shape"` region ignores `<x:p>` and flows as one block).
+
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,
@@ -1129,6 +1159,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
 | Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
 | Tables — `<x:table>`/`<x:tr>`/`<x:td>`/`<x:th>` author-set columns + content-driven row heights (Slides/Canva model), baked to rects + text (§6.15) | implemented |
+| Paragraphs — `<x:p>` in `<x:textbox>`: stacked paragraphs with `space-before`/`after`, per-paragraph align/indent/style (§6.16) | implemented |
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |

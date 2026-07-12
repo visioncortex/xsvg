@@ -52,7 +52,7 @@ standard, strongly wanted) · **S** = Stretch (advanced / later).
 | **Justification engine** (every-line vs single-line composer) | AI | E | ❌ | greedy v0 → Knuth-Plass "every-line" in Phase 2b |
 | **Justification limits**: word-spacing, letter-spacing, **glyph-scaling** each min/desired/max | AI | E | ❌ | the levers the composer adjusts to set lines |
 | **Leading / line spacing**: absolute + auto (% of size) | AI | C | ✅ | line advance in layout (`line-height` / `line-increment`) |
-| **Space before / after** paragraph | AI | C | ○ | layout gaps — one paragraph per element today |
+| **Space before / after** paragraph | AI | C | ✅ | **shipped** — `<x:p>` in a `<x:textbox>` with `space-before`/`space-after` + `paragraph-spacing` (§6.16) |
 | **Indents**: left, right, first-line, last-line | AI | C | ◑ | **first-line indent shipped** — `<x:textbox text-indent>` (negative outdents), plus per-item hanging indent in lists; left/right/last-line still to expose |
 | **Bulleted / numbered lists** (markers, nesting, hanging indent, outline counters) | AI/ID | C | ✅ | **shipped** — `<x:list>` / `<x:li indent="N">`: bullets •◦▪ and decimal→alpha→roman cycle by depth, counters restart on pop ([§6.14](Specification.md)) |
 | **Drop cap** (N lines, N characters) | AI | C | ○ | Vision item; oversized run, lines flow around it |
