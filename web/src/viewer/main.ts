@@ -110,6 +110,14 @@ let deckSelect: ((i: number) => void) | null = null;
 let deckActive = 0;
 let deckFrame: [number, number, number, number] | null = null;
 
+// Re-frame after a stage resize (code panel, sidebar drag): in a deck, keep the
+// ACTIVE artboard framed rather than fitting the whole tiled drawing.
+function refit(): void {
+  if (!panzoom || !fitted) return;
+  if (deckFrame) panzoom.fitTo(...deckFrame);
+  else panzoom.fit();
+}
+
 function setupDeck(svg: SVGSVGElement): void {
   deckRail.innerHTML = "";
   deckSelect = null;
@@ -163,7 +171,7 @@ window.addEventListener("keydown", (e) => {
 byId("code-btn").addEventListener("click", () => {
   const open = viewerEl.classList.toggle("inspector-open");
   if (open) editor.view.requestMeasure(); // CodeMirror measures once it's visible
-  if (fitted) panzoom?.fit(); // keep the diagram framed as the stage resizes
+  refit(); // keep the active artboard framed as the stage resizes
 });
 byId("zoom-btn-plus").addEventListener("click", () => panzoom?.zoomIn());
 byId("zoom-btn-minus").addEventListener("click", () => panzoom?.zoomOut());
@@ -185,7 +193,7 @@ const sidebar = document.querySelector(".sidebar") as HTMLElement;
 byId("sidebar-resize").addEventListener("dblclick", () => {
   sidebar.style.removeProperty("flex-basis");
   sidebar.style.removeProperty("width");
-  if (fitted) panzoom?.fit();
+  refit();
   editor.view.requestMeasure();
 });
 byId("sidebar-resize").addEventListener("pointerdown", (e: PointerEvent) => {
@@ -214,7 +222,7 @@ byId("sidebar-resize").addEventListener("pointerdown", (e: PointerEvent) => {
     const w = Math.max(240, Math.min(window.innerWidth - 320, window.innerWidth - ev.clientX));
     sidebar.style.flexBasis = `${w}px`;
     sidebar.style.width = `${w}px`;
-    if (fitted) panzoom?.fit(); // keep the diagram framed as the stage resizes
+    refit(); // keep the active artboard framed as the stage resizes
     editor.view.requestMeasure();
   };
   window.addEventListener("pointermove", move);
