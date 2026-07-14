@@ -32,7 +32,7 @@ impl xsvg_core::GlyphOutliner for NoOutliner {
 }
 
 fn compile(svg: &str) -> String {
-    xsvg_compile::compile_impl(svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap()
+    xsvg_core::compile_impl(svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap()
 }
 
 #[test]

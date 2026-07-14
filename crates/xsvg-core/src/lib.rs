@@ -1,7 +1,10 @@
-//! Shared, pure-Rust types for the xsvg engine.
+//! Shared, pure-Rust types for the xsvg engine, plus the document compiler.
 //!
 //! This crate must stay free of platform/JS/web dependencies so it compiles
 //! identically for native and `wasm32` targets (see Plan.md §1, "Core invariant").
+//! The `compile` module is the xsvg → plain-SVG compiler over these primitives; its
+//! platform seams (`Measurer`/`Shaper`/`GlyphOutliner`) are backed by `xsvg-wasm`
+//! (browser) or `xsvg-cli` (native).
 
 pub mod boolean;
 pub mod filter;
@@ -9,7 +12,12 @@ pub mod offset;
 pub mod text;
 pub mod warp;
 
+// The document compiler: parse xsvg/SVG, run the lowering passes, emit plain SVG. Kept a
+// private module — only its entry points are re-exported (the emit_* internals stay here).
+mod compile;
+
 pub use boolean::*;
+pub use compile::{compile_fragment_impl, compile_impl, dependents_impl, fragment_range_impl};
 pub use filter::*;
 pub use offset::*;
 pub use text::*;

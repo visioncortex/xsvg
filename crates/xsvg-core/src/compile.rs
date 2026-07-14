@@ -4,7 +4,7 @@
 //! `GlyphOutliner`, all defined in `xsvg-core`); the `xsvg-wasm` crate backs them with
 //! browser callbacks and `xsvg-cli` backs them with native font libraries. Both are thin
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
-use xsvg_core::{
+use crate::{
     boolean_svg_paths, filter_primitives, layout_area, layout_area_measured, layout_flow,
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
     parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
@@ -89,7 +89,7 @@ pub fn compile_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
-    let q = xsvg_core::QualityProfile::parse(quality);
+    let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
     load_theme(&doc); // §4.1 color/type tokens, resolved during serialization
@@ -149,7 +149,7 @@ pub fn compile_fragment_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
-    let q = xsvg_core::QualityProfile::parse(quality);
+    let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
     let node = top_level_at(&doc, offset)
@@ -318,10 +318,8 @@ fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> 
         let mut m = attr_num(node, "stroke-width", 1.0) / 2.0;
         for f in &fns {
             m += match f {
-                xsvg_core::AdjustFn::Blur(r) => 3.0 * r,
-                xsvg_core::AdjustFn::DropShadow { dx, dy, r, .. } => {
-                    3.0 * r + dx.abs().max(dy.abs())
-                }
+                crate::AdjustFn::Blur(r) => 3.0 * r,
+                crate::AdjustFn::DropShadow { dx, dy, r, .. } => 3.0 * r + dx.abs().max(dy.abs()),
                 _ => 0.0,
             };
         }
@@ -367,7 +365,7 @@ fn is_hidden(node: roxmltree::Node) -> bool {
 /// any reference (§4) and the route is recomputed from their boxes, so moving
 /// an endpoint re-emits the connector (baked reference).
 fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    use xsvg_core::kurbo::{Point, Rect};
+    use crate::kurbo::{Point, Rect};
     let bbox = |attr: &str| -> Option<Rect> {
         let r = node.attribute(attr)?;
         ref_geometry(node, r, ctx)
@@ -641,7 +639,7 @@ fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// compile-time reference: `in` resolves to the target's compiled geometry, so
 /// editing the target re-emits the offset (`baked_refs` already covers `in`).
 fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    use xsvg_core::kurbo::Join;
+    use crate::kurbo::Join;
     let Some(reference) = node.attribute("in") else {
         out.push_str("<!-- xsvg: <x:offset> requires in=\"#id\" -->");
         return;
@@ -2374,12 +2372,11 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let ranges = find_path_d_ranges(&inner);
     let bbox = ranges
         .iter()
-        .fold(None, |acc: Option<xsvg_core::kurbo::Rect>, &(a, b)| match (
-            acc,
-            svg_path_bbox(&inner[a..b]),
-        ) {
-            (Some(r), Some(n)) => Some(r.union(n)),
-            (acc, n) => acc.or(n),
+        .fold(None, |acc: Option<crate::kurbo::Rect>, &(a, b)| {
+            match (acc, svg_path_bbox(&inner[a..b])) {
+                (Some(r), Some(n)) => Some(r.union(n)),
+                (acc, n) => acc.or(n),
+            }
         });
 
     let field_name = node.attribute("field").unwrap_or("");
@@ -2408,7 +2405,7 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 node.attribute("align").unwrap_or("start"),
                 attr_num(node, "start", 0.0),
             );
-            let anchor = xsvg_core::kurbo::Point::new(b.min_x(), b.center().y);
+            let anchor = crate::kurbo::Point::new(b.min_x(), b.center().y);
             Some(Box::new(BendField { frame, s0, anchor }) as Box<dyn Field>)
         }
         "roughen" => Some(
@@ -2474,7 +2471,7 @@ fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
 /// `corners="x0,y0 x1,y1 x2,y2 x3,y3"` — the four target corners (**TL TR BR BL**)
 /// for `field="perspective"` / `"free"`. `None` unless exactly 8 finite numbers.
-fn parse_corners(node: roxmltree::Node) -> Option<[xsvg_core::kurbo::Point; 4]> {
+fn parse_corners(node: roxmltree::Node) -> Option<[crate::kurbo::Point; 4]> {
     let nums: Vec<f64> = node
         .attribute("corners")?
         .split(|c: char| c == ',' || c.is_whitespace())
@@ -2484,7 +2481,7 @@ fn parse_corners(node: roxmltree::Node) -> Option<[xsvg_core::kurbo::Point; 4]> 
     if nums.len() != 8 {
         return None;
     }
-    let p = |i: usize| xsvg_core::kurbo::Point::new(nums[2 * i], nums[2 * i + 1]);
+    let p = |i: usize| crate::kurbo::Point::new(nums[2 * i], nums[2 * i + 1]);
     Some([p(0), p(1), p(2), p(3)])
 }
 
@@ -2703,7 +2700,7 @@ fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// 2×2). Regions are clipped by the exact union of their face polygons
 /// (nonzero), so cracks stay geometry-sharp regardless of raster resolution.
 fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    use xsvg_core::gradient::Mesh;
+    use crate::gradient::Mesh;
 
     // ---- parse: grid sugar (cols/rows attributes) or points= + <x:face>
     let mut mesh = Mesh::default();
@@ -2718,7 +2715,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let (gx, gy) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
         let (gw, gh) = (attr_num(node, "width", 0.0), attr_num(node, "height", 0.0));
         let cols_ok = (1..=64).contains(&cols) && (1..=64).contains(&rows);
-        let vcols: Vec<(xsvg_core::gradient::LinRgb, f32)> = node
+        let vcols: Vec<(crate::gradient::LinRgb, f32)> = node
             .attribute("fill")
             .unwrap_or("")
             .split_whitespace()
@@ -2784,7 +2781,7 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        let cols: Vec<(xsvg_core::gradient::LinRgb, f32)> = child
+        let cols: Vec<(crate::gradient::LinRgb, f32)> = child
             .attribute("fill")
             .unwrap_or("")
             .split_whitespace()
@@ -2838,9 +2835,9 @@ fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// texel-aligned tiny PNG (or plain path for constant regions) per region.
 /// `seed` namespaces the clip ids (the caller's source position). Returns
 /// `false` on a degenerate extent (caller emits its marker).
-fn lower_mesh(mesh: &xsvg_core::gradient::Mesh, seed: usize, out: &mut String, ctx: &Ctx) -> bool {
-    use xsvg_core::gradient;
-    use xsvg_core::gradient::{fit_field, fit_grid, texel_placement, Dof};
+fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut String, ctx: &Ctx) -> bool {
+    use crate::gradient;
+    use crate::gradient::{fit_field, fit_grid, texel_placement, Dof};
 
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for &(x, y) in &mesh.verts {
@@ -3039,10 +3036,10 @@ fn emit_meshgradient_fill(
         let Some(bb) = svg_path_bbox(&shape_d) else {
             return false;
         };
-        xsvg_core::kurbo::Affine::translate((bb.x0, bb.y0))
-            * xsvg_core::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
+        crate::kurbo::Affine::translate((bb.x0, bb.y0))
+            * crate::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
     } else {
-        xsvg_core::kurbo::Affine::IDENTITY
+        crate::kurbo::Affine::IDENTITY
     };
     let Some(mesh) = parse_meshgradient(mg, tess, unit_map) else {
         out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
@@ -3092,15 +3089,15 @@ fn emit_meshgradient_fill(
 fn parse_meshgradient(
     mg: roxmltree::Node,
     tess: usize,
-    unit_map: xsvg_core::kurbo::Affine,
-) -> Option<xsvg_core::gradient::Mesh> {
-    use xsvg_core::gradient::{reverse_edge, CoonsPatch, LinRgb, Mesh};
+    unit_map: crate::kurbo::Affine,
+) -> Option<crate::gradient::Mesh> {
+    use crate::gradient::{reverse_edge, CoonsPatch, LinRgb, Mesh};
     let eased = mg.attribute("type") == Some("bicubic");
     let origin = (attr_num(mg, "x", 0.0) as f32, attr_num(mg, "y", 0.0) as f32);
     let affine = unit_map
         * mg.attribute("gradientTransform")
             .map(parse_transform)
-            .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+            .unwrap_or(crate::kurbo::Affine::IDENTITY);
 
     let mut rows: Vec<Vec<CoonsPatch>> = Vec::new();
     for row_el in mg
@@ -3192,10 +3189,10 @@ fn parse_meshgradient(
     for row in &rows {
         for patch in row {
             let mut p = *patch;
-            if affine != xsvg_core::kurbo::Affine::IDENTITY {
+            if affine != crate::kurbo::Affine::IDENTITY {
                 for e in &mut p.edges {
                     for pt in e.iter_mut() {
-                        let m = affine * xsvg_core::kurbo::Point::new(pt.0 as f64, pt.1 as f64);
+                        let m = affine * crate::kurbo::Point::new(pt.0 as f64, pt.1 as f64);
                         *pt = (m.x as f32, m.y as f32);
                     }
                 }
@@ -3228,11 +3225,11 @@ fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 4], (f32, f
             Some((e, e[3]))
         }
         ("l", 2) => {
-            let e = xsvg_core::gradient::line_edge(cur, rel(0));
+            let e = crate::gradient::line_edge(cur, rel(0));
             Some((e, e[3]))
         }
         ("L", 2) => {
-            let e = xsvg_core::gradient::line_edge(cur, abs(0));
+            let e = crate::gradient::line_edge(cur, abs(0));
             Some((e, e[3]))
         }
         _ => None,
@@ -3241,7 +3238,7 @@ fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 4], (f32, f
 
 /// A mesh `<stop>`'s color + alpha: `stop-color` (attribute or `style`
 /// declaration — Inkscape's habit), with `stop-opacity` multiplied in.
-fn stop_color(stop: roxmltree::Node) -> Option<(xsvg_core::gradient::LinRgb, f32)> {
+fn stop_color(stop: roxmltree::Node) -> Option<(crate::gradient::LinRgb, f32)> {
     let style_prop = |name: &str| {
         stop.attribute("style")?.split(';').find_map(|kv| {
             let (k, v) = kv.split_once(':')?;
@@ -3270,7 +3267,7 @@ fn stop_color(stop: roxmltree::Node) -> Option<(xsvg_core::gradient::LinRgb, f32
 
 /// `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` → linear-light RGB + straight
 /// alpha in [0,1] (the CSS Color 4 hex-alpha forms — mesh feathering's syntax).
-fn parse_hex_color(s: &str) -> Option<(xsvg_core::gradient::LinRgb, f32)> {
+fn parse_hex_color(s: &str) -> Option<(crate::gradient::LinRgb, f32)> {
     let hex = s.strip_prefix('#')?;
     let byte = |a: u8, b: u8| {
         let hi = (a as char).to_digit(16)?;
@@ -3296,7 +3293,7 @@ fn parse_hex_color(s: &str) -> Option<(xsvg_core::gradient::LinRgb, f32)> {
         _ => return None,
     };
     Some((
-        xsvg_core::gradient::RgbColor::new(r, g, bl).to_linear(),
+        crate::gradient::RgbColor::new(r, g, bl).to_linear(),
         a as f32 / 255.0,
     ))
 }
@@ -3329,8 +3326,8 @@ fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::
 /// Parse an SVG `transform` list into a kurbo [`Affine`] (§4 reference
 /// resolution honors the target's own transform). Mirrors browser behavior for
 /// invalid input: the whole list is ignored (identity).
-fn parse_transform(s: &str) -> xsvg_core::kurbo::Affine {
-    use xsvg_core::kurbo::Affine;
+fn parse_transform(s: &str) -> crate::kurbo::Affine {
+    use crate::kurbo::Affine;
     let mut total = Affine::IDENTITY;
     let mut rest = s;
     while let Some(open) = rest.find('(') {
@@ -3370,11 +3367,11 @@ fn parse_transform(s: &str) -> xsvg_core::kurbo::Affine {
 }
 
 /// Apply an affine to path data. `None` if `d` fails to parse.
-fn transform_d(d: &str, a: xsvg_core::kurbo::Affine) -> Option<String> {
-    if a == xsvg_core::kurbo::Affine::IDENTITY {
+fn transform_d(d: &str, a: crate::kurbo::Affine) -> Option<String> {
+    if a == crate::kurbo::Affine::IDENTITY {
         return Some(d.to_string());
     }
-    let mut p = xsvg_core::kurbo::BezPath::from_svg(d).ok()?;
+    let mut p = crate::kurbo::BezPath::from_svg(d).ok()?;
     p.apply_affine(a);
     Some(p.to_svg())
 }
@@ -3395,8 +3392,8 @@ fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Option<String
         return None;
     }
     let d = shape_to_path_d(child)?;
-    let path = xsvg_core::kurbo::BezPath::from_svg(&d).ok()?;
-    use xsvg_core::kurbo::{stroke, Cap, Join, Stroke, StrokeOpts};
+    let path = crate::kurbo::BezPath::from_svg(&d).ok()?;
+    use crate::kurbo::{stroke, Cap, Join, Stroke, StrokeOpts};
     let cap = match child.attribute("stroke-linecap") {
         Some("round") => Cap::Round,
         Some("square") => Cap::Square,
@@ -3425,15 +3422,12 @@ fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Option<String
 
 /// A `<use>` operand's placement: its `transform` composed with the extra
 /// `x`/`y` translation (per SVG, x/y append a translate after the transform).
-fn use_placement(use_el: roxmltree::Node) -> xsvg_core::kurbo::Affine {
+fn use_placement(use_el: roxmltree::Node) -> crate::kurbo::Affine {
     let t = use_el
         .attribute("transform")
         .map(parse_transform)
-        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
-    t * xsvg_core::kurbo::Affine::translate((
-        attr_num(use_el, "x", 0.0),
-        attr_num(use_el, "y", 0.0),
-    ))
+        .unwrap_or(crate::kurbo::Affine::IDENTITY);
+    t * crate::kurbo::Affine::translate((attr_num(use_el, "x", 0.0), attr_num(use_el, "y", 0.0)))
 }
 
 /// Why a reference failed to resolve to geometry — spelled into the caller's
@@ -3481,7 +3475,7 @@ fn target_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail
     let own = target
         .attribute("transform")
         .map(parse_transform)
-        .unwrap_or(xsvg_core::kurbo::Affine::IDENTITY);
+        .unwrap_or(crate::kurbo::Affine::IDENTITY);
     let is_x = target.tag_name().namespace() == Some(XSVG_NS);
     if !is_x && target.tag_name().name() != "g" {
         let d = shape_to_path_d(target).ok_or(RefFail::NoGeometry)?;
@@ -4347,7 +4341,7 @@ fn push_escaped(out: &mut String, s: &str, in_attr: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xsvg_core::{RasterRegion, Rect}; // used only by the test doubles below
+    use crate::{RasterRegion, Rect}; // used only by the test doubles below
 
     /// Deterministic measurer: width = char count × 0.5 × size.
     struct Mono;
@@ -4440,8 +4434,8 @@ mod tests {
         );
         // the line stops at the arrowhead's base (one arrow height back from b's
         // edge x=120, default size 7), so the stroke never protrudes past the tip
-        use xsvg_core::kurbo::Shape;
-        let bb = xsvg_core::kurbo::BezPath::from_svg(route_d(&out))
+        use crate::kurbo::Shape;
+        let bb = crate::kurbo::BezPath::from_svg(route_d(&out))
             .unwrap()
             .bounding_box();
         assert!(
@@ -4490,7 +4484,7 @@ mod tests {
             .split('"')
             .next()
             .unwrap();
-        let hp = xsvg_core::kurbo::BezPath::from_svg(head)
+        let hp = crate::kurbo::BezPath::from_svg(head)
             .unwrap()
             .bounding_box();
         assert!(
@@ -4523,7 +4517,7 @@ mod tests {
 
     #[test]
     fn offset_outsets_a_referenced_rect_and_is_baked() {
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let svg = format!(
             r##"{XW}<rect id="r" x="10" y="10" width="40" height="40"/><x:offset in="#r" distance="6" join="miter" fill="#111"/></svg>"##
         );
@@ -4540,9 +4534,7 @@ mod tests {
             .split('"')
             .next()
             .unwrap();
-        let bb = xsvg_core::kurbo::BezPath::from_svg(d)
-            .unwrap()
-            .bounding_box();
+        let bb = crate::kurbo::BezPath::from_svg(d).unwrap().bounding_box();
         assert!(
             (bb.x0 - 4.0).abs() < 0.7
                 && (bb.y0 - 4.0).abs() < 0.7
@@ -5848,7 +5840,7 @@ mod tests {
             r##"{XW}<x:boolean op="union" fill="#123"><rect x="10" y="10" width="40" height="20" stroke="#000" stroke-width="10"/></x:boolean></svg>"##
         );
         let out = compile_test(&svg);
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         assert!(
             (bb.x0 - 5.0).abs() < 0.5 && (bb.x1 - 55.0).abs() < 0.5,
@@ -5880,7 +5872,7 @@ mod tests {
                 r##"{XW}<x:boolean op="union" fill="#123"><path d="M10,20 L110,20" fill="none" stroke="#000" stroke-width="8"{dash}/></x:boolean></svg>"##
             )
         };
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let solid = first_path(&compile_test(&mk(""))).area().abs();
         let dashed = first_path(&compile_test(&mk(r#" stroke-dasharray="10 10""#)))
             .area()
@@ -5902,7 +5894,7 @@ mod tests {
         );
         let out = compile_test(&svg);
         assert!(!out.contains("evenodd operand ignored"), "{out}");
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let p = first_path(&out);
         let bb = p.bounding_box();
         assert!(
@@ -5922,7 +5914,7 @@ mod tests {
         );
         let out = compile_test(&svg);
         assert_eq!(out.matches("<circle").count(), 2, "{out}");
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         // lens spans [90,160] × [100 ± √(60²−25²) ≈ 54.5]
         assert!(
@@ -5942,7 +5934,7 @@ mod tests {
             r##"{XW}<rect id="cut" x="0" y="0" width="40" height="40"/><x:boolean op="subtract" fill="#123"><rect x="0" y="100" width="100" height="40"/><use href="#cut" x="60" y="100"/></x:boolean></svg>"##
         );
         let out = compile_test(&svg);
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let p = first_path(&out);
         let bb = p.bounding_box();
         assert!(
@@ -5959,7 +5951,7 @@ mod tests {
             r##"{XW}<x:boolean id="u" op="union" fill="#eee"><rect x="0" y="0" width="60" height="40"/><rect x="40" y="0" width="60" height="40"/></x:boolean><x:boolean op="intersect" fill="#345"><use href="#u"/><rect x="80" y="0" width="80" height="40"/></x:boolean></svg>"##
         );
         let out = compile_test(&svg);
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let p = first_path(&out);
         let bb = p.bounding_box();
         assert!(
@@ -6091,7 +6083,7 @@ mod tests {
 
     #[test]
     fn every_plain_shape_kind_resolves_as_a_reference() {
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb =
             |body: &str| first_path(&compile_test(&format!("{XW}{body}</svg>"))).bounding_box();
         let e = bb(
@@ -6526,7 +6518,7 @@ mod tests {
 
     #[test]
     fn parse_transform_matches_svg_semantics() {
-        use xsvg_core::kurbo::Point;
+        use crate::kurbo::Point;
         let p = |x, y| Point::new(x, y);
         assert_eq!(
             parse_transform("translate(10,20)") * p(0.0, 0.0),
@@ -6566,7 +6558,7 @@ mod tests {
         let svg = format!(
             r##"{XW}<rect id="t" x="0" y="0" width="40" height="10" transform="rotate(90 20 20)"/><x:boolean op="union" fill="#000"><use href="#t"/></x:boolean></svg>"##
         );
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&compile_test(&svg)).bounding_box();
         assert!(
             (bb.x0 - 30.0).abs() < 0.5 && (bb.x1 - 40.0).abs() < 0.5,
@@ -6617,7 +6609,7 @@ mod tests {
         let svg = format!(
             r##"{XW}<x:warp id="ring" field="arch" bend="0"><path d="M0,0 h40 v40 h-40 Z M10,10 h20 v20 h-20 Z" fill-rule="evenodd" fill="#000"/></x:warp><x:boolean op="union" fill="#000"><use href="#ring"/></x:boolean></svg>"##
         );
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let p = first_path(&compile_test(&svg));
         assert!((p.area().abs() - 1200.0).abs() < 5.0, "{}", p.area());
     }
@@ -6628,7 +6620,7 @@ mod tests {
         let svg = format!(
             r##"{XW}<g id="grp" transform="translate(10,0)"><circle cx="20" cy="20" r="10"/><g transform="translate(0,40)"><rect x="0" y="0" width="10" height="10"/></g></g><x:boolean op="union" fill="#000"><use href="#grp"/></x:boolean></svg>"##
         );
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&compile_test(&svg)).bounding_box();
         assert!(
             (bb.x0 - 10.0).abs() < 0.5 && (bb.x1 - 40.0).abs() < 0.5,
@@ -6675,7 +6667,7 @@ mod tests {
             out.contains("<text"),
             "textbox itself must stay live: {out}"
         );
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let a = first_path(&out).area().abs();
         assert!(a < 3999.5 && a > 3990.0, "glyph geometry not punched: {a}");
     }
@@ -6713,7 +6705,7 @@ mod tests {
             ));
         }
         let out = compile_test(&format!("{XW}{body}</svg>"));
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         // width grows by 5 per level: 40 + 24·5 = 160
         let bb = first_path(&out).bounding_box();
         assert!(
@@ -6770,7 +6762,7 @@ mod tests {
         let out = compile_test(&svg);
         assert!(out.contains(r##"<path fill="#1d4ed8""##), "{out}");
         assert!(!out.contains("#fff") && !out.contains("#000"), "{out}");
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         assert!(bb.x0.abs() < 0.1 && (bb.x1 - 60.0).abs() < 0.1, "{bb:?}");
     }
@@ -6783,7 +6775,7 @@ mod tests {
             r##"{XW}<x:boolean fill="#111"><rect x="0" y="0" width="100" height="40"/><rect x="50" y="20" width="100" height="40"/></x:boolean></svg>"##
         );
         let out = compile_test(&svg);
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         assert!(
             (bb.x1 - 150.0).abs() < 0.1 && (bb.y1 - 60.0).abs() < 0.1,
@@ -6875,7 +6867,7 @@ mod tests {
         &out[j..j + out[j..].find('"').unwrap()]
     }
 
-    fn first_path(out: &str) -> xsvg_core::kurbo::BezPath {
+    fn first_path(out: &str) -> crate::kurbo::BezPath {
         let d = out
             .rsplit(" d=\"")
             .next()
@@ -6883,7 +6875,7 @@ mod tests {
             .split('"')
             .next()
             .unwrap();
-        xsvg_core::kurbo::BezPath::from_svg(d).unwrap()
+        crate::kurbo::BezPath::from_svg(d).unwrap()
     }
 
     #[test]
@@ -6897,7 +6889,7 @@ mod tests {
         assert!(out.contains("<g"), "{out}");
         assert!(!out.contains("<rect"), "{out}");
         assert!(out.contains(r##"fill="#f00""##), "{out}");
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         assert!((bb.y0 + 25.0).abs() < 0.1, "apex {}: {out}", bb.y0);
         assert!((bb.x0.abs()) < 0.1 && (bb.x1 - 100.0).abs() < 0.1, "{out}");
@@ -6977,7 +6969,7 @@ mod tests {
         let out = compile_fast(&svg);
         assert!(out.contains("M20,10"), "{out}");
         let path = first_path(&out);
-        use xsvg_core::kurbo::PathEl;
+        use crate::kurbo::PathEl;
         let lines = path
             .elements()
             .iter()
@@ -7041,7 +7033,7 @@ mod tests {
         );
         let out = compile_fast(&svg);
         assert!(out.contains("M0,80"), "{out}");
-        use xsvg_core::kurbo::Shape;
+        use crate::kurbo::Shape;
         let bb = first_path(&out).bounding_box();
         assert!(
             bb.x0.abs() < 0.1

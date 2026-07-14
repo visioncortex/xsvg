@@ -1,6 +1,6 @@
 # Headless compiler & browser-parity tests
 
-xsvg compiles in two places over **one shared core** (`crates/xsvg-compile`):
+xsvg compiles in two places over **one shared core** (`crates/xsvg-core`):
 
 - **Browser** — `crates/xsvg-wasm` backs the core's platform seams (`Measurer`,
   `Shaper`, `GlyphOutliner`) with JS callbacks (canvas `measureText`, an offscreen

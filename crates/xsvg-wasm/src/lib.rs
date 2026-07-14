@@ -1,11 +1,11 @@
-//! Browser adapter for the xsvg compiler. The compiler itself lives in `xsvg-compile`
+//! Browser adapter for the xsvg compiler. The compiler itself lives in `xsvg-core`
 //! (platform-agnostic); this crate is a thin wasm-bindgen layer that backs the core's
 //! platform seams with JS callbacks — `Measurer` (canvas `measureText` + font metrics),
 //! `Shaper` (path rasterize for region flow), and `GlyphOutliner` (opentype.js glyph
 //! outlines + advance widths) — and exposes the `compile*` entry points to JS.
 
 use wasm_bindgen::prelude::*;
-use xsvg_compile::{compile_fragment_impl, compile_impl, dependents_impl, fragment_range_impl};
+use xsvg_core::{compile_fragment_impl, compile_impl, dependents_impl, fragment_range_impl};
 use xsvg_core::{FontMetrics, GlyphOutliner, Measurer, RasterRegion, Rect, Shaper, TextStyle};
 
 /// Runs once when the module is instantiated: route Rust panics to `console.error`.

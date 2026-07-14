@@ -343,15 +343,6 @@ name = "xsvg-cli"
 version = "0.0.0"
 dependencies = [
  "ttf-parser",
- "xsvg-compile",
- "xsvg-core",
-]
-
-[[package]]
-name = "xsvg-compile"
-version = "0.0.0"
-dependencies = [
- "roxmltree",
  "xsvg-core",
 ]
 
@@ -363,6 +354,7 @@ dependencies = [
  "i_overlay",
  "i_shape",
  "kurbo",
+ "roxmltree",
  "serde_json",
 ]
 
@@ -373,7 +365,6 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "wasm-bindgen",
- "xsvg-compile",
  "xsvg-core",
 ]
 

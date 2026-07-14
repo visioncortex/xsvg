@@ -1,5 +1,5 @@
 //! Headless xsvg compiler — a pure-Rust binary, no browser. Wires the native platform
-//! seams (fonts via ttf-parser, shape flow via kurbo) to the shared `xsvg-compile` core.
+//! seams (fonts via ttf-parser, shape flow via kurbo) to the shared `xsvg-core` compiler.
 //!
 //!   xsvg [--quality fast|balanced|highest] [--sourcemap] [-o OUT] INPUT
 //!
@@ -29,7 +29,7 @@ pub fn compile(
         None => FontDb::default(),
     };
     let p = platform::Native { fonts };
-    xsvg_compile::compile_impl(source, quality, sourcemap, &p, &p, &p)
+    xsvg_core::compile_impl(source, quality, sourcemap, &p, &p, &p)
 }
 
 fn main() -> ExitCode {

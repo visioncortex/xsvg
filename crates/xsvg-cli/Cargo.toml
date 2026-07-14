@@ -10,6 +10,5 @@ name = "xsvg"
 path = "src/main.rs"
 
 [dependencies]
-xsvg-compile = { path = "../xsvg-compile" }
 xsvg-core = { path = "../xsvg-core" }
 ttf-parser = "0.25"
