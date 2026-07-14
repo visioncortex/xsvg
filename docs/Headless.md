@@ -8,22 +8,23 @@ xsvg compiles in two places over **one shared core** (`crates/xsvg-compile`):
 - **Native** — `crates/xsvg-cli` backs the same seams with Rust libraries and needs
   no browser: `ttf-parser` for metrics + glyph outlines, `kurbo` for the shape-flow
   rasterizer (which mirrors the browser rasterizer's row/step formulas so spans line
-  up). Fonts are **embedded** from `assets/fonts` (Anton + Arimo), so it is
-  self-contained and reproducible.
+  up). Fonts are loaded at runtime from `--font-directory` (see below).
 
 ```
-xsvg [--quality fast|balanced|highest] [--sourcemap] [-o OUT] INPUT
+xsvg [--quality fast|balanced|highest] [--font-directory DIR] [--sourcemap] [-o OUT] INPUT
       # INPUT is a path or - for stdin; OUT defaults to stdout
-cargo run -p xsvg-cli -- dataset/pie.xsvg -o pie.svg
+cargo run -p xsvg-cli -- --font-directory assets/fonts dataset/pie.xsvg -o pie.svg
 ```
 
 ## Fonts
 
-The native build can't see the browser's system/Google fonts, so it ships its own
-(`assets/fonts/README.md`). **Anton** is the real font (matched by name), because
-samples bake it to outlines — those must match the browser glyph-for-glyph.
-Everything else falls back to **Arimo**, which is metric-compatible with
-Arial/Helvetica, so line-wrapping decisions agree with the browser.
+The native build can't see the browser's system/Google fonts, so it loads its own from a
+directory passed with `--font-directory` (the repo ships a matching set in `assets/fonts`,
+see its README). Each `.ttf`/`.otf` is classified by family name: **Anton** is matched by
+name (samples bake it to outlines, so it must match the browser glyph-for-glyph);
+everything else falls back to **Arimo**, which is metric-compatible with Arial/Helvetica so
+line-wrapping decisions agree. Without `--font-directory` the compile still succeeds —
+text just uses default metrics and stays live `<text>` (no outline baking).
 
 ## Parity test suite
 

@@ -8,13 +8,27 @@
 mod fonts;
 mod platform;
 
+use fonts::FontDb;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
-/// Compile an xsvg document to plain SVG with the bundled native fonts. Exposed so the
-/// comparison test harness can call it in-process.
-pub fn compile(source: &str, quality: &str, sourcemap: bool) -> Result<String, String> {
-    let p = platform::Native;
+/// Compile an xsvg document to plain SVG. `font_dir` supplies the fonts used for text
+/// measurement and `outline="true"` baking; with `None` (or an empty directory) text
+/// falls back to default metrics and stays live `<text>` (no outline baking).
+pub fn compile(
+    source: &str,
+    quality: &str,
+    sourcemap: bool,
+    font_dir: Option<&Path>,
+) -> Result<String, String> {
+    let fonts = match font_dir {
+        Some(d) => {
+            FontDb::load_dir(d).map_err(|e| format!("loading fonts from {}: {e}", d.display()))?
+        }
+        None => FontDb::default(),
+    };
+    let p = platform::Native { fonts };
     xsvg_compile::compile_impl(source, quality, sourcemap, &p, &p, &p)
 }
 
@@ -33,6 +47,7 @@ fn run() -> Result<(), String> {
     let mut output: Option<String> = None;
     let mut quality = "balanced".to_string();
     let mut sourcemap = false;
+    let mut font_dir: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -43,11 +58,17 @@ fn run() -> Result<(), String> {
             "--quality" | "-q" => {
                 quality = args.next().ok_or("--quality needs a value")?;
             }
+            "--font-directory" | "--fonts" => {
+                font_dir = Some(args.next().ok_or("--font-directory needs a path")?);
+            }
             "--sourcemap" => sourcemap = true,
             "-h" | "--help" => {
                 println!(
-                    "usage: xsvg [--quality fast|balanced|highest] [--sourcemap] [-o OUT] INPUT\n\
-                     INPUT is a path or - for stdin; OUT defaults to stdout."
+                    "usage: xsvg [--quality fast|balanced|highest] [--font-directory DIR] \
+                     [--sourcemap] [-o OUT] INPUT\n\
+                     INPUT is a path or - for stdin; OUT defaults to stdout.\n\
+                     --font-directory loads .ttf/.otf fonts for text measurement and \
+                     outline baking (without it, text uses default metrics and stays live)."
                 );
                 return Ok(());
             }
@@ -67,7 +88,12 @@ fn run() -> Result<(), String> {
         std::fs::read_to_string(&input).map_err(|e| format!("reading {input}: {e}"))?
     };
 
-    let svg = compile(&source, &quality, sourcemap)?;
+    let svg = compile(
+        &source,
+        &quality,
+        sourcemap,
+        font_dir.as_deref().map(Path::new),
+    )?;
 
     match output {
         Some(path) => std::fs::write(&path, svg).map_err(|e| format!("writing {path}: {e}"))?,

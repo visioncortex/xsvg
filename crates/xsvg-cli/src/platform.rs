@@ -1,31 +1,35 @@
 //! Native implementations of the compiler's platform seams, backed by `ttf-parser`
 //! (metrics + glyph outlines) and `kurbo` (path inside-testing for shape flow) instead of
-//! the browser. `Native` implements all three traits, so one value drives the compile.
+//! the browser. `Native` owns the loaded `FontDb`, so one value drives the compile.
 
-use crate::fonts;
+use crate::fonts::{self, FontDb};
 use ttf_parser::OutlineBuilder;
 use xsvg_core::kurbo::{BezPath, Point, Shape};
 use xsvg_core::{FontMetrics, GlyphOutliner, Measurer, RasterRegion, Rect, Shaper, TextStyle};
 
-pub struct Native;
+pub struct Native {
+    pub fonts: FontDb,
+}
 
-/// Sum of horizontal glyph advances for `text` in the resolved font, in user units.
-fn advance(text: &str, style: &TextStyle, size: f64) -> Option<f64> {
-    let r = fonts::resolve(&style.family, &style.weight, &style.style);
-    let f = fonts::face(&r)?;
-    let s = size / f.units_per_em() as f64;
-    let mut w = 0.0;
-    for c in text.chars() {
-        if let Some(g) = f.glyph_index(c) {
-            w += f.glyph_hor_advance(g).unwrap_or(0) as f64;
+impl Native {
+    /// Sum of horizontal glyph advances for `text` in the resolved font, in user units.
+    fn advance(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
+        let bytes = self.fonts.resolve(&style.family, &style.style)?;
+        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
+        let s = size / f.units_per_em() as f64;
+        let mut w = 0.0;
+        for c in text.chars() {
+            if let Some(g) = f.glyph_index(c) {
+                w += f.glyph_hor_advance(g).unwrap_or(0) as f64;
+            }
         }
+        Some(w * s)
     }
-    Some(w * s)
 }
 
 impl Measurer for Native {
     fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
-        advance(text, style, size).unwrap_or(0.0)
+        self.advance(text, style, size).unwrap_or(0.0)
     }
 
     fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
@@ -35,8 +39,10 @@ impl Measurer for Native {
             cap_height: 0.7 * size,
             x_height: 0.5 * size,
         };
-        let r = fonts::resolve(&style.family, &style.weight, &style.style);
-        let Some(f) = fonts::face(&r) else {
+        let Some(bytes) = self.fonts.resolve(&style.family, &style.style) else {
+            return default;
+        };
+        let Some(f) = fonts::face(bytes, fonts::parse_weight(&style.weight)) else {
             return default;
         };
         let s = size / f.units_per_em() as f64;
@@ -69,8 +75,8 @@ impl GlyphOutliner for Native {
         x: f64,
         baseline: f64,
     ) -> Option<String> {
-        let r = fonts::resolve(&style.family, &style.weight, &style.style);
-        let f = fonts::face(&r)?;
+        let bytes = self.fonts.resolve(&style.family, &style.style)?;
+        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
         let s = size / f.units_per_em() as f64;
         let mut b = SvgOutline {
             d: String::new(),
@@ -89,7 +95,7 @@ impl GlyphOutliner for Native {
     }
 
     fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
-        advance(text, style, size)
+        self.advance(text, style, size)
     }
 }
 

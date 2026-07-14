@@ -1,8 +1,10 @@
-# Bundled fonts
+# Fonts
 
-Embedded into the `xsvg` CLI (`crates/xsvg-cli`) so the headless compiler is
-self-contained and reproducible — no system fonts, no network. Used for text
-measurement (line wrapping) and for baking `outline="true"` glyphs to `<path>`.
+Loaded at runtime by the `xsvg` CLI via `--font-directory <dir>` (not embedded, so the
+binary carries no font bytes and each font keeps its license beside it). Point it at this
+directory to reproduce the reference renders. Used for text measurement (line wrapping)
+and for baking `outline="true"` glyphs to `<path>`. Every `.ttf`/`.otf` in the directory
+is classified into a role by its family name and italic bit.
 
 | File | Family | Role | License |
 |---|---|---|---|

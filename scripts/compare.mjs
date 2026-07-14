@@ -55,7 +55,10 @@ function browserSvg(sample) {
 }
 
 function nativeSvg(sample) {
-  return execFileSync(CLI, [`dataset/${sample}.xsvg`], { encoding: "utf8", maxBuffer: 128 << 20 });
+  return execFileSync(CLI, ["--font-directory", "assets/fonts", `dataset/${sample}.xsvg`], {
+    encoding: "utf8",
+    maxBuffer: 128 << 20,
+  });
 }
 
 // Font-independent structural signature: the sequence of element tags, but a <text>
@@ -136,8 +139,18 @@ for (const s of samples) {
   let pixel = "";
   try {
     const nSvg = nativeSvg(s);
-    const bSvg = browserSvg(s);
-    const sd = structDiff(structure(nSvg), structure(bSvg));
+    let bSvg = browserSvg(s);
+    let sd = structDiff(structure(nSvg), structure(bSvg));
+    if (sd) {
+      // A --dump-dom race (the browser's async font fetch) can truncate the DOM;
+      // re-extract once. A real divergence persists across the retry.
+      const retry = browserSvg(s);
+      const sd2 = structDiff(structure(nSvg), structure(retry));
+      if (!sd2) {
+        bSvg = retry;
+        sd = null;
+      } else sd = sd2;
+    }
     if (sd) {
       struct = `DIFF ${sd}`;
       structFails++;
