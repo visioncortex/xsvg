@@ -6,6 +6,7 @@ members = [
     "crates/gradient",
     "crates/xsvg-core",
     "crates/xsvg-compile",
+    "crates/xsvg-cli",
     "crates/xsvg-wasm",
 ]
 

@@ -1,0 +1,15 @@
+[package]
+name = "xsvg-cli"
+version = "0.0.0"
+edition = "2021"
+description = "Headless (browser-free) xsvg compiler: xsvg in, plain SVG out. Native fonts via ttf-parser."
+publish = false
+
+[[bin]]
+name = "xsvg"
+path = "src/main.rs"
+
+[dependencies]
+xsvg-compile = { path = "../xsvg-compile" }
+xsvg-core = { path = "../xsvg-core" }
+ttf-parser = "0.25"
