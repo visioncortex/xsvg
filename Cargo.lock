@@ -333,6 +333,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xsvg-compile"
+version = "0.0.0"
+dependencies = [
+ "roxmltree",
+ "xsvg-core",
+]
+
+[[package]]
 name = "xsvg-core"
 version = "0.0.0"
 dependencies = [
@@ -349,8 +357,8 @@ version = "0.0.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
- "roxmltree",
  "wasm-bindgen",
+ "xsvg-compile",
  "xsvg-core",
 ]
 
