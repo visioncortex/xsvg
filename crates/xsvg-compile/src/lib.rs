@@ -4347,6 +4347,7 @@ fn push_escaped(out: &mut String, s: &str, in_attr: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xsvg_core::{RasterRegion, Rect}; // used only by the test doubles below
 
     /// Deterministic measurer: width = char count × 0.5 × size.
     struct Mono;
