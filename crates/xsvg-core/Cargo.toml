@@ -2,16 +2,26 @@
 name = "xsvg-core"
 version = "0.0.0"
 edition = "2021"
-description = "xsvg shared types (pure Rust, no platform deps)."
+description = "xsvg shared types + the document compiler (pure Rust, no platform deps)."
 publish = false
+
+[features]
+# `compile` (opt-in) = the xsvg → plain-SVG compiler (the `compile` module + roxmltree).
+# OFF by default, so a plain build is the geometry/text/gradient primitives alone, with no
+# XML parser in the dependency graph. xsvg-wasm/xsvg-cli enable it; the tests get it via the
+# self dev-dependency below (so `cargo test` always builds the compiler).
+compile = ["dep:roxmltree"]
 
 [dependencies]
 gradient = { path = "../gradient" }
 i_overlay = "7.0.2"
 i_shape = "3.0.0"
 kurbo = "0.13.1"
-roxmltree = "0.20"
+roxmltree = { version = "0.20", optional = true }
 
 [dev-dependencies]
+# depend on ourselves with `compile` on, so `cargo test` always builds the compiler + its
+# tests even though the feature is off by default (does not affect the library/wasm build).
+xsvg-core = { path = ".", features = ["compile"] }
 # test-only (does not affect the library or the wasm build)
 serde_json = "1"

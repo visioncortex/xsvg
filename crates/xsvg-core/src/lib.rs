@@ -12,11 +12,15 @@ pub mod offset;
 pub mod text;
 pub mod warp;
 
-// The document compiler: parse xsvg/SVG, run the lowering passes, emit plain SVG. Kept a
-// private module — only its entry points are re-exported (the emit_* internals stay here).
+// The document compiler: parse xsvg/SVG, run the lowering passes, emit plain SVG. Behind
+// the `compile` feature (on by default) since it's the only thing that needs an XML parser;
+// without it, xsvg-core is the geometry/text/gradient primitives alone. Kept a private
+// module — only its entry points are re-exported (the emit_* internals stay here).
+#[cfg(feature = "compile")]
 mod compile;
 
 pub use boolean::*;
+#[cfg(feature = "compile")]
 pub use compile::{compile_fragment_impl, compile_impl, dependents_impl, fragment_range_impl};
 pub use filter::*;
 pub use offset::*;
