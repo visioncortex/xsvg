@@ -1,0 +1,35 @@
+{
+  "name": "@visioncortex/xsvg-compile",
+  "version": "0.1.0",
+  "description": "Compile xsvg — an XML graphics format that compiles to plain SVG — in Node.js. Runs the WASM compiler with native (opentype.js) font metrics + glyph outlining. No browser, no cross-compilation.",
+  "type": "module",
+  "license": "MIT",
+  "author": "VisionCortex",
+  "homepage": "https://xsvg.visioncortex.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/visioncortex/xsvg.git",
+    "directory": "packages/xsvg-compile"
+  },
+  "keywords": ["svg", "xsvg", "wasm", "graphics", "text-layout", "gradient-mesh", "compiler", "node"],
+  "engines": { "node": ">=18" },
+  "files": ["dist", "pkg", "README.md"],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "opentype.js": "^2.0.0",
+    "svgpath": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.6.3"
+  }
+}
