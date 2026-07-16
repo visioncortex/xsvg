@@ -11,9 +11,24 @@
     "url": "git+https://github.com/visioncortex/xsvg.git",
     "directory": "packages/xsvg-compile"
   },
-  "keywords": ["svg", "xsvg", "wasm", "graphics", "text-layout", "gradient-mesh", "compiler", "node"],
-  "engines": { "node": ">=18" },
-  "files": ["dist", "pkg", "README.md"],
+  "keywords": [
+    "svg",
+    "xsvg",
+    "wasm",
+    "graphics",
+    "text-layout",
+    "gradient-mesh",
+    "compiler",
+    "node"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "pkg",
+    "README.md"
+  ],
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
@@ -22,7 +37,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "opentype.js": "^2.0.0",

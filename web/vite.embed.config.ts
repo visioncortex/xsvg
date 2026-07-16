@@ -58,6 +58,13 @@ function inlineWasm(): Plugin {
 export default defineConfig({
   root: here,
   plugins: [inlineWasm()],
+  resolve: {
+    // Resolve the browser package to its source (not the built dist) so the inlineWasm
+    // plugin below can strip/inline the wasm from the source's pkg import, as before.
+    alias: {
+      "@visioncortex/xsvg-viewer": resolve(here, "../packages/xsvg-viewer/src/index.ts"),
+    },
+  },
   build: {
     outDir: resolve(here, "../dist"),
     emptyOutDir: false,

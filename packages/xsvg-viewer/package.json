@@ -11,9 +11,20 @@
     "url": "git+https://github.com/visioncortex/xsvg.git",
     "directory": "packages/xsvg-viewer"
   },
-  "keywords": ["svg", "xsvg", "wasm", "graphics", "text-layout", "gradient-mesh", "viewer"],
+  "keywords": [
+    "svg",
+    "xsvg",
+    "wasm",
+    "graphics",
+    "text-layout",
+    "gradient-mesh",
+    "viewer"
+  ],
   "sideEffects": false,
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "types": "./dist/index.d.ts",
   "module": "./dist/index.js",
   "exports": {
@@ -23,7 +34,8 @@
     }
   },
   "scripts": {
-    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly"
+    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "opentype.js": "^2.0.0"
