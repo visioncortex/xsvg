@@ -10,7 +10,40 @@
 //   await preview.render(source);
 import { compileXsvg } from "./compiler";
 import { findArtboards, makeThumb } from "./artboards";
-import "./preview.css";
+
+// The component's styles, injected once into <head> on first use. Inlined (rather than a
+// side-effect `import "./preview.css"`) so the package works in any consumer with no
+// css-aware bundler or extra stylesheet import. Everything is scoped under .xsvg-preview.
+const PREVIEW_CSS = `
+.xsvg-preview { position: absolute; inset: 0; overflow: hidden; }
+.xsvg-stage { position: absolute; inset: 0; }
+.xsvg-stage > svg { display: block; width: 100%; height: 100%; }
+.xsvg-preview.rail-open .xsvg-stage { left: 172px; }
+.xsvg-stage > .error { margin: 16px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #b00020; white-space: pre-wrap; }
+.xsvg-preview .deck-nav { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 999px; background: rgba(15,23,42,.82); box-shadow: 0 2px 10px rgba(15,23,42,.25); color: #f8fafc; font: 13px/1 "Helvetica Neue", Arial, sans-serif; }
+.xsvg-preview .deck-nav button { width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: #f8fafc; font-size: 20px; line-height: 1; cursor: pointer; }
+.xsvg-preview .deck-nav button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+.xsvg-preview .deck-nav button:disabled { opacity: .35; cursor: default; }
+.xsvg-preview .deck-label { min-width: 96px; text-align: center; letter-spacing: .02em; }
+.xsvg-preview .deck-rail { position: absolute; left: 0; top: 0; bottom: 0; width: 172px; box-sizing: border-box; padding: 12px 12px 60px; background: #f1f5f9; border-right: 1px solid #e2e8f0; overflow-y: auto; display: none; }
+.xsvg-preview.rail-open .deck-rail { display: block; }
+.xsvg-preview .deck-thumb { display: block; width: 100%; margin-bottom: 10px; border: 2px solid #e2e8f0; border-radius: 6px; overflow: hidden; background: #fff; cursor: pointer; box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+.xsvg-preview .deck-thumb:hover { border-color: #cbd5e1; }
+.xsvg-preview .deck-thumb.active { border-color: #2563eb; }
+.xsvg-preview .deck-thumb > svg { display: block; width: 100%; height: 100%; }
+.xsvg-preview .deck-toggle { position: absolute; left: 12px; bottom: 14px; z-index: 5; width: 34px; height: 34px; border: 0; border-radius: 8px; background: rgba(15,23,42,.82); color: #f8fafc; font-size: 16px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(15,23,42,.28); }
+.xsvg-preview .deck-toggle:hover { background: rgba(30,41,59,.92); }
+`;
+
+let stylesInjected = false;
+function ensureStyles(): void {
+  if (stylesInjected || typeof document === "undefined") return;
+  const style = document.createElement("style");
+  style.setAttribute("data-xsvg-preview", "");
+  style.textContent = PREVIEW_CSS;
+  document.head.appendChild(style);
+  stylesInjected = true;
+}
 
 export interface PreviewOptions {
   /** Page through artboards via a 1-based location.hash (e.g. …#3), following
@@ -48,6 +81,7 @@ function isEditingTarget(t: EventTarget | null): boolean {
 }
 
 export function createPreview(host: HTMLElement, opts: PreviewOptions = {}): Preview {
+  ensureStyles();
   const root = document.createElement("div");
   root.className = "xsvg-preview";
   const stage = document.createElement("div");

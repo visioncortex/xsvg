@@ -6,7 +6,7 @@
 // crates/xsvg-core/tests/fixtures/, consumed by the integration tests. Open at
 // http://localhost:5173/fixtures/.
 
-import { rasterize } from "../core/compiler";
+import { rasterize } from "@visioncortex/xsvg-viewer";
 
 const FONTS = ["Arial", "Times New Roman", "Courier New", "Georgia"];
 const BASE = 100;

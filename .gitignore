@@ -4,4 +4,7 @@
 # Node / web
 node_modules
 /dist
-/web/pkg
+
+# package build artifacts (wasm output + compiled dist)
+packages/*/pkg
+packages/*/dist

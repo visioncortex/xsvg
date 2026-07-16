@@ -16,6 +16,14 @@ const root = dirname(fileURLToPath(import.meta.url));
 // self-contained dist/xsvg.js.
 export default defineConfig({
   root: "web",
+  resolve: {
+    // The web app dogfoods the published browser package. In the monorepo, resolve it
+    // to the package source so dev/build need no separate package build step; the wasm
+    // it imports lives at packages/xsvg-viewer/pkg.
+    alias: {
+      "@visioncortex/xsvg-viewer": resolve(root, "packages/xsvg-viewer/src/index.ts"),
+    },
+  },
   build: {
     outDir: "../dist",
     emptyOutDir: true,

@@ -32,11 +32,13 @@ function inlineWasm(): Plugin {
     },
     load(thisId) {
       if (thisId === resolved) {
-        const wasm = readFileSync(resolve(here, "pkg/xsvg_wasm_bg.wasm"));
+        const wasm = readFileSync(resolve(here, "../packages/xsvg-viewer/pkg/xsvg_wasm_bg.wasm"));
         return `export default ${JSON.stringify(wasm.toString("base64"))};`;
       }
       if (thisId === woff2WasmId) {
-        const wasm = readFileSync(resolve(here, "src/vendor/woff2/decompress.wasm"));
+        const wasm = readFileSync(
+          resolve(here, "../packages/xsvg-viewer/src/vendor/woff2/decompress.wasm"),
+        );
         return `export default "data:application/octet-stream;base64,${wasm.toString("base64")}";`;
       }
     },

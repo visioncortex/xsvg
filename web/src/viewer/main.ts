@@ -8,13 +8,13 @@
 // element highlights its originating source.
 import "../base.css";
 import "./viewer.css";
-import { compileXsvg } from "../core/compiler";
+import { compileXsvg } from "@visioncortex/xsvg-viewer";
 import { SAMPLES, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
 import { createPanZoom, type PanZoom } from "./pan-zoom";
 import { createInspector, type Inspector } from "./inspector";
-import { findArtboards, makeThumb } from "../core/artboards";
-import { downloadSvg } from "../core/download";
+import { findArtboards, makeThumb } from "@visioncortex/xsvg-viewer";
+import { downloadSvg } from "@visioncortex/xsvg-viewer";
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);

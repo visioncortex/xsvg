@@ -9,7 +9,7 @@
 // We initialize the WASM synchronously from the inlined bytes *before* registering
 // the custom element, so the element's first render never touches the async
 // fetch-a-sibling-.wasm path (which does not exist in a single-file bundle).
-import { initFromBytes } from "../core/compiler";
+import { initFromBytes } from "@visioncortex/xsvg-viewer";
 import wasmBase64 from "virtual:xsvg-wasm";
 
 function base64ToBytes(b64: string): Uint8Array {

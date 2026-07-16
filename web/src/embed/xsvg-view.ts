@@ -11,7 +11,7 @@
 // root (style-isolated). The browser's own SVG engine does the actual drawing.
 // This is the "barebone viewer" use case — no pan/zoom/inspector, renders like an
 // image. Source maps are intentionally off, so the emitted SVG stays clean.
-import { compileXsvg } from "../core/compiler";
+import { compileXsvg } from "@visioncortex/xsvg-viewer";
 
 export class XsvgView extends HTMLElement {
   static observedAttributes = ["src", "quality"];

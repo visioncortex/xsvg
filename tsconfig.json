@@ -13,7 +13,11 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "allowJs": true,
-    "types": []
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@visioncortex/xsvg-viewer": ["packages/xsvg-viewer/src/index.ts"]
+    }
   },
-  "include": ["web/src", "web/pkg"]
+  "include": ["web/src", "packages/xsvg-viewer/src", "packages/xsvg-viewer/pkg"]
 }

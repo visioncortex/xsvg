@@ -8,8 +8,8 @@ import "../base.css";
 import "./playground.css";
 import { CATALOG, SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
 import { createEditor } from "../core/editor";
-import { createPreview } from "../core/preview";
-import { downloadSvg } from "../core/download";
+import { createPreview } from "@visioncortex/xsvg-viewer";
+import { downloadSvg } from "@visioncortex/xsvg-viewer";
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   const el = document.getElementById(id);

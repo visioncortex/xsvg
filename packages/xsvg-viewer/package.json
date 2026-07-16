@@ -1,0 +1,35 @@
+{
+  "name": "@visioncortex/xsvg-viewer",
+  "version": "0.1.0",
+  "description": "Render xsvg — an XML graphics format that compiles to plain SVG — in the browser. Bundles the WASM compiler and a drop-in preview/slide-deck surface.",
+  "type": "module",
+  "license": "MIT",
+  "author": "VisionCortex",
+  "homepage": "https://xsvg.visioncortex.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/visioncortex/xsvg.git",
+    "directory": "packages/xsvg-viewer"
+  },
+  "keywords": ["svg", "xsvg", "wasm", "graphics", "text-layout", "gradient-mesh", "viewer"],
+  "sideEffects": false,
+  "files": ["dist", "README.md"],
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly"
+  },
+  "dependencies": {
+    "opentype.js": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^8.1.0"
+  }
+}
