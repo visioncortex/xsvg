@@ -23,4 +23,5 @@ initFromBytes(base64ToBytes(wasmBase64));
 
 // Register <xsvg-view> only after init. Dynamic import so its module body (which
 // calls customElements.define) evaluates strictly after initFromBytes above.
-void import("./xsvg-view");
+// Dogfoods the package's element export (aliased to source in the monorepo).
+void import("@visioncortex/xsvg-viewer/element");

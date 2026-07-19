@@ -61,7 +61,9 @@ export default defineConfig({
   resolve: {
     // Resolve the browser package to its source (not the built dist) so the inlineWasm
     // plugin below can strip/inline the wasm from the source's pkg import, as before.
+    // Subpath first — a prefix alias would otherwise rewrite it via the bare entry.
     alias: {
+      "@visioncortex/xsvg-viewer/element": resolve(here, "../packages/xsvg-viewer/src/element.ts"),
       "@visioncortex/xsvg-viewer": resolve(here, "../packages/xsvg-viewer/src/index.ts"),
     },
   },

@@ -20,7 +20,11 @@
     "gradient-mesh",
     "viewer"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "**/element.*",
+    "**/cdn.*",
+    "**/xsvg.js"
+  ],
   "files": [
     "dist",
     "README.md"
@@ -31,10 +35,20 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./element": {
+      "types": "./dist/element.d.ts",
+      "import": "./dist/element.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./xsvg.js": "./dist/xsvg.js",
+    "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "build": "vite build && vite build --config vite.embed.config.ts && tsc -p tsconfig.build.json --emitDeclarationOnly",
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {
@@ -43,7 +57,17 @@
   "dependencies": {
     "opentype.js": "^2.0.0"
   },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.6.3",
     "vite": "^8.1.0"
   }

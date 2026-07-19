@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -16,7 +17,9 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "@visioncortex/xsvg-viewer": ["packages/xsvg-viewer/src/index.ts"]
+      "@visioncortex/xsvg-viewer": ["packages/xsvg-viewer/src/index.ts"],
+      "@visioncortex/xsvg-viewer/element": ["packages/xsvg-viewer/src/element.ts"],
+      "@visioncortex/xsvg-viewer/react": ["packages/xsvg-viewer/src/react.tsx"]
     }
   },
   "include": ["web/src", "packages/xsvg-viewer/src", "packages/xsvg-viewer/pkg"]

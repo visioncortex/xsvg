@@ -4,22 +4,31 @@ import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// Library build. Vite handles the two wasm assets natively — the compiler's
-// `new URL('..._bg.wasm', import.meta.url)` (wasm-pack --target web) and the woff2
-// decoder's `import "./decompress.wasm?url"` — emitting them as hashed assets the
-// consumer's bundler picks up. opentype.js stays external (a declared dependency).
+// Library build. Three entry points, each self-contained (the wasm is inlined into a
+// shared chunk they all import):
+//   index   — compileXsvg / createPreview / helpers
+//   element — the framework-free <xsvg-view> custom element
+//   react   — the <XsvgView> React component (react is external / a peer dep)
+// Vite handles the two wasm assets natively — the compiler's `new URL('..._bg.wasm',
+// import.meta.url)` and the woff2 decoder's `import "./decompress.wasm?url"`.
+// opentype.js and react stay external (declared / peer dependencies).
 export default defineConfig({
+  esbuild: { jsx: "automatic" },
   build: {
     outDir: "dist",
     emptyOutDir: true,
     target: "es2022",
     lib: {
-      entry: resolve(here, "src/index.ts"),
+      entry: {
+        index: resolve(here, "src/index.ts"),
+        element: resolve(here, "src/element.ts"),
+        react: resolve(here, "src/react.tsx"),
+      },
       formats: ["es"],
-      fileName: () => "index.js",
     },
     rollupOptions: {
-      external: ["opentype.js"],
+      external: ["opentype.js", "react", "react/jsx-runtime"],
+      output: { entryFileNames: "[name].js", chunkFileNames: "[name]-[hash].js" },
     },
   },
 });

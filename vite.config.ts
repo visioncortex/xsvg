@@ -21,6 +21,8 @@ export default defineConfig({
     // to the package source so dev/build need no separate package build step; the wasm
     // it imports lives at packages/xsvg-viewer/pkg.
     alias: {
+      // Subpath first — a prefix alias would otherwise rewrite it via the bare entry.
+      "@visioncortex/xsvg-viewer/element": resolve(root, "packages/xsvg-viewer/src/element.ts"),
       "@visioncortex/xsvg-viewer": resolve(root, "packages/xsvg-viewer/src/index.ts"),
     },
   },

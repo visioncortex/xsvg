@@ -65,6 +65,10 @@ el.innerHTML = await compileXsvg(source);            // → a plain-SVG string
 createPreview(host, { hashDeepLink: true }).render(source);
 ```
 
+The same package also ships an embeddable viewer: an `<xsvg-view>` custom element
+(`/element`), a React component (`/react`), and a single-file `<script>` bundle
+(`dist/xsvg.js`, WASM inlined) for drop-in use with no build step.
+
 **Node** — [`@visioncortex/xsvg-compile`](packages/xsvg-compile): the same compiler, no browser.
 
 ```bash
