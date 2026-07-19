@@ -54,6 +54,10 @@ export interface PreviewOptions {
    *  page wants this; the playground keeps the last good preview and shows its
    *  own error box, so it leaves this off and catches the throw. */
   showErrors?: boolean;
+  /** Whether a multi-artboard document opens with its slide rail expanded. On by
+   *  default; set `false` to start with the rail collapsed — the toggle button is
+   *  still shown, so the viewer can open it. */
+  slides?: boolean;
 }
 
 /** "superseded" means a newer render() started before this one finished — the
@@ -129,7 +133,7 @@ export function createPreview(host: HTMLElement, opts: PreviewOptions = {}): Pre
     toggle.addEventListener("click", () => root.classList.toggle("rail-open"));
 
     root.append(rail, nav, toggle);
-    root.classList.add("rail-open"); // decks open the rail by default
+    if (opts.slides !== false) root.classList.add("rail-open"); // open by default; slides:false starts collapsed
 
     let i = 0;
     const show = (n: number) => {

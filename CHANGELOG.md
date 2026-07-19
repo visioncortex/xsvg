@@ -10,6 +10,12 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ## [Unreleased]
 
+### Added
+
+- `createPreview` gains a `slides` option (default `true`); set `false` to start a
+  multi-artboard preview with its slide rail collapsed — the toggle button stays, so
+  the viewer can open it.
+
 ## [0.1.3] — 2026-07-19
 
 ### Added
