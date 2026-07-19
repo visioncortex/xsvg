@@ -10,6 +10,8 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-07-19
+
 ### Added
 
 - `createPreview` gains a `slides` option (default `true`); set `false` to start a
@@ -61,7 +63,8 @@ Deprecated on npm — published with debug WebAssembly. Use 0.1.2 or later.
   - **`@visioncortex/xsvg-compile`** (Node): browser-free `compile()`.
   - Rust crates on crates.io: `xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`.
 
-[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.4
 [0.1.3]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.3
 [0.1.2]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.2
 [0.1.1]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.1
