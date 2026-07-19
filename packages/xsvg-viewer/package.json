@@ -1,6 +1,6 @@
 {
   "name": "@visioncortex/xsvg-viewer",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Render xsvg — an XML graphics format that compiles to plain SVG — in the browser. Bundles the WASM compiler and a drop-in preview/slide-deck surface.",
   "type": "module",
   "license": "MIT",
