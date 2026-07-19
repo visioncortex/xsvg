@@ -22,12 +22,21 @@ export default defineConfig({
       entry: {
         index: resolve(here, "src/index.ts"),
         element: resolve(here, "src/element.ts"),
+        interactive: resolve(here, "src/interactive.ts"),
         react: resolve(here, "src/react.tsx"),
       },
       formats: ["es"],
     },
     rollupOptions: {
-      external: ["opentype.js", "react", "react/jsx-runtime"],
+      // opentype.js + react are declared/peer deps; the CodeMirror packages are
+      // optional peers the inspector lazy-loads — all external, never bundled.
+      external: [
+        "opentype.js",
+        "react",
+        "react/jsx-runtime",
+        "codemirror",
+        /^@codemirror\//,
+      ],
       output: { entryFileNames: "[name].js", chunkFileNames: "[name]-[hash].js" },
     },
   },

@@ -9,8 +9,8 @@
 // the hovered leaf to its nearest tagged ancestor (see core/sourcemap). Highlight
 // rectangles live *inside* the SVG (user space) with a non-scaling stroke, so they
 // track pan/zoom for free without recomputing on every transform change.
-import { ByteIndex, nearestSource, posAttr, type SourceRange } from "../core/sourcemap";
-import type { EditorHandle } from "../core/editor";
+import { ByteIndex, nearestSource, posAttr, type SourceRange } from "./sourcemap";
+import type { EditorHandle } from "./editor";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 

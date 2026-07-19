@@ -4,6 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>xsvg — interactive viewer</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      .viewer { position: relative; display: flex; flex-direction: column; height: 100vh; font: 14px/1.5 system-ui, sans-serif; }
+      .toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; font-size: 14px; }
+      .toolbar .brand { font-weight: 700; font-size: 15px; color: #2563eb; text-decoration: none; }
+      .toolbar .doc-name { color: #64748b; font: 12.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-decoration: none; }
+      .toolbar .spacer { flex: 1; }
+      .toolbar a { color: #2563eb; text-decoration: none; font-size: 13px; }
+      .toolbar a[href]:hover { text-decoration: underline; }
+      #view { flex: 1; min-height: 0; }
+      .drop-hint { position: absolute; left: 12px; bottom: 10px; padding: 4px 10px; border-radius: 6px; background: rgba(15,23,42,.62); color: #fff; font-size: 12px; pointer-events: none; }
+    </style>
   </head>
   <body>
     <div class="viewer">
@@ -14,54 +26,8 @@
         <a id="download-svg" href="#" title="Download the compiled plain SVG" hidden>Download SVG ↓</a>
         <a id="open-playground" href="/playground/">Open in playground →</a>
       </header>
-      <div class="body">
-        <aside id="deck-rail" class="deck-rail"></aside>
-        <div id="stage" class="stage">
-          <div id="content" class="content"></div>
-          <div id="drop-hint" class="drop-hint">Drop a .xsvg file to open</div>
-          <button id="deck-toggle" title="Slides" hidden>▤</button>
-          <div id="controls">
-            <div id="code-btn" title="Toggle code inspector">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="8 7 3 12 8 17" />
-                <polyline points="16 7 21 12 16 17" />
-                <line x1="13.5" y1="4" x2="10.5" y2="20" />
-              </svg>
-            </div>
-            <div id="zoom-capsule">
-              <div id="zoom-btn-plus" title="Zoom in">
-                <svg viewBox="-6 -2 24 24"><path d="M 6.76 5.09L 6.76 9.08L 10.69 9.08L 10.69 10.49L 6.76 10.49L 6.76 14.45L 5.19 14.45L 5.19 10.49L 1.31 10.49L 1.31 9.08L 5.19 9.08L 5.19 5.09Z" /></svg>
-              </div>
-              <div id="zoom-btn-minus" title="Zoom out">
-                <svg viewBox="-6 -2 24 24"><path d="M 1.99 10.47L 1.99 9.01L 10.01 9.01L 10.01 10.47Z" /></svg>
-              </div>
-            </div>
-            <div id="fit-btn" title="Fit / actual size">
-              <svg class="icon-fit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 9V4h5" />
-                <path d="M20 9V4h-5" />
-                <path d="M4 15v5h5" />
-                <path d="M20 15v5h-5" />
-              </svg>
-              <svg class="icon-oneone" viewBox="0 0 24 24" hidden>
-                <text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1:1</text>
-              </svg>
-            </div>
-          </div>
-        </div>
-        <div id="sidebar-resize" class="resize-handle" title="Drag to resize"></div>
-        <aside class="sidebar">
-          <section class="pane inspector-pane">
-            <h2>Inspector</h2>
-            <div id="panel" class="panel"></div>
-          </section>
-          <section class="pane source-pane">
-            <h2>xsvg source</h2>
-            <div id="source" class="source"></div>
-          </section>
-        </aside>
-      </div>
-      <div id="error" class="error" hidden></div>
+      <xsvg-view-interactive id="view" inspector></xsvg-view-interactive>
+      <p id="drop-hint" class="drop-hint">Drop a .xsvg file to open</p>
     </div>
     <script type="module" src="/src/viewer/main.ts"></script>
   </body>
