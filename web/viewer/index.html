@@ -15,6 +15,12 @@
       .toolbar a[href]:hover { text-decoration: underline; }
       #view { flex: 1; min-height: 0; }
       .drop-hint { position: absolute; left: 12px; bottom: 10px; padding: 4px 10px; border-radius: 6px; background: rgba(15,23,42,.62); color: #fff; font-size: 12px; pointer-events: none; }
+      @media (prefers-color-scheme: dark) {
+        html, body { background: #0f172a; }
+        .toolbar { background: #0f172a; border-bottom-color: #334155; }
+        .toolbar .brand, .toolbar a { color: #60a5fa; }
+        .toolbar .doc-name { color: #94a3b8; }
+      }
     </style>
   </head>
   <body>

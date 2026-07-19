@@ -97,6 +97,47 @@ const STYLE = `
 .source-pane { flex: 1; border-top: 1px solid #e2e8f0; }
 .source { flex: 1; min-height: 0; overflow: hidden; }
 .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(225,29,72,.16); outline: 1px solid rgba(225,29,72,.45); }
+
+/* Dark mode — follows the viewer's prefers-color-scheme. The source pane keeps the
+   editor's own theme. */
+@media (prefers-color-scheme: dark) {
+  :host { color: #e2e8f0; background: #0f172a; }
+  /* only color + image — NOT the \`background\` shorthand, which would reset the
+     base rule's background-size/position and stop the checkerboard from tiling */
+  .stage { background-color: #1e293b;
+    background-image: linear-gradient(45deg,#263143 25%,transparent 25%), linear-gradient(-45deg,#263143 25%,transparent 25%), linear-gradient(45deg,transparent 75%,#263143 75%), linear-gradient(-45deg,transparent 75%,#263143 75%); }
+  .err { background: #3b0d10; border-top-color: #7f1d1d; color: #fca5a5; }
+  .deck-rail { background: #1e293b; border-right-color: #334155; }
+  .deck-thumb { background: #0f172a; border-color: #334155; }
+  .deck-thumb:hover { border-color: #475569; }
+  .deck-thumb.active { border-color: #3b82f6; }
+  .deck-toggle, .code-btn, .zoom-capsule, .fit-btn { background: #1e293b; border-color: #334155; color: #94a3b8; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .deck-toggle:hover, .code-btn:hover, .fit-btn:hover, .zoom-plus:hover, .zoom-minus:hover { color: #60a5fa; background: #334155; }
+  .deck-toggle:hover, .code-btn:hover, .fit-btn:hover { border-color: #3b82f6; }
+  .root.deck-open .deck-toggle, .root.inspector-open .code-btn { color: #60a5fa; border-color: #3b82f6; background: #1e3a5f; }
+  .zoom-plus { border-bottom-color: #334155; }
+  .xsvg-hl-hover { stroke: #818cf8; }
+  .xsvg-hl-pin { stroke: #fb7185; }
+  .resize-handle:hover { background: #334155; }
+  .sidebar { background: #0f172a; border-left-color: #334155; }
+  .pane h2 { color: #94a3b8; background: #1e293b; border-bottom-color: #334155; }
+  .panel .tag { color: #60a5fa; }
+  .panel .bbox, .panel .row { color: #94a3b8; }
+  .panel .hint { color: #64748b; }
+  .panel table.attrs th { color: #c4b5fd; }
+  .panel table.attrs td { color: #e2e8f0; }
+  .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(251,113,133,.22); outline-color: rgba(251,113,133,.5); }
+  /* CodeMirror source pane: dark gutter (line numbers), surface, and native scrollbar.
+     Prefixed with .source to outweigh CodeMirror's own injected single-class rules. */
+  .source { color-scheme: dark; }
+  .source .cm-editor { background: #0f172a !important; color: #e2e8f0; }
+  .source .cm-gutters { background: #0f172a !important; color: #64748b !important; border-right-color: #1e293b !important; }
+  .source .cm-activeLineGutter { background: #1e293b !important; color: #cbd5e1 !important; }
+  .source .cm-lineNumbers .cm-gutterElement { color: #64748b; }
+  .source .cm-activeLine { background: rgba(148,163,184,.06); }
+  .source .cm-cursor { border-left-color: #e2e8f0; }
+  .source .cm-selectionBackground, .source .cm-focused .cm-selectionBackground { background: #334155 !important; }
+}
 `;
 
 export class XsvgViewInteractive extends HTMLElement {

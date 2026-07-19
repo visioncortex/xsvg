@@ -33,6 +33,12 @@ const PREVIEW_CSS = `
 .xsvg-preview .deck-thumb > svg { display: block; width: 100%; height: 100%; }
 .xsvg-preview .deck-toggle { position: absolute; left: 12px; bottom: 14px; z-index: 5; width: 34px; height: 34px; border: 0; border-radius: 8px; background: rgba(15,23,42,.82); color: #f8fafc; font-size: 16px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(15,23,42,.28); }
 .xsvg-preview .deck-toggle:hover { background: rgba(30,41,59,.92); }
+@media (prefers-color-scheme: dark) {
+  .xsvg-stage > .error { color: #fca5a5; }
+  .xsvg-preview .deck-rail { background: #1e293b; border-right-color: #334155; }
+  .xsvg-preview .deck-thumb { background: #0f172a; border-color: #334155; }
+  .xsvg-preview .deck-thumb.active { border-color: #3b82f6; }
+}
 `;
 
 let stylesInjected = false;

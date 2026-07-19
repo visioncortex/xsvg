@@ -10,6 +10,11 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ## [Unreleased]
 
+### Added
+
+- Dark mode: the interactive viewer (`<xsvg-view-interactive>`) and `createPreview`
+  chrome follow the viewer's `prefers-color-scheme`. The drawing keeps its own colors.
+
 ## [0.1.4] — 2026-07-19
 
 ### Added
