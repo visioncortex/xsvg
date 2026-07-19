@@ -3,6 +3,7 @@ name = "xsvg-cli"
 version = "0.0.0"
 edition = "2021"
 description = "Headless (browser-free) xsvg compiler: xsvg in, plain SVG out. Native fonts via ttf-parser."
+readme = "README.md"
 publish = false
 
 [[bin]]

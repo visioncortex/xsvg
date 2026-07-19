@@ -13,7 +13,8 @@
     "dev": "npm run wasm:dev && vite",
     "build": "npm run wasm:build && vite build && npm run build:embed",
     "build:embed": "vite build --config web/vite.embed.config.ts",
-    "build:packages": "npm run wasm:build && npm run wasm:node && npm -w @visioncortex/xsvg-viewer run build && npm -w @visioncortex/xsvg-compile run build",
+    "sync:readme": "cp README.md packages/xsvg-viewer/README.md && cp README.md packages/xsvg-compile/README.md && cp README.md crates/xsvg-cli/README.md",
+    "build:packages": "npm run sync:readme && npm run wasm:build && npm run wasm:node && npm -w @visioncortex/xsvg-viewer run build && npm -w @visioncortex/xsvg-compile run build",
     "start": "vite preview",
     "typecheck": "tsc --noEmit",
     "compare": "cargo build --release -p xsvg-cli && node scripts/compare.mjs"
