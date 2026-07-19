@@ -4,7 +4,8 @@
 #
 #   1. rust     cargo-publish every publishable workspace crate, in dependency order
 #   2. npm      build + npm-publish the two @visioncortex packages
-#   3. release  build the wasm, attach the binaries to a GitHub release (via gh)
+#   3. release  attach the raw wasm binary to a GitHub release (via gh) — for
+#               non-npm consumers; the npm packages already bundle the same wasm
 #
 # Which Rust crates ship is read from the Cargo manifests themselves: a crate with
 # `publish = false` is skipped. All four (xsvg-gradient, xsvg-core, xsvg-cli, xsvg-wasm)
@@ -155,46 +156,39 @@ publish_npm() {
 }
 
 # ════════════════════════════════════════════════════════════════════════════════
-# 3. RELEASE — attach the compiled wasm binaries to a GitHub release
+# 3. RELEASE — attach the raw wasm compiler binary to a GitHub release
 # ════════════════════════════════════════════════════════════════════════════════
 publish_release() {
-  step "GitHub release — attach wasm binaries ($TAG)"
+  step "GitHub release — attach wasm binary ($TAG)"
 
-  local viewer_pkg="packages/xsvg-viewer/pkg"
   local node_pkg="packages/xsvg-compile/pkg"
 
   # Build the wasm if a previous phase didn't already (npm's build:packages does).
-  if [[ ! -d "$viewer_pkg" || ! -d "$node_pkg" ]]; then
-    info "wasm not built yet — building release wasm (web + node)"
-    run npm run wasm:build
+  if [[ ! -d "$node_pkg" ]]; then
+    info "wasm not built yet — building release wasm"
     run npm run wasm:node
   else
-    info "reusing wasm already in $viewer_pkg and $node_pkg"
+    info "reusing wasm already in $node_pkg"
   fi
 
-  # Stage the assets under target/ (git-ignored).
+  # Stage the assets under target/ (git-ignored). The npm packages already bundle
+  # the wasm (xsvg-compile ships pkg/, xsvg-viewer inlines it into dist), so this is
+  # only for non-npm consumers. The web and node targets emit the *same* .wasm (they
+  # differ only in JS glue), so we attach a single binary + its checksum.
   local stage="target/release-assets"
   run rm -rf "$stage"
   run mkdir -p "$stage"
 
   if (( ! DRY_RUN )); then
-    # The raw .wasm from each target, named by where it runs…
-    cp "$viewer_pkg"/*_bg.wasm "$stage/xsvg-wasm-web.wasm"
-    cp "$node_pkg"/*_bg.wasm   "$stage/xsvg-wasm-node.wasm"
-    # …plus the full loadable module (wasm + JS glue + .d.ts) for each target.
-    tar -czf "$stage/xsvg-wasm-web-pkg.tar.gz"  -C "$viewer_pkg" .
-    tar -czf "$stage/xsvg-wasm-node-pkg.tar.gz" -C "$node_pkg" .
-    ( cd "$stage" && shasum -a 256 ./* > SHA256SUMS.txt )
+    cp "$node_pkg"/*_bg.wasm "$stage/xsvg_wasm_bg.wasm"
+    ( cd "$stage" && shasum -a 256 xsvg_wasm_bg.wasm > SHA256SUMS.txt )
   fi
   info "staged assets:"
-  (( DRY_RUN )) && info "  (dry-run: would stage web/node .wasm, pkg tarballs, SHA256SUMS.txt)" \
+  (( DRY_RUN )) && info "  (dry-run: would stage xsvg_wasm_bg.wasm + SHA256SUMS.txt)" \
                 || ls -1 "$stage" | sed 's/^/    /'
 
   local assets=(
-    "$stage/xsvg-wasm-web.wasm"
-    "$stage/xsvg-wasm-node.wasm"
-    "$stage/xsvg-wasm-web-pkg.tar.gz"
-    "$stage/xsvg-wasm-node-pkg.tar.gz"
+    "$stage/xsvg_wasm_bg.wasm"
     "$stage/SHA256SUMS.txt"
   )
 
@@ -209,7 +203,7 @@ publish_release() {
     info "creating release $TAG"
     run gh release create "$TAG" "${assets[@]}" \
       --title "xsvg $TAG" \
-      --notes "xsvg $TAG — WebAssembly compiler binaries. \`xsvg-wasm-web\` targets the browser (web target), \`xsvg-wasm-node\` targets Node.js. The npm packages bundle these; attached here for direct use."
+      --notes "xsvg $TAG — the raw WebAssembly compiler binary, for using xsvg outside npm (direct <script>/CDN, another language's wasm runtime, archival). Most users don't need this: the npm packages already bundle the same wasm — \`@visioncortex/xsvg-viewer\` (browser) inlines it, \`@visioncortex/xsvg-compile\` (Node) ships it."
   fi
 
   ok "GitHub release $TAG updated"
