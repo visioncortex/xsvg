@@ -37,6 +37,9 @@
     "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
     "prepublishOnly": "npm run build"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "opentype.js": "^2.0.0"
   },

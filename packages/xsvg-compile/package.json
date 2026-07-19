@@ -40,6 +40,9 @@
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "npm run build"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "opentype.js": "^2.0.0",
     "svgpath": "^2.6.0"
