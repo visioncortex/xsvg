@@ -1,15 +1,25 @@
 <div align="center">
 
-# xsvg
+  <img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/visioncortex-banner.png">
+  <h1>xsvg</h1>
 
-**eXtensible SVG** — an XML graphics format that compiles to plain SVG.
-The text layout, live diagrams & mesh gradients SVG never shipped.
+  <p>
+    <strong>eXtensible SVG — an XML graphics format that compiles to plain SVG</strong>
+  </p>
+
+  <p>The text layout, live diagrams &amp; mesh gradients SVG never shipped.</p>
+
+  <h3>
+    <a href="https://xsvg.visioncortex.org/docs">Documentation</a>
+    <span> | </span>
+    <a href="https://xsvg.visioncortex.org/examples">Examples</a>
+    <span> | </span>
+    <a href="https://github.com/visioncortex/xsvg/releases">Release</a>
+  </h3>
 
 [![npm · viewer](https://img.shields.io/npm/v/@visioncortex/xsvg-viewer?label=xsvg-viewer)](https://www.npmjs.com/package/@visioncortex/xsvg-viewer)
 [![npm · compile](https://img.shields.io/npm/v/@visioncortex/xsvg-compile?label=xsvg-compile)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/mesh.png" width="760" alt="xsvg mesh gradients">
 
 </div>
 

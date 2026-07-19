@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/visioncortex/xsvg"
+readme = "README.md"
 description = "Continuous color fields for xsvg's mesh-gradient lowering: mesh rasterization, bilinear/grid field fitting, pixel-exact contours, and the texel-aligned tiny-PNG trick that turns the renderer's image filter into the gradient interpolator. Extracted from vtracer's gradient/quadmesh crates; zero dependencies."
 
 [dependencies]
