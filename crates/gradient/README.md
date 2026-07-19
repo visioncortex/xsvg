@@ -17,9 +17,9 @@
     <a href="https://github.com/visioncortex/xsvg/releases">Release</a>
   </h3>
 
-[![npm · viewer](https://img.shields.io/npm/v/@visioncortex/xsvg-viewer?label=xsvg-viewer)](https://www.npmjs.com/package/@visioncortex/xsvg-viewer)
-[![npm · compile](https://img.shields.io/npm/v/@visioncortex/xsvg-compile?label=xsvg-compile)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![xsvg-viewer on npm](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-viewer.svg)](https://www.npmjs.com/package/@visioncortex/xsvg-viewer)
+[![xsvg-compile on npm](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-compile.svg)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
+[![MIT license](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-license.svg)](LICENSE)
 
 </div>
 
@@ -101,8 +101,8 @@ not just a rectangle.
 </x:textbox>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/text-flow.png" width="300" align="top" alt="text flowed inside shapes">
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/text-justify.png" width="380" align="top" alt="justified text with first-line indent">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/text-flow.png" alt="text flowed inside shapes">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/text-justify.png" alt="justified text with first-line indent">
 
 ### Type on a path
 
@@ -114,7 +114,7 @@ and `ribbon` deform the glyphs along the curve (verticals upright, or tilting wi
 <x:textpath in="#w" effect="ribbon" font-family="-x-google-Anton" font-size="34">RIBBON</x:textpath>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/textpath.png" width="760" alt="type on a path — skew, ribbon, follow">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/textpath.png" alt="type on a path — skew, ribbon, follow">
 
 ### Warp the geometry
 
@@ -127,7 +127,7 @@ fisheye, perspective, and free-distort fields.
 </x:warp>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/warp.png" width="760" alt="envelope warp presets">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/warp.png" width="560" alt="envelope warp presets">
 
 ### Mesh gradients
 
@@ -142,7 +142,7 @@ texel-aligned PNG that the renderer's own bilinear filter reconstructs. Inkscape
 </x:mesh>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/mesh.png" width="640" alt="mesh gradients">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/mesh.png" alt="mesh gradients">
 
 ### Diagrams — connectors & path algebra
 
@@ -161,9 +161,9 @@ Minkowski distance (inset & outset).
 </x:boolean>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/connectors.png" width="360" align="top" alt="self-routing connectors">
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/boolean.png" width="340" align="top" alt="boolean path algebra">
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/offset.png" width="280" align="top" alt="inset and outset offsets">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/connectors.png" alt="self-routing connectors">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/boolean.png" alt="boolean path algebra">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/offset.png" alt="inset and outset offsets">
 
 ### Paragraphs, lists & tables
 
@@ -178,10 +178,9 @@ depth; `<x:table>` has author-set columns and **row heights that grow to fit** w
 </x:table>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/table.png" width="380" align="top" alt="content-driven tables">
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/paragraphs.png" width="380" align="top" alt="paragraph typography">
-<br>
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/lists.png" width="520" alt="lists with depth-cycling markers">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/table.png" alt="content-driven tables">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/paragraphs.png" alt="paragraph typography">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/lists.png" alt="lists with depth-cycling markers">
 
 ### Data visualization
 
@@ -198,8 +197,8 @@ per-slice radius, explode, donut, and polar-area — all baked to plain shapes, 
 </x:plot>
 ```
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/plot.png" width="380" align="top" alt="bar and line plots">
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/pie.png" width="380" align="top" alt="pie, donut, polar-area">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/plot.png" alt="bar and line plots">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/pie.png" alt="pie, donut, polar-area">
 
 ### Theming
 
@@ -207,7 +206,7 @@ per-slice radius, explode, donut, and polar-area — all baked to plain shapes, 
 Fills reference `var(name)`; text pulls a named `x:font`. Change a token and the whole document
 restyles; an unknown viewer never sees the `var()` (it's already resolved).
 
-<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/theme.png" width="640" alt="theming with design tokens">
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/theme.png" alt="theming with design tokens">
 
 ## Packages & crates
 

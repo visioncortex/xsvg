@@ -8,3 +8,6 @@ node_modules
 # package build artifacts (wasm output + compiled dist)
 packages/*/pkg
 packages/*/dist
+
+# secrets — npm auth token lives here, never commit
+.npmrc
