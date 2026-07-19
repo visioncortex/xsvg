@@ -18,6 +18,17 @@ export interface Category {
 
 export const CATALOG: Category[] = [
   {
+    name: "A brief intro to xsvg",
+    note: "Start here — one file, three x:artboard slides touring what the format is. <g x:artboard=\"…\"> names a slide frame; the preview pages them with < > nav (§5.2).",
+    samples: [
+      {
+        file: "artboards.xsvg",
+        title: "Artboards (slides)",
+        blurb: "Three x:artboard slides in one file — a title, a bar chart, and a closing card; the preview pages them with a < > nav, the viewer zooms to the first, and it stays plain SVG in any viewer",
+      },
+    ],
+  },
+  {
     name: "Showcases",
     note: "Realistic composites that combine several features.",
     samples: [
@@ -318,17 +329,6 @@ export const CATALOG: Category[] = [
         file: "compose.xsvg",
         title: "Reference the compiled output",
         blurb: "a textbox flowed inside a boolean union; type riding a warp's arched spine; a path → warp → textpath chain with one edit point",
-      },
-    ],
-  },
-  {
-    name: "Artboards & slides",
-    note: "<g x:artboard=\"…\"> names a slide frame; the preview pages them with < > nav (§5.2).",
-    samples: [
-      {
-        file: "artboards.xsvg",
-        title: "Artboards (slides)",
-        blurb: "Three x:artboard slides in one file — a title, a bar chart, and a closing card; the preview pages them with a < > nav, the viewer zooms to the first, and it stays plain SVG in any viewer",
       },
     ],
   },

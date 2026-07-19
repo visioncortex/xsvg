@@ -1,15 +1,16 @@
 [package]
 name = "xsvg-cli"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/visioncortex/xsvg"
 description = "Headless (browser-free) xsvg compiler: xsvg in, plain SVG out. Native fonts via ttf-parser."
 readme = "README.md"
-publish = false
 
 [[bin]]
 name = "xsvg"
 path = "src/main.rs"
 
 [dependencies]
-xsvg-core = { path = "../xsvg-core", features = ["compile"] }
+xsvg-core = { path = "../xsvg-core", version = "0.1.0", features = ["compile"] }
 ttf-parser = "0.25"

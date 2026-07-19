@@ -1,9 +1,10 @@
 [package]
 name = "xsvg-core"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/visioncortex/xsvg"
 description = "xsvg shared types + the document compiler (pure Rust, no platform deps)."
-publish = false
 
 [features]
 # `compile` (opt-in) = the xsvg → plain-SVG compiler (the `compile` module + roxmltree).
@@ -13,7 +14,7 @@ publish = false
 compile = ["dep:roxmltree"]
 
 [dependencies]
-gradient = { path = "../gradient" }
+xsvg-gradient = { path = "../gradient", version = "0.1.0" }
 i_overlay = "7.0.2"
 i_shape = "3.0.0"
 kurbo = "0.13.1"

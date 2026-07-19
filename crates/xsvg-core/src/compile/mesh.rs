@@ -149,7 +149,6 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// `seed` namespaces the clip ids (the caller's source position). Returns
 /// `false` on a degenerate extent (caller emits its marker).
 pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut String, ctx: &Ctx) -> bool {
-    use crate::gradient;
     use crate::gradient::{fit_field, fit_grid, texel_placement, Dof};
 
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -183,7 +182,7 @@ pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut St
     let mut region_px: Vec<Vec<u32>> = vec![Vec::new(); raster.regions];
     let mut bbox: Vec<(u32, u32, u32, u32)> = vec![(u32::MAX, u32::MAX, 0, 0); raster.regions];
     for (i, &l) in raster.labels.iter().enumerate() {
-        if l == gradient::mesh::NONE {
+        if l == crate::gradient::mesh::NONE {
             continue;
         }
         region_px[l as usize].push(i as u32);
@@ -294,9 +293,9 @@ pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut St
             }
         }
         let png = if opaque {
-            gradient::png::encode_rgb_png(tw as u32, th as u32, &px)
+            crate::gradient::png::encode_rgb_png(tw as u32, th as u32, &px)
         } else {
-            gradient::png::encode_rgba_png(tw as u32, th as u32, &px)
+            crate::gradient::png::encode_rgba_png(tw as u32, th as u32, &px)
         };
         let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
         // raster pixel space -> user units
@@ -309,7 +308,7 @@ pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut St
             fmt(uy),
             fmt(uw),
             fmt(uh),
-            gradient::base64::encode(&png)
+            crate::gradient::base64::encode(&png)
         ));
     }
     true

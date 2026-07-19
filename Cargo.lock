@@ -70,10 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gradient"
-version = "0.1.0"
-
-[[package]]
 name = "i_float"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "xsvg-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ttf-parser",
  "xsvg-core",
@@ -348,20 +344,24 @@ dependencies = [
 
 [[package]]
 name = "xsvg-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "gradient",
  "i_overlay",
  "i_shape",
  "kurbo",
  "roxmltree",
  "serde_json",
  "xsvg-core",
+ "xsvg-gradient",
 ]
 
 [[package]]
+name = "xsvg-gradient"
+version = "0.1.0"
+
+[[package]]
 name = "xsvg-wasm"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",

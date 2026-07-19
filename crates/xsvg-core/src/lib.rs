@@ -33,8 +33,8 @@ pub use kurbo;
 
 // Mesh-gradient engine (Pillar 3): mesh rasterization, color-field fitting, and
 // the texel-aligned tiny-PNG serialization — extracted from vtracer into the
-// workspace `gradient` crate and re-exported the same way as kurbo.
-pub use gradient;
+// workspace `xsvg-gradient` crate and re-exported as `gradient`, the same way as kurbo.
+pub use xsvg_gradient as gradient;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QualityProfile {
