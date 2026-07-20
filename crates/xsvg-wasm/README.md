@@ -10,9 +10,9 @@
   <p>The text layout, live diagrams &amp; mesh gradients SVG never shipped.</p>
 
   <h3>
-    <a href="https://xsvg.visioncortex.org/docs">Documentation</a>
+    <a href="https://xsvg.visioncortex.org/docs/category/introduction/">Documentation</a>
     <span> | </span>
-    <a href="https://xsvg.visioncortex.org/examples">Examples</a>
+    <a href="https://xsvg.visioncortex.org/examples/">Examples</a>
     <span> | </span>
     <a href="https://github.com/visioncortex/xsvg/releases">Release</a>
   </h3>
@@ -48,7 +48,7 @@ you want the effects baked in.
 
 ## Install
 
-Two npm packages and a CLI, all over one compiler.
+Two npm packages, a CLI, and a VS Code extension — all over one compiler.
 
 **Browser** — [`@visioncortex/xsvg-viewer`](packages/xsvg-viewer): the WASM compiler plus a
 drop-in preview surface.
@@ -87,6 +87,11 @@ writeFileSync("out.svg", compile(source, { fontDir: "./fonts" })); // synchronou
 cargo install --path crates/xsvg-cli
 xsvg deck.xsvg --font-directory ./fonts -o deck.svg
 ```
+
+**VS Code** — [**xsvg viewer**](https://marketplace.visualstudio.com/items?itemName=VisionCortex.xsvg-viewer):
+open a `.xsvg` and preview it live beside the source, with pan/zoom and the element inspector.
+
+<img src="https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/vscode-extension.png" alt="xsvg viewer for VS Code">
 
 ## Features
 
