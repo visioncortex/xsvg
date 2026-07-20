@@ -10,6 +10,11 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ## [Unreleased]
 
+### Changed
+
+- Interactive viewer: the slide deck now pages on ArrowUp/ArrowDown as well as
+  ArrowLeft/ArrowRight (and PageUp/PageDown) — Google-Slides-style navigation.
+
 ## [0.1.5] — 2026-07-19
 
 ### Added

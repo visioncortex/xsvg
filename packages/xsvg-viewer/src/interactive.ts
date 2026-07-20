@@ -266,8 +266,15 @@ export class XsvgViewInteractive extends HTMLElement {
     if (!this.deckSelectFn) return;
     const el = (this.getRootNode() as Document | ShadowRoot).activeElement;
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable)) return;
-    if (e.key === "ArrowLeft" || e.key === "PageUp") this.deckSelectFn(this.deckActive - 1);
-    else if (e.key === "ArrowRight" || e.key === "PageDown") this.deckSelectFn(this.deckActive + 1);
+    // Google-Slides-style: either axis pages the deck (the rail is vertical, the
+    // preview's nav is horizontal — accept both).
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") {
+      this.deckSelectFn(this.deckActive - 1);
+      e.preventDefault();
+    } else if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown") {
+      this.deckSelectFn(this.deckActive + 1);
+      e.preventDefault();
+    }
   };
 
   private async readSource(): Promise<string> {
