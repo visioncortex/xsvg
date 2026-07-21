@@ -47,10 +47,17 @@ export function createInspector({ svgRoot, panel, source, editor }: InspectorOpt
       rect.style.display = "none";
       return;
     }
-    rect.setAttribute("x", String(box.x));
-    rect.setAttribute("y", String(box.y));
-    rect.setAttribute("width", String(box.w));
-    rect.setAttribute("height", String(box.h));
+    // A straight/axis-aligned connector (or any 1-D shape) has a zero-area bbox, and an
+    // SVG rect with width or height 0 isn't rendered — so inflate a degenerate axis to a
+    // minimum band, keeping the highlight visible over lines.
+    const MIN = 3;
+    let { x, y, w, h } = box;
+    if (w < MIN) { x -= (MIN - w) / 2; w = MIN; }
+    if (h < MIN) { y -= (MIN - h) / 2; h = MIN; }
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(y));
+    rect.setAttribute("width", String(w));
+    rect.setAttribute("height", String(h));
     rect.style.display = "";
   };
 

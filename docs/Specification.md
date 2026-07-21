@@ -951,9 +951,11 @@ lowers to a plain `<path>` carrying the connector's own stroke.
 
 - **`#id`** — reference an element; the connector attaches where the route meets that element's
   bounding box (the center-to-center ray for `straight`, the route's axis edge otherwise).
-- **`#id:side`** — the same reference, but force the attachment to a named edge, `side` ∈
-  `left` | `right` | `top` | `bottom`. It attaches at that edge's midpoint; for `curve` the
-  tangent leaves along the edge's outward normal. (A trailing `:left|:right|:top|:bottom` is
+- **`#id:anchor`** — the same reference, but force which of the box's 9 connection points to
+  attach to: an **edge midpoint** (`left` | `right` | `top` | `bottom`), a **corner**
+  (`left-top`, `right-bottom`, … — one horizontal + one vertical token, either order), or
+  `center`. For `curve`, the tangent leaves the anchor tilted toward the other end (so a
+  same-side pair reads as a leaf, not a half-circle). (A trailing `:<anchor>` keyword is
   reserved for this; any other `:` is part of the id.)
 
 A raw coordinate is given instead via **`from-point="x,y"` / `to-point="x,y"`** — the endpoint is
@@ -965,9 +967,10 @@ a point are supplied for the same end, the **reference wins**.
 | `route` | `straight` *(default)* | direct line, endpoints clipped to each box's edge along the center-to-center ray |
 | | `x-major` | orthogonal rail, **horizontal-first** — exits the facing side, elbows at the horizontal midpoint (H–V–H) |
 | | `y-major` | orthogonal rail, **vertical-first** — exits top/bottom, elbows at the vertical midpoint (V–H–V) |
-| | `curve` | a cubic with tangents along the dominant axis (horizontal when the boxes are side-by-side, vertical when stacked) |
+| | `curve` | a cubic bowing out by `bulge`, each end leaving its anchor tilted toward the other (a same-side pair reads as a leaf, not a half-circle) |
 | `arrow` | `end` *(default)* / `start` / `both` / `none` | a filled triangle (tinted to the stroke) at the chosen ends |
 | `arrow-size` | length (default `max(3.5·stroke-width, 7)`) | the arrowhead height |
+| `bulge` | length (default `44`) | how far a `curve` bows out — a **fixed** amount, not scaled by the endpoint distance (clamped down only for links shorter than the bulge) |
 
 **Baked reference (normative).** The route is recomputed from the endpoints' boxes, so a connector
 is a compile-time reference like `in="#id"`: moving or resizing an endpoint re-emits the connector

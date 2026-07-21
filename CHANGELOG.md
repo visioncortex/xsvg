@@ -12,14 +12,24 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ### Added
 
-- Connectors: `from`/`to` now accept a **forced side anchor** — `#id:left|right|top|bottom`
-  — and **raw coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the
-  reference wins if both a ref and a point are given). New `connector-anchors` sample.
+- Connectors: `from`/`to` now accept a **forced anchor** — `#id:<anchor>` where `<anchor>` is an
+  edge (`left|right|top|bottom`), a corner (`left-top`…, either order), or `center` — and **raw
+  coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the reference wins if both
+  are given). New `connector-anchors` sample.
 
 ### Changed
 
+- Connectors: `curve` arcs now bow by a **fixed** `bulge` (default 44 px, author-settable) instead
+  of an amount that scaled with the endpoint distance, and leave each anchor tilted toward the
+  other end — so a same-side pair reads as a leaf rather than ballooning into a half-circle.
 - Interactive viewer: the slide deck now pages on ArrowUp/ArrowDown as well as
   ArrowLeft/ArrowRight (and PageUp/PageDown) — Google-Slides-style navigation.
+
+### Fixed
+
+- Interactive viewer inspector: straight/axis-aligned connectors (and any zero-area shape) now
+  get a visible highlight — an SVG rect with a zero dimension isn't drawn, so the highlight band
+  is inflated to a small minimum.
 
 ## [0.1.5] — 2026-07-19
 

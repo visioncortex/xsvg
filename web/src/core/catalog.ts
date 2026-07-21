@@ -229,8 +229,8 @@ export const CATALOG: Category[] = [
       },
       {
         file: "connector-anchors.xsvg",
-        title: "Endpoints — sides & points",
-        blurb: "beyond a bare #id: force which edge a connector meets with #id:side (left/right/top/bottom, tangents leaving along the edge normal), or aim at a raw coordinate with to-point=\"x,y\" — no target element needed",
+        title: "Endpoints — anchors & points",
+        blurb: "beyond a bare #id: force which connection point a connector meets with #id:anchor — an edge, a corner (left-top…), or center — so same-side pairs curve into a leaf; or aim at a raw coordinate with to-point=\"x,y\", needing no target element",
       },
     ],
   },

@@ -196,6 +196,20 @@ fn connectors_accept_points_and_side_anchors() {
     let out = compile_test(&svg);
     assert!(route_d(&out).starts_with("M20,40"), "leaves a's bottom-edge midpoint: {}", route_d(&out));
 
+    // corner anchor: b's right-bottom corner is (x1,y1) = (160,40); order-independent
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:bottom-right" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(route_d(&out).ends_with("L160,40"), "corner anchor (either token order): {}", route_d(&out));
+
+    // center anchor: b's center (140,20)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:center" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(route_d(&out).ends_with("L140,20"), "center anchor: {}", route_d(&out));
+
     // the ref wins when both a ref and a point are given
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b" to-point="500,500" arrow="none"/></svg>"##
