@@ -947,6 +947,19 @@ lowers to a plain `<path>` carrying the connector's own stroke.
 <x:connector from="#a" to="#b" route="x-major" arrow="end" stroke="#475569" stroke-width="2"/>
 ```
 
+**Endpoints (normative).** `from` and `to` each take one of:
+
+- **`#id`** — reference an element; the connector attaches where the route meets that element's
+  bounding box (the center-to-center ray for `straight`, the route's axis edge otherwise).
+- **`#id:side`** — the same reference, but force the attachment to a named edge, `side` ∈
+  `left` | `right` | `top` | `bottom`. It attaches at that edge's midpoint; for `curve` the
+  tangent leaves along the edge's outward normal. (A trailing `:left|:right|:top|:bottom` is
+  reserved for this; any other `:` is part of the id.)
+
+A raw coordinate is given instead via **`from-point="x,y"` / `to-point="x,y"`** — the endpoint is
+an exact point (a zero-size box), needing no target element. If both a reference (`from`/`to`) and
+a point are supplied for the same end, the **reference wins**.
+
 | Attribute | Values | Route |
 |---|---|---|
 | `route` | `straight` *(default)* | direct line, endpoints clipped to each box's edge along the center-to-center ray |

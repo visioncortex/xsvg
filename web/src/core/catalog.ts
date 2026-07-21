@@ -227,6 +227,11 @@ export const CATALOG: Category[] = [
         title: "Connectors",
         blurb: "lines bound to two boxes, routed four ways — straight (edge-clipped), x-major and y-major orthogonal rails, and a smooth curve; arrowheads tint to the stroke, and the route re-derives when an endpoint moves",
       },
+      {
+        file: "connector-anchors.xsvg",
+        title: "Endpoints — sides & points",
+        blurb: "beyond a bare #id: force which edge a connector meets with #id:side (left/right/top/bottom, tangents leaving along the edge normal), or aim at a raw coordinate with to-point=\"x,y\" — no target element needed",
+      },
     ],
   },
   {

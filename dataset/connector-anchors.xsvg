@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 640 360" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="640" height="360" fill="#ffffff"/>
+  <text x="28" y="32" font-size="14" font-weight="bold" fill="#0f172a">x:connector endpoints — forced side anchors (#id:side) and raw points (to-point)</text>
+
+  <defs>
+    <style>
+      .node { fill: #eef2ff; stroke: #6366f1; stroke-width: 1.5; }
+      .lbl { font-size: 13px; font-weight: 600; fill: #3730a3; text-anchor: middle; }
+      .dot { fill: #e11d48; }
+    </style>
+  </defs>
+
+  <!-- forced side anchors: pick exactly which edge each end attaches to -->
+  <text x="48" y="72" font-size="11" fill="#94a3b8">#id:side — force the attach edge (left · right · top · bottom)</text>
+  <rect id="a" class="node" x="60" y="150" width="120" height="56" rx="8"/>
+  <text class="lbl" x="120" y="183">A</text>
+  <rect id="b" class="node" x="360" y="150" width="120" height="56" rx="8"/>
+  <text class="lbl" x="420" y="183">B</text>
+
+  <!-- both ends leave the TOP and arc over, regardless of A/B being side by side -->
+  <x:connector from="#a:top" to="#b:top" route="curve" arrow="both" stroke="#0ea5e9" stroke-width="2"/>
+  <!-- straight, facing right→left edges -->
+  <x:connector from="#a:right" to="#b:left" route="straight" stroke="#475569" stroke-width="2"/>
+  <!-- both ends leave the BOTTOM and arc under -->
+  <x:connector from="#a:bottom" to="#b:bottom" route="curve" arrow="both" stroke="#16a34a" stroke-width="2"/>
+
+  <!-- raw point endpoint: aim at a coordinate, no target element needed -->
+  <text x="48" y="270" font-size="11" fill="#94a3b8">to-point="x,y" — attach to an exact coordinate</text>
+  <rect id="p" class="node" x="60" y="286" width="120" height="52" rx="8"/>
+  <text class="lbl" x="120" y="316">Node</text>
+  <circle class="dot" cx="470" cy="312" r="3.5"/>
+  <text x="482" y="316" font-size="12" fill="#e11d48">470, 312</text>
+  <x:connector from="#p:right" to-point="470,312" route="curve" stroke="#e11d48" stroke-width="2"/>
+</svg>

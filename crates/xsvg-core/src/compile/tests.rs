@@ -174,6 +174,37 @@ fn connectors_are_baked_references() {
 }
 
 #[test]
+fn connectors_accept_points_and_side_anchors() {
+    // to-point: the connector ends at a raw x,y — no target element needed
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><x:connector from="#a" to-point="200,150" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(route_d(&out).ends_with("L200,150"), "ends at the given point: {}", route_d(&out));
+
+    // side anchor: `#b:left` forces the left-edge midpoint of b (x=120..160, y=0..40 → 120,20)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:left" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(route_d(&out).ends_with("L120,20"), "attaches at b's left-edge midpoint: {}", route_d(&out));
+
+    // a forced side on `from` too: leaves a's bottom-edge midpoint (20,40)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a:bottom" to="#b" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(route_d(&out).starts_with("M20,40"), "leaves a's bottom-edge midpoint: {}", route_d(&out));
+
+    // the ref wins when both a ref and a point are given
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b" to-point="500,500" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(!route_d(&out).contains("500"), "the `to` ref takes precedence over to-point: {}", route_d(&out));
+}
+
+#[test]
 fn offset_outsets_a_referenced_rect_and_is_baked() {
     use crate::kurbo::Shape;
     let svg = format!(

@@ -10,6 +10,12 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ## [Unreleased]
 
+### Added
+
+- Connectors: `from`/`to` now accept a **forced side anchor** — `#id:left|right|top|bottom`
+  — and **raw coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the
+  reference wins if both a ref and a point are given). New `connector-anchors` sample.
+
 ### Changed
 
 - Interactive viewer: the slide deck now pages on ArrowUp/ArrowDown as well as

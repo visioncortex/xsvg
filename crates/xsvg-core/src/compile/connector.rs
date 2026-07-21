@@ -11,17 +11,75 @@ use super::*;
 /// an endpoint re-emits the connector (baked reference).
 pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     use crate::kurbo::{Point, Rect};
-    let bbox = |attr: &str| -> Option<Rect> {
-        let r = node.attribute(attr)?;
-        ref_geometry(node, r, ctx)
-            .ok()
-            .and_then(|d| svg_path_bbox(&d))
+
+    // §7.6 endpoints. `from`/`to` reference an element by id, optionally with a
+    // `:side` suffix (`#b:left|right|top|bottom`) forcing which edge to attach to.
+    // `from-point`/`to-point` give a raw `x,y` instead — the ref wins if both are set.
+    #[derive(Clone, Copy)]
+    enum Side {
+        Left,
+        Right,
+        Top,
+        Bottom,
+    }
+    let parse_side = |s: &str| match s {
+        "left" => Some(Side::Left),
+        "right" => Some(Side::Right),
+        "top" => Some(Side::Top),
+        "bottom" => Some(Side::Bottom),
+        _ => None,
     };
-    let (Some(a), Some(b)) = (bbox("from"), bbox("to")) else {
+    let parse_point = |s: &str| -> Option<Point> {
+        let mut it = s
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty());
+        let x = it.next()?.parse::<f64>().ok()?;
+        let y = it.next()?.parse::<f64>().ok()?;
+        if it.next().is_some() {
+            return None; // more than two numbers — malformed
+        }
+        Some(Point::new(x, y))
+    };
+    // A resolved endpoint: its box (a point is a zero-size box) + an optional forced side.
+    let resolve_end = |ref_attr: &str, pt_attr: &str| -> Option<(Rect, Option<Side>)> {
+        if let Some(r) = node.attribute(ref_attr) {
+            let (id, side) = match r.rsplit_once(':') {
+                Some((base, suf)) => match parse_side(suf) {
+                    Some(s) => (base, Some(s)),
+                    None => (r, None), // `:` but not a side keyword — treat whole value as the id
+                },
+                None => (r, None),
+            };
+            let rect = ref_geometry(node, id, ctx)
+                .ok()
+                .and_then(|d| svg_path_bbox(&d))?;
+            Some((rect, side))
+        } else if let Some(pt) = node.attribute(pt_attr).and_then(|p| parse_point(p)) {
+            Some((Rect::new(pt.x, pt.y, pt.x, pt.y), None))
+        } else {
+            None
+        }
+    };
+    let (Some((a, side_a)), Some((b, side_b))) =
+        (resolve_end("from", "from-point"), resolve_end("to", "to-point"))
+    else {
         out.push_str("<!-- xsvg: <x:connector> endpoint not found or not geometry -->");
         return;
     };
     let (ca, cb) = (a.center(), b.center());
+    // Midpoint of a box's named edge, and that edge's outward unit normal.
+    let side_pt = |r: Rect, s: Side| match s {
+        Side::Left => Point::new(r.x0, r.center().y),
+        Side::Right => Point::new(r.x1, r.center().y),
+        Side::Top => Point::new(r.center().x, r.y0),
+        Side::Bottom => Point::new(r.center().x, r.y1),
+    };
+    let side_norm = |s: Side| match s {
+        Side::Left => (-1.0, 0.0),
+        Side::Right => (1.0, 0.0),
+        Side::Top => (0.0, -1.0),
+        Side::Bottom => (0.0, 1.0),
+    };
     // point on rect `r`'s edge along the ray from its center toward `t`
     let edge = |r: Rect, t: Point| -> Point {
         let c = r.center();
@@ -148,8 +206,14 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         match node.attribute("route").unwrap_or("straight") {
             "x-major" => {
                 let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
-                let ax = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
-                let bx = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
+                let ax = match side_a {
+                    Some(s) => side_pt(a, s),
+                    None => Point::new(ca.x + dir * a.width() / 2.0, ca.y),
+                };
+                let bx = match side_b {
+                    Some(s) => side_pt(b, s),
+                    None => Point::new(cb.x - dir * b.width() / 2.0, cb.y),
+                };
                 let mx = (ax.x + bx.x) / 2.0;
                 let (p1, p2) = (Point::new(mx, ax.y), Point::new(mx, bx.y));
                 let s = if arrow_start { trim(ax, p1) } else { ax };
@@ -164,8 +228,14 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             }
             "y-major" => {
                 let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
-                let ay = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
-                let by = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
+                let ay = match side_a {
+                    Some(s) => side_pt(a, s),
+                    None => Point::new(ca.x, ca.y + dir * a.height() / 2.0),
+                };
+                let by = match side_b {
+                    Some(s) => side_pt(b, s),
+                    None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
+                };
                 let my = (ay.y + by.y) / 2.0;
                 let (p1, p2) = (Point::new(ay.x, my), Point::new(by.x, my));
                 let s = if arrow_start { trim(ay, p1) } else { ay };
@@ -180,29 +250,30 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             }
             "curve" => {
                 let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
-                let (a0, c1, c2, b0) = if horiz {
-                    let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
-                    let a0 = Point::new(ca.x + dir * a.width() / 2.0, ca.y);
-                    let b0 = Point::new(cb.x - dir * b.width() / 2.0, cb.y);
-                    let k = ((b0.x - a0.x).abs() * 0.5).max(36.0);
-                    (
-                        a0,
-                        Point::new(a0.x + dir * k, a0.y),
-                        Point::new(b0.x - dir * k, b0.y),
-                        b0,
-                    )
-                } else {
-                    let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
-                    let a0 = Point::new(ca.x, ca.y + dir * a.height() / 2.0);
-                    let b0 = Point::new(cb.x, cb.y - dir * b.height() / 2.0);
-                    let k = ((b0.y - a0.y).abs() * 0.5).max(36.0);
-                    (
-                        a0,
-                        Point::new(a0.x, a0.y + dir * k),
-                        Point::new(b0.x, b0.y - dir * k),
-                        b0,
-                    )
+                // Each endpoint's exit point + outward direction: a forced side gives
+                // its edge midpoint and normal; otherwise the box edge along the
+                // dominant axis toward the other end (the original auto behaviour).
+                let exit = |r: Rect, c: Point, toward: Point, forced: Option<Side>| -> (Point, (f64, f64)) {
+                    if let Some(s) = forced {
+                        return (side_pt(r, s), side_norm(s));
+                    }
+                    if horiz {
+                        let d = if toward.x >= c.x { 1.0 } else { -1.0 };
+                        (Point::new(c.x + d * r.width() / 2.0, c.y), (d, 0.0))
+                    } else {
+                        let d = if toward.y >= c.y { 1.0 } else { -1.0 };
+                        (Point::new(c.x, c.y + d * r.height() / 2.0), (0.0, d))
+                    }
                 };
+                let (a0, an) = exit(a, ca, cb, side_a);
+                let (b0, bn) = exit(b, cb, ca, side_b);
+                let k = if horiz {
+                    ((b0.x - a0.x).abs() * 0.5).max(36.0)
+                } else {
+                    ((b0.y - a0.y).abs() * 0.5).max(36.0)
+                };
+                let c1 = Point::new(a0.x + an.0 * k, a0.y + an.1 * k);
+                let c2 = Point::new(b0.x + bn.0 * k, b0.y + bn.1 * k);
                 let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
                 let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
                 // draw only the middle of the cubic, between the two bases
@@ -223,9 +294,16 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                 )
             }
             _ => {
-                // straight: clip the center-to-center line to each box edge
-                let a0 = edge(a, cb);
-                let b0 = edge(b, ca);
+                // straight: clip the center-to-center line to each box edge (or the
+                // forced side's midpoint)
+                let a0 = match side_a {
+                    Some(s) => side_pt(a, s),
+                    None => edge(a, cb),
+                };
+                let b0 = match side_b {
+                    Some(s) => side_pt(b, s),
+                    None => edge(b, ca),
+                };
                 let s = if arrow_start { trim(a0, b0) } else { a0 };
                 let e = if arrow_end { trim(b0, a0) } else { b0 };
                 (format!("M{} L{}", p(s), p(e)), a0, b0, b0, a0)
@@ -271,7 +349,7 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     copy_attrs(
         node,
         out,
-        &["from", "to", "route", "arrow", "arrow-size", "fill"],
+        &["from", "to", "from-point", "to-point", "route", "arrow", "arrow-size", "fill"],
     );
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));
