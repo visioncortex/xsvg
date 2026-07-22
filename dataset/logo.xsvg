@@ -9,8 +9,8 @@
   </g>
 
   <!-- The wordmark is an xsvg text element, so it can carry the outline effect:
-       hollow letters (fill="none") drawn by an x:border in the mark's indigo. -->
+       white letters wrapped in an x:border in the mark's indigo. -->
   <x:textbox x="78" y="10" width="172" height="46" valign="middle" font-size="38"
              font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-             fill="none" x:border-color="#4f46e5" x:border-width="1.5">xsvg</x:textbox>
+             fill="#ffffff" x:border-color="#4f46e5" x:border-width="4">xsvg</x:textbox>
 </svg>
