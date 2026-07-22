@@ -2646,6 +2646,33 @@ fn text_border_strokes_behind_the_fill() {
     assert!(out.contains("<text") && out.contains(r##"stroke="#f00""##), "raw stroke on live text: {out}");
 }
 
+#[test]
+fn external_use_source_map_points_at_the_use_not_the_dependency() {
+    // A linked dependency's element ranges index the *dependency* file, not the entry
+    // document the viewer maps against — so baked content must carry no data-xsvg-pos,
+    // and the block resolves (up the DOM) to the <use>'s range in the entry source.
+    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+    let main = format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
+    let map = MapResolver([("logo.svg".to_string(), logo)].into_iter().collect());
+    let out =
+        compile_linked_impl(&main, "balanced", true, &Mono, &NoShaper, &NoOutliner, &map, "main")
+            .unwrap();
+
+    // only the root and the <use> wrapper are tagged — nothing baked in from the dep
+    assert_eq!(
+        out.matches("data-xsvg-pos").count(),
+        2,
+        "no source ranges on baked dependency content: {out}"
+    );
+    // and the wrapper carries the <use> element's own byte range in the entry source
+    let us = main.find("<use").unwrap();
+    let ue = main[us..].find("/>").unwrap() + us + 2;
+    assert!(
+        out.contains(&format!(r#"data-xsvg-pos="{us}-{ue}""#)),
+        "linked block maps to the <use> in the entry source: {out}"
+    );
+}
+
 const XW: &str =
     r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
 

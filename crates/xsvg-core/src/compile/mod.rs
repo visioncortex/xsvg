@@ -69,7 +69,11 @@ struct Ctx<'a> {
     shaper: &'a dyn Shaper,
     outliner: &'a dyn GlyphOutliner,
     quality: QualityProfile,
-    sourcemap: bool,
+    /// Whether to emit `data-xsvg-pos` source ranges. Toggled **off** while a linked
+    /// dependency is compiled: its element ranges index the *dependency* file, not the
+    /// entry document the viewer maps against, so baked content carries no range and a
+    /// click resolves up to the wrapper — i.e. to the `<use>` in the entry source (§4.2).
+    sourcemap: std::cell::Cell<bool>,
     /// ids currently being resolved as compiled-output references — the cycle
     /// guard for `ref_geometry` (a target that is already on this stack degrades
     /// with a marker instead of recursing forever). Its length is also the
@@ -107,7 +111,7 @@ struct Ctx<'a> {
 /// source) when the source map is enabled, else empty. Attached to each emitted
 /// top-level element so a viewer can project a rendered element back to its source.
 fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
-    if !ctx.sourcemap {
+    if !ctx.sourcemap.get() {
         return String::new();
     }
     let r = node.range();
@@ -159,7 +163,7 @@ pub fn compile_linked_impl(
             shaper,
             outliner,
             quality: q,
-            sourcemap,
+            sourcemap: std::cell::Cell::new(sourcemap),
             resolving: std::cell::RefCell::new(Vec::new()),
             resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
             cuts: std::cell::Cell::new(0),
@@ -239,7 +243,7 @@ pub fn compile_fragment_linked_impl(
             shaper,
             outliner,
             quality: q,
-            sourcemap,
+            sourcemap: std::cell::Cell::new(sourcemap),
             resolving: std::cell::RefCell::new(Vec::new()),
             resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
             cuts: std::cell::Cell::new(0),
@@ -1290,6 +1294,9 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
     // base = its key and the key pushed so a link back to it is caught as a cycle.
     ctx.files.borrow_mut().push(key.clone());
     let prev_base = ctx.base.replace(key);
+    // The dependency's node ranges index its *own* source, not the entry document, so
+    // no source map inside it — the baked block resolves up to the `<use>` (§4.2).
+    let prev_sm = ctx.sourcemap.replace(false);
     let compiled = match roxmltree::Document::parse(&source) {
         Ok(d) => {
             let mut s = String::new();
@@ -1298,6 +1305,7 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
         }
         Err(_) => None,
     };
+    ctx.sourcemap.set(prev_sm);
     ctx.base.replace(prev_base);
     ctx.files.borrow_mut().pop();
 
