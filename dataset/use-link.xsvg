@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 520 300" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="520" height="300" fill="#ffffff"/>
+  <text x="28" y="34" font-size="14" font-weight="bold" fill="#0f172a">&lt;use href="logo.svg"&gt; — author the logo once, reuse it (compiled + baked in)</text>
+
+  <!-- whole file, big: a nested &lt;svg&gt; viewport scales it to width -->
+  <text x="28" y="70" font-size="11" fill="#94a3b8">href="logo.svg" (whole file)</text>
+  <use href="logo.svg" x="28" y="80" width="240"/>
+
+  <!-- same logo again, smaller — one source of truth -->
+  <text x="300" y="70" font-size="11" fill="#94a3b8">…reused, smaller</text>
+  <use href="logo.svg" x="300" y="84" width="150"/>
+
+  <!-- just the badge shape, by id -->
+  <text x="28" y="180" font-size="11" fill="#94a3b8">href="logo.svg#badge" (one element)</text>
+  <use href="logo.svg#badge" x="28" y="192" width="80"/>
+
+  <x:textbox x="150" y="196" width="340" height="80" font-size="14" fill="#475569">
+    Edit logo.svg once and every instance here updates. The output stays plain, self-contained SVG — the link is resolved and baked at compile time.
+  </x:textbox>
+</svg>

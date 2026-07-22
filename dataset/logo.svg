@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 60">
+  <rect id="badge" x="4" y="4" width="160" height="52" rx="12" fill="#6366f1"/>
+  <circle cx="34" cy="30" r="13" fill="#ffffff"/>
+  <path d="M34 23 l6 14 h-12 Z" fill="#6366f1"/>
+  <text x="60" y="38" font-family="'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">xsvg</text>
+</svg>

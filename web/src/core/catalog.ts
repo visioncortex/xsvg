@@ -335,6 +335,11 @@ export const CATALOG: Category[] = [
         title: "Reference the compiled output",
         blurb: "a textbox flowed inside a boolean union; type riding a warp's arched spine; a path → warp → textpath chain with one edit point",
       },
+      {
+        file: "use-link.xsvg",
+        title: "Cross-file <use> links",
+        blurb: "<use href=\"logo.svg\"> pulls in another file at compile time — whole-file (a nested <svg> viewport) or one element by #id — so a logo is authored once and baked into every instance (§4.2)",
+      },
     ],
   },
   {

@@ -287,6 +287,12 @@ export interface CompileOptions {
    * that `<use>` degrades, by design.
    */
   baseUrl?: string;
+  /**
+   * Custom cross-file resolver. When provided it is used directly (synchronous,
+   * on-demand) and the same-origin `fetch` walk is skipped — e.g. to link against
+   * bundled/in-memory dependencies. `(base, href) => [canonicalKey, source] | null`.
+   */
+  resolve?: (base: string, href: string) => [string, string] | null;
 }
 
 // The hrefs of `<use>` elements that point at another file (not a same-document
@@ -345,18 +351,24 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   // strip the marker so the compiler only ever sees bare family names.
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
-  // Close the cross-file dependency graph up front (async), then link synchronously
-  // in WASM via a resolver that reads the preloaded map.
-  const deps = await collectDeps(source, base);
-  const resolve = (b: string, href: string): [string, string] | null => {
-    try {
-      const key = new URL(href, b || base || undefined).href;
-      const text = deps.get(key);
-      return text === undefined ? null : [key, text];
-    } catch {
-      return null;
-    }
-  };
+  // A caller-supplied resolver (e.g. bundled deps) is used directly — the sync compiler
+  // calls it on demand. Otherwise close the dependency graph up front over same-origin
+  // fetch, then link from the preloaded map.
+  let resolve: (base: string, href: string) => [string, string] | null;
+  if (opts.resolve) {
+    resolve = opts.resolve;
+  } else {
+    const deps = await collectDeps(source, base);
+    resolve = (b, href) => {
+      try {
+        const key = new URL(href, b || base || undefined).href;
+        const text = deps.get(key);
+        return text === undefined ? null : [key, text];
+      } catch {
+        return null;
+      }
+    };
+  }
   const { quality = "balanced", sourcemap = false } = opts;
   return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base);
 }

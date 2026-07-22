@@ -6,7 +6,7 @@
 //   /playground/#src=<base64>      preload a shared document
 import "../base.css";
 import "./playground.css";
-import { CATALOG, SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
+import { CATALOG, SAMPLES, DEFAULT_SAMPLE, requestedSample, datasetResolver } from "../core/samples";
 import { createEditor } from "../core/editor";
 import { createPreview } from "@visioncortex/xsvg-viewer";
 import { downloadSvg } from "@visioncortex/xsvg-viewer";
@@ -20,7 +20,7 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T {
 // The live preview is the same component the /preview page uses, so multi-artboard
 // documents get the slide deck (rail + nav) here for free. It keeps the last good
 // preview on a compile error; we surface the error in our own #error box.
-const preview = createPreview(byId("preview"));
+const preview = createPreview(byId("preview"), { resolve: datasetResolver });
 const errorBox = byId("error");
 const sampleSelect = byId<HTMLSelectElement>("sample");
 const viewerLink = byId<HTMLAnchorElement>("open-viewer");

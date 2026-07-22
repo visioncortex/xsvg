@@ -64,6 +64,9 @@ export interface PreviewOptions {
    *  default; set `false` to start with the rail collapsed — the toggle button is
    *  still shown, so the viewer can open it. */
   slides?: boolean;
+  /** Custom cross-file resolver for `<use href="…">` links (see `compileXsvg`). Lets a
+   *  host link against bundled/in-memory deps instead of the same-origin fetch walk. */
+  resolve?: (base: string, href: string) => [string, string] | null;
 }
 
 /** "superseded" means a newer render() started before this one finished — the
@@ -189,7 +192,7 @@ export function createPreview(host: HTMLElement, opts: PreviewOptions = {}): Pre
     const mine = ++seq;
     let svgHtml: string;
     try {
-      svgHtml = await compileXsvg(source);
+      svgHtml = await compileXsvg(source, { resolve: opts.resolve });
     } catch (err) {
       if (mine !== seq) return "superseded"; // a newer edit already superseded us
       if (opts.showErrors) {

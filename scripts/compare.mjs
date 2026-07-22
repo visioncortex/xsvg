@@ -34,6 +34,9 @@ const samples = (
     : readdirSync("dataset")
         .filter((f) => f.endsWith(".xsvg"))
         .filter((f) => f !== "artboards.xsvg")
+        // Excluded: cross-file <use> links resolve deps differently per surface (bundled
+        // in-browser vs on-disk in the CLI), so it isn't a like-for-like parity target.
+        .filter((f) => f !== "use-link.xsvg")
 ).map((s) => s.replace(/\.xsvg$/, ""));
 
 function edge(extra, wantBuffer = false) {

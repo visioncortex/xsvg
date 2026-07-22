@@ -8,13 +8,13 @@
 // The deck (rail + ‹ n/N › nav + #hash deep-linking) lives in the shared
 // createPreview() component, which the playground reuses.
 import { createPreview } from "@visioncortex/xsvg-viewer";
-import { SAMPLES, DEFAULT_SAMPLE, requestedSample } from "../core/samples";
+import { SAMPLES, DEFAULT_SAMPLE, requestedSample, datasetResolver } from "../core/samples";
 
 const name = requestedSample() ?? DEFAULT_SAMPLE;
 document.title = `xsvg — ${name}`;
 const app = document.getElementById("app")!;
 
-const preview = createPreview(app, { hashDeepLink: true, showErrors: true });
+const preview = createPreview(app, { hashDeepLink: true, showErrors: true, resolve: datasetResolver });
 
 void (async () => {
   const source = SAMPLES[name];
