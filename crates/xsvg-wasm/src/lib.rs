@@ -5,8 +5,12 @@
 //! outlines + advance widths) — and exposes the `compile*` entry points to JS.
 
 use wasm_bindgen::prelude::*;
-use xsvg_core::{compile_fragment_impl, compile_impl, dependents_impl, fragment_range_impl};
-use xsvg_core::{FontMetrics, GlyphOutliner, Measurer, RasterRegion, Rect, Shaper, TextStyle};
+use xsvg_core::{
+    compile_fragment_linked_impl, compile_linked_impl, dependents_impl, fragment_range_impl,
+};
+use xsvg_core::{
+    FontMetrics, GlyphOutliner, Measurer, RasterRegion, Rect, Resolver, Shaper, TextStyle,
+};
 
 /// Runs once when the module is instantiated: route Rust panics to `console.error`.
 #[wasm_bindgen(start)]
@@ -165,6 +169,33 @@ impl GlyphOutliner for JsOutliner<'_> {
     }
 }
 
+/// Browser-backed [`Resolver`] for cross-file `<use href>` links. `resolve(base, href)`
+/// returns `[canonicalKey, sourceText]` for a dependency the host has already fetched
+/// (same-origin), or `null`/`undefined` to degrade. The host does the URL resolution and
+/// the same-origin `fetch` DAG walk *before* calling compile — the sync core just reads
+/// the preloaded result here, so CORS / cross-origin simply surfaces as "not resolved".
+struct JsResolver<'a> {
+    resolve: &'a js_sys::Function,
+}
+
+impl Resolver for JsResolver<'_> {
+    fn resolve(&self, base: &str, href: &str) -> Option<(String, String)> {
+        let v = self
+            .resolve
+            .call2(
+                &JsValue::NULL,
+                &JsValue::from_str(base),
+                &JsValue::from_str(href),
+            )
+            .ok()?;
+        if v.is_null() || v.is_undefined() {
+            return None;
+        }
+        let arr = js_sys::Array::from(&v);
+        Some((arr.get(0).as_string()?, arr.get(1).as_string()?))
+    }
+}
+
 /// WASM entry point. `measure(text, fontCss) => number`,
 /// `metrics(fontCss) => [ascent, descent, capHeight, xHeight]`, and
 /// `rasterize(pathD, rowH) => Float64Array` are browser callbacks. Throws on
@@ -187,6 +218,8 @@ pub fn compile(
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
     advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
     let shaper = JsShaper { rasterize };
@@ -194,7 +227,11 @@ pub fn compile(
         outline_run,
         advance_width,
     };
-    compile_impl(input, quality, sourcemap, &m, &shaper, &outliner).map_err(|e| JsError::new(&e))
+    let resolver = JsResolver { resolve };
+    compile_linked_impl(
+        input, quality, sourcemap, &m, &shaper, &outliner, &resolver, base,
+    )
+    .map_err(|e| JsError::new(&e))
 }
 
 /// Incremental entry (docs/Incremental.md): re-emit only the top-level element
@@ -213,6 +250,8 @@ pub fn compile_fragment(
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
     advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
 ) -> Result<String, JsError> {
     let m = JsMeasurer { measure, metrics };
     let shaper = JsShaper { rasterize };
@@ -220,7 +259,8 @@ pub fn compile_fragment(
         outline_run,
         advance_width,
     };
-    compile_fragment_impl(
+    let resolver = JsResolver { resolve };
+    compile_fragment_linked_impl(
         input,
         quality,
         sourcemap,
@@ -228,6 +268,8 @@ pub fn compile_fragment(
         &m,
         &shaper,
         &outliner,
+        &resolver,
+        base,
     )
     .map_err(|e| JsError::new(&e))
 }

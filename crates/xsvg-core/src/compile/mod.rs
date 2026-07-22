@@ -203,6 +203,27 @@ pub fn compile_fragment_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
+    compile_fragment_linked_impl(
+        input, quality, sourcemap, offset, m, shaper, outliner, &NoResolver, "",
+    )
+}
+
+/// [`compile_fragment_impl`] with cross-file linking, so an incremental re-emit of a
+/// `<use href="file.svg">` stays byte-identical to its span in the full linked compile
+/// (the fragment invariant, docs/Incremental.md). Same `resolver`/`base` as
+/// [`compile_linked_impl`].
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_linked_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
+) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
@@ -224,9 +245,9 @@ pub fn compile_fragment_impl(
             cuts: std::cell::Cell::new(0),
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
-            resolver: &NoResolver,
-            files: std::cell::RefCell::new(Vec::new()),
-            base: std::cell::RefCell::new(String::new()),
+            resolver,
+            files: std::cell::RefCell::new(vec![base.to_string()]),
+            base: std::cell::RefCell::new(base.to_string()),
         },
     );
     Ok(out)

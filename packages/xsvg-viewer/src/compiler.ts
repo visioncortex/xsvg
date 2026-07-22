@@ -280,15 +280,83 @@ export interface CompileOptions {
    * Off by default (keeps embed output clean).
    */
   sourcemap?: boolean;
+  /**
+   * Base URL that a cross-file `<use href="…">` resolves against (and the entry
+   * document's identity for the dependency graph). Defaults to `location.href`.
+   * Dependencies are fetched **same-origin** — a cross-origin `href` fails CORS and
+   * that `<use>` degrades, by design.
+   */
+  baseUrl?: string;
 }
 
-/** Compile an xsvg source string to a plain-SVG string (runs entirely client-side). */
+// The hrefs of `<use>` elements that point at another file (not a same-document
+// `#fragment`) — the cross-file link edges to resolve.
+function externalUseHrefs(svg: string): string[] {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const out: string[] = [];
+  for (const u of Array.from(doc.getElementsByTagName("use"))) {
+    const href = u.getAttribute("href") ?? u.getAttribute("xlink:href");
+    if (href && !href.startsWith("#")) out.push(href.split("#")[0]);
+  }
+  return out;
+}
+
+/** Walk the cross-file `<use>` dependency graph from `source` (base `baseUrl`), fetching
+ *  each dependency **same-origin**, until the graph is closed. Returns `absoluteURL →
+ *  compiled-ready source` (google-font markers stripped, fonts preloaded), keyed the same
+ *  way the resolver will look them up. Cross-origin / missing deps are skipped (→ degrade);
+ *  a `visited` set dedups diamonds and stops fetch loops (the compiler guards true cycles). */
+async function collectDeps(source: string, baseUrl: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const seen = new Set<string>();
+  // queue of [rawHref, baseToResolveAgainst]
+  const queue: [string, string][] = externalUseHrefs(source).map((h) => [h, baseUrl]);
+  while (queue.length) {
+    const [href, base] = queue.shift()!;
+    let url: string;
+    try {
+      url = new URL(href, base || undefined).href;
+    } catch {
+      continue; // unresolvable href → skip (the <use> degrades)
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    let text: string;
+    try {
+      const res = await fetch(url); // same-origin; cross-origin without CORS throws
+      if (!res.ok) continue;
+      text = await res.text();
+    } catch {
+      continue; // network / CORS failure → skip
+    }
+    await Promise.all(googleFamilies(text).map(ensureGoogleFont));
+    map.set(url, stripGooglePrefix(text));
+    for (const h of externalUseHrefs(text)) queue.push([h, url]);
+  }
+  return map;
+}
+
+/** Compile an xsvg source string to a plain-SVG string (runs entirely client-side).
+ *  Cross-file `<use href="file.svg">` links are resolved same-origin and baked in. */
 export async function compileXsvg(source: string, opts: CompileOptions = {}): Promise<string> {
   await ensureReady();
+  const base = opts.baseUrl ?? (typeof location !== "undefined" ? location.href : "");
   // Resolve any `-x-google-<Name>` outline fonts up front (a miss is swallowed), then
   // strip the marker so the compiler only ever sees bare family names.
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
+  // Close the cross-file dependency graph up front (async), then link synchronously
+  // in WASM via a resolver that reads the preloaded map.
+  const deps = await collectDeps(source, base);
+  const resolve = (b: string, href: string): [string, string] | null => {
+    try {
+      const key = new URL(href, b || base || undefined).href;
+      const text = deps.get(key);
+      return text === undefined ? null : [key, text];
+    } catch {
+      return null;
+    }
+  };
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth);
+  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base);
 }

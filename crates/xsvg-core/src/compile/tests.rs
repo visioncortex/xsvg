@@ -2595,6 +2595,26 @@ fn use_links_external_files() {
     assert!(out.contains("cyclic"), "cycle refused: {out}");
 }
 
+#[test]
+fn linked_fragment_is_a_verbatim_slice_of_the_full_compile() {
+    // The incremental invariant must hold for linked elements too: re-emitting the
+    // <use>'s fragment must match its span in the full linked compile (not degrade).
+    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+    let main =
+        format!(r##"{XW}<rect id="bg" x="0" y="0" width="100" height="100"/><use href="logo.svg" x="20" y="20" width="40"/></svg>"##);
+    let map = MapResolver([("logo.svg".to_string(), logo.clone())].into_iter().collect());
+    let full =
+        compile_linked_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner, &map, "main")
+            .unwrap();
+    let off = main.find("<use").unwrap();
+    let frag = compile_fragment_linked_impl(
+        &main, "balanced", false, off, &Mono, &NoShaper, &NoOutliner, &map, "main",
+    )
+    .unwrap();
+    assert!(frag.contains(r#"<svg x="20""#) && frag.contains("#f00"), "fragment links: {frag}");
+    assert!(full.contains(&frag), "fragment is a verbatim slice of the full compile:\nfrag={frag}\nfull={full}");
+}
+
 const XW: &str =
     r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
 

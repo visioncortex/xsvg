@@ -78,7 +78,11 @@ export class XsvgView extends HTMLElement {
       if (mine !== this.token) return;
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
-      const svg = await compileXsvg(source, { quality });
+      // A `src` file is the base for its own relative <use href> deps; inline islands
+      // resolve against the page.
+      const src = this.getAttribute("src");
+      const baseUrl = src ? new URL(src, location.href).href : undefined;
+      const svg = await compileXsvg(source, { quality, baseUrl });
       if (mine !== this.token) return;
       // compiled SVGs carry a viewBox but no width/height — make it fill the host.
       this.shadow.innerHTML = `<style>:host{display:block}svg{display:block;width:100%;height:auto}</style>${svg}`;

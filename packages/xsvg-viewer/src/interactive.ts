@@ -308,7 +308,9 @@ export class XsvgViewInteractive extends HTMLElement {
       if (mine !== this.token) return;
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
-      const svg = await compileXsvg(source, { quality, sourcemap: withInspector });
+      const src = this.getAttribute("src");
+      const baseUrl = src ? new URL(src, location.href).href : undefined;
+      const svg = await compileXsvg(source, { quality, sourcemap: withInspector, baseUrl });
       if (mine !== this.token) return;
 
       this.teardown();
