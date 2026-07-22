@@ -12,6 +12,12 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ### Added
 
+- **Cross-file `<use>` links.** A `<use href="logo.svg">` (or `#id`) now links another file at
+  compile time — the dependency is compiled and **baked in** (whole-file as a nested `<svg>`
+  viewport, `#id` as that element), so you author a logo once and the output stays self-contained.
+  Forms a DAG with cycle/depth guards; degrades gracefully. Resolved from disk in the CLI /
+  `@visioncortex/xsvg-compile` (new `basePath` option), and **same-origin** `fetch` in the browser
+  (`compileXsvg` gains `baseUrl`; cross-origin fails CORS → degrades). Spec §4.2.
 - Connectors: `from`/`to` now accept a **forced anchor** — `#id:<anchor>` where `<anchor>` is an
   edge (`left|right|top|bottom`), a corner (`left-top`…, either order), or `center` — and **raw
   coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the reference wins if both

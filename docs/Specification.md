@@ -138,6 +138,38 @@ uncompiled document degrades cleanly (§3): a plain viewer just sees whatever li
 author also set, or the defaults. Tokens are loaded once per compile; forward references work (a
 `var()` may precede its `<x:theme>`).
 
+### 4.2 Cross-file links — `<use href="file.svg">` [implemented]
+
+A `<use>` whose `href` points at **another file** — anything that isn't a bare same-document
+`#fragment` — is a **compile-time link**: the referenced document is compiled and its output is
+**baked into** the target. Author a `logo.svg` once and reuse it everywhere; the emitted SVG stays
+self-contained (no dependence on the browser's spotty external-`<use>` support).
+
+```xml
+<use href="logo.svg" x="20" y="20" width="120"/>        <!-- whole file  -->
+<use href="icons.svg#warning" x="0" y="0" width="24"/>  <!-- one element by id -->
+```
+
+- **Whole file** → the dependency is inlined as a nested `<svg x y width height viewBox>…</svg>`, so
+  its `viewBox` and SVG's own viewport fit place and scale it. `width`/`height` default to the
+  dependency's intrinsic size.
+- **By id** (`#mark`) → just that compiled element, placed by `x`/`y` and (if `width`/`height` given)
+  uniformly scaled.
+- The dependency is itself compiled first, so it may use `x:` elements and its own `<use href>`
+  links. The graph forms a **DAG**: a **cycle** (a file linking back to an ancestor) degrades with a
+  marker (§3), as do a missing/unreadable dependency and links nested past a fixed depth (v0: 16).
+- A same-document `<use href="#id">` is **not** a link — it stays a live SVG reference (§5).
+
+**Resolution is a platform seam.** The host resolves the `href` (relative to the referrer) and
+enforces its own security model, then hands the compiler the dependency's source:
+
+- **CLI / Node** read from disk, relative to the source file's directory — synchronous, on demand.
+- **Browser** fetches dependencies **same-origin** *before* compiling (the compile core is
+  synchronous); a **cross-origin** `href` fails CORS and that `<use>` simply degrades. The referring
+  file is the base, so relative hrefs resolve against it.
+
+Links are **baked references** like §4: editing a dependency re-emits its dependents.
+
 ## 5. Graphics elements (reused SVG) [implemented]
 
 `<g>`, `<path>`, basic shapes, gradients, `transform`, `fill`/`stroke` are normalized or passed
