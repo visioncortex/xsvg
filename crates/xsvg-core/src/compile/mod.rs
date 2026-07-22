@@ -1245,15 +1245,35 @@ fn plain_subtree_bbox(
     node: roxmltree::Node,
     base: crate::kurbo::Affine,
 ) -> Option<crate::kurbo::Rect> {
-    let tf = base
-        * node
-            .attribute("transform")
-            .map(parse_transform)
-            .unwrap_or(crate::kurbo::Affine::IDENTITY);
+    let tag = node.tag_name().name();
+    // Never-rendered subtrees (and explicitly hidden ones) would inflate the box.
+    if is_non_rendered(tag) || is_display_none(node) {
+        return None;
+    }
+    let tf = base * element_transform(node);
     let mut acc: Option<crate::kurbo::Rect> = None;
     let mut fold = |bb: crate::kurbo::Rect| {
         acc = Some(acc.map_or(bb, |a: crate::kurbo::Rect| a.union(bb)));
     };
+
+    // A nested <svg> establishes a viewport and clips to it, so its extent *is* that
+    // viewport rect. Recursing would measure its children in the unmapped coordinate
+    // system — for a scaled viewBox (e.g. 0 0 1000 1000 shown at 20) wildly wrong.
+    // Without a usable width/height we fall through and measure children as before.
+    if tag == "svg" {
+        if let Some(bb) = viewport_rect(node).and_then(|r| transform_rect_bbox(r, tf)) {
+            fold(bb);
+            return acc;
+        }
+    }
+    // Box-shaped, not path geometry (and <foreignObject>'s content isn't SVG).
+    if matches!(tag, "image" | "foreignObject") {
+        if let Some(bb) = viewport_rect(node).and_then(|r| transform_rect_bbox(r, tf)) {
+            fold(bb);
+        }
+        return acc;
+    }
+
     if let Some(bb) = shape_to_path_d(node)
         .and_then(|d| transform_d(&d, tf))
         .and_then(|d| svg_path_bbox(&d))
@@ -1266,6 +1286,85 @@ fn plain_subtree_bbox(
         }
     }
     acc
+}
+
+/// Elements whose subtree is definition-only — referenced, never drawn in place.
+fn is_non_rendered(tag: &str) -> bool {
+    matches!(
+        tag,
+        "defs"
+            | "symbol"
+            | "clipPath"
+            | "mask"
+            | "marker"
+            | "pattern"
+            | "filter"
+            | "linearGradient"
+            | "radialGradient"
+            | "meshgradient"
+            | "title"
+            | "desc"
+            | "metadata"
+            | "style"
+            | "script"
+    )
+}
+
+/// `display:none` (attribute or inline style) — drawn nowhere, so it contributes no box.
+/// `visibility:hidden` is deliberately *not* here: it still takes up layout space.
+fn is_display_none(node: roxmltree::Node) -> bool {
+    node.attribute("display") == Some("none")
+        || style_decl(node, "display").is_some_and(|v| v.trim() == "none")
+}
+
+/// The value of one declaration in an inline `style="a: 1; b: 2"`, if present.
+fn style_decl<'a>(node: roxmltree::Node<'a, 'a>, prop: &str) -> Option<&'a str> {
+    node.attribute("style")?.split(';').find_map(|decl| {
+        let (name, value) = decl.split_once(':')?;
+        (name.trim() == prop).then(|| value.trim())
+    })
+}
+
+/// An element's transform: the presentation attribute, else a `style="transform:…"`.
+/// CSS `px`/`deg` map 1:1 onto SVG user units / degrees, so they are simply stripped;
+/// anything [`parse_transform`] doesn't recognise degrades to identity either way.
+fn element_transform(node: roxmltree::Node) -> crate::kurbo::Affine {
+    if let Some(t) = node.attribute("transform") {
+        return parse_transform(t);
+    }
+    match style_decl(node, "transform") {
+        Some(v) => parse_transform(&v.replace("px", "").replace("deg", "")),
+        None => crate::kurbo::Affine::IDENTITY,
+    }
+}
+
+/// `x`/`y`/`width`/`height` as a rect — the viewport of a nested `<svg>`, or the box of
+/// an `<image>`/`<foreignObject>`. `None` unless both extents are positive numbers.
+fn viewport_rect(node: roxmltree::Node) -> Option<crate::kurbo::Rect> {
+    let dim = |a: &str| node.attribute(a).and_then(parse_num).filter(|v| *v > 0.0);
+    let (w, h) = (dim("width")?, dim("height")?);
+    let (x, y) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    Some(crate::kurbo::Rect::new(x, y, x + w, y + h))
+}
+
+/// Axis-aligned bounds of `r` after `tf` (the bbox of its four mapped corners).
+fn transform_rect_bbox(
+    r: crate::kurbo::Rect,
+    tf: crate::kurbo::Affine,
+) -> Option<crate::kurbo::Rect> {
+    let p = |x, y| tf * crate::kurbo::Point::new(x, y);
+    let corners = [p(r.x0, r.y0), p(r.x1, r.y0), p(r.x1, r.y1), p(r.x0, r.y1)];
+    if corners.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for c in corners {
+        x0 = x0.min(c.x);
+        y0 = y0.min(c.y);
+        x1 = x1.max(c.x);
+        y1 = y1.max(c.y);
+    }
+    Some(crate::kurbo::Rect::new(x0, y0, x1, y1))
 }
 
 /// Bake a cross-file `<use>` link (§4): resolve the referenced file, compile it, and
@@ -1297,6 +1396,13 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
     // The dependency's node ranges index its *own* source, not the entry document, so
     // no source map inside it — the baked block resolves up to the `<use>` (§4.2).
     let prev_sm = ctx.sourcemap.replace(false);
+    // Compiled-output refs (`#id`) never cross a file boundary, but the memo and cycle
+    // stack are keyed by bare id — so give the dependency its own scope. Otherwise a
+    // `#mark` here and a `#mark` in the referrer collide: the memo hands back the wrong
+    // file's geometry, and the shared stack reports a false cycle. (`fuel`/`cuts` stay
+    // shared on purpose — they are a whole-compile work budget.)
+    let prev_resolved = ctx.resolved.replace(std::collections::HashMap::new());
+    let prev_resolving = ctx.resolving.replace(Vec::new());
     let compiled = match roxmltree::Document::parse(&source) {
         Ok(d) => {
             let mut s = String::new();
@@ -1305,6 +1411,8 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
         }
         Err(_) => None,
     };
+    ctx.resolving.replace(prev_resolving);
+    ctx.resolved.replace(prev_resolved);
     ctx.sourcemap.set(prev_sm);
     ctx.base.replace(prev_base);
     ctx.files.borrow_mut().pop();

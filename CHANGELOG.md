@@ -40,6 +40,17 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ### Fixed
 
+- **Cross-file `#id` collision.** The compiled-output reference memo and cycle stack are keyed by
+  bare id but were shared across linked files, so a dependency resolving its own `#a` could hand
+  the referrer that geometry (and a shared id could report a false cycle). Each linked file now
+  gets its own scope; the work budget stays global.
+- No source map inside linked dependencies: a dependency's byte ranges index *its* file, so baked
+  content pointed at garbage spans of the entry source. The linked block now resolves to its
+  `<use>` in the entry document.
+- By-id `<use>` sizing measures a truer box: definition-only subtrees (`<defs>`, `<clipPath>`,
+  `<symbol>`, gradients, …) and `display:none` elements no longer inflate it, a nested `<svg>`
+  contributes its (clipping) viewport instead of unmapped viewBox content, `<image>` contributes
+  its box, and `style="transform:…"` is honoured alongside the attribute.
 - Interactive viewer inspector: straight/axis-aligned connectors (and any zero-area shape) now
   get a visible highlight — an SVG rect with a zero dimension isn't drawn, so the highlight band
   is inflated to a small minimum.

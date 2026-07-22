@@ -2673,6 +2673,65 @@ fn external_use_source_map_points_at_the_use_not_the_dependency() {
     );
 }
 
+#[test]
+fn by_id_bbox_ignores_non_rendered_hidden_and_clips_viewports() {
+    // In every case #mark's *visible* geometry is 10 wide, so a <use> at width=20 must
+    // scale by 2. Anything that wrongly inflates the measured box breaks that.
+    let cases: &[(&str, &str)] = &[
+        // definition-only subtrees are referenced, never drawn in place
+        ("defs", r##"<g id="mark"><rect width="10" height="10"/><defs><rect width="1000" height="1000"/></defs></g>"##),
+        ("clipPath", r##"<g id="mark"><rect width="10" height="10"/><clipPath id="c"><rect width="1000" height="1000"/></clipPath></g>"##),
+        // explicitly hidden, by attribute and by inline style
+        ("display-attr", r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" display="none"/></g>"##),
+        ("display-style", r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" style="display: none"/></g>"##),
+        // a nested <svg> clips to its viewport — 10 wide, not its 1000-unit viewBox content
+        ("nested-svg", r##"<g id="mark"><svg x="0" y="0" width="10" height="10" viewBox="0 0 1000 1000"><rect width="1000" height="1000"/></svg></g>"##),
+        // <image> is box-shaped: it has no path geometry but does have an extent
+        ("image", r##"<g id="mark"><image x="0" y="0" width="10" height="10" href="p.png"/></g>"##),
+    ];
+    for (name, body) in cases {
+        let dep = format!("{XW}{body}</svg>");
+        let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
+        let out = compile_linked(&main, &[("d.svg", &dep)]);
+        assert!(out.contains("scale(2)"), "{name}: expected scale(2) — got {out}");
+    }
+}
+
+#[test]
+fn by_id_bbox_honors_a_css_style_transform() {
+    // style="transform: translate(10px,0)" puts the 10-wide rect at x=10..20 — still 10
+    // wide (scale 2 at width=20), but the box origin re-anchors onto the <use>'s x/y.
+    let dep = format!(
+        r##"{XW}<g id="mark"><rect width="10" height="10" style="transform: translate(10px, 0px)"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(
+        out.contains("translate(-20,0) scale(2)"),
+        "css style transform folded into the measured box: {out}"
+    );
+}
+
+#[test]
+fn linked_files_do_not_share_the_ref_memo() {
+    // `#id` refs never cross a file boundary, but the memo and cycle stack are keyed by
+    // bare id — so a dependency resolving its own `#a` must not poison the referrer's.
+    // The id sits on a <g>: only groups and x: elements go through the memo (a plain
+    // shape resolves directly), so that is where a cross-file collision can bite.
+    let dep = format!(
+        r##"{XW}<g id="a"><rect x="500" y="500" width="4" height="4"/></g><x:textbox in="#a" font-size="2">d</x:textbox></svg>"##
+    );
+    let main = format!(
+        r##"{XW}<g id="a"><rect x="0" y="0" width="100" height="100"/></g><rect id="b" x="200" y="0" width="100" height="100"/><use href="d.svg"/><x:connector from="#a" to="#b"/></svg>"##
+    );
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    let d = route_d(&out);
+    assert!(
+        d.starts_with("M100,50"),
+        "entry `#a` must resolve to the entry's own rect, not the dependency's: d={d}"
+    );
+}
+
 const XW: &str =
     r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
 

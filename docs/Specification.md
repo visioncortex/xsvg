@@ -157,6 +157,13 @@ self-contained (no dependence on the browser's spotty external-`<use>` support).
   uniformly scaled to that size against the **element's own extent** — a declared one (a nested
   `<svg>`'s viewBox, or explicit `width`/`height`), else its drawn geometry's bounding box. So
   `logo.xsvg#icon` at `width="24"` makes the icon 24, independent of the whole file's size.
+  That bounding box unions the subtree's shapes (`<path>`, `<rect>`, `<circle>`, …), `<image>`
+  boxes, and nested `<svg>` viewports (which clip, so the viewport *is* the extent), honouring
+  `transform` — as an attribute or a `style="transform:…"`. Definition-only subtrees (`<defs>`,
+  `<clipPath>`, `<symbol>`, gradients, …) and `display:none` elements are skipped. **v0 limits:**
+  `<text>` is not measured (no font metrics at this stage), a same-document `<use href="#id">`
+  inside the dependency is not followed, and the box is fill geometry — `stroke-width`, markers,
+  and filter effects can extend past it, while `clip-path`/`mask` are not intersected in.
 - The dependency is itself compiled first, so it may use `x:` elements and its own `<use href>`
   links. The graph forms a **DAG**: a **cycle** (a file linking back to an ancestor) degrades with a
   marker (§3), as do a missing/unreadable dependency and links nested past a fixed depth (v0: 16).
