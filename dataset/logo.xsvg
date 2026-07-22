@@ -12,5 +12,5 @@
        white letters wrapped in an x:border in the mark's indigo. -->
   <x:textbox x="78" y="10" width="172" height="46" valign="middle" font-size="38"
              font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-             fill="#ffffff" x:border-color="#4f46e5" x:border-width="4">xsvg</x:textbox>
+             fill="#ffffff" x:border-color="#4f46e5" x:border-width="4">&lt;xsvg&gt;</x:textbox>
 </svg>
