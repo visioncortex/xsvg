@@ -13,14 +13,29 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+/// Resolves cross-file `<use href="…">` links from disk, relative to the referencing
+/// file's directory. The canonical key is the resolved absolute path (so the compiler's
+/// cycle guard compares stable keys); on-demand reads are fine since native fs is sync.
+struct DiskResolver;
+impl xsvg_core::Resolver for DiskResolver {
+    fn resolve(&self, base: &str, href: &str) -> Option<(String, String)> {
+        let dir = Path::new(base).parent().unwrap_or_else(|| Path::new("."));
+        let canon = std::fs::canonicalize(dir.join(href)).ok()?;
+        let text = std::fs::read_to_string(&canon).ok()?;
+        Some((canon.to_string_lossy().into_owned(), text))
+    }
+}
+
 /// Compile an xsvg document to plain SVG. `font_dir` supplies the fonts used for text
 /// measurement and `outline="true"` baking; with `None` (or an empty directory) text
-/// falls back to default metrics and stays live `<text>` (no outline baking).
+/// falls back to default metrics and stays live `<text>` (no outline baking). `base` is
+/// the source's path — the anchor for resolving relative `<use href>` cross-file links.
 pub fn compile(
     source: &str,
     quality: &str,
     sourcemap: bool,
     font_dir: Option<&Path>,
+    base: &str,
 ) -> Result<String, String> {
     let fonts = match font_dir {
         Some(d) => {
@@ -29,7 +44,7 @@ pub fn compile(
         None => FontDb::default(),
     };
     let p = platform::Native { fonts };
-    xsvg_core::compile_impl(source, quality, sourcemap, &p, &p, &p)
+    xsvg_core::compile_linked_impl(source, quality, sourcemap, &p, &p, &p, &DiskResolver, base)
 }
 
 fn main() -> ExitCode {
@@ -78,14 +93,19 @@ fn run() -> Result<(), String> {
     }
 
     let input = input.ok_or("missing INPUT (path or - for stdin)")?;
-    let source = if input == "-" {
+    let (source, base) = if input == "-" {
         let mut s = String::new();
         std::io::stdin()
             .read_to_string(&mut s)
             .map_err(|e| format!("reading stdin: {e}"))?;
-        s
+        (s, String::new()) // stdin: relative <use href> resolves against the cwd
     } else {
-        std::fs::read_to_string(&input).map_err(|e| format!("reading {input}: {e}"))?
+        let s = std::fs::read_to_string(&input).map_err(|e| format!("reading {input}: {e}"))?;
+        // canonical path anchors relative <use href> links (falls back to the raw arg)
+        let base = std::fs::canonicalize(&input)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| input.clone());
+        (s, base)
     };
 
     let svg = compile(
@@ -93,6 +113,7 @@ fn run() -> Result<(), String> {
         &quality,
         sourcemap,
         font_dir.as_deref().map(Path::new),
+        &base,
     )?;
 
     match output {

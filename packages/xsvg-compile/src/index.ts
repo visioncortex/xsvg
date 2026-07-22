@@ -9,6 +9,8 @@
 //!   import { compile } from "@visioncortex/xsvg-compile";
 //!   const svg = compile(source, { fontDir: "./fonts" }); // synchronous
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, resolve as resolvePath } from "node:path";
 import { EMPTY_FONTS, loadFontDir, type Font, type FontDb } from "./fonts.js";
 import { rasterize } from "./rasterize.js";
 
@@ -23,6 +25,8 @@ interface WasmModule {
     rasterize: Cb,
     outlineRun: Cb,
     advanceWidth: Cb,
+    resolve: Cb,
+    base: string,
   ): string;
 }
 
@@ -94,11 +98,16 @@ export interface CompileOptions {
   /** Directory of `.ttf`/`.otf` fonts for text measurement + `outline="true"` baking.
    *  Without it, text uses default metrics and stays live `<text>` (no outline baking). */
   fontDir?: string;
+  /** Path of the source file — the anchor for resolving relative cross-file
+   *  `<use href="…">` links (read synchronously from disk). Defaults to a file in the
+   *  current working directory. */
+  basePath?: string;
 }
 
 const fontCache = new Map<string, FontDb>();
 
-/** Compile an xsvg source string to a plain-SVG string. Synchronous. */
+/** Compile an xsvg source string to a plain-SVG string. Synchronous — cross-file
+ *  `<use href="…">` links are read from disk on demand, relative to `basePath`. */
 export function compile(source: string, opts: CompileOptions = {}): string {
   const { quality = "balanced", sourcemap = false, fontDir } = opts;
   let fonts = EMPTY_FONTS;
@@ -107,6 +116,18 @@ export function compile(source: string, opts: CompileOptions = {}): string {
     if (!db) fontCache.set(fontDir, (db = loadFontDir(fontDir)));
     fonts = db;
   }
+  const base = opts.basePath ?? resolvePath("source.xsvg"); // anchor for relative <use href>
+  // Disk-backed resolver: read the dependency relative to the referrer, strip google
+  // markers, key by absolute path (stable for the compiler's cycle guard). No pre-walk —
+  // the sync compiler calls this on demand as it recurses.
+  const resolve = (b: unknown, href: unknown): [string, string] | null => {
+    try {
+      const abs = resolvePath(dirname(b as string), href as string);
+      return [abs, stripGooglePrefix(readFileSync(abs, "utf8"))];
+    } catch {
+      return null;
+    }
+  };
   const src = stripGooglePrefix(source);
   return wasm.compile(
     src,
@@ -121,6 +142,8 @@ export function compile(source: string, opts: CompileOptions = {}): string {
       const font = fonts.resolve(firstFamily(fam as string), style as string);
       return font ? font.getAdvanceWidth(text as string, size as number) : NaN;
     },
+    resolve,
+    base,
   );
 }
 
