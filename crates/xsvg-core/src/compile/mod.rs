@@ -36,6 +36,31 @@ const MAX_REF_DEPTH: usize = 32;
 /// cycle-poisoned fan-out (unmemoizable by design) burns fuel combinatorially,
 /// and this is the bound that stops it.
 const REF_FUEL: u32 = 65_536;
+
+/// Depth cap for cross-file `<use>` links — how deep the dependency DAG may nest
+/// before a link degrades with a marker (§4 totality; guards against a very deep
+/// or resolver-misbehaving chain, independent of the same-document [`MAX_REF_DEPTH`]).
+const MAX_LINK_DEPTH: usize = 16;
+
+/// Platform seam for cross-file `<use href="file.svg">` linking (§4). Given the
+/// referrer's canonical key (`base`) and the raw `href`, the host resolves the path
+/// relative to `base`, enforces its own security model (same-origin `fetch` in the
+/// browser, disk reads natively), and returns the dependency's **canonical key** plus
+/// its **source text** — or `None` to degrade. Keys only need to be stable and
+/// comparable (the cycle guard compares them); they are typically the resolved path/URL.
+pub trait Resolver {
+    fn resolve(&self, base: &str, href: &str) -> Option<(String, String)>;
+}
+
+/// A resolver that links nothing — every external `<use>` degrades with a marker.
+/// Backs the non-linking entry point ([`compile_impl`]) and callers without deps.
+pub struct NoResolver;
+impl Resolver for NoResolver {
+    fn resolve(&self, _base: &str, _href: &str) -> Option<(String, String)> {
+        None
+    }
+}
+
 /// Everything a lowering pass needs from the platform: font metrics + shape raster +
 /// glyph outliner, the quality profile (bake tolerances, §7.1), plus whether to emit
 /// source-position attributes (`data-xsvg-pos`).
@@ -68,6 +93,14 @@ struct Ctx<'a> {
     /// forces `outline="true"` semantics while scratch-serializing a reference
     /// target, so referenced text contributes glyph geometry instead of nothing.
     force_outline: std::cell::Cell<bool>,
+    /// Cross-file `<use>` linking seam (§4).
+    resolver: &'a dyn Resolver,
+    /// canonical keys of the files currently being linked — the cross-file cycle
+    /// guard (a link back to an ancestor degrades). Its length is the link depth,
+    /// capped at [`MAX_LINK_DEPTH`].
+    files: std::cell::RefCell<Vec<String>>,
+    /// canonical key of the file being serialized, so relative hrefs resolve against it.
+    base: std::cell::RefCell<String>,
 }
 
 /// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
@@ -81,6 +114,7 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
     format!(" data-xsvg-pos=\"{}-{}\"", r.start, r.end)
 }
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
+/// Cross-file `<use>` links degrade (no resolver) — use [`compile_linked_impl`] to link.
 pub fn compile_impl(
     input: &str,
     quality: &str,
@@ -88,6 +122,23 @@ pub fn compile_impl(
     m: &dyn Measurer,
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
+) -> Result<String, String> {
+    compile_linked_impl(input, quality, sourcemap, m, shaper, outliner, &NoResolver, "")
+}
+
+/// Compile entry with cross-file `<use>` linking: `resolver` fetches dependencies and
+/// `base` is the entry document's canonical key (relative hrefs resolve against it, and
+/// a dependency that links back to it is a cycle). See [`Resolver`].
+#[allow(clippy::too_many_arguments)]
+pub fn compile_linked_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
 ) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
@@ -114,6 +165,9 @@ pub fn compile_impl(
             cuts: std::cell::Cell::new(0),
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
+            resolver,
+            files: std::cell::RefCell::new(vec![base.to_string()]),
+            base: std::cell::RefCell::new(base.to_string()),
         },
     );
     Ok(out)
@@ -170,6 +224,9 @@ pub fn compile_fragment_impl(
             cuts: std::cell::Cell::new(0),
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
+            resolver: &NoResolver,
+            files: std::cell::RefCell::new(Vec::new()),
+            base: std::cell::RefCell::new(String::new()),
         },
     );
     Ok(out)
@@ -436,6 +493,21 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
                 node.tag_name().name()
             ));
             return;
+        }
+    }
+
+    // Cross-file link (§4): a <use> whose href points at another file (not a same-
+    // document #fragment) is baked here — the dependency is compiled and stamped in.
+    // A same-document <use href="#id"> stays a live reference (passthrough below).
+    if node.tag_name().name() == "use" {
+        if let Some(href) = node
+            .attribute("href")
+            .or_else(|| node.attribute((XLINK_NS, "href")))
+        {
+            if is_external_href(href) {
+                emit_link(node, href, out, ctx);
+                return;
+            }
         }
     }
 
@@ -1094,6 +1166,118 @@ fn parse_transform(s: &str) -> crate::kurbo::Affine {
         total
     } else {
         Affine::IDENTITY
+    }
+}
+
+/// `true` for a `<use href>` that points at another file — anything that isn't a
+/// bare same-document `#fragment`. That's the trigger to bake a cross-file link (§4).
+fn is_external_href(href: &str) -> bool {
+    !href.is_empty() && !href.starts_with('#')
+}
+
+/// A dependency box's intrinsic size: its `viewBox` extent, else its `width`/`height`
+/// (units stripped), else a 100×100 fallback.
+fn intrinsic_size(root: roxmltree::Node) -> (f64, f64) {
+    if let Some(vb) = root.attribute("viewBox") {
+        let p: Vec<f64> = vb
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter_map(parse_num)
+            .collect();
+        if p.len() == 4 && p[2] > 0.0 && p[3] > 0.0 {
+            return (p[2], p[3]);
+        }
+    }
+    let dim = |a: &str| root.attribute(a).and_then(parse_num).filter(|v| *v > 0.0);
+    (dim("width").unwrap_or(100.0), dim("height").unwrap_or(100.0))
+}
+
+/// Bake a cross-file `<use>` link (§4): resolve the referenced file, compile it, and
+/// stamp its output into `out`. Whole-file → a nested `<svg>` viewport (SVG's own fit);
+/// `#id` → that compiled element, placed. Degrades with a marker on any failure.
+fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
+    if ctx.files.borrow().len() > MAX_LINK_DEPTH {
+        out.push_str("<!-- xsvg: <use> link nesting too deep -->");
+        return;
+    }
+    let (file, frag) = match href.split_once('#') {
+        Some((f, g)) => (f, (!g.is_empty()).then_some(g)),
+        None => (href, None),
+    };
+    let base = ctx.base.borrow().clone();
+    let Some((key, source)) = ctx.resolver.resolve(&base, file) else {
+        out.push_str("<!-- xsvg: <use> external target not resolved -->");
+        return;
+    };
+    if ctx.files.borrow().iter().any(|f| f == &key) {
+        out.push_str("<!-- xsvg: <use> cyclic link skipped -->");
+        return;
+    }
+
+    // Compile the dependency (recursively — its own <use>/x: elements lower too), with
+    // base = its key and the key pushed so a link back to it is caught as a cycle.
+    ctx.files.borrow_mut().push(key.clone());
+    let prev_base = ctx.base.replace(key);
+    let compiled = match roxmltree::Document::parse(&source) {
+        Ok(d) => {
+            let mut s = String::new();
+            serialize(d.root_element(), &mut s, true, ctx);
+            Some(s)
+        }
+        Err(_) => None,
+    };
+    ctx.base.replace(prev_base);
+    ctx.files.borrow_mut().pop();
+
+    let Some(compiled) = compiled else {
+        out.push_str("<!-- xsvg: <use> dependency parse error -->");
+        return;
+    };
+    let Ok(dep) = roxmltree::Document::parse(&compiled) else {
+        out.push_str("<!-- xsvg: <use> dependency re-parse error -->");
+        return;
+    };
+    let root = dep.root_element();
+    let (iw, ih) = intrinsic_size(root);
+    let x = attr_num(node, "x", 0.0);
+    let y = attr_num(node, "y", 0.0);
+    let w = node.attribute("width").and_then(parse_num);
+    let h = node.attribute("height").and_then(parse_num);
+    let pos = pos_attr(node, ctx);
+
+    match frag {
+        None => {
+            // whole file → nested <svg> viewport; the browser's own viewBox fit scales it.
+            let inner: String = root
+                .children()
+                .map(|c| &compiled[c.range()])
+                .collect::<Vec<_>>()
+                .concat();
+            let vb = root
+                .attribute("viewBox")
+                .map(|v| format!(" viewBox=\"{v}\""))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "<svg{pos} x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{vb}>{inner}</svg>",
+                fmt(x),
+                fmt(y),
+                fmt(w.unwrap_or(iw)),
+                fmt(h.unwrap_or(ih))
+            ));
+        }
+        Some(id) => {
+            let Some(target) = dep.descendants().find(|n| n.attribute("id") == Some(id)) else {
+                out.push_str("<!-- xsvg: <use> #id not found in dependency -->");
+                return;
+            };
+            let el = &compiled[target.range()];
+            // uniform scale so `width`/`height` size the element as the whole file would scale
+            let scale = w.map(|w| w / iw).or_else(|| h.map(|h| h / ih));
+            let mut tf = format!("translate({},{})", fmt(x), fmt(y));
+            if let Some(s) = scale {
+                tf.push_str(&format!(" scale({})", fmt(s)));
+            }
+            out.push_str(&format!("<g{pos} transform=\"{tf}\">{el}</g>"));
+        }
     }
 }
 

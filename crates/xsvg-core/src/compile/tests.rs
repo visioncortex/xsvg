@@ -2548,6 +2548,53 @@ fn boolean_composes_with_warp_both_ways() {
 
 // ---- <x:warp> (§7.3) ----
 
+// In-memory resolver for cross-file link tests: flat namespace, href IS the key
+// (relative-path resolution is the host's job; the core just links what it's handed).
+struct MapResolver(std::collections::HashMap<String, String>);
+impl Resolver for MapResolver {
+    fn resolve(&self, _base: &str, href: &str) -> Option<(String, String)> {
+        self.0.get(href).map(|s| (href.to_string(), s.clone()))
+    }
+}
+fn compile_linked(main: &str, files: &[(&str, &str)]) -> String {
+    let map = MapResolver(files.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+    compile_linked_impl(main, "balanced", false, &Mono, &NoShaper, &NoOutliner, &map, "main")
+        .unwrap()
+}
+
+#[test]
+fn use_links_external_files() {
+    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+
+    // whole-file link → the dependency inlined inside a nested <svg> viewport, baked
+    let main = format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
+    let out = compile_linked(&main, &[("logo.svg", &logo)]);
+    assert!(out.contains(r#"<svg x="20" y="30" width="40" height="40""#), "nested svg viewport: {out}");
+    assert!(out.contains("#f00"), "dep content inlined (rect lowers to a path): {out}");
+    assert!(!out.contains("<use"), "the <use> is baked, not a live ref: {out}");
+
+    // by-id link → just that element, placed with a translate
+    let main = format!(r##"{XW}<use href="logo.svg#mark" x="5" y="5"/></svg>"##);
+    let out = compile_linked(&main, &[("logo.svg", &logo)]);
+    assert!(out.contains("translate(5,5)") && out.contains(r#"id="mark""#), "by-id placed: {out}");
+
+    // missing dependency degrades with a marker
+    let out = compile_linked(&main, &[]);
+    assert!(out.contains("not resolved"), "missing dep degrades: {out}");
+
+    // a same-document <use href="#id"> is NOT linked — it stays a live reference
+    let main = format!(r##"{XW}<rect id="r" x="0" y="0" width="4" height="4"/><use href="#r"/></svg>"##);
+    let out = compile_linked(&main, &[]);
+    assert!(out.contains(r##"<use href="#r""##), "same-doc use passes through: {out}");
+
+    // cycle a → b → a is refused
+    let a = format!(r##"{XW}<use href="b.svg"/></svg>"##);
+    let b = format!(r##"{XW}<use href="a.svg"/></svg>"##);
+    let main = format!(r##"{XW}<use href="a.svg"/></svg>"##);
+    let out = compile_linked(&main, &[("a.svg", &a), ("b.svg", &b)]);
+    assert!(out.contains("cyclic"), "cycle refused: {out}");
+}
+
 const XW: &str =
     r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">"##;
 
