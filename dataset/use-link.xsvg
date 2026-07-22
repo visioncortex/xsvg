@@ -1,21 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
-     viewBox="0 0 520 300" font-family="'Helvetica Neue', Arial, sans-serif">
-  <rect x="0" y="0" width="520" height="300" fill="#ffffff"/>
-  <text x="28" y="34" font-size="14" font-weight="bold" fill="#0f172a">&lt;use href="logo.svg"&gt; — author the logo once, reuse it (compiled + baked in)</text>
+     viewBox="0 0 560 320" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+  <rect x="0" y="0" width="560" height="320" fill="#ffffff"/>
+  <text x="28" y="36" font-size="15" font-weight="700" fill="#0f172a">&lt;use href&gt; — author once, reuse everywhere (baked in)</text>
 
-  <!-- whole file, big: a nested &lt;svg&gt; viewport scales it to width -->
-  <text x="28" y="70" font-size="11" fill="#94a3b8">href="logo.svg" (whole file)</text>
-  <use href="logo.svg" x="28" y="80" width="240"/>
+  <!-- The whole logo lockup. logo.svg itself links mark.svg, so this is a 3-file DAG:
+       this drawing → logo.svg → mark.svg. -->
+  <text x="28" y="78" font-size="11" fill="#94a3b8">href="logo.svg" — the full logo</text>
+  <use href="logo.svg" x="28" y="90" width="250"/>
 
-  <!-- same logo again, smaller — one source of truth -->
-  <text x="300" y="70" font-size="11" fill="#94a3b8">…reused, smaller</text>
-  <use href="logo.svg" x="300" y="84" width="150"/>
+  <!-- Reuse JUST the mark, at any size — favicon, app icon, avatar. -->
+  <text x="28" y="184" font-size="11" fill="#94a3b8">href="mark.svg" — reuse just the mark</text>
+  <use href="mark.svg" x="28" y="198" width="72" height="72"/>
+  <use href="mark.svg" x="116" y="214" width="56" height="56"/>
+  <use href="mark.svg" x="188" y="226" width="44" height="44"/>
 
-  <!-- just the badge shape, by id -->
-  <text x="28" y="180" font-size="11" fill="#94a3b8">href="logo.svg#badge" (one element)</text>
-  <use href="logo.svg#badge" x="28" y="192" width="80"/>
-
-  <x:textbox x="150" y="196" width="340" height="80" font-size="14" fill="#475569">
-    Edit logo.svg once and every instance here updates. The output stays plain, self-contained SVG — the link is resolved and baked at compile time.
+  <x:textbox x="272" y="196" width="264" height="112" font-size="13" fill="#475569">
+    logo.svg is itself built by linking mark.svg — so editing the mark once updates the logo and every icon here at the same time. The output stays plain, self-contained SVG.
   </x:textbox>
 </svg>

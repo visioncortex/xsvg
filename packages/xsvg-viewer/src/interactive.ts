@@ -163,11 +163,22 @@ export class XsvgViewInteractive extends HTMLElement {
   private deckActive = 0;
   private dropped: string | null = null;
   private srcProp: string | null = null;
+  private resolveFn: ((base: string, href: string) => [string, string] | null) | null = null;
   private resizeObs: ResizeObserver | null = null;
 
   /** Inline xsvg source as a JS property (used by the React wrapper / thin hosts). */
   set source(v: string | null) { this.srcProp = v; this.dropped = null; void this.render(); }
   get source(): string | null { return this.srcProp; }
+
+  /** Custom cross-file `<use href>` resolver (see `compileXsvg`). When set, links resolve
+   *  through it instead of same-origin fetch — e.g. to link against in-memory/bundled deps. */
+  set resolve(fn: ((base: string, href: string) => [string, string] | null) | null) {
+    this.resolveFn = fn;
+    void this.render();
+  }
+  get resolve() {
+    return this.resolveFn;
+  }
 
   constructor() {
     super();
@@ -310,7 +321,12 @@ export class XsvgViewInteractive extends HTMLElement {
       const quality = this.getAttribute("quality") ?? "balanced";
       const src = this.getAttribute("src");
       const baseUrl = src ? new URL(src, location.href).href : undefined;
-      const svg = await compileXsvg(source, { quality, sourcemap: withInspector, baseUrl });
+      const svg = await compileXsvg(source, {
+        quality,
+        sourcemap: withInspector,
+        baseUrl,
+        resolve: this.resolveFn ?? undefined,
+      });
       if (mine !== this.token) return;
 
       this.teardown();

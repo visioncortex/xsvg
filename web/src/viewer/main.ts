@@ -7,9 +7,16 @@
 import "../base.css";
 import "@visioncortex/xsvg-viewer/interactive";
 import { downloadSvg } from "@visioncortex/xsvg-viewer";
-import { SAMPLES, requestedSample } from "../core/samples";
+import { SAMPLES, requestedSample, datasetResolver } from "../core/samples";
 
-const view = document.getElementById("view") as HTMLElement & { source?: string | null };
+type LinkResolver = (base: string, href: string) => [string, string] | null;
+const view = document.getElementById("view") as HTMLElement & {
+  source?: string | null;
+  resolve?: LinkResolver | null;
+};
+// Samples are bundled strings, so their cross-file <use href> deps link against the
+// bundled dataset (same as the preview) rather than a network fetch.
+view.resolve = datasetResolver;
 const docName = document.getElementById("doc-name")!;
 const dropHint = document.getElementById("drop-hint")!;
 const downloadLink = document.getElementById("download-svg") as HTMLAnchorElement;

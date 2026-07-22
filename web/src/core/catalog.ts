@@ -338,7 +338,7 @@ export const CATALOG: Category[] = [
       {
         file: "use-link.xsvg",
         title: "Cross-file <use> links",
-        blurb: "<use href=\"logo.svg\"> pulls in another file at compile time — whole-file (a nested <svg> viewport) or one element by #id — so a logo is authored once and baked into every instance (§4.2)",
+        blurb: "<use href=\"logo.svg\"> pulls in another file at compile time — a 3-file DAG here (drawing → logo.svg → mark.svg) — so the xsvg mark is authored once and baked into the logo and every icon (§4.2)",
       },
     ],
   },

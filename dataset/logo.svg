@@ -1,6 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 60">
-  <rect id="badge" x="4" y="4" width="160" height="52" rx="12" fill="#6366f1"/>
-  <circle cx="34" cy="30" r="13" fill="#ffffff"/>
-  <path d="M34 23 l6 14 h-12 Z" fill="#6366f1"/>
-  <text x="60" y="38" font-family="'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">xsvg</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 64">
+  <!-- The full logo lockup is itself built by *linking* the mark (mark.svg) next to the
+       wordmark — so the mark stays a single source of truth even inside the logo. -->
+  <use href="mark.svg" x="0" y="0" width="64" height="64"/>
+  <text x="80" y="47" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="36" font-weight="700" fill="#0f172a">xsvg</text>
 </svg>
