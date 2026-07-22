@@ -142,19 +142,21 @@ author also set, or the defaults. Tokens are loaded once per compile; forward re
 
 A `<use>` whose `href` points at **another file** — anything that isn't a bare same-document
 `#fragment` — is a **compile-time link**: the referenced document is compiled and its output is
-**baked into** the target. Author a `logo.svg` once and reuse it everywhere; the emitted SVG stays
+**baked into** the target. Author a `logo.xsvg` once and reuse it everywhere; the emitted SVG stays
 self-contained (no dependence on the browser's spotty external-`<use>` support).
 
 ```xml
-<use href="logo.svg" x="20" y="20" width="120"/>        <!-- whole file  -->
-<use href="icons.svg#warning" x="0" y="0" width="24"/>  <!-- one element by id -->
+<use href="logo.xsvg" x="20" y="20" width="120"/>       <!-- whole file  -->
+<use href="logo.xsvg#icon" x="0" y="0" width="24"/>     <!-- one element by id -->
 ```
 
 - **Whole file** → the dependency is inlined as a nested `<svg x y width height viewBox>…</svg>`, so
   its `viewBox` and SVG's own viewport fit place and scale it. `width`/`height` default to the
   dependency's intrinsic size.
-- **By id** (`#mark`) → just that compiled element, placed by `x`/`y` and (if `width`/`height` given)
-  uniformly scaled.
+- **By id** (`#icon`) → just that compiled element, placed by `x`/`y` and (if `width`/`height` given)
+  uniformly scaled to that size against the **element's own extent** — a declared one (a nested
+  `<svg>`'s viewBox, or explicit `width`/`height`), else its drawn geometry's bounding box. So
+  `logo.xsvg#icon` at `width="24"` makes the icon 24, independent of the whole file's size.
 - The dependency is itself compiled first, so it may use `x:` elements and its own `<use href>`
   links. The graph forms a **DAG**: a **cycle** (a file linking back to an ancestor) degrades with a
   marker (§3), as do a missing/unreadable dependency and links nested past a fixed depth (v0: 16).
@@ -761,6 +763,29 @@ baseline leaves the box are clipped. Each `<x:p>` compiles to its own `<text>` c
 range (a click resolves to the paragraph). **v0 limits:** paragraph mode is **live text** — no
 create-outlines (§6.12), no `<tspan>` runs inside a paragraph, and it applies to the **rectangular**
 box only (a curved `in="#shape"` region ignores `<x:p>` and flows as one block).
+
+### 6.17 Bordered text — `x:border-width` / `x:border-color` [implemented]
+
+A **bordered-text effect**: an outline that hugs each glyph, sitting *behind* the fill so it never
+thins the letters. It is a convenience over SVG's own text `stroke` — the trick a designer would
+otherwise hand-tune (double the stroke, push it behind the fill, round the joins) is applied for you.
+
+```xml
+<x:textbox x="20" y="20" width="520" height="104" font-size="92" align="center"
+           fill="#ffffff" x:border-width="4" x:border-color="#1e1b4b">BORDERED</x:textbox>
+```
+
+| Attribute | On | Meaning |
+|---|---|---|
+| `x:border-width` | any xsvg text element | width **visible outside** each glyph (default `3` when only `border-color` is set) |
+| `x:border-color` | any xsvg text element | border paint (default `#000000` when only `border-width` is set); accepts a `var(--token)` |
+| `x:border-opacity` | any xsvg text element | optional border opacity |
+
+It compiles to `stroke` / `stroke-width` / `paint-order="stroke"` / `stroke-linejoin="round"` on the
+emitted `<text>` (or on the outlined `<g>` under create-outlines, §6.12). The emitted `stroke-width`
+is **doubled**, because a centered stroke is half-hidden by the fill — so `x:border-width="4"` shows
+`4` units of border. Applies to `<x:textbox>`, `<x:textpath>` (§6.13), and outlined text (§6.12). Any
+raw SVG `stroke*` attributes still pass through unchanged when no `x:border-*` is present.
 
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 

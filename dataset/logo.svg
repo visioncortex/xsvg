@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 64">
-  <!-- The full logo lockup is itself built by *linking* the mark (mark.svg) next to the
-       wordmark — so the mark stays a single source of truth even inside the logo. -->
-  <use href="mark.svg" x="0" y="0" width="64" height="64"/>
-  <text x="80" y="47" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-        font-size="36" font-weight="700" fill="#0f172a">xsvg</text>
-</svg>

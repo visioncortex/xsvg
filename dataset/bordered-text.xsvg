@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 560 340" font-family="-x-google-Anton">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <rect width="560" height="340" fill="url(#sky)"/>
+
+  <!-- Headline: white fill with a dark border sitting BEHIND the glyphs (paint-order),
+       so the outline reads against the busy background without thinning the letters. -->
+  <x:textbox x="20" y="22" width="520" height="104" font-size="92" align="center"
+             fill="#ffffff" x:border-width="4" x:border-color="#1e1b4b">BORDERED</x:textbox>
+
+  <!-- x:border-width is the width visible outside each glyph; the fill stays crisp. -->
+  <x:textbox x="20" y="156" width="520" height="40" font-size="34" align="center"
+             fill="#fde047" x:border-width="1" x:border-color="#78350f">border-width = 1</x:textbox>
+  <x:textbox x="20" y="208" width="520" height="40" font-size="34" align="center"
+             fill="#fde047" x:border-width="3" x:border-color="#78350f">border-width = 3</x:textbox>
+  <x:textbox x="20" y="260" width="520" height="48" font-size="34" align="center"
+             fill="#fde047" x:border-width="6" x:border-color="#78350f">border-width = 6</x:textbox>
+</svg>

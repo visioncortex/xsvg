@@ -158,6 +158,11 @@ export const CATALOG: Category[] = [
         title: "Bullet & numbered lists",
         blurb: "<x:list> / <x:li indent='N'>: hanging-indent items whose drawn bullet shapes (disc / ring / square, optically balanced) and decimal→alpha→roman numbers cycle by depth, with the outer counter resuming after each sublist; a third list flows inside a referenced card (§6.14)",
       },
+      {
+        file: "bordered-text.xsvg",
+        title: "Bordered text",
+        blurb: "x:border-width / x:border-color: an outline hugging each glyph that sits behind the fill (paint-order) so it never thins the letters; border-width is the width visible outside the glyph — shown scaling 1→3→6 over a gradient (§6.17)",
+      },
     ],
   },
   {
@@ -338,7 +343,7 @@ export const CATALOG: Category[] = [
       {
         file: "use-link.xsvg",
         title: "Cross-file <use> links",
-        blurb: "<use href=\"logo.svg\"> pulls in another file at compile time — a 3-file DAG here (drawing → logo.svg → mark.svg) — so the xsvg mark is authored once and baked into the logo and every icon (§4.2)",
+        blurb: "<use href=\"logo.xsvg\"> pulls in another file at compile time — the whole lockup, or just logo.xsvg#icon (one element by id, sized to its own extent) — so the xsvg mark is authored once and baked into the logo and every icon (§4.2)",
       },
     ],
   },

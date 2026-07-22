@@ -685,7 +685,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
     let outline = node.attribute("outline") == Some("true") || ctx.force_outline.get();
-    let stroke = outline_stroke_attrs(node);
+    let stroke = text_border_attrs(node);
     let pos = pos_attr(node, ctx);
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
@@ -949,7 +949,7 @@ fn emit_paragraphs(
 fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
-    let stroke = outline_stroke_attrs(node);
+    let stroke = text_border_attrs(node);
     let pos = pos_attr(node, ctx);
     let fx = PathEffect {
         effect: node.attribute("effect").unwrap_or("skew"),
@@ -1212,6 +1212,58 @@ fn intrinsic_size(root: roxmltree::Node) -> (f64, f64) {
     (dim("width").unwrap_or(100.0), dim("height").unwrap_or(100.0))
 }
 
+/// The intrinsic extent of a by-id `<use>` target when it *declares* one — a nested
+/// `<svg>`'s viewBox, or any element's explicit `width`/`height`. `None` for a plain
+/// shape/group with no declared size (the caller then measures its geometry).
+fn target_extent(node: roxmltree::Node) -> Option<(f64, f64)> {
+    if let Some(vb) = node.attribute("viewBox") {
+        let p: Vec<f64> = vb
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter_map(parse_num)
+            .collect();
+        if p.len() == 4 && p[2] > 0.0 && p[3] > 0.0 {
+            return Some((p[2], p[3]));
+        }
+    }
+    let dim = |a: &str| node.attribute(a).and_then(parse_num).filter(|v| *v > 0.0);
+    match (dim("width"), dim("height")) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    }
+}
+
+/// Bounding box of a compiled (plain-SVG) subtree: the union of every descendant shape's
+/// bbox (`<path>`, `<rect>`, `<circle>`, … via [`shape_to_path_d`]) with ancestor
+/// `transform`s applied. Used only as a by-id `<use>` sizing hint, so `<text>` (which
+/// would need font metrics) isn't measured — the drawn vector geometry defines the
+/// extent. `None` when the subtree has no shape geometry.
+fn plain_subtree_bbox(
+    node: roxmltree::Node,
+    base: crate::kurbo::Affine,
+) -> Option<crate::kurbo::Rect> {
+    let tf = base
+        * node
+            .attribute("transform")
+            .map(parse_transform)
+            .unwrap_or(crate::kurbo::Affine::IDENTITY);
+    let mut acc: Option<crate::kurbo::Rect> = None;
+    let mut fold = |bb: crate::kurbo::Rect| {
+        acc = Some(acc.map_or(bb, |a: crate::kurbo::Rect| a.union(bb)));
+    };
+    if let Some(bb) = shape_to_path_d(node)
+        .and_then(|d| transform_d(&d, tf))
+        .and_then(|d| svg_path_bbox(&d))
+    {
+        fold(bb);
+    }
+    for c in node.children().filter(roxmltree::Node::is_element) {
+        if let Some(bb) = plain_subtree_bbox(c, tf) {
+            fold(bb);
+        }
+    }
+    acc
+}
+
 /// Bake a cross-file `<use>` link (§4): resolve the referenced file, compile it, and
 /// stamp its output into `out`. Whole-file → a nested `<svg>` viewport (SVG's own fit);
 /// `#id` → that compiled element, placed. Degrades with a marker on any failure.
@@ -1291,12 +1343,31 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
                 return;
             };
             let el = &compiled[target.range()];
-            // uniform scale so `width`/`height` size the element as the whole file would scale
-            let scale = w.map(|w| w / iw).or_else(|| h.map(|h| h / ih));
-            let mut tf = format!("translate({},{})", fmt(x), fmt(y));
-            if let Some(s) = scale {
-                tf.push_str(&format!(" scale({})", fmt(s)));
-            }
+            // Size against the *target's own* extent so `logo.xsvg#icon` at width=72 makes
+            // the icon 72 — not 72 of the whole file. Prefer a declared extent (a nested
+            // <svg>'s viewBox, or explicit width+height), else the drawn geometry's bbox,
+            // else the file. When width/height is given, also re-anchor the element's
+            // top-left to (x,y) before scaling; with neither, keep the plain translate.
+            let (ox, oy, bw, bh) = match target_extent(target) {
+                Some((w, h)) => (0.0, 0.0, w, h),
+                None => match plain_subtree_bbox(target, crate::kurbo::Affine::IDENTITY) {
+                    Some(r) => (r.x0, r.y0, r.width(), r.height()),
+                    None => (0.0, 0.0, iw, ih),
+                },
+            };
+            let scale = w
+                .map(|w| w / bw)
+                .or_else(|| h.map(|h| h / bh))
+                .filter(|s| s.is_finite() && *s > 0.0);
+            let tf = match scale {
+                Some(s) => format!(
+                    "translate({},{}) scale({})",
+                    fmt(x - s * ox),
+                    fmt(y - s * oy),
+                    fmt(s)
+                ),
+                None => format!("translate({},{})", fmt(x), fmt(y)),
+            };
             out.push_str(&format!("<g{pos} transform=\"{tf}\">{el}</g>"));
         }
     }
@@ -1616,7 +1687,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &layout,
         &style,
         node.attribute("fill").unwrap_or("#000"),
-        &outline_stroke_attrs(node),
+        &text_border_attrs(node),
         gx,
         m,
         &emits,
@@ -1626,10 +1697,28 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
 }
 
-/// Paint attributes carried onto an outlined `<g>` beyond `fill` — stroke and
-/// paint-order — so create-outlines can render a stroked / keyline outline. Empty
-/// for the common fill-only case; only meaningful when `outline="true"`.
-fn outline_stroke_attrs(node: roxmltree::Node) -> String {
+/// Stroke/border paint attributes for a text element, honored on both live `<text>` and
+/// outlined glyphs. The `x:border-width` / `x:border-color` convenience (§6.17) emits a
+/// clean bordered-text effect: the stroke sits *behind* the fill (`paint-order="stroke"`,
+/// round joins) so the border never eats into the letters, and `border-width` is the width
+/// visible outside each glyph (the emitted `stroke-width` is doubled, since the fill covers
+/// the inner half). Otherwise raw SVG stroke attributes pass through unchanged.
+fn text_border_attrs(node: roxmltree::Node) -> String {
+    let bw = node.attribute((XSVG_NS, "border-width")).and_then(parse_num);
+    let bc = node.attribute((XSVG_NS, "border-color"));
+    if bw.is_some() || bc.is_some() {
+        let w = bw.unwrap_or(3.0).max(0.0);
+        let color = resolve_var(bc.unwrap_or("#000000"));
+        let mut s = format!(
+            " stroke=\"{color}\" stroke-width=\"{}\" paint-order=\"stroke\" stroke-linejoin=\"round\"",
+            fmt(w * 2.0)
+        );
+        if let Some(op) = node.attribute((XSVG_NS, "border-opacity")) {
+            s.push_str(&format!(" stroke-opacity=\"{op}\""));
+        }
+        return s;
+    }
+    // Raw passthrough of hand-written stroke attributes.
     let mut s = String::new();
     for name in [
         "stroke",
@@ -1725,6 +1814,7 @@ fn write_area_text(
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
     push_font_attrs(out, style, layout.font_size, fill);
     out.push_str(pos);
+    out.push_str(&resolve_var(stroke)); // border/stroke (§6.17) — behind the fill via paint-order
     if style.letter_spacing != 0.0 {
         out.push_str(&format!(
             " letter-spacing=\"{}\"",

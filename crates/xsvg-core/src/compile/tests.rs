@@ -2578,6 +2578,17 @@ fn use_links_external_files() {
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
     assert!(out.contains("translate(5,5)") && out.contains(r#"id="mark""#), "by-id placed: {out}");
 
+    // by-id with a width sizes to the *element's own* extent (10×10 rect → scale 2), not the file
+    let main = format!(r##"{XW}<use href="logo.svg#mark" x="0" y="0" width="20"/></svg>"##);
+    let out = compile_linked(&main, &[("logo.svg", &logo)]);
+    assert!(out.contains("scale(2)"), "by-id sizes to the target's own extent: {out}");
+
+    // a group target with no declared size measures its geometry (a 10×10 rect inside → scale 3)
+    let grp = format!(r##"{XW}<g id="mark"><rect x="0" y="0" width="10" height="10" fill="#f00"/></g></svg>"##);
+    let main = format!(r##"{XW}<use href="g.svg#mark" x="0" y="0" width="30"/></svg>"##);
+    let out = compile_linked(&main, &[("g.svg", &grp)]);
+    assert!(out.contains("scale(3)"), "group by-id sizes to its geometry bbox: {out}");
+
     // missing dependency degrades with a marker
     let out = compile_linked(&main, &[]);
     assert!(out.contains("not resolved"), "missing dep degrades: {out}");
@@ -2613,6 +2624,26 @@ fn linked_fragment_is_a_verbatim_slice_of_the_full_compile() {
     .unwrap();
     assert!(frag.contains(r#"<svg x="20""#) && frag.contains("#f00"), "fragment links: {frag}");
     assert!(full.contains(&frag), "fragment is a verbatim slice of the full compile:\nfrag={frag}\nfull={full}");
+}
+
+#[test]
+fn text_border_strokes_behind_the_fill() {
+    // x:border-* → a bordered-text effect: stroke sits behind the fill (paint-order),
+    // round joins, and border-width is what shows outside the glyph (stroke-width doubled).
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="50" font-size="30" fill="#fff" x:border-width="2" x:border-color="#000">Hi</x:textbox></svg>"##
+    );
+    let out = compile_fast(&svg);
+    assert!(out.contains(r##"stroke="#000""##), "border color: {out}");
+    assert!(out.contains(r#"stroke-width="4""#), "border-width doubled: {out}");
+    assert!(out.contains(r#"paint-order="stroke""#), "stroke behind fill: {out}");
+
+    // Raw stroke on *live* text now passes through (was silently dropped before).
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="50" stroke="#f00" stroke-width="1">Hi</x:textbox></svg>"##
+    );
+    let out = compile_fast(&svg);
+    assert!(out.contains("<text") && out.contains(r##"stroke="#f00""##), "raw stroke on live text: {out}");
 }
 
 const XW: &str =

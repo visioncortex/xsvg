@@ -20,9 +20,9 @@ for (const [path, content] of Object.entries(sampleModules)) {
 
 export const SAMPLE_NAMES = Object.keys(SAMPLES).sort();
 
-// All dataset files (incl. non-sample `.svg` deps like logo.svg) as raw strings, so a
-// sample's cross-file `<use href="logo.svg">` links against the *bundled* files in the
-// browser — the CLI reads the same files from disk. Keyed by bare filename.
+// All dataset files (incl. link deps like logo.xsvg) as raw strings, so a sample's
+// cross-file `<use href="logo.xsvg">` links against the *bundled* files in the browser
+// — the CLI reads the same files from disk. Keyed by bare filename.
 const depModules = import.meta.glob("../../../dataset/*.{svg,xsvg}", {
   query: "?raw",
   import: "default",

@@ -12,12 +12,19 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ### Added
 
+- **Bordered text.** `x:border-width` / `x:border-color` (plus optional `x:border-opacity`) on any
+  xsvg text element draw an outline that hugs each glyph and sits **behind** the fill, so it never
+  thins the letters; `x:border-width` is the width visible outside the glyph. Works on `<x:textbox>`,
+  `<x:textpath>`, and outlined text. Raw SVG `stroke*` attributes on live text also pass through now
+  (previously dropped). New `bordered-text` sample. Spec §6.17.
 - **Cross-file `<use>` links.** A `<use href="logo.svg">` (or `#id`) now links another file at
   compile time — the dependency is compiled and **baked in** (whole-file as a nested `<svg>`
-  viewport, `#id` as that element), so you author a logo once and the output stays self-contained.
-  Forms a DAG with cycle/depth guards; degrades gracefully. Resolved from disk in the CLI /
-  `@visioncortex/xsvg-compile` (new `basePath` option), and **same-origin** `fetch` in the browser
-  (`compileXsvg` gains `baseUrl`; cross-origin fails CORS → degrades). Spec §4.2.
+  viewport, `#id` as that element sized to its **own** extent), so you author a logo once and the
+  output stays self-contained. Forms a DAG with cycle/depth guards; degrades gracefully. Resolved
+  from disk in the CLI / `@visioncortex/xsvg-compile` (new `basePath` option), and **same-origin**
+  `fetch` in the browser (`compileXsvg` gains `baseUrl`; cross-origin fails CORS → degrades). The
+  `<xsvg-view-interactive>` / `<xsvg-view>` elements gain a `resolve` property to link against
+  bundled / in-memory deps instead of fetching. Spec §4.2.
 - Connectors: `from`/`to` now accept a **forced anchor** — `#id:<anchor>` where `<anchor>` is an
   edge (`left|right|top|bottom`), a corner (`left-top`…, either order), or `center` — and **raw
   coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the reference wins if both

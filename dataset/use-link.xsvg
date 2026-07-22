@@ -3,18 +3,17 @@
   <rect x="0" y="0" width="560" height="320" fill="#ffffff"/>
   <text x="28" y="36" font-size="15" font-weight="700" fill="#0f172a">&lt;use href&gt; — author once, reuse everywhere (baked in)</text>
 
-  <!-- The whole logo lockup. logo.svg itself links mark.svg, so this is a 3-file DAG:
-       this drawing → logo.svg → mark.svg. -->
-  <text x="28" y="78" font-size="11" fill="#94a3b8">href="logo.svg" — the full logo</text>
-  <use href="logo.svg" x="28" y="90" width="250"/>
+  <!-- The whole file → the full logo lockup, as a nested <svg> viewport. -->
+  <text x="28" y="78" font-size="11" fill="#94a3b8">href="logo.xsvg" — the whole file</text>
+  <use href="logo.xsvg" x="28" y="90" width="250"/>
 
-  <!-- Reuse JUST the mark, at any size — favicon, app icon, avatar. -->
-  <text x="28" y="184" font-size="11" fill="#94a3b8">href="mark.svg" — reuse just the mark</text>
-  <use href="mark.svg" x="28" y="198" width="72" height="72"/>
-  <use href="mark.svg" x="116" y="214" width="56" height="56"/>
-  <use href="mark.svg" x="188" y="226" width="44" height="44"/>
+  <!-- Just one element by #id → reuse the mark alone, at any size. -->
+  <text x="28" y="184" font-size="11" fill="#94a3b8">href="logo.xsvg#icon" — just the mark, by id</text>
+  <use href="logo.xsvg#icon" x="28" y="198" width="72" height="72"/>
+  <use href="logo.xsvg#icon" x="116" y="214" width="56" height="56"/>
+  <use href="logo.xsvg#icon" x="188" y="226" width="44" height="44"/>
 
   <x:textbox x="272" y="196" width="264" height="112" font-size="13" fill="#475569">
-    logo.svg is itself built by linking mark.svg — so editing the mark once updates the logo and every icon here at the same time. The output stays plain, self-contained SVG.
+    One logo.xsvg is the single source of truth: link the whole file for the lockup, or logo.xsvg#icon for just the mark. Edit it once and every instance here updates. Output stays plain, self-contained SVG.
   </x:textbox>
 </svg>
