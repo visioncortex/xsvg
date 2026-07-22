@@ -50,7 +50,9 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 - By-id `<use>` sizing measures a truer box: definition-only subtrees (`<defs>`, `<clipPath>`,
   `<symbol>`, gradients, …) and `display:none` elements no longer inflate it, a nested `<svg>`
   contributes its (clipping) viewport instead of unmapped viewBox content, `<image>` contributes
-  its box, and `style="transform:…"` is honoured alongside the attribute.
+  its box, same-document `<use href="#id">` targets are followed (offset by `x`/`y`, cycle
+  guarded), each shape's stroke half-width is added, and `style="transform:…"` is honoured
+  alongside the attribute.
 - Interactive viewer inspector: straight/axis-aligned connectors (and any zero-area shape) now
   get a visible highlight — an SVG rect with a zero dimension isn't drawn, so the highlight band
   is inflated to a small minimum.

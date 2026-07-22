@@ -1237,20 +1237,77 @@ fn target_extent(node: roxmltree::Node) -> Option<(f64, f64)> {
 }
 
 /// Bounding box of a compiled (plain-SVG) subtree: the union of every descendant shape's
-/// bbox (`<path>`, `<rect>`, `<circle>`, … via [`shape_to_path_d`]) with ancestor
-/// `transform`s applied. Used only as a by-id `<use>` sizing hint, so `<text>` (which
-/// would need font metrics) isn't measured — the drawn vector geometry defines the
-/// extent. `None` when the subtree has no shape geometry.
+/// bbox (`<path>`, `<rect>`, `<circle>`, … via [`shape_to_path_d`]), plus `<image>` boxes,
+/// nested `<svg>` viewports, and same-document `<use>` targets — with ancestor
+/// `transform`s and stroke half-widths applied. Used only as a by-id `<use>` sizing hint,
+/// so `<text>` (which would need font metrics) isn't measured. `None` when the subtree
+/// has no measurable geometry.
 fn plain_subtree_bbox(
     node: roxmltree::Node,
     base: crate::kurbo::Affine,
 ) -> Option<crate::kurbo::Rect> {
+    subtree_bbox(node, base, &mut Vec::new(), Stroke::NONE)
+}
+
+/// Inherited stroke state: whether a stroke is actually painted, and how wide.
+#[derive(Clone, Copy)]
+struct Stroke {
+    painted: bool,
+    width: f64,
+}
+
+impl Stroke {
+    const NONE: Self = Self {
+        painted: false,
+        width: 1.0,
+    };
+
+    /// Fold in an element's own `stroke` / `stroke-width` (attribute or inline style).
+    fn inherit(self, node: roxmltree::Node) -> Self {
+        let get = |p: &str| {
+            node.attribute(p)
+                .map(str::trim)
+                .or_else(|| style_decl(node, p))
+        };
+        Self {
+            painted: match get("stroke") {
+                Some(v) => v != "none",
+                None => self.painted,
+            },
+            width: get("stroke-width").and_then(parse_num).unwrap_or(self.width),
+        }
+    }
+
+    /// Half the stroke, in the *transformed* space — how far paint spills past the fill.
+    /// Uses `sqrt(|det|)` so a rotated or non-uniformly scaled transform still gets a
+    /// sensible single number.
+    fn outset(self, tf: crate::kurbo::Affine) -> f64 {
+        if !self.painted || self.width <= 0.0 {
+            return 0.0;
+        }
+        let scale = tf.determinant().abs().sqrt();
+        if scale.is_finite() {
+            self.width / 2.0 * scale
+        } else {
+            0.0
+        }
+    }
+}
+
+fn subtree_bbox(
+    node: roxmltree::Node,
+    base: crate::kurbo::Affine,
+    seen: &mut Vec<String>,
+    inherited: Stroke,
+) -> Option<crate::kurbo::Rect> {
     let tag = node.tag_name().name();
-    // Never-rendered subtrees (and explicitly hidden ones) would inflate the box.
+    // Never-rendered subtrees (and explicitly hidden ones) would inflate the box. A
+    // <symbol> is skipped here but *is* drawn when a <use> targets it — see below.
     if is_non_rendered(tag) || is_display_none(node) {
         return None;
     }
     let tf = base * element_transform(node);
+    let stroke = inherited.inherit(node);
     let mut acc: Option<crate::kurbo::Rect> = None;
     let mut fold = |bb: crate::kurbo::Rect| {
         acc = Some(acc.map_or(bb, |a: crate::kurbo::Rect| a.union(bb)));
@@ -1273,19 +1330,79 @@ fn plain_subtree_bbox(
         }
         return acc;
     }
+    // A same-document <use href="#id"> draws its target here, offset by x/y. (Cross-file
+    // hrefs are already baked by this point, so only local ones remain.) The id stack is
+    // the cycle guard — a <use> chain that loops back stops instead of recursing forever.
+    if tag == "use" {
+        if let Some(id) = local_href_id(node) {
+            if !seen.iter().any(|s| s == id) {
+                if let Some(target) = node
+                    .document()
+                    .descendants()
+                    .find(|n| n.is_element() && n.attribute("id") == Some(id))
+                {
+                    let target_tag = target.tag_name().name();
+                    let placed = tf
+                        * crate::kurbo::Affine::translate((
+                            attr_num(node, "x", 0.0),
+                            attr_num(node, "y", 0.0),
+                        ));
+                    seen.push(id.to_string());
+                    let bb = if matches!(target_tag, "symbol" | "svg") {
+                        // The <use> sizes the viewport when it gives width/height;
+                        // otherwise measure the (otherwise non-rendered) contents.
+                        match viewport_rect(node).and_then(|r| transform_rect_bbox(r, tf)) {
+                            Some(bb) => Some(bb),
+                            None => children_bbox(target, placed, seen, stroke),
+                        }
+                    } else {
+                        subtree_bbox(target, placed, seen, stroke)
+                    };
+                    seen.pop();
+                    if let Some(bb) = bb {
+                        fold(bb);
+                    }
+                }
+            }
+        }
+        return acc;
+    }
 
     if let Some(bb) = shape_to_path_d(node)
         .and_then(|d| transform_d(&d, tf))
         .and_then(|d| svg_path_bbox(&d))
     {
+        // Stroke straddles the outline, so paint reaches half a stroke past the fill.
+        fold(bb.inflate(stroke.outset(tf), stroke.outset(tf)));
+    }
+    if let Some(bb) = children_bbox(node, tf, seen, stroke) {
         fold(bb);
     }
+    acc
+}
+
+/// Union of `node`'s element children, measured in `tf`.
+fn children_bbox(
+    node: roxmltree::Node,
+    tf: crate::kurbo::Affine,
+    seen: &mut Vec<String>,
+    stroke: Stroke,
+) -> Option<crate::kurbo::Rect> {
+    let mut acc: Option<crate::kurbo::Rect> = None;
     for c in node.children().filter(roxmltree::Node::is_element) {
-        if let Some(bb) = plain_subtree_bbox(c, tf) {
-            fold(bb);
+        if let Some(bb) = subtree_bbox(c, tf, seen, stroke) {
+            acc = Some(acc.map_or(bb, |a: crate::kurbo::Rect| a.union(bb)));
         }
     }
     acc
+}
+
+/// The `#id` of a same-document `href` / `xlink:href`, if that's what it is.
+fn local_href_id<'a>(node: roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+    node.attribute("href")
+        .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")))?
+        .strip_prefix('#')
+        .filter(|id| !id.is_empty())
 }
 
 /// Elements whose subtree is definition-only — referenced, never drawn in place.

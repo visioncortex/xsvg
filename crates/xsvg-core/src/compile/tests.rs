@@ -2698,6 +2698,55 @@ fn by_id_bbox_ignores_non_rendered_hidden_and_clips_viewports() {
 }
 
 #[test]
+fn by_id_bbox_follows_same_document_use() {
+    // A group whose content is a live <use href="#part"> must measure the target, offset
+    // by the <use>'s x/y — otherwise it contributes nothing and the box is wrong.
+    // #part is 10 wide at x=0; the <use> shifts it to 10..20, so #mark spans 0..20.
+    let dep = format!(
+        r##"{XW}<defs><rect id="part" width="10" height="10"/></defs><g id="mark"><rect width="10" height="10"/><use href="#part" x="10" y="0"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="40"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(out.contains("scale(2)"), "measured through the <use>: {out}");
+
+    // a <use> chain that loops back must stop, not recurse forever
+    let dep = format!(
+        r##"{XW}<g id="mark"><rect width="10" height="10"/><use href="#loop"/></g><g id="loop"><use href="#mark"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(out.contains("scale(2)"), "cyclic <use> terminates: {out}");
+}
+
+#[test]
+fn by_id_bbox_counts_the_stroke_outset() {
+    // A stroke straddles the outline, so a 10-wide rect with stroke-width 4 paints from
+    // -2 to 12 — 14 wide. At width=28 that is scale 2 (without the outset it'd be 2.8).
+    let dep = format!(
+        r##"{XW}<g id="mark"><rect width="10" height="10" stroke="#000" stroke-width="4"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="28"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(out.contains("scale(2)"), "stroke half-width counted: {out}");
+
+    // stroke="none" paints nothing, so the box stays the 10-wide fill (scale 2 at 20)
+    let dep = format!(
+        r##"{XW}<g id="mark"><rect width="10" height="10" stroke="none" stroke-width="4"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(out.contains("scale(2)"), "stroke=none adds no outset: {out}");
+
+    // stroke inherits from an ancestor group
+    let dep = format!(
+        r##"{XW}<g id="mark" stroke="#000" stroke-width="4"><rect width="10" height="10"/></g></svg>"##
+    );
+    let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="28"/></svg>"##);
+    let out = compile_linked(&main, &[("d.svg", &dep)]);
+    assert!(out.contains("scale(2)"), "inherited stroke counted: {out}");
+}
+
+#[test]
 fn by_id_bbox_honors_a_css_style_transform() {
     // style="transform: translate(10px,0)" puts the 10-wide rect at x=10..20 — still 10
     // wide (scale 2 at width=20), but the box origin re-anchors onto the <use>'s x/y.
