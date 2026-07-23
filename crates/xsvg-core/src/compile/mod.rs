@@ -105,6 +105,35 @@ struct Ctx<'a> {
     files: std::cell::RefCell<Vec<String>>,
     /// canonical key of the file being serialized, so relative hrefs resolve against it.
     base: std::cell::RefCell<String>,
+    /// Stable node identity supplied by an editing host (§Incremental; consumer:
+    /// xsvg-kit). With keys, emitted identity and generated filter ids become
+    /// independent of byte offsets. [`NoKeys`] preserves byte-span behavior.
+    keys: &'a dyn NodeKeys,
+}
+
+/// Stable node identity for keyed compiles: `key(byte_start)` returns the host's
+/// stable key for the element whose source range starts there, or `None` to fall
+/// back to byte spans. With a provider, `data-xsvg-node="<key>"` replaces
+/// `data-xsvg-pos="start-end"` and filter ids become `x-flt-<key>` — an unchanged
+/// fragment's output is then **byte-stable under text shifts elsewhere** in the
+/// document (docs/Incremental.md), which is what makes surgical patching and
+/// exact-bytes verification possible for an editor. Keys are consulted only while
+/// the sourcemap is on (never inside linked dependencies, whose offsets index the
+/// dependency file).
+///
+/// Hosts MUST key **every** element, not just top-level fragments: emitters tag
+/// nested elements too (warp children, paragraphs), and an unkeyed element falls
+/// back to byte spans — silently reintroducing offset-dependence.
+pub trait NodeKeys {
+    fn key(&self, byte_start: usize) -> Option<String>;
+}
+
+/// No host keys: byte-span behavior, the default for every pre-existing entry point.
+pub struct NoKeys;
+impl NodeKeys for NoKeys {
+    fn key(&self, _: usize) -> Option<String> {
+        None
+    }
 }
 
 /// `" data-xsvg-pos=\"START-END\""` (byte offsets of `node` in the original xsvg
@@ -115,6 +144,9 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
         return String::new();
     }
     let r = node.range();
+    if let Some(k) = ctx.keys.key(r.start) {
+        return format!(" data-xsvg-node=\"{k}\"");
+    }
     format!(" data-xsvg-pos=\"{}-{}\"", r.start, r.end)
 }
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
@@ -144,6 +176,35 @@ pub fn compile_linked_impl(
     resolver: &dyn Resolver,
     base: &str,
 ) -> Result<String, String> {
+    compile_linked_keyed_impl(input, quality, sourcemap, m, shaper, outliner, resolver, base, &NoKeys)
+}
+
+/// Keyed compile without cross-file linking — the editor-host entry ([`NodeKeys`]).
+pub fn compile_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    keys: &dyn NodeKeys,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Result<String, String> {
+    compile_linked_keyed_impl(input, quality, sourcemap, m, shaper, outliner, &NoResolver, "", keys)
+}
+
+/// [`compile_linked_impl`] with host-supplied node keys ([`NodeKeys`]).
+#[allow(clippy::too_many_arguments)]
+pub fn compile_linked_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
+    keys: &dyn NodeKeys,
+) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
@@ -172,6 +233,7 @@ pub fn compile_linked_impl(
             resolver,
             files: std::cell::RefCell::new(vec![base.to_string()]),
             base: std::cell::RefCell::new(base.to_string()),
+            keys,
         },
     );
     Ok(out)
@@ -228,9 +290,47 @@ pub fn compile_fragment_linked_impl(
     resolver: &dyn Resolver,
     base: &str,
 ) -> Result<String, String> {
+    compile_fragment_linked_keyed_impl(
+        input, quality, sourcemap, offset, m, shaper, outliner, resolver, base, &NoKeys,
+    )
+}
+
+/// Keyed fragment compile without cross-file linking — the editor-host entry.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    keys: &dyn NodeKeys,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Result<String, String> {
+    compile_fragment_linked_keyed_impl(
+        input, quality, sourcemap, offset, m, shaper, outliner, &NoResolver, "", keys,
+    )
+}
+
+/// [`compile_fragment_linked_impl`] with host-supplied node keys ([`NodeKeys`]).
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_linked_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
+    keys: &dyn NodeKeys,
+) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
+    load_theme(&doc); // tokens must come from THIS document, not the last full
+                      // compile on this thread (stale-THEME hazard, kit M5)
     let node = top_level_at(&doc, offset)
         .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
     let mut out = String::new();
@@ -252,6 +352,7 @@ pub fn compile_fragment_linked_impl(
             resolver,
             files: std::cell::RefCell::new(vec![base.to_string()]),
             base: std::cell::RefCell::new(base.to_string()),
+            keys,
         },
     );
     Ok(out)
@@ -316,16 +417,35 @@ fn baked_refs<'a>(n: roxmltree::Node<'a, 'a>) -> Vec<&'a str> {
 }
 
 pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
+    dependents_multi_impl(input, &[offset])
+}
+
+/// [`dependents_impl`] seeded from several fragments at once (one parse, one
+/// union fixpoint) — a committed editor transaction can dirty k fragments, and
+/// their dependents overlap. Seed ranges themselves are excluded from the
+/// result. Results are in document order.
+pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)> {
     let Ok(doc) = roxmltree::Document::parse(input) else {
         return Vec::new();
     };
-    let Some(target) = top_level_at(&doc, offset) else {
-        return Vec::new();
+    let targets: Vec<roxmltree::Node> = {
+        let mut v: Vec<roxmltree::Node> = Vec::new();
+        for &off in seeds {
+            if let Some(t) = top_level_at(&doc, off) {
+                if !v.iter().any(|u| u.range() == t.range()) {
+                    v.push(t);
+                }
+            }
+        }
+        v
     };
+    if targets.is_empty() {
+        return Vec::new();
+    }
     // ids whose (compiled) geometry has changed; grows as dependents join
-    let mut live: Vec<&str> = target
-        .descendants()
-        .filter_map(|n| n.attribute("id"))
+    let mut live: Vec<&str> = targets
+        .iter()
+        .flat_map(|t| t.descendants().filter_map(|n| n.attribute("id")))
         .collect();
     if live.is_empty() {
         return Vec::new();
@@ -333,7 +453,7 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
     let tops: Vec<roxmltree::Node> = doc
         .root_element()
         .children()
-        .filter(|c| c.is_element() && c.range() != target.range())
+        .filter(|c| c.is_element() && !targets.iter().any(|t| t.range() == c.range()))
         .collect();
     let mut included = vec![false; tops.len()];
     loop {
@@ -385,9 +505,19 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
 /// live, mirroring CSS's whole-declaration-invalid rule. sRGB interpolation is
 /// pinned so lowered output matches live browser rendering; the region gets
 /// the ±10% margin so strokes outside the fill bbox survive.
-fn lower_filter_attr(node: roxmltree::Node, out: &mut String) -> Option<String> {
+/// Seed for generated def ids (`x-flt-…`, `x-mesh-…`, `x-mgc-…`): the host key
+/// when one is provided (offset-independent, see [`NodeKeys`]), else the node's
+/// byte start — the legacy form, byte-for-byte.
+fn gen_id_seed(node: roxmltree::Node, ctx: &Ctx) -> String {
+    match ctx.sourcemap.get().then(|| ctx.keys.key(node.range().start)).flatten() {
+        Some(k) => k,
+        None => node.range().start.to_string(),
+    }
+}
+
+fn lower_filter_attr(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> Option<String> {
     let fns = parse_filter_functions(node.attribute("filter")?)?;
-    let id = format!("x-flt-{}", node.range().start);
+    let id = format!("x-flt-{}", gen_id_seed(node, ctx));
     // pointwise functions need only the stroke margin. Blur/drop-shadow spill:
     // on a plain shape the spill is computed EXACTLY (3σ per blur + the shadow
     // offset + half the stroke width) as a userSpaceOnUse region; on
@@ -581,7 +711,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     let filter_sub = if is_root {
         None
     } else {
-        lower_filter_attr(node, out)
+        lower_filter_attr(node, out, ctx)
     };
     out.push('<');
     out.push_str(name);
@@ -647,7 +777,7 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let w = attr_num(node, "width", 0.0);
     let h = attr_num(node, "height", 0.0);
 
-    let filter_sub = lower_filter_attr(node, out);
+    let filter_sub = lower_filter_attr(node, out, ctx);
     out.push_str("<path");
     match &filter_sub {
         Some(sub) => {

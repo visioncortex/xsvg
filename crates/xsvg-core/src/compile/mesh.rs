@@ -137,7 +137,7 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
-    if !lower_mesh(&mesh, node.range().start, out, ctx) {
+    if !lower_mesh(&mesh, &gen_id_seed(node, ctx), out, ctx) {
         out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
     }
     out.push_str("</g>");
@@ -148,7 +148,7 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// texel-aligned tiny PNG (or plain path for constant regions) per region.
 /// `seed` namespaces the clip ids (the caller's source position). Returns
 /// `false` on a degenerate extent (caller emits its marker).
-pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: usize, out: &mut String, ctx: &Ctx) -> bool {
+pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: &str, out: &mut String, ctx: &Ctx) -> bool {
     use crate::gradient::{fit_field, fit_grid, texel_placement, Dof};
 
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -359,7 +359,7 @@ pub(super) fn emit_meshgradient_fill(
         out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
         return false;
     };
-    let pos = node.range().start;
+    let pos = gen_id_seed(node, ctx);
     out.push_str(&format!(
         "<clipPath id=\"x-mgc-{pos}\"><path d=\"{shape_d}\"/></clipPath><g clip-path=\"url(#x-mgc-{pos})\""
     ));
@@ -370,7 +370,7 @@ pub(super) fn emit_meshgradient_fill(
     }
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
-    if !lower_mesh(&mesh, pos, out, ctx) {
+    if !lower_mesh(&mesh, &pos, out, ctx) {
         out.push_str("<!-- xsvg: meshgradient degenerate extent -->");
     }
     out.push_str("</g>");

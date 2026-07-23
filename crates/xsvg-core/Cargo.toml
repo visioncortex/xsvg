@@ -13,6 +13,9 @@ description = "xsvg shared types + the document compiler (pure Rust, no platform
 # XML parser in the dependency graph. xsvg-wasm/xsvg-cli enable it; the tests get it via the
 # self dev-dependency below (so `cargo test` always builds the compiler).
 compile = ["dep:roxmltree"]
+# Canonical deterministic platform-seam doubles (Mono measurer, BoxShaper, …) for
+# downstream test suites (xsvg-kit parity tests). Test-only by design.
+test-doubles = []
 
 [dependencies]
 xsvg-gradient = { path = "../gradient", version = "0.1.0" }
@@ -24,6 +27,6 @@ roxmltree = { version = "0.20", optional = true }
 [dev-dependencies]
 # depend on ourselves with `compile` on, so `cargo test` always builds the compiler + its
 # tests even though the feature is off by default (does not affect the library/wasm build).
-xsvg-core = { path = ".", features = ["compile"] }
+xsvg-core = { path = ".", features = ["compile", "test-doubles"] }
 # test-only (does not affect the library or the wasm build)
 serde_json = "1"

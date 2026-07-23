@@ -20,9 +20,16 @@ pub fn on_start() {
 
 /// Browser-backed `Measurer`. `measure(text, fontCss) -> width` and
 /// `metrics(fontCss) -> [ascent, descent, capHeight, xHeight]` are canvas callbacks.
-struct JsMeasurer<'a> {
+pub struct JsMeasurer<'a> {
     measure: &'a js_sys::Function,
     metrics: &'a js_sys::Function,
+}
+
+impl<'a> JsMeasurer<'a> {
+    /// For downstream wasm crates (xsvg-kit) reusing the browser seams.
+    pub fn new(measure: &'a js_sys::Function, metrics: &'a js_sys::Function) -> Self {
+        Self { measure, metrics }
+    }
 }
 
 impl Measurer for JsMeasurer<'_> {
@@ -69,8 +76,15 @@ impl Measurer for JsMeasurer<'_> {
 /// Browser-backed [`Shaper`]: `rasterize(pathD, rowH) => Float64Array` where the
 /// array is `[minX, minY, width, height, rowH, l0, r0, l1, r1, …]` (a `NaN` pair for
 /// an empty row). The browser flattens curves + scans via `getBBox`/`isPointInFill`.
-struct JsShaper<'a> {
+pub struct JsShaper<'a> {
     rasterize: &'a js_sys::Function,
+}
+
+impl<'a> JsShaper<'a> {
+    /// For downstream wasm crates (xsvg-kit) reusing the browser seams.
+    pub fn new(rasterize: &'a js_sys::Function) -> Self {
+        Self { rasterize }
+    }
 }
 
 impl Shaper for JsShaper<'_> {
@@ -130,9 +144,16 @@ fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
 /// bytes aren't available (→ fall back to live `<text>`). `advance_width(text, family,
 /// weight, style, size) => number | NaN` returns the run's advance per the same font.
 /// Path-warping itself is native (§6.13 runs through the core §7.1 bake).
-struct JsOutliner<'a> {
+pub struct JsOutliner<'a> {
     outline_run: &'a js_sys::Function,
     advance_width: &'a js_sys::Function,
+}
+
+impl<'a> JsOutliner<'a> {
+    /// For downstream wasm crates (xsvg-kit) reusing the browser seams.
+    pub fn new(outline_run: &'a js_sys::Function, advance_width: &'a js_sys::Function) -> Self {
+        Self { outline_run, advance_width }
+    }
 }
 
 impl GlyphOutliner for JsOutliner<'_> {

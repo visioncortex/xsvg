@@ -18,12 +18,16 @@ pub mod warp;
 // module — only its entry points are re-exported (the emit_* internals stay here).
 #[cfg(feature = "compile")]
 mod compile;
+#[cfg(any(test, feature = "test-doubles"))]
+pub mod test_doubles;
 
 pub use boolean::*;
 #[cfg(feature = "compile")]
 pub use compile::{
-    compile_fragment_impl, compile_fragment_linked_impl, compile_impl, compile_linked_impl,
-    dependents_impl, fragment_range_impl, NoResolver, Resolver,
+    compile_fragment_impl, compile_fragment_keyed_impl, compile_fragment_linked_impl,
+    compile_fragment_linked_keyed_impl, compile_impl, compile_keyed_impl, compile_linked_impl,
+    compile_linked_keyed_impl, dependents_impl, dependents_multi_impl, fragment_range_impl,
+    NoKeys, NodeKeys, NoResolver, Resolver,
 };
 pub use filter::*;
 pub use offset::*;

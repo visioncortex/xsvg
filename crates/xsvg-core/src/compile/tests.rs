@@ -1,62 +1,5 @@
 use super::*;
-use crate::{RasterRegion, Rect}; // used only by the test doubles below
-
-/// Deterministic measurer: width = char count × 0.5 × size.
-struct Mono;
-impl Measurer for Mono {
-    fn measure(&self, text: &str, _style: &TextStyle, size: f64) -> f64 {
-        text.chars().count() as f64 * 0.5 * size
-    }
-}
-
-/// No shape rasterizer (the default for tests that don't use `in=`).
-struct NoShaper;
-impl Shaper for NoShaper {
-    fn rasterize(&self, _d: &str, _row_h: f64) -> Option<RasterRegion> {
-        None
-    }
-}
-
-/// Pretends every shape is a 60×60 box, so `in=`-region flow can be exercised
-/// without a browser (the real raster comes from the browser / fixtures).
-struct BoxShaper;
-impl Shaper for BoxShaper {
-    fn rasterize(&self, _d: &str, row_h: f64) -> Option<RasterRegion> {
-        let n = (60.0 / row_h).ceil().max(1.0) as usize;
-        Some(RasterRegion::new(
-            Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 60.0,
-                h: 60.0,
-            },
-            0.0,
-            row_h,
-            vec![Some((0.0, 60.0)); n],
-        ))
-    }
-}
-
-/// No glyph outliner (the default for tests not exercising `outline`).
-struct NoOutliner;
-impl GlyphOutliner for NoOutliner {
-    fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, _x: f64, _b: f64) -> Option<String> {
-        None
-    }
-}
-
-/// Stub outliner: a deterministic 1×1 box path at the run origin (so outline
-/// emit paths can be exercised without a real font) and Mono-consistent advance
-/// widths (chars × 0.5 × size), matching the `Mono` measurer.
-struct BoxOutliner;
-impl GlyphOutliner for BoxOutliner {
-    fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
-        Some(format!("M{x},{b} h1 v-1 h-1 Z"))
-    }
-    fn advance_width(&self, text: &str, _s: &TextStyle, size: f64) -> Option<f64> {
-        Some(text.chars().count() as f64 * 0.5 * size)
-    }
-}
+use crate::test_doubles::{BoxOutliner, BoxShaper, Mono, NoOutliner, NoShaper};
 
 fn compile_test(svg: &str) -> String {
     compile_impl(svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap()
@@ -3146,4 +3089,138 @@ fn sourcemap_tags_elements_with_valid_source_ranges() {
         slices.iter().any(|s| s.contains("x:textbox")),
         "no range covers the <x:textbox>: {slices:?}"
     );
+}
+
+// ------------------------------------------------------------- keyed compiles
+
+/// Test key provider: element start byte → stable key (the kit's serializer
+/// supplies exactly this shape, for every element).
+struct MapKeys(std::collections::HashMap<usize, String>);
+impl NodeKeys for MapKeys {
+    fn key(&self, s: usize) -> Option<String> {
+        self.0.get(&s).cloned()
+    }
+}
+
+/// Keys for EVERY element (root included), by document order — the shape the
+/// kit's serializer supplies. Nested elements matter: emitters tag children
+/// too (warp inner shapes, paragraphs), so a top-level-only provider would
+/// silently reintroduce offset-dependence (pinned by the byte-stability test).
+fn keys_for(input: &str) -> MapKeys {
+    let doc = roxmltree::Document::parse(input).unwrap();
+    MapKeys(
+        doc.descendants()
+            .filter(|n| n.is_element())
+            .enumerate()
+            .map(|(i, n)| (n.range().start, format!("n{i}")))
+            .collect(),
+    )
+}
+
+#[test]
+fn keyed_fragments_are_verbatim_slices_of_the_full_compile() {
+    // The canary invariant holds in keyed mode too.
+    let keys = keys_for(INC);
+    let full =
+        compile_keyed_impl(INC, "balanced", true, &keys, &Mono, &BoxShaper, &BoxOutliner).unwrap();
+    let mut cursor = 0;
+    for off in top_level_offsets(INC) {
+        let frag = compile_fragment_keyed_impl(
+            INC,
+            "balanced",
+            true,
+            off,
+            &keys,
+            &Mono,
+            &BoxShaper,
+            &BoxOutliner,
+        )
+        .unwrap();
+        assert!(!frag.is_empty());
+        let at = full[cursor..]
+            .find(&frag)
+            .unwrap_or_else(|| panic!("keyed fragment not found in order: {frag}\n{full}"));
+        cursor += at + frag.len();
+    }
+    // identity attributes are keys, not byte spans; filter ids are keyed too
+    assert!(full.contains("data-xsvg-node=\"n0\""), "{full}");
+    assert!(!full.contains("data-xsvg-pos"), "{full}");
+    assert!(full.contains("x-flt-n"), "{full}");
+    assert!(!full.contains("x-flt-1"), "no byte-offset filter ids in keyed mode: {full}");
+}
+
+#[test]
+fn keyed_fragment_output_is_byte_stable_under_text_shifts() {
+    // The reason the seam exists (docs/Incremental.md): an edit that shifts
+    // earlier bytes must not change an untouched fragment's output.
+    let shifted = INC.replace(
+        "viewBox=\"0 0 400 300\">",
+        "viewBox=\"0 0 400 300\">\n  <!-- padding: shifts every later byte offset -->",
+    );
+    assert_ne!(top_level_offsets(INC), top_level_offsets(&shifted));
+    let (keys_a, keys_b) = (keys_for(INC), keys_for(&shifted));
+    for (i, (off_a, off_b)) in top_level_offsets(INC)
+        .into_iter()
+        .zip(top_level_offsets(&shifted))
+        .enumerate()
+    {
+        let frag_a = compile_fragment_keyed_impl(
+            INC, "balanced", true, off_a, &keys_a, &Mono, &BoxShaper, &BoxOutliner,
+        )
+        .unwrap();
+        let frag_b = compile_fragment_keyed_impl(
+            &shifted, "balanced", true, off_b, &keys_b, &Mono, &BoxShaper, &BoxOutliner,
+        )
+        .unwrap();
+        assert_eq!(frag_a, frag_b, "fragment {i} must be byte-identical across the shift");
+    }
+}
+
+#[test]
+fn dependents_multi_is_the_union_closure() {
+    let wave = fragment_range_impl(INC, INC.find("id=\"wave\"").unwrap()).unwrap().0;
+    let blob = fragment_range_impl(INC, INC.find("id=\"blob\"").unwrap()).unwrap().0;
+
+    let mut union: Vec<(usize, usize)> = dependents_impl(INC, wave)
+        .into_iter()
+        .chain(dependents_impl(INC, blob))
+        .collect();
+    union.sort_unstable();
+    union.dedup();
+    // neither seed may appear in the union (each is excluded from its own scan,
+    // and here neither depends on the other)
+    let wave_range = fragment_range_impl(INC, wave).unwrap();
+    let blob_range = fragment_range_impl(INC, blob).unwrap();
+    union.retain(|r| *r != wave_range && *r != blob_range);
+
+    assert_eq!(dependents_multi_impl(INC, &[wave, blob]), union);
+    // duplicate seeds inside one fragment collapse
+    assert_eq!(dependents_multi_impl(INC, &[wave, wave + 1]), dependents_impl(INC, wave));
+    // and both closures are non-trivial (textpath / textbox+boolean-use chains)
+    assert!(!dependents_impl(INC, wave).is_empty());
+    assert!(dependents_impl(INC, blob).len() >= 2);
+}
+
+#[test]
+fn fragment_compile_reloads_theme_from_its_own_document() {
+    // Regression (stale-THEME hazard): compile_fragment_impl used to skip
+    // load_theme and silently reuse whatever the last full compile left in the
+    // thread-local.
+    let doc = |accent: &str| {
+        format!(
+            r##"{XW}<x:theme><x:color name="accent" value="{accent}"/></x:theme><rect x="0" y="0" width="10" height="10" fill="var(accent)"/></svg>"##
+        )
+    };
+    let red = doc("#ff0000");
+    let blue = doc("#0000ff");
+
+    // Poison the thread-local with red…
+    let _ = compile_test(&red);
+    // …then a fragment compile of the BLUE document must resolve blue.
+    let off = fragment_range_impl(&blue, blue.find("<rect").unwrap()).unwrap().0;
+    let frag =
+        compile_fragment_impl(&blue, "balanced", false, off, &Mono, &NoShaper, &NoOutliner)
+            .unwrap();
+    assert!(frag.contains("#0000ff"), "fragment must use its own document's theme: {frag}");
+    assert!(!frag.contains("#ff0000"), "stale theme leaked: {frag}");
 }

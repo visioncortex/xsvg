@@ -54,6 +54,23 @@ enough that one edit re-lowers one feature's worth of work.
   be re-emitted alongside this fragment: the **transitive closure** over baked `in="#id"` references
   (an `x:` element's compiled output can itself be a target — Specification.md §4).
 
+## 3.1 Keyed compiles (editor hosts)
+
+Stock fragment output is **byte-offset-dependent**: `data-xsvg-pos` embeds source
+spans and generated def ids seed on byte starts (`x-flt-…`, `x-mesh-…`, `x-mgc-…`),
+so an edit that shifts earlier bytes changes later fragments' output even when
+nothing about them changed. The `NodeKeys` seam removes that: a host supplies
+`key(byte_start) → stable key` and calls the `*_keyed_impl` variants
+(`compile_keyed_impl`, `compile_fragment_keyed_impl`, plus `_linked_` forms). With
+keys, identity emits as `data-xsvg-node="<key>"`, def ids become `x-flt-<key>` etc.,
+and an unchanged fragment's output is **byte-stable under text shifts** (pinned by
+`keyed_fragment_output_is_byte_stable_under_text_shifts`). Hosts MUST key every
+element — emitters tag nested elements too (warp children, paragraphs); an unkeyed
+element falls back to byte spans. Keys are never consulted inside linked
+dependencies (their offsets index the dependency file). `dependents_multi_impl`
+computes the union closure from several seed fragments in one parse. The first
+consumer is xsvg-kit (the editor core).
+
 ## 4. JS-side protocol (next slice)
 
 1. Keep the compiled document in the DOM with `sourcemap` on; maintain a map
