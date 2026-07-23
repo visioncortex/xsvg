@@ -1,7 +1,7 @@
 //! Fidelity + performance bench for the grid-fit solver and the alpha
 //! pipeline — the numbers behind docs/Bench.md. Run release:
 //!
-//!     cargo run --release -p gradient --example bench_fit
+//!     cargo run --release -p xsvg-gradient --example bench_fit
 //!
 //! 1. SOLVER: banded conjugate gradient (shipped) vs a dense Gauss–Jordan
 //!    reference, on a hard radial field. Fidelity must match (same normal
@@ -10,13 +10,13 @@
 //!    error measured in *premultiplied* space (what compositing shows over
 //!    any background).
 
-use gradient::{fit_grid, GridField};
+use xsvg_gradient::{fit_grid, GridField};
 use std::time::Instant;
 
 /// Dense Gauss–Jordan reference (the solver the CG replaced), assembled from
 /// the same bilinear footprint — used only to check fidelity/time here.
 fn fit_grid_dense(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) -> GridField {
-    let rect = gradient::Rect::of_indices(indices, w);
+    let rect = xsvg_gradient::Rect::of_indices(indices, w);
     let (dx, dy) = (
         (rect.width - 1).max(1) as f32,
         (rect.height - 1).max(1) as f32,
