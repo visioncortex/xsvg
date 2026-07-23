@@ -14,7 +14,7 @@
 //!   await preview.render(source);
 
 export { compileXsvg, initFromBytes, registerOutlineFont, rasterize } from "./compiler";
-export type { CompileOptions } from "./compiler";
+export type { CompileOptions, DepLoader } from "./compiler";
 
 export { createPreview } from "./preview";
 export type { Preview, PreviewOptions, RenderResult } from "./preview";

@@ -170,13 +170,25 @@ self-contained (no dependence on the browser's spotty external-`<use>` support).
   marker (§3), as do a missing/unreadable dependency and links nested past a fixed depth (v0: 16).
 - A same-document `<use href="#id">` is **not** a link — it stays a live SVG reference (§5).
 
-**Resolution is a platform seam.** The host resolves the `href` (relative to the referrer) and
-enforces its own security model, then hands the compiler the dependency's source:
+**Resolution is a platform seam, and discovery is lazy.** Dependencies are discovered by the
+compiler alone, the moment it reaches a link — there is no pre-scan and no materialized dependency
+graph anywhere (the graph exists only implicitly: discovered edges plus the cycle stack). The host
+resolves the `href` (relative to the referrer), enforces its own security model, and hands the
+compiler the dependency's source:
 
-- **CLI / Node** read from disk, relative to the source file's directory — synchronous, on demand.
-- **Browser** fetches dependencies **same-origin** *before* compiling (the compile core is
-  synchronous); a **cross-origin** `href` fails CORS and that `<use>` simply degrades. The referring
-  file is the base, so relative hrefs resolve against it.
+- **CLI / Node** read from disk, relative to the source file's directory — synchronous, on demand,
+  a single compile pass.
+- **Hosts with async I/O** (browser `fetch`, an editor-extension RPC) can't answer the synchronous
+  compiler mid-call, so they converge in **rounds**: compile, let the resolver record which
+  canonical keys were missing, load exactly those, and re-run — bounded by the link-depth cap.
+  Intermediate rounds are cheap *probes* (stub platform seams, fast quality, output discarded);
+  discovery is structural, so probes find the same links as a full compile. Misses are cached by
+  canonical key (a diamond `A→B→D, A→C→D` fetches `D` once) with failures remembered as tombstones.
+  The final round's resolver still records misses, so correctness never depends on probe fidelity.
+- In the **browser**, the default loader is **same-origin** `fetch` — a **cross-origin** `href`
+  fails CORS and that `<use>` simply degrades. The referring file is the base, so relative hrefs
+  resolve against it. Embedders can substitute a sync resolver (bundled deps, one pass) or an async
+  `key`/`fetch` loader (see the viewer package's `DepLoader`).
 
 Links are **baked references** like §4: editing a dependency re-emits its dependents.
 

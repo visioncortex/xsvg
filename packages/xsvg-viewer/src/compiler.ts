@@ -271,6 +271,27 @@ function advanceWidth(
   return font ? font.getAdvanceWidth(text, size) : NaN;
 }
 
+/**
+ * How an async host supplies cross-file `<use href>` dependencies (§4.2). Dependency
+ * *discovery* belongs to the compiler alone — it calls its resolver the moment it
+ * reaches a link. A host that cannot answer synchronously (fetch, an RPC to an
+ * extension host) implements just these two functions; the fixpoint driver in
+ * `compileXsvg` turns them into the compiler's synchronous seam by re-running the
+ * compile until no dependency is missing (bounded by the core's link-depth cap).
+ */
+export interface DepLoader {
+  /**
+   * Canonical identity of `href` resolved against `base` — synchronous and pure
+   * (e.g. `new URL(href, base).href`). Two references to the same file MUST return
+   * the same key (this is what makes a diamond fetch once), and it must match the
+   * key the compiler's cycle guard sees. `null` = unresolvable (that `<use>` degrades).
+   */
+  key(base: string, href: string): string | null;
+  /** Fetch the source text for a canonical key. Called at most once per key per
+   *  compile — a rejection is remembered as missing (that `<use>` degrades). */
+  fetch(key: string): Promise<string>;
+}
+
 export interface CompileOptions {
   /** Quality profile string (default "balanced"). */
   quality?: string;
@@ -289,61 +310,123 @@ export interface CompileOptions {
   baseUrl?: string;
   /**
    * Custom cross-file resolver. When provided it is used directly (synchronous,
-   * on-demand) and the same-origin `fetch` walk is skipped — e.g. to link against
-   * bundled/in-memory dependencies. `(base, href) => [canonicalKey, source] | null`.
+   * on-demand, single compile pass) — e.g. to link against bundled/in-memory
+   * dependencies. `(base, href) => [canonicalKey, source] | null`.
    */
   resolve?: (base: string, href: string) => [string, string] | null;
+  /**
+   * Custom async dependency loader (see `DepLoader`) for hosts whose bytes live
+   * behind an async boundary (an extension host, a virtual FS). Ignored when
+   * `resolve` is given. Defaults to same-origin `fetch`.
+   */
+  loader?: DepLoader;
 }
 
-// The hrefs of `<use>` elements that point at another file (not a same-document
-// `#fragment`) — the cross-file link edges to resolve.
-function externalUseHrefs(svg: string): string[] {
-  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
-  const out: string[] = [];
-  for (const u of Array.from(doc.getElementsByTagName("use"))) {
-    const href = u.getAttribute("href") ?? u.getAttribute("xlink:href");
-    if (href && !href.startsWith("#")) out.push(href.split("#")[0]);
-  }
-  return out;
+// The default browser loader: URL canonicalization + same-origin fetch. Policy lives
+// in the platform — a cross-origin key simply fails CORS and becomes a tombstone.
+function fetchLoader(fallbackBase: string): DepLoader {
+  return {
+    key(base, href) {
+      try {
+        return new URL(href, base || fallbackBase || undefined).href;
+      } catch {
+        return null;
+      }
+    },
+    async fetch(key) {
+      const res = await fetch(key);
+      if (!res.ok) throw new Error(`${res.status} ${key}`);
+      return res.text();
+    },
+  };
 }
 
-/** Walk the cross-file `<use>` dependency graph from `source` (base `baseUrl`), fetching
- *  each dependency **same-origin**, until the graph is closed. Returns `absoluteURL →
- *  compiled-ready source` (google-font markers stripped, fonts preloaded), keyed the same
- *  way the resolver will look them up. Cross-origin / missing deps are skipped (→ degrade);
- *  a `visited` set dedups diamonds and stops fetch loops (the compiler guards true cycles). */
-async function collectDeps(source: string, baseUrl: string): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  const seen = new Set<string>();
-  // queue of [rawHref, baseToResolveAgainst]
-  const queue: [string, string][] = externalUseHrefs(source).map((h) => [h, baseUrl]);
-  while (queue.length) {
-    const [href, base] = queue.shift()!;
-    let url: string;
-    try {
-      url = new URL(href, base || undefined).href;
-    } catch {
-      continue; // unresolvable href → skip (the <use> degrades)
+// Stub platform seams for probe rounds. Links are *structural* — which elements the
+// serializer visits doesn't depend on measurement fidelity — so a compile against
+// these discovers the same `resolve()` calls as the real one at a fraction of the
+// cost (no canvas, no fonts, no shape rasterization). Output is discarded.
+const probeSeams = {
+  measure: (text: string) => text.length * 8,
+  metrics: () => [10, 3, 7, 5],
+  rasterize: () => [],
+  outline: () => "",
+  advanceWidth: () => NaN,
+};
+
+// Safety bound on fixpoint rounds. Convergence needs at most link-depth rounds (the
+// core caps nesting at 16) and the cache only ever grows, so this never bites on
+// real input — it is a guard against a pathological loader.
+const MAX_ROUNDS = 20;
+
+/**
+ * Fixpoint driver: run the sync compiler, let its resolver record which canonical
+ * keys were missing, load exactly those, and repeat until nothing is missing.
+ * Discovery therefore stays owned by the compiler — no pre-scan, no materialized
+ * dependency graph; the graph is implicit and only ever *recorded* (the cache).
+ *
+ * Rounds after the first run as cheap probes (stub seams, "fast" quality, output
+ * discarded) — only the converged final round pays for real text layout. The final
+ * round's resolver still records misses, so correctness never depends on probe
+ * fidelity: an under-discovering probe would just cost one more loop iteration.
+ */
+async function compileFixpoint(
+  source: string,
+  quality: string,
+  sourcemap: boolean,
+  loader: DepLoader,
+  base: string,
+): Promise<string> {
+  // canonical key → source text, or null = known-missing (tombstone: degrade, don't refetch)
+  const cache = new Map<string, string | null>();
+  const makeResolve = (misses: Set<string>) => (b: string, href: string): [string, string] | null => {
+    const key = loader.key(b || base, href);
+    if (key == null) return null;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit === null ? null : [key, hit];
+    misses.add(key);
+    return null; // degrade this round; the driver fetches it before the next
+  };
+  const loadAll = (keys: Set<string>) =>
+    Promise.all(
+      [...keys].map(async (key) => {
+        try {
+          const text = await loader.fetch(key);
+          // Dep fonts get the same treatment as the entry document's.
+          await Promise.all(googleFamilies(text).map(ensureGoogleFont));
+          cache.set(key, stripGooglePrefix(text));
+        } catch {
+          cache.set(key, null);
+        }
+      }),
+    );
+
+  // First round is the real compile: a document with no (missing) deps — the common
+  // case — pays exactly one compile, same as before linking existed.
+  let probing = false;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const misses = new Set<string>();
+    const resolve = makeResolve(misses);
+    if (probing) {
+      compile(source, "fast", false, probeSeams.measure, probeSeams.metrics, probeSeams.rasterize, probeSeams.outline, probeSeams.advanceWidth, resolve, base);
+      if (misses.size === 0) {
+        probing = false; // discovery converged → next round is the real one
+        continue;
+      }
+    } else {
+      const svg = compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base);
+      if (misses.size === 0) return svg;
+      probing = true; // deps discovered → cheap rounds until the set closes
     }
-    if (seen.has(url)) continue;
-    seen.add(url);
-    let text: string;
-    try {
-      const res = await fetch(url); // same-origin; cross-origin without CORS throws
-      if (!res.ok) continue;
-      text = await res.text();
-    } catch {
-      continue; // network / CORS failure → skip
-    }
-    await Promise.all(googleFamilies(text).map(ensureGoogleFont));
-    map.set(url, stripGooglePrefix(text));
-    for (const h of externalUseHrefs(text)) queue.push([h, url]);
+    await loadAll(misses);
   }
-  return map;
+  // Pathological loader (cap hit): compile once more and return the degraded-but-valid
+  // output — missing links carry their marker comments, nothing throws.
+  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, makeResolve(new Set()), base);
 }
 
 /** Compile an xsvg source string to a plain-SVG string (runs entirely client-side).
- *  Cross-file `<use href="file.svg">` links are resolved same-origin and baked in. */
+ *  Cross-file `<use href="file.svg">` links are discovered lazily by the compiler and
+ *  baked in — same-origin fetch by default, or a custom `resolve`/`loader`. */
 export async function compileXsvg(source: string, opts: CompileOptions = {}): Promise<string> {
   await ensureReady();
   const base = opts.baseUrl ?? (typeof location !== "undefined" ? location.href : "");
@@ -351,24 +434,10 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   // strip the marker so the compiler only ever sees bare family names.
   await Promise.all(googleFamilies(source).map(ensureGoogleFont));
   source = stripGooglePrefix(source);
-  // A caller-supplied resolver (e.g. bundled deps) is used directly — the sync compiler
-  // calls it on demand. Otherwise close the dependency graph up front over same-origin
-  // fetch, then link from the preloaded map.
-  let resolve: (base: string, href: string) => [string, string] | null;
-  if (opts.resolve) {
-    resolve = opts.resolve;
-  } else {
-    const deps = await collectDeps(source, base);
-    resolve = (b, href) => {
-      try {
-        const key = new URL(href, b || base || undefined).href;
-        const text = deps.get(key);
-        return text === undefined ? null : [key, text];
-      } catch {
-        return null;
-      }
-    };
-  }
   const { quality = "balanced", sourcemap = false } = opts;
-  return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base);
+  if (opts.resolve) {
+    // Sync resolver (bundled/in-memory deps): the compiler links on demand, one pass.
+    return compile(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, opts.resolve, base);
+  }
+  return compileFixpoint(source, quality, sourcemap, opts.loader ?? fetchLoader(base), base);
 }

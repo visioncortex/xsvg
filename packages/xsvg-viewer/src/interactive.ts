@@ -164,6 +164,8 @@ export class XsvgViewInteractive extends HTMLElement {
   private dropped: string | null = null;
   private srcProp: string | null = null;
   private resolveFn: ((base: string, href: string) => [string, string] | null) | null = null;
+  private loaderObj: import("./compiler").DepLoader | null = null;
+  private baseUrlProp: string | null = null;
   private resizeObs: ResizeObserver | null = null;
 
   /** Inline xsvg source as a JS property (used by the React wrapper / thin hosts). */
@@ -178,6 +180,28 @@ export class XsvgViewInteractive extends HTMLElement {
   }
   get resolve() {
     return this.resolveFn;
+  }
+
+  /** Custom async dependency loader (see `DepLoader` in `compileXsvg`) — for hosts whose
+   *  dependency bytes live behind an async boundary (e.g. a VSCode extension host RPC).
+   *  Ignored when `resolve` is set. */
+  set loader(l: import("./compiler").DepLoader | null) {
+    this.loaderObj = l;
+    void this.render();
+  }
+  get loader() {
+    return this.loaderObj;
+  }
+
+  /** Base the document's relative `<use href>` links resolve against, when the source is
+   *  supplied via the `source` property rather than a `src` attribute (which carries its
+   *  own base). E.g. the file's URI in an editor host. */
+  set baseUrl(v: string | null) {
+    this.baseUrlProp = v;
+    void this.render();
+  }
+  get baseUrl() {
+    return this.baseUrlProp;
   }
 
   constructor() {
@@ -320,12 +344,14 @@ export class XsvgViewInteractive extends HTMLElement {
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
       const src = this.getAttribute("src");
-      const baseUrl = src ? new URL(src, location.href).href : undefined;
+      const baseUrl =
+        this.baseUrlProp ?? (src ? new URL(src, location.href).href : undefined);
       const svg = await compileXsvg(source, {
         quality,
         sourcemap: withInspector,
         baseUrl,
         resolve: this.resolveFn ?? undefined,
+        loader: this.loaderObj ?? undefined,
       });
       if (mine !== this.token) return;
 

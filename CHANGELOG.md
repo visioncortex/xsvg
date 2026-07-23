@@ -17,14 +17,20 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
   thins the letters; `x:border-width` is the width visible outside the glyph. Works on `<x:textbox>`,
   `<x:textpath>`, and outlined text. Raw SVG `stroke*` attributes on live text also pass through now
   (previously dropped). New `bordered-text` sample. Spec §6.17.
-- **Cross-file `<use>` links.** A `<use href="logo.svg">` (or `#id`) now links another file at
+- **Cross-file `<use>` links.** A `<use href="logo.xsvg">` (or `#id`) links another file at
   compile time — the dependency is compiled and **baked in** (whole-file as a nested `<svg>`
-  viewport, `#id` as that element sized to its **own** extent), so you author a logo once and the
-  output stays self-contained. Forms a DAG with cycle/depth guards; degrades gracefully. Resolved
-  from disk in the CLI / `@visioncortex/xsvg-compile` (new `basePath` option), and **same-origin**
-  `fetch` in the browser (`compileXsvg` gains `baseUrl`; cross-origin fails CORS → degrades). The
-  `<xsvg-view-interactive>` / `<xsvg-view>` elements gain a `resolve` property to link against
-  bundled / in-memory deps instead of fetching. Spec §4.2.
+  viewport, `#id` as that element sized to its **own** extent: declared viewBox/width/height, else
+  its drawn geometry's box incl. local `<use>` targets and stroke), so you author a logo once and
+  the output stays self-contained. A DAG with cycle/depth guards; degrades gracefully; per-file
+  `#id` scoping; no source map inside dependencies (the baked block maps to its `<use>` in the
+  entry document). **Discovery is lazy** — the compiler finds links itself; no pre-scan anywhere.
+  Sync hosts link in one pass: the CLI / `@visioncortex/xsvg-compile` read from disk on demand
+  (new `basePath` option), and a `resolve` option/property links bundled in-memory deps. Async
+  hosts converge via a fixpoint driver (cheap probe rounds; deps cached by canonical key, so a
+  diamond fetches once): the browser default is **same-origin** `fetch` (cross-origin fails CORS →
+  degrades), and a `loader` (`DepLoader`: `key`/`fetch`) option on `compileXsvg` + `loader`/
+  `baseUrl` properties on `<xsvg-view-interactive>` let e.g. a VSCode extension host supply deps
+  over RPC. Spec §4.2.
 - Connectors: `from`/`to` now accept a **forced anchor** — `#id:<anchor>` where `<anchor>` is an
   edge (`left|right|top|bottom`), a corner (`left-top`…, either order), or `center` — and **raw
   coordinates** via `from-point`/`to-point`, alongside a plain `#id` (the reference wins if both
@@ -40,19 +46,6 @@ iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
 
 ### Fixed
 
-- **Cross-file `#id` collision.** The compiled-output reference memo and cycle stack are keyed by
-  bare id but were shared across linked files, so a dependency resolving its own `#a` could hand
-  the referrer that geometry (and a shared id could report a false cycle). Each linked file now
-  gets its own scope; the work budget stays global.
-- No source map inside linked dependencies: a dependency's byte ranges index *its* file, so baked
-  content pointed at garbage spans of the entry source. The linked block now resolves to its
-  `<use>` in the entry document.
-- By-id `<use>` sizing measures a truer box: definition-only subtrees (`<defs>`, `<clipPath>`,
-  `<symbol>`, gradients, …) and `display:none` elements no longer inflate it, a nested `<svg>`
-  contributes its (clipping) viewport instead of unmapped viewBox content, `<image>` contributes
-  its box, same-document `<use href="#id">` targets are followed (offset by `x`/`y`, cycle
-  guarded), each shape's stroke half-width is added, and `style="transform:…"` is honoured
-  alongside the attribute.
 - Interactive viewer inspector: straight/axis-aligned connectors (and any zero-area shape) now
   get a visible highlight — an SVG rect with a zero dimension isn't drawn, so the highlight band
   is inflated to a small minimum.
