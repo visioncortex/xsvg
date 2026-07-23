@@ -7,16 +7,16 @@
 import "../base.css";
 import "@visioncortex/xsvg-viewer/interactive";
 import { downloadSvg } from "@visioncortex/xsvg-viewer";
-import { SAMPLES, requestedSample, datasetResolver } from "../core/samples";
+import { SAMPLES, requestedSample, DATASET_BASE } from "../core/samples";
 
-type LinkResolver = (base: string, href: string) => [string, string] | null;
 const view = document.getElementById("view") as HTMLElement & {
   source?: string | null;
-  resolve?: LinkResolver | null;
+  baseUrl?: string | null;
 };
-// Samples are bundled strings, so their cross-file <use href> deps link against the
-// bundled dataset (same as the preview) rather than a network fetch.
-view.resolve = datasetResolver;
+// Samples arrive as bundled strings (no src attribute), so give their relative
+// <use href> links a base under /dataset/ — deps then load over the compiler's
+// real lazy fetch path, served by the dev middleware.
+view.baseUrl = DATASET_BASE;
 const docName = document.getElementById("doc-name")!;
 const dropHint = document.getElementById("drop-hint")!;
 const downloadLink = document.getElementById("download-svg") as HTMLAnchorElement;
