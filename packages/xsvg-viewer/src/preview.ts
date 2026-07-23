@@ -8,7 +8,7 @@
 //
 //   const preview = createPreview(hostEl, { hashDeepLink: true, showErrors: true });
 //   await preview.render(source);
-import { compileXsvg } from "./compiler";
+import { compileXsvg, type DepLoader } from "./compiler";
 import { findArtboards, makeThumb } from "./artboards";
 
 // The component's styles, injected once into <head> on first use. Inlined (rather than a
@@ -70,6 +70,10 @@ export interface PreviewOptions {
   /** Base URL the source's relative `<use href="…">` links resolve against (see
    *  `compileXsvg`) — e.g. the URL the document was loaded from. */
   baseUrl?: string;
+  /** Custom async dependency loader (see `DepLoader` in `compileXsvg`) for hosts whose
+   *  dependency bytes live behind an async boundary (an extension host, a virtual FS).
+   *  Ignored when `resolve` is given. Defaults to same-origin fetch. */
+  loader?: DepLoader;
 }
 
 /** "superseded" means a newer render() started before this one finished — the
@@ -195,7 +199,11 @@ export function createPreview(host: HTMLElement, opts: PreviewOptions = {}): Pre
     const mine = ++seq;
     let svgHtml: string;
     try {
-      svgHtml = await compileXsvg(source, { resolve: opts.resolve, baseUrl: opts.baseUrl });
+      svgHtml = await compileXsvg(source, {
+        resolve: opts.resolve,
+        baseUrl: opts.baseUrl,
+        loader: opts.loader,
+      });
     } catch (err) {
       if (mine !== seq) return "superseded"; // a newer edit already superseded us
       if (opts.showErrors) {

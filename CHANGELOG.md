@@ -10,6 +10,12 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+### Added
+
+- `createPreview` accepts the async `loader` option (`DepLoader`), matching
+  `compileXsvg` and the interactive element — for embedding the preview surface
+  behind an async dependency boundary.
+
 ## [0.1.6] — 2026-07-23
 
 From this release the two npm packages share one version; `xsvg-compile` jumps
