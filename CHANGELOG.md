@@ -15,6 +15,12 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 - `createPreview` accepts the async `loader` option (`DepLoader`), matching
   `compileXsvg` and the interactive element — for embedding the preview surface
   behind an async dependency boundary.
+- Cross-file linking on every embed surface: the static `<xsvg-view>` element gains a
+  `base-url` attribute plus `baseUrl`/`resolve`/`loader` properties, and both React
+  components (`XsvgView`, `XsvgViewInteractive`) gain `baseUrl`/`resolve`/`loader`
+  props — so an inline-source embed (e.g. a docs page) can resolve `<use href>` deps.
+  The React `XsvgView` also now defaults the base to the fetched `src` URL, matching
+  the custom element (deps previously resolved against the page).
 
 ## [0.1.6] — 2026-07-23
 

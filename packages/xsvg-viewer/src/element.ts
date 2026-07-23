@@ -15,15 +15,47 @@
 //! root (style-isolated); the browser's own SVG engine does the drawing. This is the
 //! "render like an image" surface — no pan/zoom/inspector, ideal for docs & iframes.
 //! For a bundler-free `<script>` include, use the self-contained `dist/xsvg.js` build.
-import { compileXsvg } from "./compiler";
+import { compileXsvg, type DepLoader } from "./compiler";
 
 export class XsvgView extends HTMLElement {
-  static observedAttributes = ["src", "quality"];
+  static observedAttributes = ["src", "quality", "base-url"];
   private shadow: ShadowRoot;
   private token = 0;
   // A file dropped onto the viewer, rendered in place of `src`. Only ever set when the
   // opt-in `droppable` attribute is present; otherwise the viewer stays locked to `src`.
   private dropped: string | null = null;
+  private baseUrlProp: string | null = null;
+  private resolveFn: ((base: string, href: string) => [string, string] | null) | null = null;
+  private loaderObj: DepLoader | null = null;
+
+  /** Base the source's relative `<use href>` links resolve against — for inline/data-island
+   *  sources, which otherwise resolve against the page. Also settable as the `base-url`
+   *  attribute; a `src` attribute carries its own base. */
+  set baseUrl(v: string | null) {
+    this.baseUrlProp = v;
+    void this.render();
+  }
+  get baseUrl() {
+    return this.baseUrlProp;
+  }
+
+  /** Custom sync cross-file resolver (see `compileXsvg`) — bundled/in-memory deps. */
+  set resolve(fn: ((base: string, href: string) => [string, string] | null) | null) {
+    this.resolveFn = fn;
+    void this.render();
+  }
+  get resolve() {
+    return this.resolveFn;
+  }
+
+  /** Custom async dependency loader (see `DepLoader`). Ignored when `resolve` is set. */
+  set loader(l: DepLoader | null) {
+    this.loaderObj = l;
+    void this.render();
+  }
+  get loader() {
+    return this.loaderObj;
+  }
 
   constructor() {
     super();
@@ -78,11 +110,20 @@ export class XsvgView extends HTMLElement {
       if (mine !== this.token) return;
       if (!source) return;
       const quality = this.getAttribute("quality") ?? "balanced";
-      // A `src` file is the base for its own relative <use href> deps; inline islands
+      // Base for relative <use href> deps: an explicit baseUrl property / base-url
+      // attribute wins; else a `src` file is its own base; inline islands otherwise
       // resolve against the page.
       const src = this.getAttribute("src");
-      const baseUrl = src ? new URL(src, location.href).href : undefined;
-      const svg = await compileXsvg(source, { quality, baseUrl });
+      const explicit = this.baseUrlProp ?? this.getAttribute("base-url");
+      const baseUrl =
+        (explicit ? new URL(explicit, location.href).href : undefined) ??
+        (src ? new URL(src, location.href).href : undefined);
+      const svg = await compileXsvg(source, {
+        quality,
+        baseUrl,
+        resolve: this.resolveFn ?? undefined,
+        loader: this.loaderObj ?? undefined,
+      });
       if (mine !== this.token) return;
       // compiled SVGs carry a viewBox but no width/height — make it fill the host.
       this.shadow.innerHTML = `<style>:host{display:block}svg{display:block;width:100%;height:auto}</style>${svg}`;

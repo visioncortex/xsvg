@@ -10,9 +10,20 @@
 //! the `/react` entry, so non-React consumers never load it.
 import { createElement, useEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent, HTMLAttributes } from "react";
-import { compileXsvg } from "./compiler";
+import { compileXsvg, type DepLoader } from "./compiler";
 
-export interface XsvgViewProps extends Omit<HTMLAttributes<HTMLDivElement>, "onError"> {
+/** Cross-file `<use href>` linking inputs, shared by both components (see `compileXsvg`). */
+interface LinkProps {
+  /** Base URL the source's relative `<use href="…">` links resolve against. Defaults
+   *  to the `src` URL when fetching, else the page URL. */
+  baseUrl?: string;
+  /** Custom sync cross-file resolver — bundled/in-memory deps; single compile pass. */
+  resolve?: (base: string, href: string) => [string, string] | null;
+  /** Custom async dependency loader (`key`/`fetch`). Ignored when `resolve` is given. */
+  loader?: DepLoader;
+}
+
+export interface XsvgViewProps extends Omit<HTMLAttributes<HTMLDivElement>, "onError">, LinkProps {
   /** Inline xsvg source. Takes precedence over `src`. */
   source?: string;
   /** URL to fetch xsvg source from (used when `source` is absent). */
@@ -31,7 +42,7 @@ function fit(svg: string): string {
   return svg.replace(/^<svg\b/, '<svg style="display:block;width:100%;height:auto"');
 }
 
-export interface XsvgViewInteractiveProps extends HTMLAttributes<HTMLElement> {
+export interface XsvgViewInteractiveProps extends HTMLAttributes<HTMLElement>, LinkProps {
   /** Inline xsvg source. Takes precedence over `src`. */
   source?: string;
   /** URL to fetch xsvg source from. */
@@ -48,8 +59,15 @@ export interface XsvgViewInteractiveProps extends HTMLAttributes<HTMLElement> {
 /** The full interactive viewer (pan/zoom, artboard deck, optional inspector) as a
  *  React component. Registers the `<xsvg-view-interactive>` element on mount via a
  *  dynamic import, so `XsvgView` above never pulls in the pan/zoom code. */
-export function XsvgViewInteractive({ source, src, quality, inspector, droppable, ...rest }: XsvgViewInteractiveProps) {
-  const ref = useRef<HTMLElement & { source?: string | null }>(null);
+export function XsvgViewInteractive({ source, src, quality, inspector, droppable, baseUrl, resolve, loader, ...rest }: XsvgViewInteractiveProps) {
+  const ref = useRef<
+    HTMLElement & {
+      source?: string | null;
+      baseUrl?: string | null;
+      resolve?: XsvgViewInteractiveProps["resolve"] | null;
+      loader?: DepLoader | null;
+    }
+  >(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -65,14 +83,20 @@ export function XsvgViewInteractive({ source, src, quality, inspector, droppable
     if (quality != null) el.setAttribute("quality", quality); else el.removeAttribute("quality");
     el.toggleAttribute("inspector", !!inspector);
     el.toggleAttribute("droppable", !!droppable);
-    // Inline source flows through the element's property (re-renders on assignment).
+    // Linking inputs and inline source flow through the element's properties. Every
+    // assignment re-renders, so only touch what changed, and set source last so it
+    // compiles with the linking inputs in place. (resolve/loader compare by reference
+    // — memoize them in the consumer, per the usual React contract.)
+    if (el.baseUrl !== (baseUrl ?? null)) el.baseUrl = baseUrl ?? null;
+    if (el.resolve !== (resolve ?? null)) el.resolve = resolve ?? null;
+    if (el.loader !== (loader ?? null)) el.loader = loader ?? null;
     if (source != null) el.source = source;
-  }, [ready, source, src, quality, inspector, droppable]);
+  }, [ready, source, src, quality, inspector, droppable, baseUrl, resolve, loader]);
 
   return createElement("xsvg-view-interactive", { ref, ...rest });
 }
 
-export function XsvgView({ source, src, quality, droppable, onError, ...rest }: XsvgViewProps) {
+export function XsvgView({ source, src, quality, droppable, onError, baseUrl, resolve, loader, ...rest }: XsvgViewProps) {
   const [html, setHtml] = useState("");
   const [error, setError] = useState<string | null>(null);
   // A dropped file overrides source/src; cleared whenever those inputs change.
@@ -97,7 +121,11 @@ export function XsvgView({ source, src, quality, droppable, onError, ...rest }: 
           if (!cancelled) { setHtml(""); setError(null); }
           return;
         }
-        const svg = await compileXsvg(text, { quality });
+        // Base for relative <use href> deps: an explicit baseUrl wins; else a fetched
+        // `src` file is its own base; inline source otherwise resolves against the page.
+        const base =
+          baseUrl ?? (!(dropped ?? source) && src ? new URL(src, location.href).href : undefined);
+        const svg = await compileXsvg(text, { quality, baseUrl: base, resolve, loader });
         if (!cancelled) { setHtml(fit(svg)); setError(null); }
       } catch (err) {
         if (cancelled) return;
@@ -107,7 +135,7 @@ export function XsvgView({ source, src, quality, droppable, onError, ...rest }: 
       }
     })();
     return () => { cancelled = true; };
-  }, [dropped, source, src, quality]);
+  }, [dropped, source, src, quality, baseUrl, resolve, loader]);
 
   // Drop-to-load is opt-in; without `droppable` the viewer renders only source/src.
   const dropHandlers = droppable
