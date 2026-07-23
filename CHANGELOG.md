@@ -4,11 +4,19 @@ All notable changes are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 per-package [Semantic Versioning](https://semver.org/).
 
-Versions below track the **`@visioncortex/xsvg-viewer`** npm package — the actively
-iterating artifact. `@visioncortex/xsvg-compile` and the Rust crates
-(`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.0**.
+Versions below track the npm packages — **`@visioncortex/xsvg-viewer`** and
+**`@visioncortex/xsvg-compile`** release in version-paired lockstep. The Rust
+crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.0**.
 
 ## [Unreleased]
+
+## [0.1.6] — 2026-07-23
+
+From this release the two npm packages share one version; `xsvg-compile` jumps
+0.1.0 → 0.1.6. Its own changes: fixes the package failing to load under Node
+(`exports is not defined` — the wasm pkg is now marked CommonJS), and adds
+cross-file `<use href>` linking from disk via the new `basePath` option.
+Crates unchanged at 0.1.0.
 
 ### Added
 
@@ -110,7 +118,8 @@ Deprecated on npm — published with debug WebAssembly. Use 0.1.2 or later.
   - **`@visioncortex/xsvg-compile`** (Node): browser-free `compile()`.
   - Rust crates on crates.io: `xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`.
 
-[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.6
 [0.1.5]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.5
 [0.1.4]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.4
 [0.1.3]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.3

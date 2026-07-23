@@ -1,6 +1,6 @@
 {
   "name": "@visioncortex/xsvg-viewer",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Render xsvg — an XML graphics format that compiles to plain SVG — in the browser. Bundles the WASM compiler and a drop-in preview/slide-deck surface.",
   "type": "module",
   "license": "MIT",
@@ -63,18 +63,28 @@
     "opentype.js": "^2.0.0"
   },
   "peerDependencies": {
-    "react": ">=18",
-    "codemirror": "^6.0.0",
+    "@codemirror/lang-xml": "^6.0.0",
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
-    "@codemirror/lang-xml": "^6.0.0"
+    "codemirror": "^6.0.0",
+    "react": ">=18"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "codemirror": { "optional": true },
-    "@codemirror/state": { "optional": true },
-    "@codemirror/view": { "optional": true },
-    "@codemirror/lang-xml": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "codemirror": {
+      "optional": true
+    },
+    "@codemirror/state": {
+      "optional": true
+    },
+    "@codemirror/view": {
+      "optional": true
+    },
+    "@codemirror/lang-xml": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@codemirror/lang-xml": "^6.1.0",

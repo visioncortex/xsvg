@@ -1,6 +1,6 @@
 {
   "name": "@visioncortex/xsvg-compile",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "Compile xsvg — an XML graphics format that compiles to plain SVG — in Node.js. Runs the WASM compiler with native (opentype.js) font metrics + glyph outlining. No browser, no cross-compilation.",
   "type": "module",
   "license": "MIT",
