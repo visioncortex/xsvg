@@ -162,6 +162,35 @@ fn connectors_accept_points_and_side_anchors() {
 }
 
 #[test]
+fn x_major_rail_flips_to_a_4_turn_detour_when_the_target_sits_back() {
+    use crate::kurbo::Shape;
+    // a:right → b:left with b to the RIGHT: the exits face each other with room, so a
+    // 2-turn Z (M + 3 L) — and the mid-x crossing lies between the edges.
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="60" width="40" height="40"/><x:connector from="#a:right" to="#b:left" route="x-major" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(route_d(&out).matches('L').count(), 3, "2-turn Z when facing with room: {}", route_d(&out));
+
+    // b's left edge NOT to the right of a's right edge (here: directly behind, overlapping
+    // rows) → the rail must flip to a 4-turn detour (M + 5 L) and route AROUND the boxes,
+    // never doubling back through them. a:right=40, b at x=0..40 → b:left=0 ≤ 40.
+    let svg = format!(
+        r##"{XW}<rect id="a" x="120" y="0" width="40" height="40"/><rect id="b" x="0" y="0" width="40" height="40"/><x:connector from="#a:right" to="#b:left" route="x-major" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    let d = route_d(&out);
+    assert_eq!(d.matches('L').count(), 5, "4-turn detour when the target sits back: {d}");
+    assert!(d.starts_with("M160,20"), "still exits a's right edge: {d}");
+    assert!(d.ends_with("L0,20"), "still enters b's left edge: {d}");
+    // routes around: the path clears the boxes' shared row (y 0..40) on one side
+    let bb = crate::kurbo::BezPath::from_svg(d).unwrap().bounding_box();
+    assert!(bb.y0 < 0.0 || bb.y1 > 40.0, "detour clears the boxes vertically: {bb:?}");
+    // and the first move out of a is rightward (the +stub), not back toward b
+    assert!(d.contains("M160,20 L178,20"), "stubs OUT of a before turning: {d}");
+}
+
+#[test]
 fn offset_outsets_a_referenced_rect_and_is_baked() {
     use crate::kurbo::Shape;
     let svg = format!(

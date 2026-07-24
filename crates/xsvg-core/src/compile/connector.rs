@@ -212,6 +212,70 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         Point::new(from.x + dx * s, from.y + dy * s)
     };
 
+    // Orthogonal "rail" waypoints from A's exit to B's exit, both leaving along the
+    // major axis (`horiz` ⇒ x is major). `da`/`db` are the outward major-axis signs.
+    // When the exits face each other with room between (A can reach a crossing line
+    // before B), a 2-turn Z suffices. Otherwise — they face away, or B sits back past
+    // A's exit (e.g. A right edge → B left edge with B *not* to the right, or coincident)
+    // — the rail flips to a 4-turn detour: stub out of each box, then cross over on a
+    // line that clears both boxes (midway between them when they don't overlap on the
+    // minor axis, else around the nearer side). Mirrors Google Docs' elbow connectors.
+    let stub = 18.0_f64;
+    let elbow = |ax: Point, da: f64, bx: Point, db: f64, horiz: bool| -> Vec<Point> {
+        let pt = |m: f64, n: f64| if horiz { Point::new(m, n) } else { Point::new(n, m) };
+        let (am, an, bm, bn) = if horiz {
+            (ax.x, ax.y, bx.x, bx.y)
+        } else {
+            (ax.y, ax.x, bx.y, bx.x)
+        };
+        if da * db < 0.0 && da * (bm - am) > 1e-6 {
+            let mm = (am + bm) / 2.0; // crossing line sits in the gap between the exits
+            return vec![pt(am, an), pt(mm, an), pt(mm, bn), pt(bm, bn)];
+        }
+        // Detour: a crossing line on the minor axis that clears both boxes.
+        let (alo, ahi, blo, bhi) = if horiz {
+            (a.y0, a.y1, b.y0, b.y1)
+        } else {
+            (a.x0, a.x1, b.x0, b.x1)
+        };
+        let midn = if alo < bhi && blo < ahi {
+            // overlap on the minor axis → route around the nearer of the two far sides
+            let (lo, hi) = (alo.min(blo) - stub, ahi.max(bhi) + stub);
+            let mid = (an + bn) / 2.0;
+            if (mid - lo).abs() <= (hi - mid).abs() { lo } else { hi }
+        } else {
+            (an + bn) / 2.0 // clear vertical band between them
+        };
+        let (pam, pbm) = (am + da * stub, bm + db * stub);
+        vec![
+            pt(am, an),
+            pt(pam, an),
+            pt(pam, midn),
+            pt(pbm, midn),
+            pt(pbm, bn),
+            pt(bm, bn),
+        ]
+    };
+    // Turn an orthogonal waypoint list into (path, tangents), trimming the first/last
+    // segment back to the arrowhead base as needed. Works for 4- or 6-point rails.
+    let build_rail = |pts: &[Point]| {
+        let n = pts.len();
+        let s = if arrow_start { trim(pts[0], pts[1]) } else { pts[0] };
+        let e = if arrow_end { trim(pts[n - 1], pts[n - 2]) } else { pts[n - 1] };
+        let mut d = format!("M{}", p(s));
+        for q in &pts[1..n - 1] {
+            d.push_str(&format!(" L{}", p(*q)));
+        }
+        d.push_str(&format!(" L{}", p(e)));
+        (d, pts[0], pts[1], pts[n - 1], pts[n - 2])
+    };
+    // Outward sign of a forced anchor along one axis (0 ⇒ no component on that axis).
+    let anchor_axis = |an: Option<Anchor>, horiz: bool| -> Option<f64> {
+        an.and_then(|s| anchor_norm(s))
+            .map(|(h, v)| if horiz { h } else { v })
+            .filter(|s| s.abs() > 1e-9)
+    };
+
     // Each route yields its drawn path (already trimmed where an arrowhead sits)
     // plus the two endpoint tangents as (tip, adj) pairs: `adj` is the
     // neighbouring path point, so unit(tip − adj) is the direction the line
@@ -228,17 +292,10 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     Some(s) => anchor_pt(b, s),
                     None => Point::new(cb.x - dir * b.width() / 2.0, cb.y),
                 };
-                let mx = (ax.x + bx.x) / 2.0;
-                let (p1, p2) = (Point::new(mx, ax.y), Point::new(mx, bx.y));
-                let s = if arrow_start { trim(ax, p1) } else { ax };
-                let e = if arrow_end { trim(bx, p2) } else { bx };
-                (
-                    format!("M{} L{} L{} L{}", p(s), p(p1), p(p2), p(e)),
-                    ax,
-                    p1,
-                    bx,
-                    p2,
-                )
+                // Outward x-direction: a forced anchor's own normal, else toward/away.
+                let da = anchor_axis(anchor_a, true).unwrap_or(dir);
+                let db = anchor_axis(anchor_b, true).unwrap_or(-dir);
+                build_rail(&elbow(ax, da, bx, db, true))
             }
             "y-major" => {
                 let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
@@ -250,17 +307,9 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     Some(s) => anchor_pt(b, s),
                     None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
                 };
-                let my = (ay.y + by.y) / 2.0;
-                let (p1, p2) = (Point::new(ay.x, my), Point::new(by.x, my));
-                let s = if arrow_start { trim(ay, p1) } else { ay };
-                let e = if arrow_end { trim(by, p2) } else { by };
-                (
-                    format!("M{} L{} L{} L{}", p(s), p(p1), p(p2), p(e)),
-                    ay,
-                    p1,
-                    by,
-                    p2,
-                )
+                let da = anchor_axis(anchor_a, false).unwrap_or(dir);
+                let db = anchor_axis(anchor_b, false).unwrap_or(-dir);
+                build_rail(&elbow(ay, da, by, db, false))
             }
             "curve" => {
                 let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
@@ -292,14 +341,35 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     let l = (dx * dx + dy * dy).sqrt();
                     if l < 1e-9 { (0.0, 0.0) } else { (dx / l, dy / l) }
                 };
-                // Tilt each control handle from the exit direction toward the other
-                // anchor, so a same-side arc leaves diagonally (a leaf/petal, pointed at
-                // both ends) instead of bulging straight out into a half-circle. For the
-                // auto S-curve the exit already points along the chord, so this is a no-op.
+                // Handle directions. Normally tilt each control handle from the exit
+                // toward the other anchor, so a same-side arc leaves diagonally (a
+                // leaf/petal, pointed at both ends) rather than bulging into a half-circle.
                 let (cax, cay) = unit(b0.x - a0.x, b0.y - a0.y);
                 let (cbx, cby) = unit(a0.x - b0.x, a0.y - b0.y);
-                let da = unit(an.0 + cax * 0.7, an.1 + cay * 0.7);
-                let db = unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7);
+                // But when the other anchor is *behind* the exit (dot < 0 — overlapping or
+                // back-to-back boxes, the case the elbow routes flip for), tilting toward
+                // it drags the curve flat through the boxes. Instead bow both handles out
+                // along the minor axis, around the nearer clear side, so the curve routes
+                // around — the curve analogue of the elbow flip.
+                let behind = an.0 * cax + an.1 * cay < 0.0 || bn.0 * cbx + bn.1 * cby < 0.0;
+                let (da, db) = if behind {
+                    let horiz_exit = an.0.abs() >= an.1.abs();
+                    let (lx, ly) = if horiz_exit {
+                        let (lo, hi) = (a.y0.min(b.y0) - stub, a.y1.max(b.y1) + stub);
+                        let mid = (a0.y + b0.y) / 2.0;
+                        (0.0, if (mid - lo).abs() <= (hi - mid).abs() { -1.0 } else { 1.0 })
+                    } else {
+                        let (lo, hi) = (a.x0.min(b.x0) - stub, a.x1.max(b.x1) + stub);
+                        let mid = (a0.x + b0.x) / 2.0;
+                        (if (mid - lo).abs() <= (hi - mid).abs() { -1.0 } else { 1.0 }, 0.0)
+                    };
+                    (unit(an.0 + lx, an.1 + ly), unit(bn.0 + lx, bn.1 + ly))
+                } else {
+                    (
+                        unit(an.0 + cax * 0.7, an.1 + cay * 0.7),
+                        unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7),
+                    )
+                };
                 // fixed bow; only clamped down for connectors shorter than the bulge
                 // itself, so a short link can't loop past its own endpoints
                 let dist = ((b0.x - a0.x).powi(2) + (b0.y - a0.y).powi(2)).sqrt();

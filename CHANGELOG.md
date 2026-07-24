@@ -10,6 +10,16 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+### Fixed
+
+- Connector rails flip to a 4-turn detour when the endpoints don't face each other with room
+  (e.g. `a:right → b:left` where `b`'s left edge is at or behind `a`'s right edge). Previously the
+  `x-major`/`y-major` rail always drew a 2-turn Z, which doubled the line straight back through its
+  own box; it now stubs out of each box and crosses over on a line that clears both — routing
+  *around* rather than through (matching Google Docs elbow connectors). The `curve` route gets the
+  analogous fix: when the far endpoint is behind the exit, the bow lifts to the minor axis to route
+  around instead of drawing a flat line across the boxes.
+
 ### Added
 
 - `createPreview` accepts the async `loader` option (`DepLoader`), matching

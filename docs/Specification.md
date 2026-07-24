@@ -1042,12 +1042,20 @@ a point are supplied for the same end, the **reference wins**.
 | Attribute | Values | Route |
 |---|---|---|
 | `route` | `straight` *(default)* | direct line, endpoints clipped to each box's edge along the center-to-center ray |
-| | `x-major` | orthogonal rail, **horizontal-first** — exits the facing side, elbows at the horizontal midpoint (H–V–H) |
-| | `y-major` | orthogonal rail, **vertical-first** — exits top/bottom, elbows at the vertical midpoint (V–H–V) |
-| | `curve` | a cubic bowing out by `bulge`, each end leaving its anchor tilted toward the other (a same-side pair reads as a leaf, not a half-circle) |
+| | `x-major` | orthogonal rail, **horizontal-first** — exits the facing side, elbows at the horizontal midpoint (H–V–H). Flips to a 4-turn detour when the exits don't face each other with room (see below) |
+| | `y-major` | orthogonal rail, **vertical-first** — exits top/bottom, elbows at the vertical midpoint (V–H–V); same flip |
+| | `curve` | a cubic bowing out by `bulge`, each end leaving its anchor tilted toward the other (a same-side pair reads as a leaf, not a half-circle). When the far endpoint sits *behind* the exit, the bow lifts to the minor axis to route around rather than cut across the boxes |
 | `arrow` | `end` *(default)* / `start` / `both` / `none` | a filled triangle (tinted to the stroke) at the chosen ends |
 | `arrow-size` | length (default `max(3.5·stroke-width, 7)`) | the arrowhead height |
 | `bulge` | length (default `44`) | how far a `curve` bows out — a **fixed** amount, not scaled by the endpoint distance (clamped down only for links shorter than the bulge) |
+
+**Rail flip (normative).** An orthogonal rail's 2-turn Z only works when the two exits face each
+other with room to cross between them — e.g. `a:right → b:left` with `b`'s left edge to the right of
+`a`'s right edge. When they don't (the edges coincide, `b` sits back past `a`'s exit, or two same-side
+anchors face the same way), a mid-split would double the line back through its own box. The rail then
+**flips to a 4-turn detour**: it stubs straight out of each box, then crosses over on a line that
+clears both boxes — midway between them when they don't overlap on the minor axis, otherwise around
+the nearer far side. (This mirrors how Google Docs/Slides route elbow connectors.)
 
 **Baked reference (normative).** The route is recomputed from the endpoints' boxes, so a connector
 is a compile-time reference like `in="#id"`: moving or resizing an endpoint re-emits the connector
