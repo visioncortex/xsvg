@@ -17,8 +17,9 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   `x-major`/`y-major` rail always drew a 2-turn Z, which doubled the line straight back through its
   own box; it now stubs out of each box and crosses over on a line that clears both — routing
   *around* rather than through (matching Google Docs elbow connectors). The `curve` route gets the
-  analogous fix: when the far endpoint is behind the exit, the bow lifts to the minor axis to route
-  around instead of drawing a flat line across the boxes.
+  analogous fix: when the far endpoint is behind the exit, it becomes a **rounded elbow** (the rail
+  path with filleted corners) so it routes around and meets each edge along its normal, instead of a
+  single cubic cutting flat across the boxes. New `connector-rail-flip` sample compares rail vs curve.
 
 ### Added
 

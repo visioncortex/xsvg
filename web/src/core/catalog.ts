@@ -237,6 +237,11 @@ export const CATALOG: Category[] = [
         title: "Endpoints — anchors & points",
         blurb: "beyond a bare #id: force which connection point a connector meets with #id:anchor — an edge, a corner (left-top…), or center — so same-side pairs curve into a leaf; or aim at a raw coordinate with to-point=\"x,y\", needing no target element",
       },
+      {
+        file: "connector-rail-flip.xsvg",
+        title: "Rail flip — routing around",
+        blurb: "an orthogonal rail draws a 2-turn Z only when the exits face each other with room; when the target sits back (a:right → b:left with b at/behind a's right edge) it flips to a 4-turn detour that routes around the boxes instead of doubling back through them, and the curve becomes a rounded elbow — like Google Docs; each case is shown as both a rail and a curve",
+      },
     ],
   },
   {

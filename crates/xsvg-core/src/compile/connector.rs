@@ -242,7 +242,10 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             // overlap on the minor axis → route around the nearer of the two far sides
             let (lo, hi) = (alo.min(blo) - stub, ahi.max(bhi) + stub);
             let mid = (an + bn) / 2.0;
-            if (mid - lo).abs() <= (hi - mid).abs() { lo } else { hi }
+            // Bias toward `lo` on a near-tie so the choice is stable against the ULP-level
+            // float divergence between the native and wasm builds (a perfect tie must not
+            // land on opposite sides per platform).
+            if (mid - lo).abs() <= (hi - mid).abs() + 1e-6 { lo } else { hi }
         } else {
             (an + bn) / 2.0 // clear vertical band between them
         };
@@ -274,6 +277,45 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         an.and_then(|s| anchor_norm(s))
             .map(|(h, v)| if horiz { h } else { v })
             .filter(|s| s.abs() > 1e-9)
+    };
+    // The same orthogonal waypoints as `build_rail`, but with every corner rounded by a
+    // quadratic fillet — the `curve` route's way of routing around when the endpoints
+    // don't face with room, so it reads as a smooth cornered line rather than cutting
+    // flat across the boxes. One *uniform* radius across all corners (so the fillets look
+    // consistent): each corner may eat at most its fair share of the segments it touches
+    // — half of a segment shared with another corner, all of one that ends at an endpoint
+    // — and the tightest such share caps the shared radius.
+    let round_rail = |pts: &[Point], r: f64| {
+        let n = pts.len();
+        // effective polyline with the arrowhead-trimmed ends baked in, so the end
+        // segments' true lengths bound the radius too
+        let mut q = pts.to_vec();
+        if arrow_start {
+            q[0] = trim(pts[0], pts[1]);
+        }
+        if arrow_end {
+            q[n - 1] = trim(pts[n - 1], pts[n - 2]);
+        }
+        let mut rr = r;
+        for i in 0..n - 1 {
+            // how many of this segment's two ends are corners (endpoints 0 and n-1 aren't)
+            let corners = (i != 0) as usize + (i != n - 2) as usize;
+            if corners > 0 {
+                rr = rr.min(q[i].distance(q[i + 1]) / corners as f64);
+            }
+        }
+        let seg = |from: Point, to: Point| -> Point {
+            let (dx, dy) = (to.x - from.x, to.y - from.y);
+            let l = (dx * dx + dy * dy).sqrt();
+            if l < 1e-9 { from } else { Point::new(from.x + dx / l * rr, from.y + dy / l * rr) }
+        };
+        let mut d = format!("M{}", p(q[0]));
+        for i in 1..n - 1 {
+            // approach the corner, then a quadratic through it to the departure point
+            d.push_str(&format!(" L{} Q{} {}", p(seg(q[i], q[i - 1])), p(q[i]), p(seg(q[i], q[i + 1]))));
+        }
+        d.push_str(&format!(" L{}", p(q[n - 1])));
+        (d, pts[0], pts[1], pts[n - 1], pts[n - 2])
     };
 
     // Each route yields its drawn path (already trimmed where an arrowhead sits)
@@ -341,59 +383,50 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     let l = (dx * dx + dy * dy).sqrt();
                     if l < 1e-9 { (0.0, 0.0) } else { (dx / l, dy / l) }
                 };
-                // Handle directions. Normally tilt each control handle from the exit
-                // toward the other anchor, so a same-side arc leaves diagonally (a
-                // leaf/petal, pointed at both ends) rather than bulging into a half-circle.
+                // When the other anchor is *behind* the exit (dot < 0 — overlapping or
+                // back-to-back boxes, the case the elbow routes flip for), a single cubic
+                // can't both bow around and still meet the far edge along its normal; it
+                // ends up cutting across the box. Route it as a rounded elbow instead (the
+                // same rail path, corners filleted) so it reads as a smooth cornered line.
                 let (cax, cay) = unit(b0.x - a0.x, b0.y - a0.y);
                 let (cbx, cby) = unit(a0.x - b0.x, a0.y - b0.y);
-                // But when the other anchor is *behind* the exit (dot < 0 — overlapping or
-                // back-to-back boxes, the case the elbow routes flip for), tilting toward
-                // it drags the curve flat through the boxes. Instead bow both handles out
-                // along the minor axis, around the nearer clear side, so the curve routes
-                // around — the curve analogue of the elbow flip.
                 let behind = an.0 * cax + an.1 * cay < 0.0 || bn.0 * cbx + bn.1 * cby < 0.0;
-                let (da, db) = if behind {
-                    let horiz_exit = an.0.abs() >= an.1.abs();
-                    let (lx, ly) = if horiz_exit {
-                        let (lo, hi) = (a.y0.min(b.y0) - stub, a.y1.max(b.y1) + stub);
-                        let mid = (a0.y + b0.y) / 2.0;
-                        (0.0, if (mid - lo).abs() <= (hi - mid).abs() { -1.0 } else { 1.0 })
-                    } else {
-                        let (lo, hi) = (a.x0.min(b.x0) - stub, a.x1.max(b.x1) + stub);
-                        let mid = (a0.x + b0.x) / 2.0;
-                        (if (mid - lo).abs() <= (hi - mid).abs() { -1.0 } else { 1.0 }, 0.0)
-                    };
-                    (unit(an.0 + lx, an.1 + ly), unit(bn.0 + lx, bn.1 + ly))
+                if behind {
+                    let hz = an.0.abs() >= an.1.abs();
+                    let da = (if hz { an.0 } else { an.1 }).signum();
+                    let db = (if hz { bn.0 } else { bn.1 }).signum();
+                    round_rail(&elbow(a0, da, b0, db, hz), 22.0)
                 } else {
+                    // Facing with room: a single smooth cubic. Tilt each handle from the
+                    // exit toward the other anchor, so a same-side pair reads as a leaf
+                    // (pointed at both ends) rather than bulging into a half-circle.
+                    let da = unit(an.0 + cax * 0.7, an.1 + cay * 0.7);
+                    let db = unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7);
+                    // fixed bow; only clamped down for connectors shorter than the bulge
+                    // itself, so a short link can't loop past its own endpoints
+                    let dist = ((b0.x - a0.x).powi(2) + (b0.y - a0.y).powi(2)).sqrt();
+                    let k = bulge.min(dist);
+                    let c1 = Point::new(a0.x + da.0 * k, a0.y + da.1 * k);
+                    let c2 = Point::new(b0.x + db.0 * k, b0.y + db.1 * k);
+                    let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
+                    let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
+                    // draw only the middle of the cubic, between the two bases
+                    let [q0, q1, q2, q3] = subcubic(
+                        a0,
+                        c1,
+                        c2,
+                        b0,
+                        if arrow_start { t0 } else { 0.0 },
+                        if arrow_end { t1 } else { 1.0 },
+                    );
                     (
-                        unit(an.0 + cax * 0.7, an.1 + cay * 0.7),
-                        unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7),
+                        format!("M{} C{} {} {}", p(q0), p(q1), p(q2), p(q3)),
+                        a0,
+                        s_base,
+                        b0,
+                        e_base,
                     )
-                };
-                // fixed bow; only clamped down for connectors shorter than the bulge
-                // itself, so a short link can't loop past its own endpoints
-                let dist = ((b0.x - a0.x).powi(2) + (b0.y - a0.y).powi(2)).sqrt();
-                let k = bulge.min(dist);
-                let c1 = Point::new(a0.x + da.0 * k, a0.y + da.1 * k);
-                let c2 = Point::new(b0.x + db.0 * k, b0.y + db.1 * k);
-                let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
-                let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
-                // draw only the middle of the cubic, between the two bases
-                let [q0, q1, q2, q3] = subcubic(
-                    a0,
-                    c1,
-                    c2,
-                    b0,
-                    if arrow_start { t0 } else { 0.0 },
-                    if arrow_end { t1 } else { 1.0 },
-                );
-                (
-                    format!("M{} C{} {} {}", p(q0), p(q1), p(q2), p(q3)),
-                    a0,
-                    s_base,
-                    b0,
-                    e_base,
-                )
+                }
             }
             _ => {
                 // straight: clip the center-to-center line to each box edge (or the

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
+     viewBox="0 0 700 650" font-family="'Helvetica Neue', Arial, sans-serif">
+  <rect x="0" y="0" width="700" height="650" fill="#ffffff"/>
+  <defs>
+    <style>
+      .node { fill: #eef2ff; stroke: #6366f1; stroke-width: 1.5; }
+      .lbl { font-size: 12px; font-weight: 700; fill: #3730a3; text-anchor: middle; }
+      .cap { font-size: 11px; fill: #94a3b8; }
+      .hdr { font-size: 12px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    </style>
+  </defs>
+  <text x="24" y="26" font-size="14" font-weight="bold" fill="#0f172a">x:connector — a:right → b:left, orthogonal rail vs curve, as B moves behind A</text>
+  <text class="hdr" x="185" y="52">route="x-major"</text>
+  <text class="hdr" x="535" y="52">route="curve"</text>
+
+  <!-- ── row 1: B ahead (to the right) ───────────────────────────────── -->
+  <text class="cap" x="24" y="78">B ahead → faces with room</text>
+  <rect id="a1r" class="node" x="24"  y="92"  width="90" height="44" rx="8"/><text class="lbl" x="69"  y="118">A</text>
+  <rect id="b1r" class="node" x="206" y="150" width="90" height="44" rx="8"/><text class="lbl" x="251" y="176">B</text>
+  <x:connector from="#a1r:right" to="#b1r:left" route="x-major" stroke="#111" stroke-width="2"/>
+  <rect id="a1c" class="node" x="374" y="92"  width="90" height="44" rx="8"/><text class="lbl" x="419" y="118">A</text>
+  <rect id="b1c" class="node" x="556" y="150" width="90" height="44" rx="8"/><text class="lbl" x="601" y="176">B</text>
+  <x:connector from="#a1c:right" to="#b1c:left" route="curve" stroke="#e11d48" stroke-width="2"/>
+
+  <!-- ── row 2: B behind, offset rows → detour crossing between ───────── -->
+  <text class="cap" x="24" y="266">B behind, offset rows</text>
+  <rect id="a2r" class="node" x="206" y="282" width="90" height="44" rx="8"/><text class="lbl" x="251" y="308">A</text>
+  <rect id="b2r" class="node" x="24"  y="348" width="90" height="44" rx="8"/><text class="lbl" x="69"  y="374">B</text>
+  <x:connector from="#a2r:right" to="#b2r:left" route="x-major" stroke="#111" stroke-width="2"/>
+  <rect id="a2c" class="node" x="556" y="282" width="90" height="44" rx="8"/><text class="lbl" x="601" y="308">A</text>
+  <rect id="b2c" class="node" x="374" y="348" width="90" height="44" rx="8"/><text class="lbl" x="419" y="374">B</text>
+  <x:connector from="#a2c:right" to="#b2c:left" route="curve" stroke="#e11d48" stroke-width="2"/>
+
+  <!-- ── row 3: B behind, same row → route around the boxes ──────────── -->
+  <text class="cap" x="24" y="456">B behind, same row</text>
+  <rect id="a3r" class="node" x="206" y="484" width="90" height="44" rx="8"/><text class="lbl" x="251" y="510">A</text>
+  <rect id="b3r" class="node" x="24"  y="484" width="90" height="44" rx="8"/><text class="lbl" x="69"  y="510">B</text>
+  <x:connector from="#a3r:right" to="#b3r:left" route="x-major" stroke="#111" stroke-width="2"/>
+  <rect id="a3c" class="node" x="556" y="484" width="90" height="44" rx="8"/><text class="lbl" x="601" y="510">A</text>
+  <rect id="b3c" class="node" x="374" y="484" width="90" height="44" rx="8"/><text class="lbl" x="419" y="510">B</text>
+  <x:connector from="#a3c:right" to="#b3c:left" route="curve" stroke="#e11d48" stroke-width="2"/>
+</svg>
