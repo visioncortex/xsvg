@@ -9,9 +9,10 @@ pub(crate) use crate::{
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
     parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
     Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
-    EnvelopePreset, Field, Fit, FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer,
-    PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec, RoughenField, Shaper, Taper,
-    TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    EnvelopePreset, Field, Fit, FontMetrics, FreeDistort, GlyphOutliner, Homography,
+    LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec,
+    RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
+    WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -951,6 +952,62 @@ fn emit_paragraphs(
     ctx: &Ctx,
 ) {
     let m = ctx.m;
+    let cy = spec.y + spec.padding;
+    let ch = spec.height - 2.0 * spec.padding;
+    let (items, block_top) = plan_paragraphs(node, paras, base_style, base_fill, spec, m);
+
+    // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
+    // <text> per paragraph
+    let base = [EmitAttrs::default()];
+    for para in &items {
+        let visible: Vec<PlacedLine> = para
+            .lines
+            .iter()
+            .filter(|l| {
+                let b = l.baseline + block_top;
+                b >= cy - 1e-6 && b <= cy + ch + 1e-6
+            })
+            .cloned()
+            .collect();
+        if visible.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
+        push_font_attrs(out, &para.style, para.style.size, para.fill);
+        out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
+        out.push('>');
+        for line in &visible {
+            let mut l = line.clone();
+            l.baseline += block_top;
+            emit_line(out, &l, &para.style, para.style.size, gx, m, &base);
+        }
+        out.push_str("</text>");
+    }
+}
+
+/// One planned paragraph of a §6.16 flow: lines laid in a RELATIVE frame
+/// (paragraph 0's cap-top at 0) — shift baselines by the plan's `block_top`
+/// to place them in the box.
+struct ParaPlan<'a> {
+    lines: Vec<PlacedLine>,
+    style: TextStyle,
+    fill: &'a str,
+    anchor: &'static str,
+    src: roxmltree::Node<'a, 'a>,
+}
+
+/// Pass 1 of paragraph flow (§6.16), shared verbatim by emission and the
+/// editor's text-layout seam (docs/Incremental.md §6) so the two can never
+/// drift: lay each `<x:p>` as its own wrapped block, stack top-down with the
+/// paragraph gaps, and compute the block's valigned top.
+fn plan_paragraphs<'a>(
+    node: roxmltree::Node<'a, 'a>,
+    paras: &[roxmltree::Node<'a, 'a>],
+    base_style: &TextStyle,
+    base_fill: &'a str,
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> (Vec<ParaPlan<'a>>, f64) {
     let cx = spec.x + spec.padding;
     let cy = spec.y + spec.padding;
     let cw = spec.width - 2.0 * spec.padding;
@@ -987,16 +1044,9 @@ fn emit_paragraphs(
         st
     };
 
-    struct Para<'a> {
-        lines: Vec<PlacedLine>,
-        style: TextStyle,
-        fill: &'a str,
-        anchor: &'static str,
-        src: roxmltree::Node<'a, 'a>,
-    }
     // pass 1: lay each paragraph in a relative frame (para 0's cap-top at 0),
     // accumulating the gaps
-    let mut items: Vec<Para> = Vec::with_capacity(paras.len());
+    let mut items: Vec<ParaPlan> = Vec::with_capacity(paras.len());
     let mut cursor = 0.0f64; // cap-top of the current paragraph
     let mut prev_after = 0.0f64;
     for (i, &p) in paras.iter().enumerate() {
@@ -1023,7 +1073,7 @@ fn emit_paragraphs(
         let pfm = m.font_metrics(&pstyle, pstyle.size);
         let n = layout.lines.len().max(1);
         let ph = pfm.cap_height + pfm.descent + (n - 1) as f64 * (pstyle.size * pstyle.line_height);
-        items.push(Para {
+        items.push(ParaPlan {
             lines: layout.lines,
             style: pstyle,
             fill: p.attribute("fill").unwrap_or(base_fill),
@@ -1040,34 +1090,7 @@ fn emit_paragraphs(
         VAlign::Middle => cy + (ch - block_h) / 2.0,
         VAlign::Bottom => cy + (ch - block_h),
     };
-
-    // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
-    // <text> per paragraph
-    let base = [EmitAttrs::default()];
-    for para in &items {
-        let visible: Vec<PlacedLine> = para
-            .lines
-            .iter()
-            .filter(|l| {
-                let b = l.baseline + block_top;
-                b >= cy - 1e-6 && b <= cy + ch + 1e-6
-            })
-            .cloned()
-            .collect();
-        if visible.is_empty() {
-            continue;
-        }
-        out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
-        push_font_attrs(out, &para.style, para.style.size, para.fill);
-        out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
-        out.push('>');
-        for line in &visible {
-            let mut l = line.clone();
-            l.baseline += block_top;
-            emit_line(out, &l, &para.style, para.style.size, gx, m, &base);
-        }
-        out.push_str("</text>");
-    }
+    (items, block_top)
 }
 
 /// `<x:textpath in="#path" effect="skew|rainbow|stair">` (§6.13): outline the run flat
@@ -2699,3 +2722,277 @@ mod mesh;
 use mesh::*;
 mod pathops;
 use pathops::*;
+
+// ============================================================================
+// Text-layout seam for editors (docs/Incremental.md §6; consumer: xsvg-kit).
+// The compiler computes every PlacedLine it renders and used to discard them;
+// this seam returns the same geometry so an editing host can draw a caret
+// without becoming a second text-layout engine.
+
+/// One rendered line of a textbox flow, in absolute user units.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLayoutLine {
+    /// Exactly the rendered text (wrap words joined by single spaces; an
+    /// `ellipsis` rewrite included — see [`TextLayoutLine::words`]).
+    pub text: String,
+    /// Line anchor x — interpret through the paragraph's `anchor`.
+    pub x: f64,
+    /// Absolute baseline y.
+    pub baseline: f64,
+    /// Justified lines render stretched to this width (SVG `textLength`).
+    pub justify_width: Option<f64>,
+    /// `[start, end)` into the paragraph's [`TextLayoutPara::words`]. Wrapping
+    /// never splits a word, so the range is exact even for clipped-away
+    /// neighbors; when `text` differs from `words[start..end].join(" ")` the
+    /// line was rewritten by `text-overflow="ellipsis"` and carets must not be
+    /// mapped through it.
+    pub words: (usize, usize),
+}
+
+/// One paragraph flow of a textbox: the whole box for plain / `in=` boxes,
+/// one `<x:p>` in paragraph mode (§6.16).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLayoutPara {
+    /// Byte range of the paragraph's source element (`<x:p>`, or the textbox
+    /// itself outside paragraph mode) — hosts resolve it to a node via their
+    /// span table, exactly like `data-xsvg-pos`.
+    pub span: (usize, usize),
+    /// Resolved paragraph style. `size` is the RENDERED size — after
+    /// `fit="shrink"` — so measuring prefixes of a line's text in this style
+    /// (plus `letter_spacing` per gap / `word_spacing` per space, exactly the
+    /// renderer's math in [`line_advance`]) yields caret x offsets.
+    pub style: TextStyle,
+    /// `start` | `middle` | `end` — how each line's `x` anchors its text.
+    pub anchor: String,
+    /// Vertical metrics at the rendered size (caret height = ascent + descent).
+    pub metrics: FontMetrics,
+    /// The paragraph's wrap words: its text split on whitespace. Mapping a word
+    /// back to source offsets is the same whitespace walk over the host's own
+    /// text content.
+    pub words: Vec<String>,
+    /// Rendered lines only — lines clipped by the box are absent (their word
+    /// ranges are simply never covered).
+    pub lines: Vec<TextLayoutLine>,
+}
+
+/// The rendered text geometry of one `<x:textbox>`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLayout {
+    /// Content rect `(x, y, width, height)`: the box after padding for
+    /// rectangular flows, the region's padded bounds for curved region flow.
+    pub content: (f64, f64, f64, f64),
+    pub paras: Vec<TextLayoutPara>,
+}
+
+/// Text-layout geometry for the `<x:textbox>` whose source range starts at
+/// byte `offset` (the host's span table knows it — the same convention as
+/// [`compile_fragment_impl`], but any element depth). Returns `None` when the
+/// offset is not a textbox, the document doesn't parse, or the box resolves to
+/// nothing renderable (broken `in=` reference, un-rasterizable region).
+///
+/// The geometry is byte-for-byte the emitter's: rectangular and paragraph
+/// flows share their layout code with emission (`plan_paragraphs`,
+/// [`layout_area_measured`]), and the dispatch mirrors `emit_textbox` — pinned
+/// by the `text_layout_matches_emitted_tspans` canary test.
+pub fn text_layout_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Option<TextLayout> {
+    check_nesting_depth(input, MAX_NESTING_DEPTH).ok()?;
+    let doc = roxmltree::Document::parse(input).ok()?;
+    load_theme(&doc);
+    let node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.range().start == offset)?;
+    if node.tag_name().namespace() != Some(XSVG_NS) || node.tag_name().name() != "textbox" {
+        return None;
+    }
+    let ctx = Ctx {
+        m,
+        shaper,
+        outliner,
+        quality: QualityProfile::parse(quality),
+        sourcemap: std::cell::Cell::new(false),
+        resolving: std::cell::RefCell::new(Vec::new()),
+        resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
+        cuts: std::cell::Cell::new(0),
+        fuel: std::cell::Cell::new(REF_FUEL),
+        force_outline: std::cell::Cell::new(false),
+        resolver: &NoResolver,
+        files: std::cell::RefCell::new(vec![String::new()]),
+        base: std::cell::RefCell::new(String::new()),
+        keys: &NoKeys,
+    };
+    layout_textbox(node, &ctx)
+}
+
+/// The layout half of `emit_textbox`'s dispatch — same branches, same order.
+fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
+    let style = style_from(node);
+
+    let paras: Vec<roxmltree::Node> = node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "p")
+        .collect();
+    if !paras.is_empty() {
+        let geom = match node.attribute("in") {
+            Some(r) => resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            None => Some(node),
+        };
+        if let Some(geom) = geom {
+            let spec = textbox_area_spec(node, geom);
+            return Some(paragraphs_layout_info(node, &paras, &style, &spec, ctx.m));
+        }
+        // curved region flow ignores <x:p> and falls through, like emission
+    }
+
+    if let Some(reference) = node.attribute("in") {
+        let target = resolve_ref(node, reference)?;
+        if target.tag_name().name() == "rect" {
+            let spec = textbox_area_spec(node, target);
+            return Some(area_layout_info(node, &style, &spec, ctx.m));
+        }
+        let geometry = ref_geometry(node, reference, ctx).ok()?;
+        let region = ctx
+            .shaper
+            .rasterize(&geometry, (style.size / 3.0).max(1.0))?;
+        let spec = RegionSpec {
+            padding: attr_num(node, "padding", 0.0),
+            align: Align::parse(node.attribute("align").unwrap_or("start")),
+            valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
+            text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+        };
+        let text = collect_text(node);
+        let layout = layout_region(&text, &style, &region, &spec, ctx.m);
+        let b = crate::Region::bounds(&region);
+        let pad = spec.padding;
+        let words: Vec<String> = text.split_whitespace().map(str::to_string).collect();
+        return Some(TextLayout {
+            content: (b.x + pad, b.y + pad, b.w - 2.0 * pad, b.h - 2.0 * pad),
+            paras: vec![para_info(node, &style, &layout, words, ctx.m)],
+        });
+    }
+
+    let spec = textbox_area_spec(node, node);
+    Some(area_layout_info(node, &style, &spec, ctx.m))
+}
+
+/// Rectangular flow (own box or `in="#rect"`): the same `collect_runs` →
+/// `measure_runs` → `layout_area_measured` pipeline emission runs.
+fn area_layout_info(
+    node: roxmltree::Node,
+    style: &TextStyle,
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> TextLayout {
+    let (segments, styles, _) = collect_runs(node, style);
+    let measured = measure_runs(&segments, &styles, m);
+    let words: Vec<String> = measured
+        .words
+        .iter()
+        .map(|w| w.pieces.iter().map(|p| p.text.as_str()).collect())
+        .collect();
+    let layout = layout_area_measured(&measured, style, spec, m);
+    let p = spec.padding;
+    TextLayout {
+        content: (
+            spec.x + p,
+            spec.y + p,
+            spec.width - 2.0 * p,
+            spec.height - 2.0 * p,
+        ),
+        paras: vec![para_info(node, style, &layout, words, m)],
+    }
+}
+
+/// Paragraph mode (§6.16): the shared `plan_paragraphs` pass plus the same
+/// shift-and-clip emission applies.
+fn paragraphs_layout_info(
+    node: roxmltree::Node,
+    paras: &[roxmltree::Node],
+    base_style: &TextStyle,
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> TextLayout {
+    let (items, block_top) = plan_paragraphs(node, paras, base_style, "", spec, m);
+    let cy = spec.y + spec.padding;
+    let ch = spec.height - 2.0 * spec.padding;
+    let p = spec.padding;
+    let out_paras = items
+        .iter()
+        .map(|para| {
+            let words: Vec<String> = collect_text(para.src)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            let lines = para
+                .lines
+                .iter()
+                .filter_map(|l| {
+                    let b = l.baseline + block_top;
+                    (b >= cy - 1e-6 && b <= cy + ch + 1e-6).then(|| TextLayoutLine {
+                        text: l.text.clone(),
+                        x: l.x,
+                        baseline: b,
+                        justify_width: l.justify_width,
+                        words: l.words,
+                    })
+                })
+                .collect();
+            let r = para.src.range();
+            TextLayoutPara {
+                span: (r.start, r.end),
+                style: para.style.clone(),
+                anchor: para.anchor.to_string(),
+                metrics: m.font_metrics(&para.style, para.style.size),
+                words,
+                lines,
+            }
+        })
+        .collect();
+    TextLayout {
+        content: (
+            spec.x + p,
+            spec.y + p,
+            spec.width - 2.0 * p,
+            spec.height - 2.0 * p,
+        ),
+        paras: out_paras,
+    }
+}
+
+/// Wrap one [`AreaLayout`] (already clipped/ellipsized, absolute coordinates)
+/// as a single-paragraph [`TextLayoutPara`] spanning `node`.
+fn para_info(
+    node: roxmltree::Node,
+    style: &TextStyle,
+    layout: &AreaLayout,
+    words: Vec<String>,
+    m: &dyn Measurer,
+) -> TextLayoutPara {
+    let mut rendered = style.clone();
+    rendered.size = layout.font_size;
+    let r = node.range();
+    TextLayoutPara {
+        span: (r.start, r.end),
+        anchor: layout.anchor.svg().to_string(),
+        metrics: m.font_metrics(style, layout.font_size),
+        words,
+        lines: layout
+            .lines
+            .iter()
+            .map(|l| TextLayoutLine {
+                text: l.text.clone(),
+                x: l.x,
+                baseline: l.baseline,
+                justify_width: l.justify_width,
+                words: l.words,
+            })
+            .collect(),
+        style: rendered,
+    }
+}

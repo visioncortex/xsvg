@@ -138,18 +138,19 @@ pub fn layout_text_area_runs(
     }
     let has_breaks = breaks > 0;
 
-    let mut line_metas: Vec<(Vec<Piece>, bool)> = Vec::new(); // (pieces, is_paragraph_final)
+    // (pieces, is_paragraph_final, word range within the line's own paragraph)
+    let mut line_metas: Vec<(Vec<Piece>, bool, (usize, usize))> = Vec::new();
     for para in &paragraphs {
         if para.is_empty() {
             if has_breaks {
-                line_metas.push((Vec::new(), true)); // forced blank line
+                line_metas.push((Vec::new(), true, (0, 0))); // forced blank line
             }
             continue;
         }
         let wrapped = wrap_pieces(&measure_runs(para, styles, m), max_w, 1.0);
         let n = wrapped.len();
-        for (j, pieces) in wrapped.into_iter().enumerate() {
-            line_metas.push((pieces, j + 1 == n));
+        for (j, (pieces, words)) in wrapped.into_iter().enumerate() {
+            line_metas.push((pieces, j + 1 == n, words));
         }
     }
 
@@ -183,7 +184,7 @@ pub fn layout_text_area_runs(
 
     let mut lines = Vec::new();
     let mut dropped = false;
-    for (i, (pieces, is_final)) in line_metas.into_iter().enumerate() {
+    for (i, (pieces, is_final, words)) in line_metas.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
         // clip by the line's ink band [cap-top, baseline + descent]
         if let Some(h) = spec.height {
@@ -202,6 +203,7 @@ pub fn layout_text_area_runs(
             baseline,
             justify_width,
             runs,
+            words,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {

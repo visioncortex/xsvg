@@ -105,3 +105,50 @@ consumer is xsvg-kit (the editor core).
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient
   needs no dependent re-emits (live references).
+
+## 6. Text layout for editors (`text_layout_impl`, shipped)
+
+The compiler computes every placed line it renders — `PlacedLine { text, x,
+baseline, justify_width, runs, words }` — and used to discard them at emission.
+`text_layout_impl(input, offset, quality, measurer, shaper, outliner)` returns
+that geometry for the `<x:textbox>` whose source range starts at byte `offset`
+(any element depth; the host's span table knows offsets — same convention as
+`compile_fragment_impl`), so an editing host can place a caret without becoming
+a second text-layout engine. `None` when the offset is not a textbox, the
+document doesn't parse, or the box resolves to nothing renderable.
+
+**Shape**: `TextLayout { content, paras }` — one `TextLayoutPara` per flow (the
+whole box, or one `<x:p>` in paragraph mode §6.16), carrying its source byte
+`span`, the **rendered** style (`size` is post `fit="shrink"`), anchor,
+`FontMetrics` at the rendered size (caret height), the flow's whitespace-split
+`words`, and the rendered `lines`.
+
+**Caret mapping contract**:
+
+- Every line records `words: [start, end)` into its paragraph's word sequence.
+  The range is produced **inside the wrapper** (`fill_line` always consumes
+  whole words), not recovered by matching text afterwards — so it stays exact
+  when clipping drops leading lines (`valign="bottom"` overflow), pinned by
+  `text_layout_valign_bottom_clip_keeps_exact_word_ranges`.
+- Caret x within a line = prefix advance of `line.text` measured in the para's
+  rendered style **plus** `letter-spacing` per grapheme gap and `word-spacing`
+  per space — exactly the renderer's `line_advance` math, interpreted through
+  `anchor` (start/middle/end from the line's `x`).
+- Word → source offsets is the host's job: the words are its own text content
+  split on whitespace, the same walk in both places.
+- `text-overflow="ellipsis"` rewrites a line's `text` but not its `words`
+  range; `text != words[range].join(" ")` is the truncation test, and carets
+  must not be mapped through such a line.
+
+**No drift**: rectangular and paragraph flows share their layout code with
+emission (`plan_paragraphs`, `layout_area_measured`), the dispatch mirrors
+`emit_textbox` branch-for-branch, and `text_layout_matches_emitted_tspans`
+pins the whole surface — every emitted `<tspan x y>` must reappear in the
+seam's lines with formatter-identical coordinates across plain, fit-shrink,
+valign, indent, and paragraph variants.
+
+**Limits (v1)**: styled-run boundaries inside a line are not broken out per
+run (caret x uses whole-line prefixes; correct while runs share the paragraph
+size, which §6.16 guarantees); `glyph-x-scale ≠ 1` and warped/textpath text are
+not caret targets; curved region flow reports lines and padded bounds but
+editors should treat it read-only for now.

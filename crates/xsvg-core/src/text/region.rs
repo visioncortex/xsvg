@@ -172,6 +172,7 @@ pub fn layout_region(
                 baseline: y + fm.ascent,
                 justify_width: None,
                 runs,
+                words: (i, next),
             });
             widths.push(r - l);
             i = next;

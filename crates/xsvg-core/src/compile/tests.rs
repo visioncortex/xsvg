@@ -3253,3 +3253,168 @@ fn fragment_compile_reloads_theme_from_its_own_document() {
     assert!(frag.contains("#0000ff"), "fragment must use its own document's theme: {frag}");
     assert!(!frag.contains("#ff0000"), "stale theme leaked: {frag}");
 }
+
+// ---------------------------------------------------------------- text layout
+// The editor seam (docs/Incremental.md §6): text_layout_impl must report
+// exactly the geometry the emitter renders.
+
+/// Layout for the textbox starting at `offset` with the standard doubles.
+fn layout_at(svg: &str, offset: usize) -> Option<TextLayout> {
+    text_layout_impl(svg, offset, "balanced", &Mono, &NoShaper, &NoOutliner)
+}
+
+/// Byte offset of the first occurrence of `needle` — tests locate elements the
+/// way a host's span table would.
+fn at(svg: &str, needle: &str) -> usize {
+    svg.find(needle).unwrap()
+}
+
+#[test]
+fn text_layout_plain_box_wraps_with_word_ranges() {
+    // Mono: char = 0.5×size = 8. "alpha beta" = 10 chars = 80 > 72 → wraps.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="10" y="20" width="72" height="90" font-size="16">alpha beta gamma</x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    assert_eq!(tl.content, (10.0, 20.0, 72.0, 90.0));
+    assert_eq!(tl.paras.len(), 1);
+    let p = &tl.paras[0];
+    assert_eq!(p.words, ["alpha", "beta", "gamma"]);
+    assert_eq!(p.style.size, 16.0);
+    assert_eq!(p.anchor, "start");
+    let texts: Vec<&str> = p.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["alpha", "beta", "gamma"]);
+    let ranges: Vec<(usize, usize)> = p.lines.iter().map(|l| l.words).collect();
+    assert_eq!(ranges, [(0, 1), (1, 2), (2, 3)]);
+    // consecutive baselines step by size × line-height
+    let step = p.lines[1].baseline - p.lines[0].baseline;
+    assert!((step - 16.0 * p.style.line_height).abs() < 1e-9);
+}
+
+#[test]
+fn text_layout_matches_emitted_tspans() {
+    // The anti-drift canary: every <tspan x y>text</tspan> the compiler emits
+    // for a textbox must appear in the seam's lines with identical geometry —
+    // across plain, fit-shrink, valign, indent, and paragraph variants.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="80" height="60" font-size="16">alpha beta gamma delta</x:textbox>
+<x:textbox x="0" y="100" width="60" height="30" font-size="20" fit="shrink" valign="middle">epsilon zeta</x:textbox>
+<x:textbox x="0" y="200" width="120" height="80" font-size="10" align="center" text-indent="12">eta theta iota kappa</x:textbox>
+<x:textbox x="0" y="300" width="160" height="120" font-size="12"><x:p>lambda mu</x:p><x:p align="end">nu xi omicron</x:p></x:textbox>
+</svg>"#;
+    let out = compile_test(svg);
+    let mut emitted: Vec<(f64, f64, String)> = Vec::new();
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    for n in doc.descendants().filter(|n| n.tag_name().name() == "tspan") {
+        emitted.push((
+            n.attribute("x").unwrap().parse().unwrap(),
+            n.attribute("y").unwrap().parse().unwrap(),
+            n.text().unwrap_or("").to_string(),
+        ));
+    }
+    let mut reported: Vec<(f64, f64, String)> = Vec::new();
+    let mut from = 0;
+    while let Some(i) = svg[from..].find("<x:textbox") {
+        let off = from + i;
+        let tl = layout_at(svg, off).unwrap();
+        for p in &tl.paras {
+            for l in &p.lines {
+                reported.push((l.x, l.baseline, l.text.clone()));
+            }
+        }
+        from = off + 1;
+    }
+    // same multiset, and in fact the same order (document order both ways);
+    // compare through the emitter's number formatting to match exactly
+    let fmt3 = |v: &[(f64, f64, String)]| -> Vec<String> {
+        v.iter()
+            .map(|(x, y, t)| format!("{}|{}|{}", crate::compile::fmt(*x), crate::compile::fmt(*y), t))
+            .collect()
+    };
+    assert_eq!(fmt3(&reported), fmt3(&emitted));
+    assert!(!emitted.is_empty());
+}
+
+#[test]
+fn text_layout_fit_shrink_reports_rendered_size() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="40" height="20" font-size="32" fit="shrink">wide words here</x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    let p = &tl.paras[0];
+    assert!(p.style.size < 32.0, "shrunk from 32, got {}", p.style.size);
+    // metrics are at the rendered size (default proportions: ascent = 0.8×size)
+    assert!((p.metrics.ascent - 0.8 * p.style.size).abs() < 1e-9);
+}
+
+#[test]
+fn text_layout_paragraphs_have_own_spans_and_words() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="200" height="100" font-size="12"><x:p>alpha beta</x:p><x:p font-size="8">gamma</x:p></x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    assert_eq!(tl.paras.len(), 2);
+    let (a, b) = (&tl.paras[0], &tl.paras[1]);
+    assert_eq!(a.words, ["alpha", "beta"]);
+    assert_eq!(b.words, ["gamma"]);
+    // spans point at each <x:p>, inside the textbox's own range
+    assert_eq!(&svg[a.span.0..a.span.0 + 5], "<x:p>");
+    assert!(b.span.0 > a.span.1 - 1);
+    assert_eq!(b.style.size, 8.0);
+    assert!(b.lines[0].baseline > a.lines[0].baseline);
+}
+
+#[test]
+fn text_layout_ellipsis_line_diverges_from_words() {
+    // One line tall → the rest truncates into an ellipsis rewrite of line 1.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="80" height="18" font-size="16" text-overflow="ellipsis">alpha beta gamma delta</x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    let p = &tl.paras[0];
+    assert_eq!(p.lines.len(), 1);
+    let l = &p.lines[0];
+    let joined = p.words[l.words.0..l.words.1].join(" ");
+    assert_ne!(l.text, joined, "ellipsis must be detectable");
+    assert!(l.text.ends_with('…'));
+}
+
+#[test]
+fn text_layout_region_flow_reports_padded_bounds() {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<circle id="c" cx="30" cy="30" r="30"/>
+<x:textbox in="#c" font-size="10" padding="5">one two three</x:textbox></svg>"##;
+    let tl = text_layout_impl(svg, at(svg, "<x:textbox"), "balanced", &Mono, &BoxShaper, &NoOutliner).unwrap();
+    // BoxShaper pretends a 60×60 region at the origin
+    assert_eq!(tl.content, (5.0, 5.0, 50.0, 50.0));
+    assert!(!tl.paras[0].lines.is_empty());
+    assert_eq!(tl.paras[0].words, ["one", "two", "three"]);
+}
+
+#[test]
+fn text_layout_refuses_non_textboxes_and_bad_offsets() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<rect x="0" y="0" width="10" height="10"/>
+<x:textbox width="50" height="20">hi</x:textbox></svg>"#;
+    assert!(layout_at(svg, at(svg, "<rect")).is_none());
+    assert!(layout_at(svg, 3).is_none());
+    assert!(layout_at(svg, 10_000).is_none());
+    assert!(layout_at("not xml <", 0).is_none());
+    // broken in= reference resolves to nothing renderable
+    let broken = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox in="#missing" width="50" height="20">hi</x:textbox></svg>"##;
+    assert!(layout_at(broken, at(broken, "<x:textbox")).is_none());
+}
+
+#[test]
+fn text_layout_valign_bottom_clip_keeps_exact_word_ranges() {
+    // valign=bottom with an overflowing block clips EARLY lines — ranges must
+    // stay exact for the surviving tail (the case that breaks post-hoc
+    // token matching, and why ranges thread through the wrapper).
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="48" height="40" font-size="16" valign="bottom">aa bb cc dd ee</x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    let p = &tl.paras[0];
+    assert!(p.lines.len() < 5, "some lines must have clipped");
+    for l in &p.lines {
+        assert_eq!(l.text, p.words[l.words.0..l.words.1].join(" "));
+    }
+    // the surviving lines are the TAIL of the word sequence
+    assert_eq!(p.lines.last().unwrap().words.1, p.words.len());
+}

@@ -27,7 +27,8 @@ pub use compile::{
     compile_fragment_impl, compile_fragment_keyed_impl, compile_fragment_linked_impl,
     compile_fragment_linked_keyed_impl, compile_impl, compile_keyed_impl, compile_linked_impl,
     compile_linked_keyed_impl, dependents_impl, dependents_multi_impl, fragment_range_impl,
-    NoKeys, NodeKeys, NoResolver, Resolver,
+    text_layout_impl, NoKeys, NodeKeys, NoResolver, Resolver, TextLayout, TextLayoutLine,
+    TextLayoutPara,
 };
 pub use filter::*;
 pub use offset::*;

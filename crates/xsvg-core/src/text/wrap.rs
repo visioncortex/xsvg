@@ -14,17 +14,23 @@ use super::measure::{Measured, Piece};
 pub fn wrap(measured: &Measured, max_width: f64, scale: f64) -> Vec<String> {
     wrap_pieces(measured, max_width, scale)
         .into_iter()
-        .map(|pieces| pieces.iter().map(|p| p.text.as_str()).collect())
+        .map(|(pieces, _)| pieces.iter().map(|p| p.text.as_str()).collect())
         .collect()
 }
 
-/// Like [`wrap`], but keeps each line's styled [`Piece`]s (for run-aware layout).
-pub(crate) fn wrap_pieces(measured: &Measured, max_width: f64, scale: f64) -> Vec<Vec<Piece>> {
+/// Like [`wrap`], but keeps each line's styled [`Piece`]s (for run-aware layout)
+/// and its `[start, end)` word range (for the editor's caret mapping —
+/// `PlacedLine::words`).
+pub(crate) fn wrap_pieces(
+    measured: &Measured,
+    max_width: f64,
+    scale: f64,
+) -> Vec<(Vec<Piece>, (usize, usize))> {
     let mut lines = Vec::new();
     let mut i = 0;
     while i < measured.words.len() {
         let (pieces, next) = fill_line(measured, i, max_width, scale);
-        lines.push(pieces);
+        lines.push((pieces, (i, next)));
         i = next; // fill_line always consumes ≥1 word, so this terminates
     }
     lines

@@ -1,6 +1,6 @@
 //! Resolved text styling needed to measure and lay out a run.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextStyle {
     pub family: String,
     pub size: f64,

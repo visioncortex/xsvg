@@ -127,6 +127,15 @@ pub struct PlacedLine {
     pub justify_width: Option<f64>,
     /// The line split into styled runs (`<tspan>`s). One base run for plain text.
     pub runs: Vec<Run>,
+    /// `[start, end)` into the word sequence of the [`Measured`] flow that
+    /// wrapped this line (wrapping never splits a word, so a line is always a
+    /// whole-word range). The editor seam (`text_layout_impl`) maps carets
+    /// through it. Ellipsis truncation rewrites `text` but leaves this range —
+    /// `text != words[range].join(" ")` is the truncation test. Flows that stack
+    /// several paragraphs index each line against its own paragraph's words.
+    ///
+    /// [`Measured`]: super::measure::Measured
+    pub words: (usize, usize),
 }
 
 /// Merge a line's pieces into `(full_text, runs)`, coalescing adjacent same-style
@@ -192,10 +201,10 @@ pub fn layout_area_measured(
     let indent = spec.text_indent;
     let line_pieces = if indent != 0.0 && cw > 0.0 && !measured.words.is_empty() {
         let (first, mut i) = fill_line(measured, 0, (cw - indent).max(0.0), scale);
-        let mut ls = vec![first];
+        let mut ls = vec![(first, (0, i))];
         while i < measured.words.len() {
             let (p, n) = fill_line(measured, i, cw, scale);
-            ls.push(p);
+            ls.push((p, (i, n)));
             i = n;
         }
         ls
@@ -234,7 +243,7 @@ pub fn layout_area_measured(
 
     let mut lines = Vec::new();
     let mut dropped = false;
-    for (i, pieces) in line_pieces.into_iter().enumerate() {
+    for (i, (pieces, words)) in line_pieces.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * advance;
         // Keep a line by its BASELINE (its block position), not its full ink band:
         // a lone line whose cap or descent merely grazes the edge should render and
@@ -253,6 +262,7 @@ pub fn layout_area_measured(
             baseline,
             justify_width,
             runs,
+            words,
         });
     }
     if spec.text_overflow == TextOverflow::Ellipsis {
@@ -281,7 +291,7 @@ pub fn layout_flow(
     wrap_pieces(&measured, max_width, 1.0)
         .into_iter()
         .enumerate()
-        .map(|(i, pieces)| {
+        .map(|(i, (pieces, words))| {
             let (text, runs) = merge_pieces(pieces);
             PlacedLine {
                 text,
@@ -289,6 +299,7 @@ pub fn layout_flow(
                 baseline: y + i as f64 * advance,
                 justify_width: None,
                 runs,
+                words,
             }
         })
         .collect()
