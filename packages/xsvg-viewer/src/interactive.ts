@@ -210,6 +210,7 @@ export class XsvgViewInteractive extends HTMLElement {
   private srcProp: string | null = null;
   private resolveFn: ((base: string, href: string) => [string, string] | null) | null = null;
   private loaderObj: import("./compiler").DepLoader | null = null;
+  private pluginsObj: import("./compiler").PluginLoader | null = null;
   private baseUrlProp: string | null = null;
   private resizeObs: ResizeObserver | null = null;
 
@@ -236,6 +237,22 @@ export class XsvgViewInteractive extends HTMLElement {
   }
   get loader() {
     return this.loaderObj;
+  }
+
+  /** Custom `<x:import>` module loader (see `PluginLoader` in `compileXsvg`) — for hosts
+   *  whose generator-module bytes live behind an async boundary, or that cannot fetch at
+   *  all. A sandboxed embedder (a VS Code webview under a strict CSP) can reach neither
+   *  `file://` nor an arbitrary origin, so without this the sibling `.wasm` a document
+   *  imports is simply unreachable; with it, the bytes arrive over the host's own channel.
+   *
+   *  The `<use href>` counterpart of this is `loader`. When null, imports fall back to a
+   *  same-origin fetch of the module `src`. */
+  set plugins(l: import("./compiler").PluginLoader | null) {
+    this.pluginsObj = l;
+    void this.render();
+  }
+  get plugins() {
+    return this.pluginsObj;
   }
 
   /** Base the document's relative `<use href>` links resolve against, when the source is
@@ -408,6 +425,7 @@ export class XsvgViewInteractive extends HTMLElement {
         baseUrl,
         resolve: this.resolveFn ?? undefined,
         loader: this.loaderObj ?? undefined,
+        plugins: this.pluginsObj ?? undefined,
         // Guarded on the token: a superseded compile must not leave its schemas or
         // its incremental handle behind for the current document to edit through.
         onPlugins: (s) => { if (mine === this.token) this.pluginSchemas = s; },

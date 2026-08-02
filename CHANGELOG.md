@@ -136,6 +136,17 @@ at 0.1.0.
 
 ### Fixed
 
+- **`<x:import>` modules could not be routed through a host loader**, which made external-WASM
+  plugins impossible in any sandboxed embedder. `compileXsvg` accepted a `PluginLoader` from the
+  day generators landed — its docstring even named "an embedder with its own module store" as
+  the case — but no host surface forwarded it, so imports always fell back to a same-origin
+  fetch of the module `src`. A VS Code webview under a strict CSP reaches neither `file://` nor
+  an arbitrary origin, so the sibling `.wasm` was simply unreachable, with nothing to intercept
+  it. `plugins` is now a property on `<xsvg-view>` and `<xsvg-view-interactive>` and an option on
+  `createPreview`, mirroring the `loader` hook for `<use href>` deps; `PluginLoader` is exported
+  from the package root so a TypeScript host can name it. Unset, behaviour is unchanged.
+  `npm run check:hosts` pins every host hook to every surface — a hook that reaches no surface
+  is indistinguishable from no hook at all, and fails silently rather than loudly.
 - **Regression: `route="curve"` sent same-side anchors on a detour** instead of arcing.
   `#a:left-top → #b:top` — the "both ends leave the top and arc over" idiom — routed out past
   the far box and doubled back, drawing two brackets where the sample asks for two Ls. The

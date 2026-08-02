@@ -113,6 +113,18 @@ provenance and governance, not mechanism:
 - The **native hosts accept local paths only** — a `src` with a scheme degrades rather than
   being fetched, because a CLI or a synchronous Node call reaching the network would be a
   surprise. Vendor the module next to the document, as with any other dependency.
+- The browser host fetches the module `src` same-origin **by default only**. A host that
+  cannot fetch — a VS Code webview under a strict CSP reaches neither `file://` nor an
+  arbitrary origin — supplies a `PluginLoader` instead, and the bytes arrive over whatever
+  channel it already has (an extension-host RPC, a bundle, a virtual FS). Every host surface
+  takes it: `compileXsvg({ plugins })`, `createPreview({ plugins })`, and a `plugins` property
+  on both `<xsvg-view>` and `<xsvg-view-interactive>`. It is the generator-module counterpart
+  of the `loader` hook for `<use href>` deps, and the two are wired the same way.
+
+  A hook that exists but reaches no surface is indistinguishable from no hook at all —
+  `plugins` was supported by `compileXsvg` from the day generators landed and forwarded by
+  nothing, so external-WASM plugins were impossible in any sandboxed host without a single
+  error being raised. `npm run check:hosts` now pins every hook to every surface.
 - Plugin elements compose exactly like built-ins: their emitted `d` geometry is harvested by
   `x_output_geometry` (`compile/mod.rs:1887`), so a `<clip:gear>` is a valid `<x:boolean>` operand,
   warp target, or `<x:textbox in=…>` container with **zero additional plumbing**.

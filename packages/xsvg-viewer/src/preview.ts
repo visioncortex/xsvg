@@ -8,7 +8,7 @@
 //
 //   const preview = createPreview(hostEl, { hashDeepLink: true, showErrors: true });
 //   await preview.render(source);
-import { compileXsvg, type DepLoader } from "./compiler";
+import { compileXsvg, type DepLoader, type PluginLoader } from "./compiler";
 import { findArtboards, makeThumb } from "./artboards";
 
 // The component's styles, injected once into <head> on first use. Inlined (rather than a
@@ -74,6 +74,11 @@ export interface PreviewOptions {
    *  dependency bytes live behind an async boundary (an extension host, a virtual FS).
    *  Ignored when `resolve` is given. Defaults to same-origin fetch. */
   loader?: DepLoader;
+  /** Custom `<x:import>` module loader (see `PluginLoader` in `compileXsvg`) — the
+   *  generator-module counterpart of `loader`, for hosts that cannot fetch the module
+   *  `src` themselves (a sandboxed webview reaches neither `file://` nor an arbitrary
+   *  origin). Defaults to same-origin fetch of the module `src`. */
+  plugins?: PluginLoader;
 }
 
 /** "superseded" means a newer render() started before this one finished — the
@@ -203,6 +208,7 @@ export function createPreview(host: HTMLElement, opts: PreviewOptions = {}): Pre
         resolve: opts.resolve,
         baseUrl: opts.baseUrl,
         loader: opts.loader,
+        plugins: opts.plugins,
       });
     } catch (err) {
       if (mine !== seq) return "superseded"; // a newer edit already superseded us

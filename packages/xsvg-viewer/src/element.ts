@@ -15,7 +15,7 @@
 //! root (style-isolated); the browser's own SVG engine does the drawing. This is the
 //! "render like an image" surface — no pan/zoom/inspector, ideal for docs & iframes.
 //! For a bundler-free `<script>` include, use the self-contained `dist/xsvg.js` build.
-import { compileXsvg, type DepLoader } from "./compiler";
+import { compileXsvg, type DepLoader, type PluginLoader } from "./compiler";
 
 export class XsvgView extends HTMLElement {
   static observedAttributes = ["src", "quality", "base-url"];
@@ -27,6 +27,7 @@ export class XsvgView extends HTMLElement {
   private baseUrlProp: string | null = null;
   private resolveFn: ((base: string, href: string) => [string, string] | null) | null = null;
   private loaderObj: DepLoader | null = null;
+  private pluginsObj: PluginLoader | null = null;
 
   /** Base the source's relative `<use href>` links resolve against — for inline/data-island
    *  sources, which otherwise resolve against the page. Also settable as the `base-url`
@@ -55,6 +56,18 @@ export class XsvgView extends HTMLElement {
   }
   get loader() {
     return this.loaderObj;
+  }
+
+  /** Custom `<x:import>` module loader (see `PluginLoader`) — the generator-module
+   *  counterpart of `loader`, for hosts that cannot fetch the module `src` themselves
+   *  (a sandboxed webview reaches neither `file://` nor an arbitrary origin). When null,
+   *  imports fall back to a same-origin fetch. */
+  set plugins(l: PluginLoader | null) {
+    this.pluginsObj = l;
+    void this.render();
+  }
+  get plugins() {
+    return this.pluginsObj;
   }
 
   constructor() {
@@ -123,6 +136,7 @@ export class XsvgView extends HTMLElement {
         baseUrl,
         resolve: this.resolveFn ?? undefined,
         loader: this.loaderObj ?? undefined,
+        plugins: this.pluginsObj ?? undefined,
       });
       if (mine !== this.token) return;
       // compiled SVGs carry a viewBox but no width/height — make it fill the host.
