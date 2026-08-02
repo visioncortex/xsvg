@@ -60,8 +60,11 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   modules and resolved dependencies, so re-emitting a fragment costs one parse plus one
   element's lowering, with no fetching and no module compilation.
 - `npm run check:incremental` reconstructs a patch the way the viewer does, headlessly, and
-  requires the result to be byte-identical to a full recompile — 354 patches across the whole
-  dataset. It found both of the bugs fixed below.
+  requires the result to be byte-identical to a full recompile — 326 patches across the whole
+  dataset, 214 of them length-changing (so every later offset moves). It found all three of the
+  bugs fixed below, and reports its own length-changing count because the first version of it
+  did not: nine in ten arithmetic edits keep their width and shift nothing, so it passed
+  confidently while barely exercising the mapping it exists to check.
 - **`superseded_by`** on a parameter declaration: the other parameters whose presence makes it
   inert (`<clip:arrow length>` is read only in the polar form; `<x:textbox>` takes its box from
   `in="#shape"`). Carried through the manifest as `supersededBy`, and the panel disables such a
@@ -81,6 +84,13 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   their element's own span alongside the finer per-cell mapping, and the rule is pinned as a
   normative invariant (docs/Incremental.md §4.1) rather than left to each emitter to remember.
   Affects `sourcemap` output only; compiled output is byte-identical.
+- An incremental patch could **strand a generated def id**. Ids the compiler invents (`x-flt-…`,
+  `x-mesh-…`, `x-mgc-…`) seed on the node's byte start, so a length-changing edit renames every
+  one after it — and a fragment the patch does not re-emit keeps the old name. It still renders
+  (the def and its `url(#…)` move together), but a re-emitted dependent can land on an id an
+  untouched fragment still holds, and a duplicate id resolves to the wrong element. The viewer
+  now declines to patch in that case rather than reimplement the compiler's id scheme; `NodeKeys`
+  (docs/Incremental.md §3.1) removes the offset-dependence for good and is the real fix.
 - Source ranges were **off by ten bytes per `-x-google-` font marker** in the interactive viewer:
   the compiler is handed the source with those markers stripped, but the inspector indexed the
   original text, so on the affected documents clicking an element highlighted the wrong source and

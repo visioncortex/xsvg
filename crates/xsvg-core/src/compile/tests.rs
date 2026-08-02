@@ -1470,6 +1470,34 @@ const INC_COMPOSITE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x=
 </svg>"##;
 
 #[test]
+fn generated_def_ids_are_all_prefixed_x() {
+    // Ids the compiler invents for its own defs (`x-flt-…`, `x-mesh-…`, `x-mgc-…`)
+    // seed on the node's byte start unless a host supplies `NodeKeys`, so they
+    // *move* when an edit shifts earlier text. An incremental host must therefore be
+    // able to tell a generated id from an authored one, and the `x-` prefix is the
+    // whole signal it has. Adding a family without it would silently un-fix
+    // https://…/Incremental.md §5 "stale generated ids" — hence this canary.
+    let svg = format!(
+        r##"{XW}<rect x="0" y="0" width="20" height="10" fill="#48a" filter="blur(2)"/><x:mesh points="0,40 40,40 40,80 0,80"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #ff0"/></x:mesh><meshgradient id="mg" x="0" y="100"><meshrow><meshpatch><stop path="l 40,0" stop-color="#e11"/><stop path="l 0,30" stop-color="#fa0"/><stop path="l -40,0" stop-color="#3b7"/><stop path="l 0,-30" stop-color="#06c"/></meshpatch></meshrow></meshgradient><rect x="0" y="100" width="40" height="30" fill="url(#mg)"/></svg>"##
+    );
+    let out = compile_impl(&svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
+    let authored: std::collections::HashSet<&str> = ["mg"].into_iter().collect();
+    let mut generated = 0;
+    for chunk in out.split(r#"id=""#).skip(1) {
+        let id = &chunk[..chunk.find('"').unwrap()];
+        if authored.contains(id) {
+            continue;
+        }
+        assert!(
+            id.starts_with("x-"),
+            "generated id `{id}` is indistinguishable from an authored one: {out}"
+        );
+        generated += 1;
+    }
+    assert!(generated >= 3, "expected filter/mesh/clip ids: {out}");
+}
+
+#[test]
 fn every_emitted_fragment_is_anchorable_by_its_own_range() {
     // The companion to the verbatim-slice invariant, and what makes surgical
     // replacement *addressable* rather than merely sound: a host holds the rendered

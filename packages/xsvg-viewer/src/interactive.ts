@@ -510,6 +510,22 @@ export class XsvgViewInteractive extends HTMLElement {
       swaps.push({ run, nodes: parseSvgFragment(markup) });
     }
 
+    // The compiler seeds the ids of defs it invents — `x-flt-…`, `x-mesh-…`,
+    // `x-mgc-…` — on the node's byte start, so an offset shift renames them. A
+    // fragment we do not re-emit keeps its old id, which still matches its own
+    // `url(#…)` and so still renders; but a re-emitted dependent can land on an id
+    // an untouched fragment is still using, and a duplicate id resolves to the wrong
+    // one. Re-stamping them here would mean reimplementing the compiler's id scheme
+    // in the host, so decline instead — `NodeKeys` is the real answer, and removes
+    // the offset-dependence rather than tracking it (docs/Incremental.md §3.1).
+    if (delta !== 0) {
+      const beingReplaced = (el: Element) =>
+        swaps.some((s) => s.run.some((n) => n === el || n.contains(el)));
+      if (Array.from(svgEl.querySelectorAll('[id^="x-"]')).some((el) => !beingReplaced(el))) {
+        return false;
+      }
+    }
+
     // Re-stamp the spans of everything we are *not* replacing: their source moved
     // under them even though their output did not.
     for (const el of Array.from(svgEl.querySelectorAll("[data-xsvg-pos]"))) {

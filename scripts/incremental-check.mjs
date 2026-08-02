@@ -142,6 +142,23 @@ function patch(rendered, source, next, o) {
   }
 
   swaps.sort((x, y) => x.at - y.at);
+
+  // Generated def ids (`x-flt-…`, `x-mesh-…`, `x-mgc-…`) seed on the node's byte
+  // start, so an offset shift renames them — and a fragment we do not re-emit keeps
+  // the old name. The viewer declines rather than reimplement the compiler's id
+  // scheme; model that here, or the harness reports a divergence the shipped code
+  // never produces. `NodeKeys` removes the offset-dependence for good.
+  if (delta !== 0) {
+    let outside = "";
+    let end = 0;
+    for (const s of swaps) {
+      outside += rendered.slice(end, s.at);
+      end = s.at + s.len;
+    }
+    outside += rendered.slice(end);
+    if (/\bid="x-/.test(outside)) return { skipped: "would strand a byte-seeded def id" };
+  }
+
   let out = "";
   let cursor = 0;
   for (const s of swaps) {
@@ -151,11 +168,19 @@ function patch(rendered, source, next, o) {
     out += restamp(rendered.slice(cursor, s.at), toNew) + s.after;
     cursor = s.at + s.len;
   }
-  return { out: out + restamp(rendered.slice(cursor), toNew) };
+  return { out: out + restamp(rendered.slice(cursor), toNew), shifted: delta !== 0 };
 }
 
-/** Plausible single-attribute edits inside top-level elements — the shape every
- *  edit the parameter panel makes actually takes. */
+/**
+ * Plausible single-attribute edits inside top-level elements — the shape every edit
+ * the parameter panel makes actually takes.
+ *
+ * Deliberately produces a **length-changing** edit for every attribute, alongside the
+ * same-length one. An edit that keeps the value's width shifts no offsets at all, so
+ * it exercises none of the mapping this protocol is made of: the pivot arithmetic, the
+ * re-anchoring, the re-stamping. Nine in ten arithmetic tweaks happen to keep their
+ * width, so left to chance the interesting case is nearly absent.
+ */
 function edits(source) {
   const out = [];
   for (const m of source.matchAll(/([\w:-]+)="([^"<>]*)"/g)) {
@@ -164,14 +189,20 @@ function edits(source) {
     const unit = fragmentRange(source, bytes(source.slice(0, m.index)));
     if (!unit) continue;
     const v = m[2];
-    let next;
-    if (/^-?\d+(\.\d+)?$/.test(v)) next = String(Number(v) + 7); // grows and shrinks the text
-    else if (v === "") next = "1";
-    else continue;
-    out.push({
-      label: `${m[1]}="${v}" → "${next}"`,
-      source: source.slice(0, valueAt) + next + source.slice(valueAt + v.length),
-    });
+    const nexts = [];
+    if (/^-?\d+(\.\d+)?$/.test(v)) {
+      nexts.push(`${v}0`); // one byte longer — every later offset moves
+      const same = String(Number(v) + 7);
+      if (same.length === v.length) nexts.push(same);
+    } else if (v === "") {
+      nexts.push("1");
+    }
+    for (const next of nexts) {
+      out.push({
+        label: `${m[1]}="${v}" → "${next}"${next.length === v.length ? "" : " [shifts]"}`,
+        source: source.slice(0, valueAt) + next + source.slice(valueAt + v.length),
+      });
+    }
   }
   return out;
 }
@@ -180,6 +211,11 @@ const samples = readdirSync(DATASET).filter((f) => f.endsWith(".xsvg")).sort();
 const PER_SAMPLE = 6;
 let patched = 0;
 let skipped = 0;
+// Patches where the edit changed the source's length, so every later offset moved.
+// Reported because it is the number that matters: a same-length edit shifts nothing
+// and exercises none of the mapping, and an earlier version of this harness was
+// almost entirely made of those without saying so.
+let shifting = 0;
 
 for (const file of samples) {
   const path = join(DATASET, file);
@@ -202,6 +238,7 @@ for (const file of samples) {
         return;
       }
       patched++;
+      if (result.shifted) shifting++;
       assert.equal(
         result.out,
         compile(c.source, o),
@@ -213,6 +250,7 @@ for (const file of samples) {
 
 console.log(
   `incremental: ${passed} checks passed (${patched} patches verified byte-identical, ` +
-    `${skipped} declined to a full compile) over ${samples.length} samples`,
+    `${shifting} of them shifting every later offset; ${skipped} declined to a full ` +
+    `compile) over ${samples.length} samples`,
 );
 if (failed) console.error(`${failed} failed`);

@@ -155,6 +155,16 @@ in Node.
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient
   needs no dependent re-emits (live references).
+- **Stale generated def ids** — the sharpest reason to want §3.1. Ids the compiler invents
+  (`x-flt-…`, `x-mesh-…`, `x-mgc-…`) seed on the node's byte start, so a length-changing edit
+  renames every one after it. A fragment that is *not* re-emitted keeps its old id, which still
+  matches its own `url(#…)` and so still renders — but a re-emitted dependent can land on an id an
+  untouched fragment is still using, and a duplicate id resolves to the wrong element. Re-stamping
+  them host-side would mean reimplementing `gen_id_seed` outside the compiler, so the host
+  **declines the patch** instead: when the edit changes length and any `[id^="x-"]` sits outside
+  the replaced runs, it recompiles. The `x-` prefix is the only signal the host has for telling a
+  generated id from an authored one, and is pinned by `generated_def_ids_are_all_prefixed_x`.
+  Adopting `NodeKeys` removes the condition entirely rather than detecting it.
 
 ## 5.1 End-to-end check
 
@@ -170,6 +180,15 @@ by it, not by inspection.
 
 Anything the viewer would decline is reported as declined rather than skipped silently, so the
 count is a live measure of how much of the corpus the fast path actually covers.
+
+It also reports how many verified patches **changed the source's length**, and that number is the
+one to read. A same-length edit (`40` → `47`) shifts no offsets and therefore exercises none of
+the mapping this protocol is made of — not the pivot arithmetic, not the re-anchoring, not the
+re-stamping. Nine in ten arithmetic tweaks happen to keep their width, so the first version of
+this harness was almost entirely made of them and reported a confident pass while barely testing
+the interesting path; the stale-def-id limit above went unnoticed until edits were forced to
+change length. Generating both widths per attribute is the fix, and printing the count is what
+keeps the gap from reopening quietly.
 
 ## 6. Text layout for editors (`text_layout_impl`, shipped)
 
