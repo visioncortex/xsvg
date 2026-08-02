@@ -132,6 +132,8 @@ struct ParamOpts {
     max: Option<f64>,
     step: Option<f64>,
     doc: Option<String>,
+    /// `superseded_by = "x2, y2"` — parameters whose presence makes this one inert.
+    superseded_by: Vec<String>,
     color: bool,
     skip: bool,
     flatten: bool,
@@ -241,6 +243,16 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     "max" => opts.max = expr.and_then(expr_f64),
                     "step" => opts.step = expr.and_then(expr_f64),
                     "doc" => opts.doc = expr.and_then(expr_text),
+                    "superseded_by" => {
+                        opts.superseded_by = expr
+                            .and_then(expr_text)
+                            .into_iter()
+                            .flat_map(|s| {
+                                s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()
+                            })
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    }
                     "color" => opts.color = true,
                     "skip" => opts.skip = true,
                     "flatten" => opts.flatten = true,
@@ -323,6 +335,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         };
         let default_tokens = opt_str(&opts.default);
         let doc_tokens = opt_str(&opts.doc);
+        let superseded = &opts.superseded_by;
         let min = opt_f64(opts.min);
         let max = opt_f64(opts.max);
         let step = opt_f64(opts.step);
@@ -337,6 +350,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 step: #step,
                 values: #values_tokens,
                 doc: #doc_tokens,
+                superseded_by: &[#(#superseded),*],
             }
         });
         reads.push(quote!(#ident: #read));

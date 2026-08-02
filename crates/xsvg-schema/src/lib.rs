@@ -107,6 +107,14 @@ pub struct ParamSpec {
     /// Allowed values when `kind` is [`ParamKind::Enum`], else empty.
     pub values: &'static [&'static str],
     pub doc: Option<&'static str>,
+    /// Other parameters that, when present, make this one have no effect — e.g.
+    /// `<clip:arrow length>` is read only in the polar form, so setting `x2`/`y2`
+    /// supersedes it.
+    ///
+    /// Only the element knows this; without it an editing host offers a control that
+    /// silently does nothing, which reads as a broken editor rather than as an
+    /// inapplicable parameter. Declaring it is what lets the host say *why*.
+    pub superseded_by: &'static [&'static str],
 }
 
 impl ParamSpec {
@@ -121,6 +129,7 @@ impl ParamSpec {
             step: None,
             values: &[],
             doc: None,
+            superseded_by: &[],
         }
     }
 }
@@ -221,6 +230,16 @@ impl ParamSpec {
         if !self.values.is_empty() {
             out.push_str(",\"values\":[");
             for (i, v) in self.values.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                push_json_str(out, v);
+            }
+            out.push(']');
+        }
+        if !self.superseded_by.is_empty() {
+            out.push_str(",\"supersededBy\":[");
+            for (i, v) in self.superseded_by.iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
@@ -361,6 +380,10 @@ mod tests {
         stroke: Option<String>,
         #[param(default = false)]
         outlined: bool,
+        /// Read only when the endpoint form is absent — a fact only the element
+        /// knows, so it has to be declared for a host to act on.
+        #[param(default = 100.0, superseded_by = "x2, y2")]
+        length: f64,
     }
 
     #[test]
@@ -385,6 +408,11 @@ mod tests {
         // an element that computes its default declares none, and says why
         assert_eq!(by("head-width").default, None);
         assert_eq!(by("head-width").doc, Some("defaults to 2.5x thickness"));
+        // a parameter another one can render inert names what supersedes it, so an
+        // editing host can disable the control instead of offering one that silently
+        // does nothing
+        assert_eq!(by("length").superseded_by, ["x2", "y2"]);
+        assert!(by("thickness").superseded_by.is_empty());
     }
 
     #[test]
@@ -452,5 +480,6 @@ mod tests {
         assert!(json.contains(r#""values":["end","start","both","none"]"#), "{json}");
         assert!(json.contains(r#""children":"container""#), "{json}");
         assert!(json.contains(r#""ns":"https://x.example/c""#), "{json}");
+        assert!(json.contains(r#""supersededBy":["x2","y2"]"#), "{json}");
     }
 }

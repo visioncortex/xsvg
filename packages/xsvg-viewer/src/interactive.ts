@@ -103,6 +103,10 @@ const STYLE = `
 .xsvg-param input, .xsvg-param select { width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 5px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #0f172a; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .xsvg-param input:focus, .xsvg-param select:focus { outline: 2px solid #93c5fd; outline-offset: -1px; border-color: #60a5fa; }
 .xsvg-param input::placeholder { color: #94a3b8; }
+/* A parameter the element's own attributes have overridden — shown, so its value is
+   still readable, but visibly not in play. */
+.xsvg-param.superseded { opacity: .55; }
+.xsvg-param.superseded .xsvg-param-name { text-decoration: line-through; }
 /* A bounded number: drag the rail, or type in the box beside it. */
 .xsvg-slider { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .xsvg-slider input[type=range] { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: none; accent-color: #2563eb; }

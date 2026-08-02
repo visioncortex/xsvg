@@ -288,13 +288,16 @@ pub(super) enum FitParam {
     group = TextFont
 )]
 pub(super) struct Textbox {
-    #[param(default = 0.0)]
+    // `in="#shape"` takes the box from the referenced shape instead (see
+    // `textbox_area_spec`, which reads geometry from the target and only the layout
+    // options from the textbox), so these four stop governing the moment it is set.
+    #[param(default = 0.0, superseded_by = "in")]
     pub x: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, superseded_by = "in")]
     pub y: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in")]
     pub width: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in")]
     pub height: f64,
     #[param(default = 0.0, min = 0.0, max = 400.0)]
     pub padding: f64,

@@ -411,6 +411,20 @@ A parameter is draggable exactly when the module said what its useful range is, 
 reason to declare `min`/`max` rather than decoration: the host offers a slider over the
 declared span instead of guessing one.
 
+### 10.1 Parameters that other parameters switch off
+
+Elements commonly read a parameter only in one of two forms — `<clip:arrow>` uses
+`length`/`angle` only when `x2`/`y2` are absent; `<x:textbox>` takes its box from `in="#shape"`
+and ignores its own `x`/`y`/`width`/`height` once that is set. Only the element knows this, and
+a host that doesn't will happily offer a live control that does nothing. Dragging it and seeing
+no movement reads as *the editor is broken*, not as *this parameter doesn't apply here* — the
+worse of the two conclusions, and the one a user reaches first.
+
+So it is declared: `#[param(superseded_by = "x2, y2")]`, carried through the manifest as
+`supersededBy`, and the panel disables such a control while any of the named attributes is
+present and says which one is winning. The value stays visible — it is still what the source
+says — but it is visibly not in play.
+
 Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) remains, and is
 deliberately skipped for now.
 

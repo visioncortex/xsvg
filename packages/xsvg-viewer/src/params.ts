@@ -20,6 +20,11 @@ export interface ParamSpec {
   values?: string[];
   /** Help text, shown as the control's tooltip. */
   doc?: string;
+  /** Parameters whose presence makes this one have no effect — `<clip:arrow length>`
+   *  is read only in the polar form, so `x2`/`y2` supersede it. Only the element
+   *  knows this; the panel uses it to disable a control that would otherwise look
+   *  live and do nothing. */
+  supersededBy?: string[];
 }
 
 /** One element a module provides. */
@@ -179,15 +184,35 @@ export function renderParams(
     const p = params[name];
     const row = document.createElement("label");
     row.className = "xsvg-param";
-    if (p.doc) row.title = p.doc;
 
     const label = document.createElement("span");
     label.className = "xsvg-param-name";
     label.textContent = name;
     row.append(label);
 
+    // A parameter the element's own attributes have made inert. Offering a live
+    // control for it is worse than offering none: the user drags it, nothing moves,
+    // and the reasonable conclusion is that the editor is broken rather than that
+    // the parameter does not apply. Say which attribute is winning.
+    const by = (p.supersededBy ?? []).filter((n) => current.has(n));
     const value = current.get(name)?.value ?? "";
-    row.append(makeControl(p, value, (v) => onChange(name, v)));
+    const control = makeControl(p, value, (v) => onChange(name, v));
+    if (by.length) {
+      row.classList.add("superseded");
+      for (const el of control.querySelectorAll?.("input, select") ?? []) {
+        (el as HTMLInputElement).disabled = true;
+      }
+      if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) {
+        control.disabled = true;
+      }
+      row.title = `no effect while ${by.join(" and ")} ${by.length > 1 ? "are" : "is"} set${
+        p.doc ? ` — ${p.doc}` : ""
+      }`;
+    } else if (p.doc) {
+      row.title = p.doc;
+    }
+
+    row.append(control);
     wrap.append(row);
   }
   return wrap;

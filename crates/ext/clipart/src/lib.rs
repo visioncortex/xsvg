@@ -57,9 +57,9 @@ enum Tail {
     doc = "An outlined thick arrow. Either give it two endpoints (x1,y1,x2,y2) or an origin plus length and angle."
 )]
 struct Arrow {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, superseded_by = "x")]
     x1: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, superseded_by = "y")]
     y1: f64,
     /// Endpoint form. Absent means the origin/length/angle form is used instead,
     /// which is why these are optional rather than defaulted.
@@ -71,9 +71,19 @@ struct Arrow {
     x: Option<f64>,
     #[param(doc = "alias for y1")]
     y: Option<f64>,
-    #[param(default = 100.0, min = 0.0, max = 2000.0)]
+    #[param(
+        default = 100.0,
+        min = 0.0,
+        max = 2000.0,
+        superseded_by = "x2, y2",
+        doc = "polar form; ignored once x2/y2 give the endpoint outright"
+    )]
     length: f64,
-    #[param(default = 0.0, doc = "degrees clockwise from +x")]
+    #[param(
+        default = 0.0,
+        superseded_by = "x2, y2",
+        doc = "degrees clockwise from +x; ignored once x2/y2 give the endpoint outright"
+    )]
     angle: f64,
     #[param(default = 16.0, min = 0.0, max = 200.0)]
     thickness: f64,

@@ -62,6 +62,10 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 - `npm run check:incremental` reconstructs a patch the way the viewer does, headlessly, and
   requires the result to be byte-identical to a full recompile — 354 patches across the whole
   dataset. It found both of the bugs fixed below.
+- **`superseded_by`** on a parameter declaration: the other parameters whose presence makes it
+  inert (`<clip:arrow length>` is read only in the polar form; `<x:textbox>` takes its box from
+  `in="#shape"`). Carried through the manifest as `supersededBy`, and the panel disables such a
+  control and names what is overriding it, instead of offering one that silently does nothing.
 
 ### Fixed
 
