@@ -8,6 +8,8 @@ node_modules
 # package build artifacts (wasm output + compiled dist)
 packages/*/pkg
 packages/*/dist
+# extension modules, built from crates/ext by `npm run ext:build`
+packages/*/ext
 
 # secrets — npm auth token lives here, never commit
 .npmrc

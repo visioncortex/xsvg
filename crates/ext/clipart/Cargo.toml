@@ -1,0 +1,12 @@
+[package]
+name = "xsvg-ext-clipart"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Official xsvg extension: procedural diagram clipart (arrows, callouts)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+xsvg-plugin = { path = "../../xsvg-plugin" }

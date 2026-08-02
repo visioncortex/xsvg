@@ -356,7 +356,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "xsvg-ext-clipart"
+version = "0.1.0"
+dependencies = [
+ "xsvg-plugin",
+]
+
+[[package]]
 name = "xsvg-gradient"
+version = "0.1.0"
+
+[[package]]
+name = "xsvg-plugin"
 version = "0.1.0"
 
 [[package]]

@@ -1,0 +1,307 @@
+//! SDK for writing xsvg geometry plugins (docs/Extensibility.md).
+//!
+//! A plugin is a WASM module exporting five functions. This crate implements the
+//! whole ABI — memory handoff, JSON decode, length-prefixed replies — so a plugin
+//! is just a [`Plugin`] impl plus [`export_plugin!`]:
+//!
+//! ```ignore
+//! struct MyClipart;
+//! impl xsvg_plugin::Plugin for MyClipart {
+//!     const MANIFEST: &'static str = include_str!("manifest.json");
+//!     fn generate(tag: &str, req: &Request) -> Result<String, String> { … }
+//! }
+//! xsvg_plugin::export_plugin!(MyClipart);
+//! ```
+//!
+//! The module gets no imports, no WASI, and no host callbacks: a generator is a
+//! pure function from request to SVG fragment. Whatever it returns is re-parsed
+//! and re-emitted by the compiler, so it cannot escape the static SVG subset —
+//! and it need not be defensive about that either.
+//!
+//! ## ABI (version 1)
+//!
+//! | Export | Meaning |
+//! |---|---|
+//! | `xsvg_abi_version() -> i32` | `1` |
+//! | `xsvg_alloc(len: i32) -> i32` | allocate `len` bytes, return the pointer |
+//! | `xsvg_free(ptr: i32, len: i32)` | release a buffer the host owns |
+//! | `xsvg_describe() -> i32` | pointer to the length-prefixed manifest |
+//! | `xsvg_generate(ptr, len) -> i32` | pointer to the length-prefixed reply |
+//!
+//! Both returned buffers are `u32` little-endian length followed by UTF-8 bytes;
+//! the host reads them and then calls `xsvg_free(ptr, 4 + len)`. `xsvg_generate`
+//! takes ownership of its input buffer, so the host must not free that.
+
+pub mod json;
+
+pub use json::Json;
+
+/// The ABI version this SDK implements.
+pub const ABI_VERSION: i32 = 1;
+
+/// One child of a container element, lowered by the compiler before the call.
+pub struct Child {
+    /// Compiled SVG. Splice it verbatim to keep the child's source stamps, and
+    /// with them the viewer's click-to-source mapping.
+    pub svg: String,
+    /// `[x, y, width, height]` of what the child actually paints, or `None` when
+    /// the compiler found nothing measurable.
+    pub bbox: Option<[f64; 4]>,
+}
+
+/// Everything a generator is given.
+pub struct Request {
+    /// The element's attributes, minus the ones the compiler reserves
+    /// (`id`, `transform`, `in`), with theme `var()` tokens already resolved.
+    pub attrs: Vec<(String, String)>,
+    /// Geometry resolved from `in="#id"`, as an SVG path `d`.
+    pub input_d: Option<String>,
+    /// Compiled children, in document order. Empty for a leaf element.
+    pub children: Vec<Child>,
+    /// The active quality profile's flattening tolerance, for anything this
+    /// generator approximates with line or curve segments.
+    pub tolerance: f64,
+}
+
+impl Request {
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// A numeric attribute, falling back to `default` when absent or unparseable.
+    /// Non-finite input takes the default too — totality is the compiler's
+    /// contract and a generator must not be the thing that breaks it.
+    pub fn num(&self, name: &str, default: f64) -> f64 {
+        match self.attr(name).and_then(|v| v.trim().parse::<f64>().ok()) {
+            Some(n) if n.is_finite() => n,
+            _ => default,
+        }
+    }
+
+    /// The union of every child's box, or `None` when no child had one.
+    pub fn children_bbox(&self) -> Option<[f64; 4]> {
+        self.children.iter().filter_map(|c| c.bbox).reduce(|a, b| {
+            let x0 = a[0].min(b[0]);
+            let y0 = a[1].min(b[1]);
+            let x1 = (a[0] + a[2]).max(b[0] + b[2]);
+            let y1 = (a[1] + a[3]).max(b[1] + b[3]);
+            [x0, y0, x1 - x0, y1 - y0]
+        })
+    }
+
+    fn decode(v: &Json) -> Option<Request> {
+        let attrs = v
+            .get("attrs")
+            .and_then(Json::as_arr)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|p| {
+                        let pair = p.as_arr()?;
+                        Some((
+                            pair.first()?.as_str()?.to_string(),
+                            pair.get(1)?.as_str()?.to_string(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let children = v
+            .get("children")
+            .and_then(Json::as_arr)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|c| Child {
+                        svg: c
+                            .get("svg")
+                            .and_then(Json::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        bbox: c.get("bbox").and_then(Json::as_arr).and_then(|b| {
+                            let mut out = [0.0; 4];
+                            if b.len() != 4 {
+                                return None;
+                            }
+                            for (slot, v) in out.iter_mut().zip(b) {
+                                *slot = v.as_num()?;
+                            }
+                            Some(out)
+                        }),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Request {
+            attrs,
+            input_d: v
+                .get("input_d")
+                .and_then(Json::as_str)
+                .map(ToString::to_string),
+            children,
+            tolerance: v.get("tolerance").and_then(Json::as_num).unwrap_or(0.1),
+        })
+    }
+}
+
+/// What a plugin must provide.
+pub trait Plugin {
+    /// The manifest (docs/Extensibility.md §4): the namespace this module claims,
+    /// and the elements it provides with their parameters. The compiler's host
+    /// validates that the declared `ns` matches the `<x:import>` that bound it.
+    const MANIFEST: &'static str;
+
+    /// Lower one element. `Err` degrades that element with the given reason
+    /// rather than failing the compile.
+    fn generate(tag: &str, req: &Request) -> Result<String, String>;
+}
+
+/// Format a number for SVG output: short, locale-free, and never `NaN`/`inf`.
+pub fn num(v: f64) -> String {
+    if !v.is_finite() {
+        return "0".to_string();
+    }
+    // three decimals is finer than any sane tolerance and keeps output compact
+    let r = (v * 1000.0).round() / 1000.0;
+    let mut s = format!("{r}");
+    if s.contains('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.pop();
+        }
+    }
+    if s == "-0" {
+        s = "0".to_string();
+    }
+    s
+}
+
+/// Escape a string for use in an XML attribute value.
+pub fn esc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+// ---- ABI plumbing --------------------------------------------------------
+
+/// Allocate `len` bytes for the host to write into.
+///
+/// # Safety
+/// The returned pointer is owned by the caller until handed to `xsvg_generate`
+/// or `xsvg_free`.
+pub fn alloc_bytes(len: usize) -> *mut u8 {
+    let mut v = vec![0u8; len];
+    let p = v.as_mut_ptr();
+    core::mem::forget(v);
+    p
+}
+
+/// Release a buffer previously handed to the host.
+///
+/// # Safety
+/// `ptr`/`len` must come from [`alloc_bytes`] or a length-prefixed reply.
+pub unsafe fn free_bytes(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        drop(unsafe { Vec::from_raw_parts(ptr, len, len) });
+    }
+}
+
+/// Pack a string as a `u32`-LE length followed by its UTF-8 bytes, and hand
+/// ownership to the host.
+pub fn reply(s: &str) -> *mut u8 {
+    let bytes = s.as_bytes();
+    let mut v = Vec::with_capacity(4 + bytes.len());
+    v.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    v.extend_from_slice(bytes);
+    let p = v.as_mut_ptr();
+    core::mem::forget(v);
+    p
+}
+
+/// Decode a request buffer (taking ownership) and run `P`, returning the reply
+/// JSON. Exposed so a host-side test can exercise a plugin without WASM.
+///
+/// # Safety
+/// `ptr`/`len` must describe a buffer from [`alloc_bytes`].
+pub unsafe fn dispatch<P: Plugin>(ptr: *mut u8, len: usize) -> String {
+    let input = unsafe { Vec::from_raw_parts(ptr, len, len) };
+    let text = match core::str::from_utf8(&input) {
+        Ok(t) => t,
+        Err(_) => return error_json("request is not valid UTF-8"),
+    };
+    let Some(v) = json::parse(text) else {
+        return error_json("request is not valid JSON");
+    };
+    let Some(tag) = v.get("tag").and_then(Json::as_str) else {
+        return error_json("request names no element");
+    };
+    let Some(req) = Request::decode(&v) else {
+        return error_json("request is malformed");
+    };
+    match P::generate(tag, &req) {
+        Ok(svg) => {
+            let mut out = String::from("{\"svg\":");
+            json::push_str(&mut out, &svg);
+            out.push('}');
+            out
+        }
+        Err(why) => error_json(&why),
+    }
+}
+
+fn error_json(why: &str) -> String {
+    let mut out = String::from("{\"error\":");
+    json::push_str(&mut out, why);
+    out.push('}');
+    out
+}
+
+/// Emit the five ABI exports for a [`Plugin`] impl.
+#[macro_export]
+macro_rules! export_plugin {
+    ($ty:ty) => {
+        #[no_mangle]
+        pub extern "C" fn xsvg_abi_version() -> i32 {
+            $crate::ABI_VERSION
+        }
+
+        #[no_mangle]
+        pub extern "C" fn xsvg_alloc(len: i32) -> *mut u8 {
+            $crate::alloc_bytes(len.max(0) as usize)
+        }
+
+        /// # Safety
+        /// `ptr`/`len` must come from `xsvg_alloc` or a reply buffer.
+        #[no_mangle]
+        pub unsafe extern "C" fn xsvg_free(ptr: *mut u8, len: i32) {
+            unsafe { $crate::free_bytes(ptr, len.max(0) as usize) }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn xsvg_describe() -> *mut u8 {
+            $crate::reply(<$ty as $crate::Plugin>::MANIFEST)
+        }
+
+        /// # Safety
+        /// `ptr`/`len` must come from `xsvg_alloc`; ownership passes to the callee.
+        #[no_mangle]
+        pub unsafe extern "C" fn xsvg_generate(ptr: *mut u8, len: i32) -> *mut u8 {
+            let out = unsafe { $crate::dispatch::<$ty>(ptr, len.max(0) as usize) };
+            $crate::reply(&out)
+        }
+    };
+}
