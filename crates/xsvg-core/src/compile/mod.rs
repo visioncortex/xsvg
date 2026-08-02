@@ -952,7 +952,16 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         };
         if let Some(geom) = geom {
             let spec = textbox_area_spec(node, geom);
+            // one keyed <g> wraps the per-paragraph <text>s: the TEXTBOX keeps a
+            // rendered identity (and so a real bbox) of its own — the paragraphs
+            // carry only their own <x:p> keys (found live: a multi-paragraph
+            // textbox had no element to select, and its paragraphs were promoted
+            // to free-standing objects)
+            out.push_str("<g");
+            out.push_str(&pos);
+            out.push('>');
             emit_paragraphs(node, &paras, &style, fill, gx, &spec, out, ctx);
+            out.push_str("</g>");
             return;
         }
     }

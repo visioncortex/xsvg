@@ -384,6 +384,19 @@ fn textbox_paragraphs_stack_with_spacing() {
         out.contains("text-anchor=\"middle\""),
         "per-paragraph align: {out}"
     );
+    // the textbox keeps its OWN rendered identity: one <g> wraps the paragraph
+    // <text>s (otherwise a multi-paragraph textbox has no element — no bbox —
+    // and its paragraphs get promoted to free-standing objects)
+    assert!(
+        out.contains("<g>") && out.contains("</text></g>"),
+        "a <g> wraps the paragraphs: {out}"
+    );
+    let sm = compile_mapped(&svg);
+    // root + textbox wrapper + one per paragraph = 4 mapped elements
+    assert!(
+        sm.contains("<g data-xsvg-pos=") && sm.matches("data-xsvg-pos").count() == 4,
+        "the wrapper carries the TEXTBOX's source map, the texts their <x:p>s': {sm}"
+    );
 }
 
 #[test]
