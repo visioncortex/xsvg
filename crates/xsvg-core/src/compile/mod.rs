@@ -110,6 +110,81 @@ struct Ctx<'a> {
     /// xsvg-kit). With keys, emitted identity and generated filter ids become
     /// independent of byte offsets. [`NoKeys`] preserves byte-span behavior.
     keys: &'a dyn NodeKeys,
+    /// Loadable geometry generators (docs/Extensibility.md). [`NoGenerators`]
+    /// degrades every plugin element, the default for hosts that load nothing.
+    generators: &'a dyn GeneratorHost,
+    /// `<x:import>` namespace bindings from the entry document — the set of
+    /// namespaces that dispatch to `generators` rather than dropping as foreign.
+    imports: ImportTable,
+    /// Set while generator output is being sanitized, so a module emitting an
+    /// element in its own namespace degrades instead of recursing forever.
+    in_plugin: std::cell::Cell<bool>,
+}
+
+/// The platform seams a compile runs against, bundled so entry points don't grow
+/// an argument per seam. [`Seams::new`] supplies the inert defaults (no linking,
+/// no host keys, no generators) that the older entry points have always used.
+pub struct Seams<'a> {
+    pub m: &'a dyn Measurer,
+    pub shaper: &'a dyn Shaper,
+    pub outliner: &'a dyn GlyphOutliner,
+    pub resolver: &'a dyn Resolver,
+    pub keys: &'a dyn NodeKeys,
+    pub generators: &'a dyn GeneratorHost,
+}
+
+impl<'a> Seams<'a> {
+    /// The three font seams every compile needs; everything else inert.
+    pub fn new(m: &'a dyn Measurer, shaper: &'a dyn Shaper, outliner: &'a dyn GlyphOutliner) -> Self {
+        Self {
+            m,
+            shaper,
+            outliner,
+            resolver: &NoResolver,
+            keys: &NoKeys,
+            generators: &NoGenerators,
+        }
+    }
+
+    pub fn with_resolver(mut self, resolver: &'a dyn Resolver) -> Self {
+        self.resolver = resolver;
+        self
+    }
+
+    pub fn with_keys(mut self, keys: &'a dyn NodeKeys) -> Self {
+        self.keys = keys;
+        self
+    }
+
+    pub fn with_generators(mut self, generators: &'a dyn GeneratorHost) -> Self {
+        self.generators = generators;
+        self
+    }
+}
+
+impl<'a> Ctx<'a> {
+    /// Build the per-compile context from the seams plus this document's imports.
+    fn new(seams: &Seams<'a>, quality: QualityProfile, sourcemap: bool, base: &str, imports: ImportTable) -> Self {
+        Self {
+            m: seams.m,
+            shaper: seams.shaper,
+            outliner: seams.outliner,
+            quality,
+            sourcemap: std::cell::Cell::new(sourcemap),
+            resolving: std::cell::RefCell::new(Vec::new()),
+            resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
+            cuts: std::cell::Cell::new(0),
+            fuel: std::cell::Cell::new(REF_FUEL),
+            force_outline: std::cell::Cell::new(false),
+            resolver: seams.resolver,
+            files: std::cell::RefCell::new(vec![base.to_string()]),
+            base: std::cell::RefCell::new(base.to_string()),
+            keys: seams.keys,
+            generators: seams.generators,
+            imports,
+            in_plugin: std::cell::Cell::new(false),
+        }
+    }
 }
 
 /// Stable node identity for keyed compiles: `key(byte_start)` returns the host's
@@ -206,10 +281,32 @@ pub fn compile_linked_keyed_impl(
     base: &str,
     keys: &dyn NodeKeys,
 ) -> Result<String, String> {
+    compile_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        base,
+        &Seams::new(m, shaper, outliner)
+            .with_resolver(resolver)
+            .with_keys(keys),
+    )
+}
+
+/// The full compile entry: every platform seam at once, including loadable
+/// geometry generators (docs/Extensibility.md). The older entry points are this
+/// one with inert defaults.
+pub fn compile_seams_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    base: &str,
+    seams: &Seams,
+) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
     load_theme(&doc); // §4.1 color/type tokens, resolved during serialization
+    let imports = load_imports(&doc); // §Extensibility — generator namespace bindings
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -220,22 +317,7 @@ pub fn compile_linked_keyed_impl(
         doc.root_element(),
         &mut out,
         true,
-        &Ctx {
-            m,
-            shaper,
-            outliner,
-            quality: q,
-            sourcemap: std::cell::Cell::new(sourcemap),
-            resolving: std::cell::RefCell::new(Vec::new()),
-            resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
-            cuts: std::cell::Cell::new(0),
-            fuel: std::cell::Cell::new(REF_FUEL),
-            force_outline: std::cell::Cell::new(false),
-            resolver,
-            files: std::cell::RefCell::new(vec![base.to_string()]),
-            base: std::cell::RefCell::new(base.to_string()),
-            keys,
-        },
+        &Ctx::new(seams, q, sourcemap, base, imports),
     );
     Ok(out)
 }
@@ -327,11 +409,35 @@ pub fn compile_fragment_linked_keyed_impl(
     base: &str,
     keys: &dyn NodeKeys,
 ) -> Result<String, String> {
+    compile_fragment_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        offset,
+        base,
+        &Seams::new(m, shaper, outliner)
+            .with_resolver(resolver)
+            .with_keys(keys),
+    )
+}
+
+/// The full incremental entry — [`compile_seams_impl`]'s counterpart. A fragment
+/// containing a plugin element re-emits byte-identically to its span in the full
+/// compile, which is what makes generator purity a hard requirement (§6).
+pub fn compile_fragment_seams_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    base: &str,
+    seams: &Seams,
+) -> Result<String, String> {
     let q = crate::QualityProfile::parse(quality);
     check_nesting_depth(input, MAX_NESTING_DEPTH)?;
     let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
     load_theme(&doc); // tokens must come from THIS document, not the last full
                       // compile on this thread (stale-THEME hazard, kit M5)
+    let imports = load_imports(&doc);
     let node = top_level_at(&doc, offset)
         .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
     let mut out = String::new();
@@ -339,22 +445,7 @@ pub fn compile_fragment_linked_keyed_impl(
         node,
         &mut out,
         false,
-        &Ctx {
-            m,
-            shaper,
-            outliner,
-            quality: q,
-            sourcemap: std::cell::Cell::new(sourcemap),
-            resolving: std::cell::RefCell::new(Vec::new()),
-            resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
-            cuts: std::cell::Cell::new(0),
-            fuel: std::cell::Cell::new(REF_FUEL),
-            force_outline: std::cell::Cell::new(false),
-            resolver,
-            files: std::cell::RefCell::new(vec![base.to_string()]),
-            base: std::cell::RefCell::new(base.to_string()),
-            keys,
-        },
+        &Ctx::new(seams, q, sourcemap, base, imports),
     );
     Ok(out)
 }
@@ -448,7 +539,16 @@ pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)
         .iter()
         .flat_map(|t| t.descendants().filter_map(|n| n.attribute("id")))
         .collect();
-    if live.is_empty() {
+    // Editing an <x:import> rebinds a whole namespace — every element in it lowers
+    // through a different module, so all of them are dependents (§Extensibility §3).
+    // This edge is by namespace rather than by id, so it can't live in `baked_refs`.
+    let dirty_ns: Vec<&str> = targets
+        .iter()
+        .flat_map(|t| t.descendants())
+        .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "import")
+        .filter_map(|n| n.attribute("ns"))
+        .collect();
+    if live.is_empty() && dirty_ns.is_empty() {
         return Vec::new();
     }
     let tops: Vec<roxmltree::Node> = doc
@@ -467,6 +567,9 @@ pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)
                 baked_refs(n)
                     .iter()
                     .any(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
+                    || n.tag_name()
+                        .namespace()
+                        .is_some_and(|ns| dirty_ns.contains(&ns))
             });
             if refs_live {
                 included[i] = true;
@@ -634,15 +737,27 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "pie" => emit_pie(node, out, ctx),
             "plot" => emit_plot(node, out, ctx),
             "theme" => {} // §4.1 definitions — loaded up front, emit nothing
+            // §Extensibility definitions — collected up front like <x:theme>, so
+            // only a binding we could not honor has anything to say here.
+            "import" => {
+                if let Some(why) = check_import(node, &ctx.imports) {
+                    out.push_str(&format!("<!-- xsvg: <x:import> {why} -->"));
+                }
+            }
             other => out.push_str(&format!("<!-- xsvg: <x:{other}> not yet lowered -->")),
         }
         return;
     }
 
-    // Foreign-namespace elements (editor metadata like sodipodi:/inkscape:) can't
-    // be re-emitted faithfully — we declare no xmlns for them — so they drop with
-    // a marker rather than being silently reparented into the SVG namespace.
     if let Some(ns) = node.tag_name().namespace() {
+        // A namespace bound by <x:import> is a loadable generator (§Extensibility).
+        if ns != SVG_NS && ctx.imports.has(ns) {
+            emit_plugin(node, ns, out, ctx);
+            return;
+        }
+        // Other foreign-namespace elements (editor metadata like sodipodi:/inkscape:)
+        // can't be re-emitted faithfully — we declare no xmlns for them — so they drop
+        // with a marker rather than being silently reparented into the SVG namespace.
         if ns != SVG_NS {
             out.push_str(&format!(
                 "<!-- xsvg: foreign-namespace <{}> dropped -->",
@@ -1825,7 +1940,13 @@ fn target_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail
         .attribute("transform")
         .map(parse_transform)
         .unwrap_or(crate::kurbo::Affine::IDENTITY);
-    let is_x = target.tag_name().namespace() == Some(XSVG_NS);
+    // A generator element harvests like a built-in x: element: its compiled output
+    // is scratch-serialized and every `d` it emits is joined (§Extensibility §2).
+    let is_x = match target.tag_name().namespace() {
+        Some(XSVG_NS) => true,
+        Some(ns) => ctx.imports.has(ns),
+        None => false,
+    };
     if !is_x && target.tag_name().name() != "g" {
         let d = shape_to_path_d(target).ok_or(RefFail::NoGeometry)?;
         return transform_d(&d, own).ok_or(RefFail::NoGeometry);
@@ -2722,6 +2843,10 @@ mod mesh;
 use mesh::*;
 mod pathops;
 use pathops::*;
+pub mod plugin;
+use plugin::{
+    check_import, emit_plugin, load_imports, GeneratorHost, ImportTable, NoGenerators,
+};
 
 // ============================================================================
 // Text-layout seam for editors (docs/Incremental.md §6; consumer: xsvg-kit).
@@ -2811,22 +2936,14 @@ pub fn text_layout_impl(
     if node.tag_name().namespace() != Some(XSVG_NS) || node.tag_name().name() != "textbox" {
         return None;
     }
-    let ctx = Ctx {
-        m,
-        shaper,
-        outliner,
-        quality: QualityProfile::parse(quality),
-        sourcemap: std::cell::Cell::new(false),
-        resolving: std::cell::RefCell::new(Vec::new()),
-        resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
-        cuts: std::cell::Cell::new(0),
-        fuel: std::cell::Cell::new(REF_FUEL),
-        force_outline: std::cell::Cell::new(false),
-        resolver: &NoResolver,
-        files: std::cell::RefCell::new(vec![String::new()]),
-        base: std::cell::RefCell::new(String::new()),
-        keys: &NoKeys,
-    };
+    let imports = load_imports(&doc);
+    let ctx = Ctx::new(
+        &Seams::new(m, shaper, outliner),
+        QualityProfile::parse(quality),
+        false,
+        "",
+        imports,
+    );
     layout_textbox(node, &ctx)
 }
 

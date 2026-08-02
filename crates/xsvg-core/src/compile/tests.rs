@@ -3418,3 +3418,417 @@ fn text_layout_valign_bottom_clip_keeps_exact_word_ranges() {
     // the surviving lines are the TAIL of the word sequence
     assert_eq!(p.lines.last().unwrap().words.1, p.words.len());
 }
+
+// ---- Plugin seam (docs/Extensibility.md) ----------------------------------
+
+use super::plugin::{
+    imports_impl, ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, InputMode,
+};
+
+const PLUG_NS: &str = "https://example.com/clipart";
+
+/// A stand-in for a loaded WASM module. `bar` is a leaf that draws a rectangle
+/// from its params, `frame` is a container that boxes its children, `edge`
+/// requires `in=` geometry, and `evil` returns markup a module must not sneak in.
+struct MockHost;
+
+impl MockHost {
+    fn param(req: &GenRequest, name: &str) -> Option<String> {
+        req.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    }
+    fn num(req: &GenRequest, name: &str, default: f64) -> f64 {
+        Self::param(req, name)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    }
+}
+
+impl GeneratorHost for MockHost {
+    fn element(&self, ns: &str, tag: &str) -> ElementInfo {
+        if ns != PLUG_NS {
+            return ElementInfo::Unbound;
+        }
+        match tag {
+            "bar" | "evil" | "nested" | "warped" => ElementInfo::Ready {
+                input: InputMode::None,
+                children: ChildMode::None,
+            },
+            "edge" => ElementInfo::Ready {
+                input: InputMode::Required,
+                children: ChildMode::None,
+            },
+            "frame" => ElementInfo::Ready {
+                input: InputMode::None,
+                children: ChildMode::Container,
+            },
+            "later" => ElementInfo::Pending,
+            _ => ElementInfo::UnknownElement,
+        }
+    }
+
+    fn generate(&self, _ns: &str, tag: &str, req: &GenRequest) -> GenResult {
+        match tag {
+            "bar" => {
+                let w = Self::num(req, "width", 10.0);
+                let fill = Self::param(req, "fill").unwrap_or_else(|| "#000".into());
+                GenResult::Svg(format!(
+                    r##"<path fill="{fill}" d="M 0 0 L {w} 0 L {w} 5 L 0 5 Z"/>"##
+                ))
+            }
+            "edge" => GenResult::Svg(format!(
+                r##"<path fill="none" d="{}"/>"##,
+                req.input_d.as_deref().unwrap_or("")
+            )),
+            "frame" => {
+                // box the children: a rect around their union bbox, then the kids
+                let mut out = String::new();
+                let boxes: Vec<[f64; 4]> = req.children.iter().filter_map(|c| c.bbox).collect();
+                if let Some(u) = boxes.iter().copied().reduce(|a, b| {
+                    let (x0, y0) = (a[0].min(b[0]), a[1].min(b[1]));
+                    let (x1, y1) = ((a[0] + a[2]).max(b[0] + b[2]), (a[1] + a[3]).max(b[1] + b[3]));
+                    [x0, y0, x1 - x0, y1 - y0]
+                }) {
+                    let p = Self::num(req, "pad", 0.0);
+                    out.push_str(&format!(
+                        r##"<rect class="frame" x="{}" y="{}" width="{}" height="{}"/>"##,
+                        u[0] - p,
+                        u[1] - p,
+                        u[2] + 2.0 * p,
+                        u[3] + 2.0 * p
+                    ));
+                }
+                for c in &req.children {
+                    out.push_str(&c.svg);
+                }
+                GenResult::Svg(out)
+            }
+            // a module trying to escape the static subset
+            "evil" => GenResult::Svg(
+                r##"<script>alert(1)</script><rect x="0" y="0" width="1" height="1" onclick="x()"/><animate dur="1s"/>"##
+                    .into(),
+            ),
+            // a module emitting an element in its own namespace (must not recurse)
+            "nested" => GenResult::Svg(format!(r##"<c:bar xmlns:c="{PLUG_NS}" width="3"/>"##)),
+            // a module emitting xsvg for the core to lower
+            "warped" => GenResult::Svg(
+                r##"<x:offset xmlns:x="https://xsvg.visioncortex.org" in="#s" distance="2"/><rect id="s" x="0" y="0" width="10" height="10" fill="none"/>"##
+                    .into(),
+            ),
+            _ => GenResult::Error("unreachable".into()),
+        }
+    }
+}
+
+/// `[x, y, w, h]` of the mock container's frame path in compiled output.
+fn frame_box(out: &str) -> Option<[f64; 4]> {
+    use crate::kurbo::Shape;
+    let d = out
+        .split(r##"class="frame""##)
+        .nth(1)?
+        .split(" d=\"")
+        .nth(1)?
+        .split('"')
+        .next()?;
+    let bb = crate::kurbo::BezPath::from_svg(d).ok()?.bounding_box();
+    Some([bb.x0, bb.y0, bb.width(), bb.height()])
+}
+
+fn compile_plug(svg: &str) -> String {
+    compile_seams_impl(
+        svg,
+        "balanced",
+        false,
+        "",
+        &Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost),
+    )
+    .unwrap()
+}
+
+/// Document header binding the mock namespace.
+fn plug_doc(body: &str) -> String {
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" xmlns:c="{PLUG_NS}"><x:import ns="{PLUG_NS}" src="./clipart.wasm"/>{body}</svg>"##
+    )
+}
+
+#[test]
+fn an_imported_namespace_dispatches_to_its_generator() {
+    let out = compile_plug(&plug_doc(r##"<c:bar width="20" fill="#f00"/>"##));
+    assert!(out.contains(r##"d="M 0 0 L 20 0 L 20 5 L 0 5 Z""##), "{out}");
+    assert!(out.contains(r##"fill="#f00""##), "{out}");
+    // <x:import> itself compiles to nothing
+    assert!(!out.contains("x:import"), "{out}");
+}
+
+#[test]
+fn without_the_import_a_plugin_element_stays_foreign() {
+    // same element, no <x:import> — the namespace is unknown, so it drops as
+    // editor metadata would, never reaching a generator
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:c="{PLUG_NS}"><c:bar width="20"/></svg>"##
+    );
+    let out = compile_plug(&svg);
+    assert!(out.contains("foreign-namespace <bar> dropped"), "{out}");
+}
+
+#[test]
+fn an_unbound_namespace_degrades_with_a_named_reason() {
+    let body = r##"<d:thing xmlns:d="https://other.example/ns"/>"##;
+    let out = compile_plug(&plug_doc(body));
+    assert!(out.contains("foreign-namespace <thing> dropped"), "{out}");
+
+    // bound namespace, element the module doesn't provide
+    let out = compile_plug(&plug_doc(r##"<c:nope/>"##));
+    assert!(out.contains("not provided by the imported module"), "{out}");
+
+    // module known but not instantiated yet — the host's cue to load and retry
+    let out = compile_plug(&plug_doc(r##"<c:later/>"##));
+    assert!(out.contains("module not loaded yet"), "{out}");
+}
+
+#[test]
+fn the_core_namespace_can_never_be_bound() {
+    // an import claiming the core namespace would let a module shadow a built-in
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:import ns="https://xsvg.visioncortex.org" src="./evil.wasm"/><x:pie value="0.5" r="10"/></svg>"##;
+    let out = compile_plug(svg);
+    assert!(out.contains("the core namespace cannot be bound"), "{out}");
+    // <x:pie>'s own diagnostic proves it still reached the built-in emitter
+    // rather than being dispatched to the module that tried to claim it
+    assert!(out.contains("<x:pie> has no slices"), "{out}");
+}
+
+#[test]
+fn a_namespace_binds_once() {
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" xmlns:c="{PLUG_NS}"><x:import ns="{PLUG_NS}" src="./a.wasm"/><x:import ns="{PLUG_NS}" src="./b.wasm"/><c:bar width="7"/></svg>"##
+    );
+    let out = compile_plug(&svg);
+    assert!(out.contains("already bound to another module"), "{out}");
+    // the first binding still works
+    assert!(out.contains("L 7 0"), "{out}");
+    assert_eq!(imports_impl(&svg).len(), 1);
+}
+
+#[test]
+fn generator_output_is_confined_to_the_static_subset() {
+    // the sanitizer is the core's, so safety does not depend on the host
+    let out = compile_plug(&plug_doc(r##"<c:evil/>"##));
+    assert!(!out.contains("alert"), "{out}");
+    assert!(!out.contains("onclick"), "{out}");
+    assert_eq!(
+        out.matches("outside the static subset — dropped").count(),
+        2,
+        "both <script> and <animate> dropped: {out}"
+    );
+    assert!(out.contains("<path"), "the harmless part survives: {out}");
+}
+
+#[test]
+fn generators_do_not_nest_in_generator_output() {
+    let out = compile_plug(&plug_doc(r##"<c:nested/>"##));
+    assert!(
+        out.contains("generators do not nest in generator output"),
+        "{out}"
+    );
+}
+
+#[test]
+fn generator_output_may_be_xsvg_and_is_lowered_by_the_core() {
+    // <x:offset> inside plugin output grows the rect by 2 on each side
+    let out = compile_plug(&plug_doc(r##"<c:warped/>"##));
+    assert!(
+        !out.contains("x:offset"),
+        "lowered, not passed through: {out}"
+    );
+    let d = out
+        .split(" d=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap_or_default();
+    use crate::kurbo::Shape;
+    let bb = crate::kurbo::BezPath::from_svg(d).unwrap().bounding_box();
+    assert!(
+        (bb.x0 + 2.0).abs() < 0.5 && (bb.x1 - 12.0).abs() < 0.5,
+        "the referenced square grew by 2 on each side: {bb:?} {out}"
+    );
+}
+
+#[test]
+fn required_input_geometry_degrades_when_it_cannot_resolve() {
+    let out = compile_plug(&plug_doc(r##"<c:edge/>"##));
+    assert!(out.contains("requires in="), "{out}");
+
+    let out = compile_plug(&plug_doc(r##"<c:edge in="#nope"/>"##));
+    assert!(out.contains("target not found"), "{out}");
+
+    // resolving normally: the referenced rect's geometry reaches the generator
+    let out = compile_plug(&plug_doc(
+        r##"<rect id="r" x="0" y="0" width="10" height="10"/><c:edge in="#r"/>"##,
+    ));
+    assert!(out.contains(r##"<path fill="none" d="M0,0 h10 v10 h-10 Z""##), "{out}");
+}
+
+#[test]
+fn a_leaf_generator_ignores_children_with_a_marker() {
+    let out = compile_plug(&plug_doc(
+        r##"<c:bar width="4"><rect width="1" height="1"/></c:bar>"##,
+    ));
+    assert!(out.contains("takes no children"), "{out}");
+    assert!(out.contains("L 4 0"), "the element still renders: {out}");
+}
+
+#[test]
+fn a_container_receives_its_children_compiled_and_measured() {
+    let out = compile_plug(&plug_doc(
+        r##"<c:frame pad="5"><rect x="10" y="10" width="20" height="20"/><rect x="40" y="10" width="10" height="30"/></c:frame>"##,
+    ));
+    // the frame is the union box (10,10)-(50,40) grown by pad=5
+    assert_eq!(frame_box(&out), Some([5.0, 5.0, 50.0, 40.0]), "{out}");
+    // and the children themselves are spliced through
+    assert_eq!(out.matches("<path").count(), 3, "{out}");
+}
+
+#[test]
+fn a_container_measures_text_children_as_line_boxes() {
+    // Mono measures a fixed advance per char; the box follows the measurer, and
+    // vertically it is the font's ascent above the baseline
+    let out = compile_plug(&plug_doc(
+        r##"<c:frame><text x="0" y="20" font-size="10">abc</text></c:frame>"##,
+    ));
+    let b = frame_box(&out).unwrap_or_default();
+    let expect = Mono.measure("abc", &crate::TextStyle::default(), 10.0);
+    assert!((b[2] - expect).abs() < 0.5, "line box width {}: {out}", b[2]);
+    // vertically the box spans ascent above the baseline to descent below it
+    let fm = Mono.font_metrics(&crate::TextStyle::default(), 10.0);
+    assert!((b[1] - (20.0 - fm.ascent)).abs() < 0.5, "top of line box: {out}");
+    assert!(
+        (b[3] - (fm.ascent + fm.descent)).abs() < 0.5,
+        "line box height: {out}"
+    );
+}
+
+#[test]
+fn a_container_child_keeps_its_own_geometry_when_nested_in_a_group() {
+    // transforms compose down the fragment when measuring
+    let out = compile_plug(&plug_doc(
+        r##"<c:frame><g transform="translate(100,0)"><rect x="0" y="0" width="10" height="10"/></g></c:frame>"##,
+    ));
+    assert_eq!(frame_box(&out), Some([100.0, 0.0, 10.0, 10.0]), "{out}");
+}
+
+#[test]
+fn a_stroked_child_reports_its_painted_extent() {
+    // half the stroke falls outside the geometric box; a frame that ignored it
+    // would clip the child
+    let out = compile_plug(&plug_doc(
+        r##"<c:frame><rect x="10" y="10" width="20" height="20" stroke="#000" stroke-width="4"/></c:frame>"##,
+    ));
+    assert_eq!(frame_box(&out), Some([8.0, 8.0, 24.0, 24.0]), "{out}");
+}
+
+#[test]
+fn theme_tokens_resolve_before_the_generator_sees_them() {
+    let out = compile_plug(&plug_doc(
+        r##"<x:theme><x:color name="accent" value="#0f0"/></x:theme><c:bar fill="var(accent)"/>"##,
+    ));
+    assert!(out.contains(r##"fill="#0f0""##), "{out}");
+    assert!(!out.contains("var("), "{out}");
+}
+
+#[test]
+fn a_generator_element_is_referenceable_geometry() {
+    // the composition promise: plugin output harvests like a built-in x: element
+    let out = compile_plug(&plug_doc(
+        r##"<c:bar id="a" width="20"/><x:boolean op="union"><use href="#a"/><rect x="0" y="0" width="5" height="30"/></x:boolean>"##,
+    ));
+    let d = out
+        .rsplit(" d=\"")
+        .next()
+        .and_then(|s| s.split('"').next())
+        .unwrap_or_default();
+    use crate::kurbo::Shape;
+    let bb = crate::kurbo::BezPath::from_svg(d).unwrap().bounding_box();
+    assert!(
+        bb.x1 >= 19.5 && bb.y1 >= 29.5,
+        "union spans both operands: {bb:?} {out}"
+    );
+}
+
+#[test]
+fn the_wrapper_carries_identity_and_placement() {
+    let out = compile_plug(&plug_doc(
+        r##"<c:bar id="a" transform="translate(3,4)" width="2"/>"##,
+    ));
+    assert!(
+        out.contains(r##"<g id="a" transform="translate(3,4)">"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_plugin_element_carries_a_source_range() {
+    let src = plug_doc(r##"<c:bar width="2"/>"##);
+    let out = compile_seams_impl(
+        &src,
+        "balanced",
+        true,
+        "",
+        &Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost),
+    )
+    .unwrap();
+    let start = src.find("<c:bar").unwrap();
+    assert!(out.contains(&format!(r##"data-xsvg-pos="{start}-"##)), "{out}");
+    // only the root and the wrapper are stamped — a range inside generator
+    // output would index the module's output string, not this document
+    assert_eq!(out.matches("data-xsvg-pos").count(), 2, "{out}");
+}
+
+#[test]
+fn imports_are_visible_before_compiling() {
+    // the host pre-scan that avoids a throwaway compile round
+    let src = plug_doc(r##"<c:bar/>"##);
+    let found = imports_impl(&src);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].ns, PLUG_NS);
+    assert_eq!(found[0].src, "./clipart.wasm");
+    assert_eq!(found[0].integrity, None);
+}
+
+#[test]
+fn editing_an_import_recompiles_every_element_in_its_namespace() {
+    // the namespace-level recalc edge: a rebind changes what every element in
+    // that namespace lowers to, even though no id is involved
+    let src = plug_doc(r##"<c:bar width="1"/><rect x="0" y="0" width="1" height="1"/>"##);
+    let at = src.find("<x:import").unwrap();
+    let deps = dependents_multi_impl(&src, &[at]);
+    let bar = src.find("<c:bar").unwrap();
+    assert!(deps.iter().any(|&(s, _)| s == bar), "{deps:?}");
+    // the plain rect is untouched
+    let rect = src.rfind("<rect").unwrap();
+    assert!(!deps.iter().any(|&(s, _)| s == rect), "{deps:?}");
+}
+
+#[test]
+fn a_plugin_fragment_matches_its_span_in_the_full_compile() {
+    // the incremental canary (docs/Incremental.md) extended to generators —
+    // this is what makes host-side purity a hard requirement
+    let src = plug_doc(r##"<rect x="0" y="0" width="4" height="4"/><c:bar width="9"/>"##);
+    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost);
+    let full = compile_seams_impl(&src, "balanced", true, "", &seams).unwrap();
+    let at = src.find("<c:bar").unwrap();
+    let frag = compile_fragment_seams_impl(&src, "balanced", true, at, "", &seams).unwrap();
+    assert!(
+        full.contains(&frag),
+        "fragment is a verbatim slice:\n{frag}\n{full}"
+    );
+}
+
+#[test]
+fn a_document_without_generators_still_compiles() {
+    // the default host degrades every plugin element, and nothing else changes
+    let out = compile_test(&plug_doc(r##"<c:bar width="2"/>"##));
+    assert!(out.contains("no generator bound"), "{out}");
+}
