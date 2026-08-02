@@ -101,8 +101,8 @@ pub(super) struct Warp {
     pub distort_h: f64,
     #[param(default = 0.0, min = -100.0, max = 100.0, doc = "vertical distortion, percent")]
     pub distort_v: f64,
-    #[param(default = "start", doc = "alignment along the spine")]
-    pub align: String,
+    #[param(doc = "placement along the spine")]
+    pub align: PathAlignParam,
     #[param(default = 0.0, doc = "offset along the spine")]
     pub start: f64,
     #[param(doc = "four x,y pairs for free distortion")]
@@ -234,6 +234,186 @@ pub(super) enum ConnectorArrow {
     None,
 }
 
+// ---- text -----------------------------------------------------------------
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum AlignParam {
+    #[default]
+    Start,
+    Center,
+    End,
+    Justify,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum VAlignParam {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+/// Placement along a path or spine. A **different vocabulary** from
+/// [`AlignParam`]: `run_offset` centres on `middle`, where box alignment centres
+/// on `center`. Declaring them separately is the point — one shared enum would
+/// quietly accept the wrong spelling on half the elements.
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum PathAlignParam {
+    #[default]
+    Start,
+    Middle,
+    End,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum OverflowParam {
+    #[default]
+    Clip,
+    Ellipsis,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum FitParam {
+    #[default]
+    None,
+    /// Shrink the font until the text fits its box.
+    Shrink,
+}
+
+#[derive(Params)]
+#[element(
+    name = "textbox",
+    doc = "Text laid out inside a box — wrapping, alignment, shrink-to-fit, and flow into a referenced shape.",
+    input = "optional",
+    group = TextFont
+)]
+pub(super) struct Textbox {
+    #[param(default = 0.0)]
+    pub x: f64,
+    #[param(default = 0.0)]
+    pub y: f64,
+    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    pub width: f64,
+    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    pub height: f64,
+    #[param(default = 0.0, min = 0.0, max = 400.0)]
+    pub padding: f64,
+    pub align: AlignParam,
+    pub valign: VAlignParam,
+    pub fit: FitParam,
+    #[param(default = 6.0, min = 1.0, max = 400.0, doc = "smallest font size shrink-to-fit will use")]
+    pub fit_min: f64,
+    #[param(name = "text-overflow")]
+    pub text_overflow: OverflowParam,
+    #[param(default = 0.0, min = -400.0, max = 400.0, doc = "first-line indent")]
+    pub text_indent: f64,
+    #[param(default = false, doc = "bake the glyphs to paths instead of live text")]
+    pub outline: bool,
+}
+
+/// The shared font block. Described beside [`super::style_from`], which reads it —
+/// see the comment there for why this one group is not derived.
+pub(super) struct TextFont;
+
+impl Params for TextFont {
+    const SPEC: ElementSpec = ElementSpec {
+        name: "font",
+        doc: None,
+        params: super::FONT_PARAMS,
+        groups: &[],
+        input: xsvg_schema::InputMode::None,
+        children: xsvg_schema::ChildMode::None,
+    };
+    fn from_attrs(_: &dyn AttrSource) -> Self {
+        // style_from() does the reading: it needs the node for theme-token fallback.
+        TextFont
+    }
+}
+
+#[derive(Params)]
+#[element(
+    name = "textpath",
+    doc = "Text set along a referenced path.",
+    input = "required",
+    group = TextFont
+)]
+pub(super) struct Textpath {
+    #[param(default = 0.0)]
+    pub start: f64,
+    pub align: PathAlignParam,
+    #[param(default = 0.0, min = -400.0, max = 400.0)]
+    pub baseline_shift: f64,
+    #[param(default = "skew", doc = "skew or rainbow")]
+    pub effect: String,
+}
+
+#[derive(Params)]
+#[element(
+    name = "list",
+    doc = "A bulleted or numbered list of <x:li> items, with hanging indents that cycle by depth.",
+    input = "optional",
+    group = TextFont
+)]
+pub(super) struct List {
+    #[param(default = 0.0)]
+    pub x: f64,
+    #[param(default = 0.0)]
+    pub y: f64,
+    #[param(default = 320.0, min = 0.0, max = 4000.0)]
+    pub width: f64,
+    #[param(default = "bullet", doc = "bullet or number; marker glyphs cycle by depth")]
+    pub list: String,
+    #[param(doc = "literal marker text for every item, overriding the list style")]
+    pub marker: Option<String>,
+    #[param(color, doc = "defaults to the list's own fill")]
+    pub marker_fill: Option<String>,
+    #[param(default = 1.0, min = 0.0, max = 10.0, step = 0.1, doc = "marker size as a multiple of the item size")]
+    pub marker_size: f64,
+    #[param(min = 0.0, max = 200.0, doc = "gap between marker and text; defaults to 0.5em")]
+    pub marker_gap: Option<f64>,
+    #[param(min = 0.0, max = 400.0, doc = "indent step per level; defaults to 1.5em")]
+    pub indent: Option<f64>,
+    #[param(min = 0.0, max = 200.0, doc = "space between items; defaults to 0.35em")]
+    pub item_spacing: Option<f64>,
+    pub valign: VAlignParam,
+    #[param(color, default = "#111827")]
+    pub fill: String,
+}
+
+#[derive(Params)]
+#[element(
+    name = "table",
+    doc = "A grid of <x:tr>/<x:td> cells with shared padding, rules, and header styling.",
+    input = "optional",
+    group = TextFont
+)]
+pub(super) struct Table {
+    #[param(default = 0.0)]
+    pub x: f64,
+    #[param(default = 0.0)]
+    pub y: f64,
+    #[param(default = 400.0, min = 0.0, max = 4000.0)]
+    pub width: f64,
+    #[param(doc = "explicit column widths, space or comma separated")]
+    pub cols: Option<String>,
+    #[param(default = 8.0, min = 0.0, max = 200.0)]
+    pub cell_padding: f64,
+    #[param(default = 0.0, min = 0.0, max = 400.0)]
+    pub row_min_height: f64,
+    pub align: AlignParam,
+    /// Cells centre vertically by default, unlike a textbox.
+    #[param(default = "middle")]
+    pub valign: VAlignParam,
+    #[param(color, default = "#0f172a")]
+    pub fill: String,
+    #[param(color, default = "#f1f5f9")]
+    pub header_fill: String,
+    #[param(color, default = "#cbd5e1", doc = "rule colour")]
+    pub stroke: String,
+    #[param(default = 1.0, min = 0.0, max = 40.0)]
+    pub stroke_width: f64,
+}
+
 /// Every built-in element, for the compiler's own `describe` surface — the same
 /// shape a plugin's manifest takes, so a host merges the two without branching.
 pub fn built_in_elements() -> &'static [ElementSpec] {
@@ -255,4 +435,8 @@ static ELEMENTS: &[ElementSpec] = &[
     Plot::SPEC,
     Mesh::SPEC,
     Connector::SPEC,
+    Textbox::SPEC,
+    Textpath::SPEC,
+    List::SPEC,
+    Table::SPEC,
 ];

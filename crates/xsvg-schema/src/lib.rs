@@ -130,9 +130,22 @@ impl ParamSpec {
 pub struct ElementSpec {
     pub name: &'static str,
     pub doc: Option<&'static str>,
+    /// The element's own parameters.
     pub params: &'static [ParamSpec],
+    /// Shared parameter groups this element also accepts — the font block every
+    /// text element takes, for instance. Kept as a list of slices rather than one
+    /// flat array because a `const` cannot concatenate slices, and flattening at
+    /// read time costs nothing.
+    pub groups: &'static [&'static [ParamSpec]],
     pub input: InputMode,
     pub children: ChildMode,
+}
+
+impl ElementSpec {
+    /// Every parameter this element accepts, own and inherited.
+    pub fn all_params(&self) -> impl Iterator<Item = &'static ParamSpec> {
+        self.params.iter().chain(self.groups.iter().copied().flatten())
+    }
 }
 
 /// Read attributes from wherever they live — an XML node in the compiler, a
@@ -233,7 +246,7 @@ impl ElementSpec {
             out.push(',');
         }
         out.push_str("\"params\":{");
-        for (i, p) in self.params.iter().enumerate() {
+        for (i, p) in self.all_params().enumerate() {
             if i > 0 {
                 out.push(',');
             }
@@ -280,10 +293,15 @@ pub fn manifest_json(
 
 // ---- parsing helpers the derive calls -------------------------------------
 
-/// Parse a number, rejecting non-finite input — totality is the compiler's
-/// contract and a parameter must not be the thing that breaks it.
+/// Parse a number the way every length attribute in xsvg is read: the numeric
+/// prefix, so `13px` is 13, and never a non-finite value — totality is the
+/// compiler's contract and a parameter must not be the thing that breaks it.
 pub fn parse_num(s: &str) -> Option<f64> {
-    s.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+    let s = s.trim();
+    let end = s
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+        .unwrap_or(s.len());
+    s[..end].parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 pub fn parse_bool(s: &str) -> Option<bool> {
@@ -395,6 +413,20 @@ mod tests {
         assert_eq!(a.fill, "currentColor", "declared default applies");
         assert_eq!(a.stroke.as_deref(), Some("#111"));
         assert!(a.outlined);
+    }
+
+    #[test]
+    fn a_unit_suffix_parses_its_numeric_prefix() {
+        // every length attribute in xsvg reads this way, so a declared parameter
+        // must too or `13px` would silently become the default
+        assert_eq!(parse_num("13px"), Some(13.0));
+        assert_eq!(parse_num(" 40 "), Some(40.0));
+        assert_eq!(parse_num("-1e999"), None, "non-finite is rejected");
+        assert_eq!(parse_num("px"), None);
+        // `e` is exponent syntax, so an em suffix is NOT a numeric prefix — the
+        // same quirk the compiler's own parse_num has, matched deliberately so a
+        // declared parameter reads exactly like every other length attribute
+        assert_eq!(parse_num("2.5em"), None);
     }
 
     #[test]

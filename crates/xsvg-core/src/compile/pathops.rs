@@ -110,7 +110,7 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 .attribute("in")
                 .and_then(|r| ref_geometry(node, r, ctx).ok())
                 .and_then(|d| PathFrame::new(&d, ctx.quality.tolerance()))?;
-            let s0 = run_offset(frame.len(), b.width(), &w.align, w.start);
+            let s0 = run_offset(frame.len(), b.width(), w.align.as_str(), w.start);
             let anchor = crate::kurbo::Point::new(b.min_x(), b.center().y);
             Some(Box::new(BendField { frame, s0, anchor }) as Box<dyn Field>)
         }

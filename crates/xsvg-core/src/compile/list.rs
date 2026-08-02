@@ -19,17 +19,14 @@ use super::*;
 pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node);
-    let fill = node.attribute("fill").unwrap_or("#111827");
+    let lp: super::elements::List = params_of(node);
+    let fill = lp.fill.as_str();
     let pos = pos_attr(node, ctx);
     let size = style.size;
 
     // Block geometry: an `in="#rect"` reference (its bbox), else x/y/width; the
     // height (rect bbox or explicit `height`) is only used for vertical align.
-    let (mut x, mut y, mut width) = (
-        attr_num(node, "x", 0.0),
-        attr_num(node, "y", 0.0),
-        attr_num(node, "width", 320.0),
-    );
+    let (mut x, mut y, mut width) = (lp.x, lp.y, lp.width);
     let mut avail_h = dim_attr(node, "height");
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
@@ -42,13 +39,13 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             avail_h = Some(bb.height());
         }
     }
-    let indent_step = attr_num(node, "indent", size * 1.5).max(0.0);
-    let marker_gap = attr_num(node, "marker-gap", size * 0.5);
-    let item_spacing = attr_num(node, "item-spacing", size * 0.35);
-    let list_kind = node.attribute("list").unwrap_or("bullet");
-    let marker_scale = attr_num(node, "marker-size", 1.0).max(0.0);
-    let marker_fill = resolve_var(node.attribute("marker-fill").unwrap_or(fill)).into_owned();
-    let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
+    let indent_step = lp.indent.unwrap_or(size * 1.5).max(0.0);
+    let marker_gap = lp.marker_gap.unwrap_or(size * 0.5);
+    let item_spacing = lp.item_spacing.unwrap_or(size * 0.35);
+    let list_kind = lp.list.as_str();
+    let marker_scale = lp.marker_size.max(0.0);
+    let marker_fill = resolve_var(lp.marker_fill.as_deref().unwrap_or(fill)).into_owned();
+    let valign = VAlign::parse(lp.valign.as_str());
 
     let fm = m.font_metrics(&style, size);
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
@@ -96,7 +93,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // resolve the marker: an explicit `marker` (item, then list) wins — a
         // named shape (disc/circle/square/dash) draws a shape, anything else is
         // a literal text marker; otherwise the list kind decides.
-        let marker_attr = li.attribute("marker").or_else(|| node.attribute("marker"));
+        let marker_attr = li.attribute("marker").or(lp.marker.as_deref());
         let marker = match marker_attr {
             Some(mk) => match shape_token(mk) {
                 Some(tok) => Marker::Shape(tok),

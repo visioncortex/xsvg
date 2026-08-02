@@ -934,7 +934,8 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
-    let outline = node.attribute("outline") == Some("true") || ctx.force_outline.get();
+    let tb: elements::Textbox = params_of(node);
+    let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node);
     let pos = pos_attr(node, ctx);
 
@@ -1232,11 +1233,12 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let fill = node.attribute("fill").unwrap_or("#000");
     let stroke = text_border_attrs(node);
     let pos = pos_attr(node, ctx);
+    let tp: elements::Textpath = params_of(node);
     let fx = PathEffect {
-        effect: node.attribute("effect").unwrap_or("skew"),
-        baseline_shift: attr_num(node, "baseline-shift", 0.0),
-        align: node.attribute("align").unwrap_or("start"),
-        start: attr_num(node, "start", 0.0),
+        effect: &tp.effect,
+        baseline_shift: tp.baseline_shift,
+        align: tp.align.as_str(),
+        start: tp.start,
     };
     let text = collect_text(node);
 
@@ -1406,17 +1408,25 @@ fn find_path_d_ranges(s: &str) -> Vec<(usize, usize)> {
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
 /// (the textbox itself, or a referenced `rect`) and options from the textbox `node`.
 fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) -> AreaSpec {
+    // One declaration read twice, in its two roles: `geom` supplies the box (it
+    // may be a referenced <rect> rather than the textbox itself), `node` the
+    // layout options.
+    let opts: elements::Textbox = params_of(node);
+    let box_: elements::Textbox = params_of(geom);
     AreaSpec {
-        x: attr_num(geom, "x", 0.0),
-        y: attr_num(geom, "y", 0.0),
-        width: attr_num(geom, "width", 0.0),
-        height: attr_num(geom, "height", 0.0),
-        padding: attr_num(node, "padding", 0.0),
-        align: Align::parse(node.attribute("align").unwrap_or("start")),
-        valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
-        fit: fit_from(node.attribute("fit"), || attr_num(node, "fit-min", 6.0)),
-        text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
-        text_indent: attr_num(node, "text-indent", 0.0),
+        x: box_.x,
+        y: box_.y,
+        width: box_.width,
+        height: box_.height,
+        padding: opts.padding,
+        align: Align::parse(opts.align.as_str()),
+        valign: VAlign::parse(opts.valign.as_str()),
+        fit: match opts.fit {
+            elements::FitParam::Shrink => Fit::Shrink { min: opts.fit_min },
+            elements::FitParam::None => Fit::None,
+        },
+        text_overflow: TextOverflow::parse(opts.text_overflow.as_str()),
+        text_indent: opts.text_indent,
     }
 }
 
@@ -2437,6 +2447,51 @@ fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
 
 // ---- helpers ---------------------------------------------------------------
 
+/// The font block every text element accepts, declared beside the code that
+/// reads it.
+///
+/// This is the one group that is **described here rather than derived**, because
+/// its reading is not a plain attribute lookup: each property falls back to an
+/// `<x:font>` theme token (§4.1), sizes are only honoured when positive, and
+/// `letter-spacing`/`word-spacing` treat `normal` as zero. Keeping the
+/// declaration touching [`style_from`] is the next best thing to deriving it —
+/// the two are a screen apart, not a crate apart.
+pub(super) const FONT_PARAMS: &[xsvg_schema::ParamSpec] = &[
+    ParamSpec {
+        default: Some("sans-serif"),
+        ..ParamSpec::new("font-family", xsvg_schema::ParamKind::Text)
+    },
+    ParamSpec {
+        default: Some("16"),
+        min: Some(0.0),
+        max: Some(400.0),
+        ..ParamSpec::new("font-size", xsvg_schema::ParamKind::Number)
+    },
+    ParamSpec {
+        default: Some("normal"),
+        ..ParamSpec::new("font-weight", xsvg_schema::ParamKind::Text)
+    },
+    ParamSpec {
+        default: Some("normal"),
+        ..ParamSpec::new("font-style", xsvg_schema::ParamKind::Text)
+    },
+    ParamSpec {
+        default: Some("1.2"),
+        min: Some(0.0),
+        max: Some(10.0),
+        step: Some(0.05),
+        ..ParamSpec::new("line-height", xsvg_schema::ParamKind::Number)
+    },
+    ParamSpec {
+        doc: Some("extra tracking in user units; `normal` means none"),
+        ..ParamSpec::new("letter-spacing", xsvg_schema::ParamKind::Text)
+    },
+    ParamSpec {
+        doc: Some("extra space at each word gap; `normal` means none"),
+        ..ParamSpec::new("word-spacing", xsvg_schema::ParamKind::Text)
+    },
+];
+
 fn style_from(node: roxmltree::Node) -> TextStyle {
     // A `<x:font>` token (via `x:font="name"`) supplies OVERRIDABLE defaults —
     // the element's own `font-*` attributes win over the token (§4.1).
@@ -2855,7 +2910,7 @@ use pathops::*;
 pub mod elements;
 use elements::params_of;
 // so submodules reach `.as_str()` on a declared enum parameter through `super::*`
-pub(crate) use xsvg_schema::ParamEnum;
+pub(crate) use xsvg_schema::{ParamEnum, ParamSpec};
 pub mod plugin;
 use plugin::{
     check_import, emit_plugin, load_imports, GeneratorHost, ImportTable, NoGenerators,

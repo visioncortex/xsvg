@@ -51,28 +51,29 @@ pub(super) fn resolve_cols(spec: Option<&str>, ncols: usize, total: f64) -> Vec<
 pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node);
-    let text_fill = resolve_var(node.attribute("fill").unwrap_or("#0f172a")).into_owned();
-    let grid = resolve_var(node.attribute("stroke").unwrap_or("#cbd5e1")).into_owned();
-    let grid_w = attr_num(node, "stroke-width", 1.0).max(0.0);
+    let tp: super::elements::Table = params_of(node);
+    let text_fill = resolve_var(&tp.fill).into_owned();
+    let grid = resolve_var(&tp.stroke).into_owned();
+    let grid_w = tp.stroke_width.max(0.0);
     let body_bg = node
         .attribute("cell-fill")
         .map(|v| resolve_var(v).into_owned());
-    let header_bg = resolve_var(node.attribute("header-fill").unwrap_or("#f1f5f9")).into_owned();
+    let header_bg = resolve_var(&tp.header_fill).into_owned();
     // zebra striping: an alternate background for every other BODY row (rows with
     // no header cell); the first data row is unstriped.
     let stripe = node
         .attribute("stripe")
         .map(|v| resolve_var(v).into_owned());
-    let pad = attr_num(node, "cell-padding", 8.0).max(0.0);
-    let default_align = node.attribute("align").unwrap_or("start");
-    let default_valign = node.attribute("valign").unwrap_or("middle");
-    let row_min = attr_num(node, "row-min-height", 0.0);
+    let pad = tp.cell_padding.max(0.0);
+    let default_align = tp.align.as_str();
+    let default_valign = tp.valign.as_str();
+    let row_min = tp.row_min_height;
 
     // block geometry: `in="#rect"` bbox, else x/y/width
     let (mut x, mut y, mut width) = (
-        attr_num(node, "x", 0.0),
-        attr_num(node, "y", 0.0),
-        attr_num(node, "width", 400.0),
+        tp.x,
+        tp.y,
+        tp.width,
     );
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
@@ -101,7 +102,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out.push_str("<!-- xsvg: <x:table> has no rows/cells -->");
         return;
     }
-    let colw = resolve_cols(node.attribute("cols"), ncols, width);
+    let colw = resolve_cols(tp.cols.as_deref(), ncols, width);
     let mut colx = vec![x; ncols + 1];
     for i in 0..ncols {
         colx[i + 1] = colx[i] + colw[i];

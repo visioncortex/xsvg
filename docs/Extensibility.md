@@ -416,15 +416,30 @@ generates its manifest from it, and the compiler answers `describe()` for its ow
 the same shape (`crates/xsvg-core/src/compile/elements.rs`), so a host merges the two into one
 lookup and a property panel never has to know which tier it is editing.
 
-Converted so far: `offset`, `boolean`, `warp`, `pie`, `plot`, `mesh`, `connector`. The text
-elements (`textbox`, `textpath`, `list`, `table`, and revived `<textArea>`) still read their
-attributes by hand; they share a font-property group, so finishing them wants a
-`#[param(flatten)]` on the derive rather than the same seven fields restated five times.
+All eleven `x:` elements are converted — `offset`, `boolean`, `warp`, `pie`, `plot`, `mesh`,
+`connector`, `textbox`, `textpath`, `list`, `table` — and none has a declared field its emitter
+does not read.
 
-The enforcement is not theoretical. Converting these caught three would-be drifts immediately:
-`<x:boolean>`'s fourth operation is `exclude`, not the `xor` first declared; and `dead_code`
-flagged `warp`'s `corners` and `pie`'s `stroke` as declared-but-not-read, because their
-emitters were still reading the node directly.
+Shared blocks come in two shapes. `#[param(flatten)]` embeds another `Params` struct as a field
+that *is* read. `#[element(group = T)]` declares a block that is described here but read
+elsewhere — the font properties, whose reader ([`style_from`]) needs the node itself for
+`<x:font>` token fallback, honours sizes only when positive, and treats `normal` as zero for
+spacing. That group is declared immediately above the function that reads it: a screen apart
+rather than a crate apart.
+
+The enforcement is not theoretical. Converting these caught five real problems:
+
+- `<x:boolean>`'s fourth operation is `exclude`, not the `xor` first declared.
+- `dead_code` flagged `warp`'s `corners` and `pie`'s `stroke` as declared-but-not-read, because
+  their emitters still went to the node directly.
+- `<x:textpath>` and `<x:warp>` place along a path with `middle`, while box alignment centres
+  on `center`. One shared enum would have silently accepted the wrong spelling on half the
+  elements; they are declared separately for exactly that reason.
+- Several `<x:list>` and `<x:table>` defaults in the first draft were wrong (`width` is 320 and
+  400, not 0; `marker-size` is a *scale*, not a size; three spacings are computed from the font
+  size, so they declare no constant).
+- A declared number must read like every other length attribute, including the compiler's own
+  quirk that `13px` parses as 13 while `2.5em` does not (`e` is exponent syntax).
 
 One semantic worth knowing: a non-`Option` enum parameter falls back to its default when a
 value is misspelled, which matches how this codebase's `Align::parse` and friends already

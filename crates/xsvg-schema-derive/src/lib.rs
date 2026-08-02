@@ -118,6 +118,10 @@ struct ElementOpts {
     doc: Option<String>,
     input: Option<String>,
     children: Option<String>,
+    /// Shared parameter blocks this element accepts. Unlike `#[param(flatten)]`
+    /// these produce no field: the block is *described* here and read elsewhere,
+    /// which is the shape of the font properties every text element takes.
+    groups: Vec<proc_macro2::TokenStream>,
 }
 
 #[derive(Default)]
@@ -130,6 +134,7 @@ struct ParamOpts {
     doc: Option<String>,
     color: bool,
     skip: bool,
+    flatten: bool,
 }
 
 /// Read `key = value` pairs (and bare flags) out of one `#[attr(…)]`.
@@ -178,6 +183,15 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             continue;
         }
         parse_meta_list(&attr.meta, |key, expr, span| {
+            if key == "group" {
+                let Some(syn::Expr::Path(p)) = expr else {
+                    return err(span, "expected a type implementing Params");
+                };
+                let path = &p.path;
+                el.groups
+                    .push(quote!(<#path as ::xsvg_schema::Params>::SPEC.params));
+                return Ok(());
+            }
             let text = expr.and_then(expr_text);
             match key {
                 "name" => el.name = text,
@@ -199,6 +213,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let mut specs = Vec::new();
     let mut reads = Vec::new();
+    let mut groups: Vec<proc_macro2::TokenStream> = el.groups.clone();
 
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
@@ -228,6 +243,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     "doc" => opts.doc = expr.and_then(expr_text),
                     "color" => opts.color = true,
                     "skip" => opts.skip = true,
+                    "flatten" => opts.flatten = true,
                     "values" => {} // handled above
                     other => return err(span, &format!("unknown param option `{other}`")),
                 }
@@ -235,6 +251,15 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             })?;
         }
         if opts.skip {
+            continue;
+        }
+        // A flattened field is another `Params` struct whose parameters this
+        // element also accepts — one declaration of a shared block rather than
+        // the same fields restated on every element that takes it.
+        if opts.flatten {
+            let ty = &field.ty;
+            groups.push(quote!(<#ty as ::xsvg_schema::Params>::SPEC.params));
+            reads.push(quote!(#ident: <#ty as ::xsvg_schema::Params>::from_attrs(src)));
             continue;
         }
 
@@ -325,6 +350,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 name: #el_name,
                 doc: #el_doc,
                 params: &[#(#specs),*],
+                groups: &[#(#groups),*],
                 input: #input_mode,
                 children: #child_mode,
             };
