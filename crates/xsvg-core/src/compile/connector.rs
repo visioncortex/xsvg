@@ -263,8 +263,114 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             pt(bm, bn),
         ]
     };
+    // Which axis an exit leaves along, as (horizontal?, outward sign ±1).
+    //
+    // A corner anchor's normal is diagonal, so neither axis is more its own than the
+    // other: it reports `None` and lets the far end choose, which is what keeps the
+    // two exits on a rail they can share. `(0,0)` — a center anchor with nowhere to
+    // aim — does the same.
+    let dominant = |(h, v): (f64, f64)| -> Option<(bool, f64)> {
+        if (h.abs() - v.abs()).abs() < 1e-9 {
+            return None; // diagonal (or nothing at all): no dominant axis
+        }
+        if h.abs() > v.abs() {
+            Some((true, h.signum()))
+        } else {
+            Some((false, v.signum()))
+        }
+    };
+    // A normal's outward sign along one axis, or 0 when it has no component there.
+    // `signum` alone will not do: it answers +1 for a zero component, which would
+    // send an exit sideways along an axis its anchor says nothing about.
+    let along = |(h, v): (f64, f64), horiz: bool| -> f64 {
+        let c = if horiz { h } else { v };
+        if c.abs() < 1e-9 { 0.0 } else { c.signum() }
+    };
+    // Both ends' exits, resolved to work together: a diagonal corner adopts the far
+    // end's axis wherever it has a component there, so the pair shares one rail
+    // instead of one end being forced onto an axis it never faced. `prefer` breaks
+    // the tie when neither end commits.
+    //
+    // The signs are ±1, never the raw component. A diagonal's 0.707 would scale that
+    // end's stub to 12.7px against the other's 18 and leave a stair-step jog exactly
+    // where the two stubs are meant to meet.
+    let exits = |na: (f64, f64), nb: (f64, f64), prefer: bool| -> (bool, f64, bool, f64) {
+        let (ah, asg, bh, bsg) = match (dominant(na), dominant(nb)) {
+            (Some((ah, asg)), Some((bh, bsg))) => (ah, asg, bh, bsg),
+            (Some((ah, asg)), None) => {
+                let s = along(nb, ah);
+                if s != 0.0 { (ah, asg, ah, s) } else { (ah, asg, !ah, along(nb, !ah)) }
+            }
+            (None, Some((bh, bsg))) => {
+                let s = along(na, bh);
+                if s != 0.0 { (bh, s, bh, bsg) } else { (!bh, along(na, !bh), bh, bsg) }
+            }
+            (None, None) => (prefer, along(na, prefer), prefer, along(nb, prefer)),
+        };
+        // An exit with no direction at all cannot happen once resolved (both callers
+        // supply a real normal), but a rail needs a side to leave from either way.
+        let nz = |s: f64| if s == 0.0 { 1.0 } else { s };
+        (ah, nz(asg), bh, nz(bsg))
+    };
+
+    // Perpendicular exits — one end leaves horizontally, the other vertically, so no
+    // single shared axis describes them and `elbow` does not apply. The natural route
+    // is the one corner where the two exit lines meet, taken when it lies ahead of A
+    // and lets the line arrive against B's normal rather than out of it. Otherwise
+    // stub both ends clear of their boxes first and join the stubs with one corner.
+    let corner_rail = |ax: Point, ah: bool, asg: f64, bx: Point, bh: bool, bsg: f64| -> Vec<Point> {
+        let meet = if ah { Point::new(bx.x, ax.y) } else { Point::new(ax.x, bx.y) };
+        let out_a = if ah { (meet.x - ax.x) * asg } else { (meet.y - ax.y) * asg };
+        let into_b = if bh { (bx.x - meet.x) * bsg } else { (bx.y - meet.y) * bsg };
+        if out_a > 1e-6 && into_b < -1e-6 {
+            return vec![ax, meet, bx];
+        }
+        let step = |p: Point, horiz: bool, s: f64| {
+            if horiz { Point::new(p.x + s * stub, p.y) } else { Point::new(p.x, p.y + s * stub) }
+        };
+        let (pa, pb) = (step(ax, ah, asg), step(bx, bh, bsg));
+        let bend = if ah { Point::new(pa.x, pb.y) } else { Point::new(pb.x, pa.y) };
+        vec![ax, pa, bend, pb, bx]
+    };
+    // Drop repeated and straight-through waypoints.
+    //
+    // Not cosmetic: `round_rail` shares ONE radius across every corner, capped by the
+    // shortest segment any corner has to eat into. A rail whose two stubs land on the
+    // same coordinate (both ends leaving the same way from boxes whose facing edges
+    // line up) emits a zero-length segment between duplicate points — which pins that
+    // shared radius to 0 and leaves every corner on the path sharp.
+    let simplify = |pts: Vec<Point>| -> Vec<Point> {
+        let mut out: Vec<Point> = Vec::with_capacity(pts.len());
+        for q in pts {
+            if out.last().is_some_and(|l| l.distance(q) < 1e-6) {
+                continue;
+            }
+            if out.len() >= 2 {
+                let (u, v) = (out[out.len() - 2], out[out.len() - 1]);
+                let (e1, e2) = ((v.x - u.x, v.y - u.y), (q.x - v.x, q.y - v.y));
+                // Collinear AND continuing forward — a 180° reversal is a real turn.
+                if (e1.0 * e2.1 - e1.1 * e2.0).abs() < 1e-6 && e1.0 * e2.0 + e1.1 * e2.1 > 0.0 {
+                    out.pop();
+                }
+            }
+            out.push(q);
+        }
+        if let (1, Some(&only)) = (out.len(), out.last()) {
+            out.push(only); // degenerate (both ends coincide): keep it indexable
+        }
+        out
+    };
+    // The orthogonal rail between two exits, whatever axes they leave along.
+    let rail = |ax: Point, na: (f64, f64), bx: Point, nb: (f64, f64), prefer: bool| -> Vec<Point> {
+        let (ah, asg, bh, bsg) = exits(na, nb, prefer);
+        simplify(if ah == bh {
+            elbow(ax, asg, bx, bsg, ah)
+        } else {
+            corner_rail(ax, ah, asg, bx, bh, bsg)
+        })
+    };
     // Turn an orthogonal waypoint list into (path, tangents), trimming the first/last
-    // segment back to the arrowhead base as needed. Works for 4- or 6-point rails.
+    // segment back to the arrowhead base as needed. Works for any rail of ≥2 points.
     let build_rail = |pts: &[Point]| {
         let n = pts.len();
         let s = if arrow_start { trim(pts[0], pts[1]) } else { pts[0] };
@@ -275,12 +381,6 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         }
         d.push_str(&format!(" L{}", p(e)));
         (d, pts[0], pts[1], pts[n - 1], pts[n - 2])
-    };
-    // Outward sign of a forced anchor along one axis (0 ⇒ no component on that axis).
-    let anchor_axis = |an: Option<Anchor>, horiz: bool| -> Option<f64> {
-        an.and_then(|s| anchor_norm(s))
-            .map(|(h, v)| if horiz { h } else { v })
-            .filter(|s| s.abs() > 1e-9)
     };
     // The same orthogonal waypoints as `build_rail`, but with every corner rounded by a
     // quadratic fillet — the `curve` route's way of routing around when the endpoints
@@ -338,10 +438,12 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     Some(s) => anchor_pt(b, s),
                     None => Point::new(cb.x - dir * b.width() / 2.0, cb.y),
                 };
-                // Outward x-direction: a forced anchor's own normal, else toward/away.
-                let da = anchor_axis(anchor_a, true).unwrap_or(dir);
-                let db = anchor_axis(anchor_b, true).unwrap_or(-dir);
-                build_rail(&elbow(ax, da, bx, db, true))
+                // A forced anchor's own normal decides which way that end leaves — and
+                // which axis, since an anchor facing across the route (`:top` on an
+                // x-major rail) is the more specific instruction of the two.
+                let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((dir, 0.0));
+                let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((-dir, 0.0));
+                build_rail(&rail(ax, na, bx, nb, true))
             }
             "y-major" => {
                 let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
@@ -353,9 +455,9 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     Some(s) => anchor_pt(b, s),
                     None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
                 };
-                let da = anchor_axis(anchor_a, false).unwrap_or(dir);
-                let db = anchor_axis(anchor_b, false).unwrap_or(-dir);
-                build_rail(&elbow(ay, da, by, db, false))
+                let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((0.0, dir));
+                let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((0.0, -dir));
+                build_rail(&rail(ay, na, by, nb, false))
             }
             "curve" => {
                 let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
@@ -394,12 +496,19 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                 // same rail path, corners filleted) so it reads as a smooth cornered line.
                 let (cax, cay) = unit(b0.x - a0.x, b0.y - a0.y);
                 let (cbx, cby) = unit(a0.x - b0.x, a0.y - b0.y);
-                let behind = an.0 * cax + an.1 * cay < 0.0 || bn.0 * cbx + bn.1 * cby < 0.0;
+                // "Behind" means pointing very nearly straight BACK, not merely away.
+                // A corner anchor is 45° off the chord (dot −0.707) and two same-side
+                // anchors are 90° off (dot 0) — both arc cleanly, because the tilted
+                // handles below pull them round; that is what `#a:left-top → #b:top`
+                // is *for*, and testing `< 0` sent every one of them to the elbow.
+                // Only an exit facing back down the chord defeats a cubic, so the
+                // threshold sits between a corner's −0.707 and a reversed edge's −1,
+                // with margin to spare against float noise.
+                const BACKWARD: f64 = -0.9;
+                let behind =
+                    an.0 * cax + an.1 * cay < BACKWARD || bn.0 * cbx + bn.1 * cby < BACKWARD;
                 if behind {
-                    let hz = an.0.abs() >= an.1.abs();
-                    let da = (if hz { an.0 } else { an.1 }).signum();
-                    let db = (if hz { bn.0 } else { bn.1 }).signum();
-                    round_rail(&elbow(a0, da, b0, db, hz), 22.0)
+                    round_rail(&rail(a0, an, b0, bn, horiz), 22.0)
                 } else {
                     // Facing with room: a single smooth cubic. Tilt each handle from the
                     // exit toward the other anchor, so a same-side pair reads as a leaf

@@ -120,6 +120,26 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ### Fixed
 
+- **Regression: `route="curve"` sent same-side anchors on a detour** instead of arcing.
+  `#a:left-top → #b:top` — the "both ends leave the top and arc over" idiom — routed out past
+  the far box and doubled back, drawing two brackets where the sample asks for two Ls. The
+  elbow flip added for back-to-back endpoints tested whether an exit points *away at all*, but
+  a corner anchor is only 45° off the chord and a same-side edge is 90°, and both bow round
+  perfectly. Now only an exit facing nearly straight back down the chord takes the detour, with
+  margin either side of a corner's −0.707 so the choice never hinges on float noise. The rail
+  flip's own cases are unchanged.
+- **A forced anchor now decides which axis its rail leaves along.** `:top` on an `x-major` rail
+  is the more specific instruction and leaves vertically; before, only the horizontal component
+  was read, and a `:top` normal's zero component has `signum` +1 — so the rail confidently left
+  rightward along an axis the anchor never faced. Perpendicular exits (one end horizontal, one
+  vertical) route through the corner where their exit lines meet, stubbing clear first when that
+  corner would land inside a box.
+- **A diagonal corner anchor contributes a sign to a rail, not its 0.707 component**, which had
+  been scaling one end's 18px stub to 12.7 and leaving a stair-step where the two stubs meet.
+- **Rounded elbows are no longer sharp when two stubs coincide.** `round_rail` shares one radius
+  across every corner, capped by the shortest segment a corner eats into — so the zero-length
+  segment such a rail emitted pinned that radius to 0 and left the whole path sharp. Repeated and
+  straight-through waypoints are dropped before the fillets are laid.
 - The incremental dependency scan **missed connectors attached by anchor**. A `<x:connector>`
   bakes its endpoint boxes into the routed path, but an endpoint written `from="#box:right"` was
   compared whole against element ids, so `#box:right` never matched `box` and editing the box

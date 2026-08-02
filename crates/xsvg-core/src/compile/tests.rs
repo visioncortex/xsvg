@@ -4143,3 +4143,109 @@ fn placement_and_extent_are_declared_as_geometry() {
         assert!(!p.geometry, "<x:{el}> `{name}` is not placement or extent");
     }
 }
+
+/// Two boxes side by side, as `dataset/connector-anchors.xsvg` arranges them.
+const ANCHOR_BOXES: &str = r##"<rect id="a" x="60" y="150" width="120" height="56"/><rect id="b" x="360" y="150" width="120" height="56"/>"##;
+
+/// The connector's route as its own compiled document, so `route_d`'s borrow lives.
+fn connector_d(anchors: &str, route: &str, arrow: &str) -> String {
+    let svg = format!(
+        r##"{XW}{ANCHOR_BOXES}<x:connector {anchors} route="{route}" arrow="{arrow}" stroke="#111"/></svg>"##
+    );
+    route_d(&compile_test(&svg)).to_string()
+}
+
+/// Every `M`/`L`/`Q`/`C` segment endpoint of a route, in order.
+fn waypoints(d: &str) -> Vec<crate::kurbo::Point> {
+    d.split(|c: char| c == 'M' || c == 'L' || c == 'Q' || c == 'C')
+        .skip(1)
+        .filter_map(|seg| {
+            let last = seg.split_whitespace().last()?;
+            let (x, y) = last.split_once(',')?;
+            Some(crate::kurbo::Point::new(x.parse().ok()?, y.parse().ok()?))
+        })
+        .collect()
+}
+
+#[test]
+fn same_side_anchors_arc_over_instead_of_detouring() {
+    // Regression. Anchoring both ends to the same side — `#a:left-top → #b:top`, the
+    // "leave the top and arc over" idiom — must stay ONE smooth cubic. The elbow
+    // detour is for exits that face back down the chord; a corner anchor is only 45°
+    // off it and a same-side edge is 90°, and both bow round perfectly. Testing
+    // "points away at all" sent them to the elbow, which routed out past the far box
+    // and doubled back — two brackets where the sample asks for two Ls.
+    for anchors in [
+        r##"from="#a:left-top" to="#b:top""##,
+        r##"from="#a:bottom" to="#b:right-bottom""##,
+        r##"from="#a:top" to="#b:top""##,
+    ] {
+        let d = connector_d(anchors, "curve", "both");
+        assert!(
+            d.contains(" C") && !d.contains(" L") && !d.contains(" Q"),
+            "{anchors} is a single arc, not an elbow: {d}"
+        );
+        // and the arc stays within the span it connects — the detour's tell was
+        // running out past the far box to x=438 before doubling back to 420
+        use crate::kurbo::Shape;
+        let bbox = crate::kurbo::BezPath::from_svg(&d).unwrap().bounding_box();
+        assert!(bbox.x1 <= 481.0, "{anchors} overshoots the far box: {bbox:?}");
+    }
+}
+
+#[test]
+fn a_forced_anchor_decides_which_axis_its_rail_leaves_along() {
+    // An anchor facing across the route is the more specific instruction: `:top` on
+    // an x-major rail must leave vertically, not be forced onto x. Reading only the
+    // horizontal component of a `:top` normal gives zero, whose `signum` is +1 — so
+    // the rail confidently left rightward along an axis the anchor never faced.
+    for route in ["x-major", "y-major"] {
+        let d = connector_d(r##"from="#a:left-top" to="#b:top""##, route, "none");
+        assert_eq!(d, "M60,150 L60,132 L420,132 L420,150", "{route}");
+    }
+
+    // A diagonal corner contributes a SIGN, not its 0.707 component. Scaling one
+    // end's stub by that left the two stubs on different lines and put a stair-step
+    // where they were meant to meet.
+    let d = connector_d(r##"from="#a:bottom" to="#b:right-bottom""##, "y-major", "none");
+    assert_eq!(d, "M120,206 L120,224 L480,224 L480,206");
+}
+
+#[test]
+fn perpendicular_anchors_route_through_a_corner() {
+    // One end leaves horizontally, the other vertically: no shared axis, so the rail
+    // turns through the corner where the two exit lines meet — stubbing clear first
+    // when that corner would land inside a box or arrive out of B rather than into it.
+    let d = connector_d(r##"from="#a:right" to="#b:top""##, "x-major", "none");
+    assert_eq!(d, "M180,178 L198,178 L198,132 L420,132 L420,150");
+}
+
+#[test]
+fn a_rail_never_repeats_or_runs_straight_through_a_waypoint() {
+    // `round_rail` shares one radius across every corner, capped by the shortest
+    // segment a corner eats into — so a single zero-length segment pins it to 0 and
+    // leaves the whole path sharp. Rails whose two stubs land on the same coordinate
+    // emitted exactly that, plus a redundant collinear vertex.
+    for (anchors, route) in [
+        (r##"from="#a:bottom" to="#b:right-bottom""##, "y-major"),
+        (r##"from="#a:left-top" to="#b:top""##, "x-major"),
+        (r##"from="#a:right" to="#b:left""##, "x-major"),
+    ] {
+        let d = connector_d(anchors, route, "none");
+        let pts = waypoints(&d);
+        assert!(pts.len() >= 2, "{anchors} {route}: {d}");
+        for w in pts.windows(2) {
+            assert!(
+                w[0].distance(w[1]) > 1e-6,
+                "{anchors} {route} repeats a waypoint: {d}"
+            );
+        }
+        for w in pts.windows(3) {
+            let (e1, e2) = (w[1] - w[0], w[2] - w[1]);
+            assert!(
+                (e1.x * e2.y - e1.y * e2.x).abs() > 1e-6,
+                "{anchors} {route} keeps a waypoint it runs straight through: {d}"
+            );
+        }
+    }
+}
