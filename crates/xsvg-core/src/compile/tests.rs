@@ -506,15 +506,23 @@ fn table_cell_bg_override_and_empty_degrades() {
 #[test]
 fn table_source_map_is_per_cell() {
     // each <x:td>/<x:th> becomes its own source node (a <g data-xsvg-pos>),
-    // so a viewer resolves a click to the cell, not the whole table
+    // so a viewer resolves a click to the cell, not the whole table — while the
+    // wrapper still carries the table's own span, which is the range an incremental
+    // re-emit replaces (docs/Incremental.md §4)
     let svg = format!(
         r##"{XW}<x:table x="0" y="0" width="100"><x:tr><x:td>a</x:td><x:td>b</x:td></x:tr></x:table></svg>"##
     );
     let out = compile_impl(&svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
     assert_eq!(
         out.matches("<g data-xsvg-pos").count(),
-        2,
-        "one source-mapped <g> per cell: {out}"
+        3,
+        "the table's wrapper plus one source-mapped <g> per cell: {out}"
+    );
+    let table = top_level_offsets(&svg)[0];
+    let range = fragment_range_impl(&svg, table).unwrap();
+    assert!(
+        out.contains(&format!(r#"<g data-xsvg-pos="{}-{}">"#, range.0, range.1)),
+        "the wrapper carries the very range `fragment_range` reports: {out}"
     );
 }
 
@@ -547,8 +555,14 @@ fn pie_geometry_and_per_slice() {
     let sm = compile_impl(&svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
     assert_eq!(
         sm.matches("<g data-xsvg-pos").count(),
-        3,
-        "per-slice source map: {sm}"
+        4,
+        "the pie's wrapper plus a per-slice source map: {sm}"
+    );
+    let pie = top_level_offsets(&svg)[0];
+    let range = fragment_range_impl(&svg, pie).unwrap();
+    assert!(
+        sm.contains(&format!(r#"<g data-xsvg-pos="{}-{}">"#, range.0, range.1)),
+        "the wrapper carries the very range `fragment_range` reports: {sm}"
     );
 
     // per-slice radius: explicit `r` and a `grow` factor both set the arc radius
@@ -1441,6 +1455,66 @@ fn fragments_are_verbatim_slices_of_the_full_compile() {
     }
 }
 
+/// Every composite emitter, so the rule below is checked against the elements that
+/// build a wrapper of their own rather than passing one through.
+const INC_COMPOSITE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" viewBox="0 0 400 300">
+  <x:table x="0" y="0" width="100"><x:tr><x:th>h</x:th></x:tr><x:tr><x:td>a</x:td></x:tr></x:table>
+  <x:pie cx="100" cy="100" r="40"><x:slice value="1"/><x:slice value="2"/></x:pie>
+  <x:plot x="0" y="150" width="120" height="60" type="bar"><x:series values="1 2 3"/></x:plot>
+  <x:list x="200" y="20" font-size="10"><x:li>one</x:li><x:li>two</x:li></x:list>
+  <rect id="n1" x="200" y="100" width="40" height="20"/>
+  <rect id="n2" x="300" y="160" width="40" height="20"/>
+  <x:connector from="#n1:right" to="#n2:left" stroke="#111"/>
+  <x:theme><x:color name="ink" value="#111"/></x:theme>
+  <g x:layer="hidden" x:hidden="true"><rect x="0" y="0" width="10" height="10"/></g>
+</svg>"##;
+
+#[test]
+fn every_emitted_fragment_is_anchorable_by_its_own_range() {
+    // The companion to the verbatim-slice invariant, and what makes surgical
+    // replacement *addressable* rather than merely sound: a host holds the rendered
+    // document and knows only source ranges, so the element a fragment emits has to
+    // announce the range `fragment_range` reports for it. An emitter that wraps its
+    // output in an untagged `<g>` is invisible to that lookup, and every edit to it
+    // silently degrades to a whole-document recompile.
+    //
+    // Exactly one, not merely at least one: the range is the host's *key*. A
+    // fragment may legitimately emit several sibling nodes — a `<filter>` def ahead
+    // of the shape that uses it, marker comments ahead of both — and the host locates
+    // that whole run from the one node carrying the key, so a second claimant would
+    // make the lookup ambiguous.
+    //
+    // Elements that emit nothing at all (`<x:theme>` is a declaration; a hidden
+    // layer is deliberately dropped) have no element to tag and are exempt.
+    for input in [INC, INC_COMPOSITE] {
+        for off in top_level_offsets(input) {
+            let frag =
+                compile_fragment_impl(input, "balanced", true, off, &Mono, &BoxShaper, &BoxOutliner)
+                    .unwrap();
+            let (start, end) = fragment_range_impl(input, off).unwrap();
+            if !has_element(&frag) {
+                continue; // nothing renderable emitted → nothing to key
+            }
+            let key = format!(r#" data-xsvg-pos="{start}-{end}""#);
+            assert_eq!(
+                frag.matches(&key).count(),
+                1,
+                "the fragment at {start}-{end} must carry its own range exactly once, \
+                 or a host cannot address the element it has to replace: {frag}"
+            );
+        }
+    }
+}
+
+/// Whether markup contains an element, as opposed to only comments/whitespace.
+fn has_element(markup: &str) -> bool {
+    let mut rest = markup.trim_start();
+    while let Some(r) = rest.strip_prefix("<!--") {
+        rest = r.split_once("-->").map(|(_, t)| t).unwrap_or("").trim_start();
+    }
+    !rest.is_empty()
+}
+
 #[test]
 fn fragment_range_and_offsets_resolve() {
     let offs = top_level_offsets(INC);
@@ -1493,6 +1567,30 @@ fn dependents_track_baked_in_references() {
         deps[0].0, offs[12],
         "expected the mesh-filled rect: {deps:?}"
     );
+}
+
+#[test]
+fn dependents_follow_a_connector_through_its_anchor_suffix() {
+    // `from="#a:right"` names the box `#a` with a forced attachment point. The
+    // reference the dependency scan sees is the whole string, so an id match that
+    // did not look past the `:anchor` suffix would report no dependents at all —
+    // and an editor moving the box would leave the connector drawn to where it
+    // used to be.
+    let svg = format!(
+        r##"{XW}<rect id="a" x="10" y="10" width="40" height="20"/><rect id="b" x="120" y="80" width="40" height="20"/><x:connector from="#a:right" to="#b:left" route="x-major" stroke="#111"/></svg>"##
+    );
+    let offs = top_level_offsets(&svg);
+    let starts = |deps: Vec<(usize, usize)>| deps.into_iter().map(|d| d.0).collect::<Vec<_>>();
+    assert_eq!(starts(dependents_impl(&svg, offs[0])), vec![offs[2]]);
+    assert_eq!(starts(dependents_impl(&svg, offs[1])), vec![offs[2]]);
+    // Editing the connector itself pulls in nothing — the boxes do not read it.
+    assert!(dependents_impl(&svg, offs[2]).is_empty());
+    // And the plain, suffix-free spelling keeps working.
+    let plain = format!(
+        r##"{XW}<rect id="a" x="10" y="10" width="40" height="20"/><rect id="b" x="120" y="80" width="40" height="20"/><x:connector from="#a" to="#b" stroke="#111"/></svg>"##
+    );
+    let po = top_level_offsets(&plain);
+    assert_eq!(starts(dependents_impl(&plain, po[0])), vec![po[2]]);
 }
 
 #[test]

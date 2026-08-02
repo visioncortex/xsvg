@@ -481,8 +481,17 @@ fn baked_refs<'a>(n: roxmltree::Node<'a, 'a>) -> Vec<&'a str> {
     }
     // <x:connector from to> bakes both endpoint boxes into the routed path (§7.6)
     if n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "connector" {
-        out.extend(n.attribute("from"));
-        out.extend(n.attribute("to"));
+        for r in [n.attribute("from"), n.attribute("to")].into_iter().flatten() {
+            out.push(r);
+            // An endpoint may carry a `:anchor` suffix (`#box:right`), and the
+            // dependency is on the id in front of it. Report both spellings rather
+            // than re-deciding here whether the suffix is an anchor keyword: naming
+            // an id that does not exist costs a comparison, while missing one leaves
+            // a connector routed to where its box used to be.
+            if let Some((base, _)) = r.rsplit_once(':') {
+                out.push(base);
+            }
+        }
     }
     if n.tag_name().name() == "use"
         && n.tag_name().namespace() != Some(XSVG_NS)

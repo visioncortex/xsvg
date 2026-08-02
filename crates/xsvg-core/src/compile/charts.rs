@@ -142,7 +142,11 @@ pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     ];
     let d2r = std::f64::consts::PI / 180.0;
 
-    out.push_str("<g>"); // per-slice source mapping (each slice carries its own range)
+    // Each slice carries its own range for click mapping; the wrapper carries the
+    // pie's, so an incremental re-emit can find the element it replaces.
+    out.push_str("<g");
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
     let mut angle = start;
     for (i, &s) in slices.iter().enumerate() {
         let value = attr_num(s, "value", 1.0).max(0.0);

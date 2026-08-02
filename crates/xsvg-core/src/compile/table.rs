@@ -188,7 +188,13 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // resolves a click to the individual `<x:td>`/`<x:th>` — not the whole table.
     // Cells don't overlap, so emitting each cell's bg then text keeps the paint
     // order correct without a separate backgrounds pass.
-    out.push_str("<g>");
+    //
+    // The wrapper carries the table's own span as well: cell-level mapping is what a
+    // click wants, but an incremental re-emit needs the element it replaces to be
+    // findable by the range `fragment_range` reports (docs/Incremental.md §4).
+    out.push_str("<g");
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
     let base = [EmitAttrs::default()];
     let mut body_row = 0usize;
     for (ri, row) in rows.iter().enumerate() {
