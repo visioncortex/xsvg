@@ -1169,46 +1169,95 @@ fn plan_paragraphs<'a>(
         st
     };
 
-    // pass 1: lay each paragraph in a relative frame (para 0's cap-top at 0),
-    // accumulating the gaps
-    let mut items: Vec<ParaPlan> = Vec::with_capacity(paras.len());
-    let mut cursor = 0.0f64; // cap-top of the current paragraph
-    let mut prev_after = 0.0f64;
-    for (i, &p) in paras.iter().enumerate() {
-        let ptext = collect_text(p);
-        let pstyle = para_style(p);
-        let sb = attr_num(p, "space-before", 0.0);
-        let sa = attr_num(p, "space-after", default_spacing);
-        if i > 0 {
-            cursor += prev_after + sb;
+    // pass 1 at a given SCALE (fit="shrink" searches it below): every text
+    // metric — the font sizes, the paragraph gaps, the first-line indent —
+    // scales together, so the block shrinks like a zoom while the box
+    // geometry stays put. Returns the plans and the stacked block height.
+    let plan_at = |scale: f64| -> (Vec<ParaPlan<'a>>, f64) {
+        let mut items: Vec<ParaPlan> = Vec::with_capacity(paras.len());
+        let mut cursor = 0.0f64; // cap-top of the current paragraph
+        let mut prev_after = 0.0f64;
+        for (i, &p) in paras.iter().enumerate() {
+            let ptext = collect_text(p);
+            let mut pstyle = para_style(p);
+            pstyle.size *= scale;
+            let sb = attr_num(p, "space-before", 0.0) * scale;
+            let sa = attr_num(p, "space-after", default_spacing) * scale;
+            if i > 0 {
+                cursor += prev_after + sb;
+            }
+            let pspec = AreaSpec {
+                x: cx,
+                y: cursor,
+                width: cw,
+                height: 1e5, // tall → no clip; valign=top places lines from `cursor`
+                padding: 0.0,
+                align: Align::parse(p.attribute("align").unwrap_or(default_align)),
+                valign: VAlign::Top,
+                fit: Fit::None,
+                text_overflow: TextOverflow::Clip,
+                text_indent: attr_num(p, "text-indent", 0.0) * scale,
+            };
+            let layout = layout_area(&ptext, &pstyle, &pspec, m);
+            let pfm = m.font_metrics(&pstyle, pstyle.size);
+            let n = layout.lines.len().max(1);
+            let ph =
+                pfm.cap_height + pfm.descent + (n - 1) as f64 * (pstyle.size * pstyle.line_height);
+            items.push(ParaPlan {
+                lines: layout.lines,
+                style: pstyle,
+                fill: p.attribute("fill").unwrap_or(base_fill),
+                anchor: layout.anchor.svg(),
+                src: p,
+            });
+            cursor += ph;
+            prev_after = sa;
         }
-        let pspec = AreaSpec {
-            x: cx,
-            y: cursor,
-            width: cw,
-            height: 1e5, // tall → no clip; valign=top places lines from `cursor`
-            padding: 0.0,
-            align: Align::parse(p.attribute("align").unwrap_or(default_align)),
-            valign: VAlign::Top,
-            fit: Fit::None,
-            text_overflow: TextOverflow::Clip,
-            text_indent: attr_num(p, "text-indent", 0.0),
-        };
-        let layout = layout_area(&ptext, &pstyle, &pspec, m);
-        let pfm = m.font_metrics(&pstyle, pstyle.size);
-        let n = layout.lines.len().max(1);
-        let ph = pfm.cap_height + pfm.descent + (n - 1) as f64 * (pstyle.size * pstyle.line_height);
-        items.push(ParaPlan {
-            lines: layout.lines,
-            style: pstyle,
-            fill: p.attribute("fill").unwrap_or(base_fill),
-            anchor: layout.anchor.svg(),
-            src: p,
-        });
-        cursor += ph;
-        prev_after = sa;
-    }
-    let block_h = cursor;
+        let block_h = cursor;
+        (items, block_h)
+    };
+
+    // fit="shrink" (§6.1, extended to paragraph mode): binary-search the
+    // block scale like `fit_size` searches the font size — the stacked height
+    // drives it (each trial re-wraps to the width), plus `fit_size`'s width
+    // condition: a lone unbreakable word is the only line greedy wrap lets
+    // overflow, so it must fit the content width too. `fit-min` floors the
+    // BASE size; per-paragraph overrides scale proportionally with it. Each
+    // trial re-lays every paragraph (measures at the scaled size): the cost
+    // is paid only by overflowing shrink boxes.
+    let (items, block_h) = match spec.fit {
+        Fit::Shrink { min } if base_style.size > 0.0 => {
+            let fits = |s: f64| {
+                let (items, h) = plan_at(s);
+                h <= ch
+                    && items.iter().all(|it| {
+                        it.lines.iter().all(|l| {
+                            l.words.1 - l.words.0 != 1
+                                || m.measure(&l.text, &it.style, it.style.size)
+                                    + it.style.letter_spacing
+                                        * (l.text.chars().count().saturating_sub(1)) as f64
+                                    <= cw + 1e-6
+                        })
+                    })
+            };
+            if fits(1.0) {
+                plan_at(1.0)
+            } else {
+                let min_scale = (min / base_style.size).clamp(0.0, 1.0);
+                let (mut lo, mut hi) = (min_scale, 1.0f64);
+                for _ in 0..24 {
+                    let mid = 0.5 * (lo + hi);
+                    if fits(mid) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                plan_at(lo.max(min_scale))
+            }
+        }
+        _ => plan_at(1.0),
+    };
     let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
     let block_top = match valign {
         VAlign::Top => cy,

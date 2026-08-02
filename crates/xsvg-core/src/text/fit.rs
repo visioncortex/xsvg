@@ -3,11 +3,15 @@
 use super::{measure::Measured, wrap::wrap};
 
 /// Largest font size in `[min_size, base_size]` whose wrapped block fits
-/// `max_w` × `max_h`. Returns `min_size` if even that overflows the height.
+/// `max_w` × `max_h`. Returns `min_size` if even that overflows.
 ///
-/// Only the *height* is searched: `wrap` already reflows text to `max_w` at every
-/// trial, so shrinking just needs to win back vertical space. Each trial re-wraps
-/// (cheap — base-size widths are scaled, not re-measured).
+/// The block's *height* drives the search — `wrap` already reflows text to
+/// `max_w` at every trial, so shrinking wins back vertical space — plus one
+/// width condition: the widest unbreakable word must fit `max_w`, since a
+/// lone long token is the only line greedy wrap lets overflow (§6.6); a
+/// shrink box shrinks it into the box instead of spilling horizontally.
+/// Each trial re-wraps (cheap — base-size widths are scaled, not
+/// re-measured).
 ///
 /// Crate-internal: `area::layout_area` is the public entry point for fitting.
 pub(crate) fn fit_size(
@@ -27,7 +31,12 @@ pub(crate) fn fit_size(
     let fits = |size: f64| {
         let scale = size / base_size;
         let lines = wrap(measured, max_w, scale).len().max(1) as f64;
-        lines * size * line_height <= max_h
+        let widest = measured
+            .words
+            .iter()
+            .map(|w| w.advance * scale + measured.letter_spacing * w.graphemes.saturating_sub(1) as f64)
+            .fold(0.0f64, f64::max);
+        lines * size * line_height <= max_h && widest <= max_w + 1e-6
     };
 
     if fits(base_size) {

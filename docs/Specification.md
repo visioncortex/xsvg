@@ -308,7 +308,12 @@ only tags and passes through — artboards do not reorder or clip content.
 - **Wrapping.** Greedy (first-fit): break only at whitespace. A token wider than the available width
   is placed alone (it overflows; see §6.6). No automatic hyphenation in v0.
 - **Fitting** (shrink-to-fit, `<x:textbox>` only). Binary-search the font size in
-  `[fit-min, font-size]` for the largest whose wrapped block fits the box height; re-wrap each trial.
+  `[fit-min, font-size]` for the largest whose wrapped block fits the box height — and whose widest
+  unbreakable word fits the content width (a lone long token is the only line greedy wrap lets
+  overflow; a shrink box shrinks it in rather than spilling). Re-wrap each trial. In paragraph mode
+  (§6.16) the search runs on the whole BLOCK's scale: every paragraph's size, the paragraph gaps,
+  and first-line indents shrink together (a zoom), `fit-min` flooring the box's base size with
+  per-paragraph overrides scaling proportionally.
 
 ### 6.2 `<text>` and `inline-size` — Rung 1 [implemented]
 
@@ -822,9 +827,10 @@ indent, style, and spacing.
 The gap between two paragraphs is `space-after` of the first plus `space-before` of the second. The
 whole stacked block is then placed by the box's `valign` (top/middle/bottom), and lines whose
 baseline leaves the box are clipped. Each `<x:p>` compiles to its own `<text>` carrying its source
-range (a click resolves to the paragraph). **v0 limits:** paragraph mode is **live text** — no
-create-outlines (§6.12), no `<tspan>` runs inside a paragraph, and it applies to the **rectangular**
-box only (a curved `in="#shape"` region ignores `<x:p>` and flows as one block).
+range (a click resolves to the paragraph). `fit="shrink"` applies to the whole block (§6.1: the
+scale is searched, so all paragraphs shrink together). **v0 limits:** paragraph mode is **live
+text** — no create-outlines (§6.12), no `<tspan>` runs inside a paragraph, and it applies to the
+**rectangular** box only (a curved `in="#shape"` region ignores `<x:p>` and flows as one block).
 
 ### 6.17 Bordered text — `x:border-width` / `x:border-color` [implemented]
 

@@ -400,6 +400,53 @@ fn textbox_paragraphs_stack_with_spacing() {
 }
 
 #[test]
+fn textbox_paragraphs_shrink_to_fit() {
+    // Mono size 20: cap 14, descent 4 → two 1-line paragraphs stack to
+    // 18+18=36, over the 30-high box → fit="shrink" scales the block down
+    // (found live: pasting newlines into a shrink box exploded the text,
+    // because paragraph mode ignored fit entirely).
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="30" font-size="20" line-height="1" fit="shrink" fit-min="10"><x:p>aa</x:p><x:p>bb</x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    let sizes: Vec<f64> = out
+        .match_indices("font-size=\"")
+        .map(|(i, _)| {
+            let rest = &out[i + 11..];
+            rest[..rest.find('"').unwrap()].parse().unwrap()
+        })
+        .collect();
+    assert_eq!(sizes.len(), 2, "one <text> per paragraph: {out}");
+    for s in &sizes {
+        assert!(*s < 20.0 && *s >= 10.0, "shrunk within [fit-min, base): {sizes:?} {out}");
+    }
+    assert!((sizes[0] - sizes[1]).abs() < 1e-6, "the block scales as one: {sizes:?}");
+
+    // a block that already fits stays at the base size
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="20" line-height="1" fit="shrink" fit-min="10"><x:p>aa</x:p><x:p>bb</x:p></x:textbox></svg>"##
+    );
+    let fits = compile_test(&svg);
+    assert!(fits.contains("font-size=\"20\""), "no shrink when it fits: {fits}");
+
+    // a lone unbreakable word wider than the box shrinks too (the §6.6
+    // overflow is for non-fit boxes): Mono 20 → "wwwwwwwwww" = 100 wide in a
+    // 60-wide box; plenty of height, so only the WIDTH forces the shrink
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="200" font-size="20" line-height="1" fit="shrink" fit-min="5"><x:p>wwwwwwwwww</x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    let size: f64 = {
+        let i = out.find("font-size=\"").unwrap() + 11;
+        out[i..i + out[i..].find('"').unwrap()].parse().unwrap()
+    };
+    assert!(
+        size <= 12.0 + 1e-6 && size > 5.0,
+        "10 mono chars at size s are s/2·10 wide → fits 60 at s ≤ 12: {size} {out}"
+    );
+}
+
+#[test]
 fn table_columns_and_content_row_heights() {
     // width 300, cols "100 * *" → 100 fixed + two flex of (200/2)=100 each.
     // Mono char = 5 at size 10: the long cell wraps to 2 lines in a 100-wide
