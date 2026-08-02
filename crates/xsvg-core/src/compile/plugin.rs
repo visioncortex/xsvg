@@ -438,13 +438,37 @@ fn box_attrs(n: roxmltree::Node) -> Option<Rect> {
     Some(Rect::new(x, y, x + w, y + h))
 }
 
-/// A `<text>` element's line box: measured advance horizontally, font ascent and
-/// descent vertically, shifted for `text-anchor`.
+/// A `<text>` element's box: the union of its **positioned runs**.
+///
+/// Multi-line output puts each line on its own `<tspan x y>`, so measuring the
+/// element's whole string as one run would report a box as wide as all the lines
+/// concatenated and place it wherever `<text>` happened to sit. Each positioned
+/// tspan is measured separately; an element with none is one run of its own text.
 fn text_bbox(n: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
-    // text nodes only — `Node::text()` also answers for an *element*, returning
-    // its first child's text, which would count every run twice
-    let text: String = n
+    let positioned: Vec<roxmltree::Node> = n
         .descendants()
+        .filter(|d| {
+            d.is_element()
+                && d.tag_name().name() == "tspan"
+                && (d.has_attribute("x") || d.has_attribute("y"))
+        })
+        .collect();
+    if positioned.is_empty() {
+        return run_bbox(n, ctx);
+    }
+    positioned
+        .into_iter()
+        .filter_map(|s| run_bbox(s, ctx))
+        .reduce(|a, b| a.union(b))
+}
+
+/// One positioned run: measured advance horizontally, font ascent and descent
+/// vertically, shifted for `text-anchor`.
+fn run_bbox(n: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
+    // direct text children only — `Node::text()` also answers for an *element*,
+    // returning its first child's text, which would count runs twice
+    let text: String = n
+        .children()
         .filter(|d| d.is_text())
         .filter_map(|d| d.text())
         .collect();
@@ -452,7 +476,7 @@ fn text_bbox(n: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
         return None;
     }
     let mut style = crate::TextStyle {
-        size: attr_num(n, "font-size", 16.0),
+        size: inherited(n, "font-size").and_then(super::parse_num).unwrap_or(16.0),
         ..Default::default()
     };
     if let Some(f) = inherited(n, "font-family") {
@@ -472,7 +496,8 @@ fn text_bbox(n: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
         return None;
     }
     let fm = ctx.m.font_metrics(&style, style.size);
-    let (x, y) = (attr_num(n, "x", 0.0), attr_num(n, "y", 0.0));
+    let x = inherited(n, "x").and_then(super::parse_num).unwrap_or(0.0);
+    let y = inherited(n, "y").and_then(super::parse_num).unwrap_or(0.0);
     let x0 = match inherited(n, "text-anchor") {
         Some("middle") => x - w / 2.0,
         Some("end") => x - w,

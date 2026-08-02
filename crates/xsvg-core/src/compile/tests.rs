@@ -3711,6 +3711,23 @@ fn a_container_measures_text_children_as_line_boxes() {
 }
 
 #[test]
+fn a_container_measures_multi_line_text_line_by_line() {
+    // wrapped text puts each line on its own positioned <tspan>; measuring the
+    // element's whole string as one run would report a box as wide as every line
+    // concatenated, and place it wherever the <text> element happened to sit
+    let out = compile_plug(&plug_doc(
+        r##"<c:frame><x:textbox x="40" y="100" width="120" height="60" font-size="10">one two three four five</x:textbox></c:frame>"##,
+    ));
+    let b = frame_box(&out).unwrap_or_default();
+    assert!(out.contains("<tspan"), "the textbox wrapped: {out}");
+    // the box starts at the text's own left edge, not the origin
+    assert!((b[0] - 40.0).abs() < 0.5, "left edge {}: {out}", b[0]);
+    // and is no wider than the box the lines were laid out in
+    assert!(b[2] <= 120.0 + 0.5, "width {} exceeds the textbox: {out}", b[2]);
+    assert!(b[1] > 80.0, "top follows the first baseline: {out}");
+}
+
+#[test]
 fn a_container_child_keeps_its_own_geometry_when_nested_in_a_group() {
     // transforms compose down the fragment when measuring
     let out = compile_plug(&plug_doc(

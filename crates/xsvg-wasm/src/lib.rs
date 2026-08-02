@@ -6,8 +6,10 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    compile_fragment_linked_impl, compile_linked_impl, dependents_impl, fragment_range_impl,
+    compile_fragment_linked_impl, compile_fragment_seams_impl, compile_linked_impl,
+    compile_seams_impl, dependents_impl, fragment_range_impl, imports_impl, Seams,
 };
+use xsvg_core::{ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, InputMode};
 use xsvg_core::{
     FontMetrics, GlyphOutliner, Measurer, RasterRegion, Rect, Resolver, Shaper, TextStyle,
 };
@@ -314,4 +316,197 @@ pub fn dependents(input: &str, offset: u32) -> Vec<u32> {
         .into_iter()
         .flat_map(|(s, e)| [s as u32, e as u32])
         .collect()
+}
+
+// ---- Loadable geometry generators (docs/Extensibility.md) -----------------
+
+/// Browser-backed [`GeneratorHost`]. The two callbacks are the whole contract:
+///
+/// - `element(ns, tag)` → `null` for an unbound namespace, else
+///   `{state: "ready"|"pending"|"unknown", input, children}`.
+/// - `generate(ns, tag, requestJson)` → the module's reply JSON, or `null`.
+///
+/// The request is encoded here rather than in JS so both hosts speak the exact
+/// wire format the plugin SDK decodes; JS is left with pure memory plumbing.
+/// Module loading is the host's business and happens before compiling — the core
+/// is synchronous, so a namespace whose module has not arrived yet answers
+/// `pending` and the host recompiles once it has (Extensibility §5).
+struct JsGeneratorHost<'a> {
+    element: &'a js_sys::Function,
+    generate: &'a js_sys::Function,
+}
+
+impl GeneratorHost for JsGeneratorHost<'_> {
+    fn element(&self, ns: &str, tag: &str) -> ElementInfo {
+        let Ok(v) = self.element.call2(
+            &JsValue::NULL,
+            &JsValue::from_str(ns),
+            &JsValue::from_str(tag),
+        ) else {
+            return ElementInfo::Unbound;
+        };
+        if v.is_null() || v.is_undefined() {
+            return ElementInfo::Unbound;
+        }
+        let field = |k: &str| {
+            js_sys::Reflect::get(&v, &JsValue::from_str(k))
+                .ok()
+                .and_then(|x| x.as_string())
+        };
+        match field("state").as_deref() {
+            Some("ready") => ElementInfo::Ready {
+                input: match field("input").as_deref() {
+                    Some("required") => InputMode::Required,
+                    Some("optional") => InputMode::Optional,
+                    _ => InputMode::None,
+                },
+                children: match field("children").as_deref() {
+                    Some("container") => ChildMode::Container,
+                    _ => ChildMode::None,
+                },
+            },
+            Some("pending") => ElementInfo::Pending,
+            Some("unknown") => ElementInfo::UnknownElement,
+            _ => ElementInfo::Unbound,
+        }
+    }
+
+    fn generate(&self, ns: &str, tag: &str, req: &GenRequest) -> GenResult {
+        let kids: Vec<xsvg_plugin::host::ChildIn> = req
+            .children
+            .iter()
+            .map(|c| (c.svg.as_str(), c.bbox))
+            .collect();
+        let payload = xsvg_plugin::host::encode_request(
+            tag,
+            &req.attrs,
+            req.input_d.as_deref(),
+            &kids,
+            req.tolerance,
+        );
+        let reply = self.generate.call3(
+            &JsValue::NULL,
+            &JsValue::from_str(ns),
+            &JsValue::from_str(tag),
+            &JsValue::from_str(&payload),
+        );
+        match reply.ok().and_then(|v| v.as_string()) {
+            Some(s) => match xsvg_plugin::host::decode_reply(&s) {
+                Ok(svg) => GenResult::Svg(svg),
+                Err(why) => GenResult::Error(why),
+            },
+            None => GenResult::Error("generator call failed".to_string()),
+        }
+    }
+}
+
+/// The `<x:import>` bindings a document declares, as JSON
+/// `[{"ns":…,"src":…,"integrity":…|null}]`.
+///
+/// A host calls this **before** compiling so it can fetch and instantiate exactly
+/// the modules the document asks for, instead of discovering them through a
+/// throwaway compile round.
+#[wasm_bindgen]
+pub fn imports(input: &str) -> String {
+    let mut out = String::from("[");
+    for (i, im) in imports_impl(input).iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"ns\":");
+        xsvg_plugin::json::push_str(&mut out, &im.ns);
+        out.push_str(",\"src\":");
+        xsvg_plugin::json::push_str(&mut out, &im.src);
+        out.push_str(",\"integrity\":");
+        match &im.integrity {
+            Some(h) => xsvg_plugin::json::push_str(&mut out, h),
+            None => out.push_str("null"),
+        }
+        out.push('}');
+    }
+    out.push(']');
+    out
+}
+
+/// [`compile`] with loadable generators. Separate entry rather than extra
+/// parameters so existing embedders keep working unchanged.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_ext(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
+    plugin_element: &js_sys::Function,
+    plugin_generate: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
+    let shaper = JsShaper { rasterize };
+    let outliner = JsOutliner {
+        outline_run,
+        advance_width,
+    };
+    let resolver = JsResolver { resolve };
+    let generators = JsGeneratorHost {
+        element: plugin_element,
+        generate: plugin_generate,
+    };
+    compile_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        base,
+        &Seams::new(&m, &shaper, &outliner)
+            .with_resolver(&resolver)
+            .with_generators(&generators),
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// [`compile_fragment`] with loadable generators.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_ext(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: u32,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
+    plugin_element: &js_sys::Function,
+    plugin_generate: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
+    let shaper = JsShaper { rasterize };
+    let outliner = JsOutliner {
+        outline_run,
+        advance_width,
+    };
+    let resolver = JsResolver { resolve };
+    let generators = JsGeneratorHost {
+        element: plugin_element,
+        generate: plugin_generate,
+    };
+    compile_fragment_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        offset as usize,
+        base,
+        &Seams::new(&m, &shaper, &outliner)
+            .with_resolver(&resolver)
+            .with_generators(&generators),
+    )
+    .map_err(|e| JsError::new(&e))
 }

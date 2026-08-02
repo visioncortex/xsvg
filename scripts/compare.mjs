@@ -37,6 +37,10 @@ const samples = (
         // Excluded: cross-file <use> links resolve deps differently per surface (bundled
         // in-browser vs on-disk in the CLI), so it isn't a like-for-like parity target.
         .filter((f) => f !== "use-link.xsvg")
+        // Excluded until the native host lands: <x:import> generators run in the
+        // browser but the CLI has no WASM runtime yet, so it degrades them and
+        // there is nothing like-for-like to compare (docs/Extensibility.md §9).
+        .filter((f) => f !== "clipart.xsvg")
         // Excluded: a link dependency (the logo pulled in by use-link.xsvg), not a
         // standalone showcase — it's exercised through use-link, not on its own.
         .filter((f) => f !== "logo.xsvg")

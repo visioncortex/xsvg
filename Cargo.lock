@@ -378,6 +378,7 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "xsvg-core",
+ "xsvg-plugin",
 ]
 
 [[package]]

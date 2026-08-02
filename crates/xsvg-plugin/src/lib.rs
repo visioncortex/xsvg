@@ -305,3 +305,148 @@ macro_rules! export_plugin {
         }
     };
 }
+
+/// Encoding the *host* side of the ABI needs.
+///
+/// It lives here, next to the decoder it must agree with, so the two cannot drift
+/// apart: a host that encodes with [`encode_request`] and a plugin that decodes
+/// with this crate are compatible by construction.
+pub mod host {
+    use crate::json;
+
+    /// One child of a container element: its compiled SVG and measured box.
+    pub type ChildIn<'a> = (&'a str, Option<[f64; 4]>);
+
+    /// Build the JSON for one `xsvg_generate` call.
+    pub fn encode_request(
+        tag: &str,
+        attrs: &[(String, String)],
+        input_d: Option<&str>,
+        children: &[ChildIn],
+        tolerance: f64,
+    ) -> String {
+        let mut out = String::from("{\"tag\":");
+        json::push_str(&mut out, tag);
+        out.push_str(",\"attrs\":[");
+        for (i, (k, v)) in attrs.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push('[');
+            json::push_str(&mut out, k);
+            out.push(',');
+            json::push_str(&mut out, v);
+            out.push(']');
+        }
+        out.push_str("],\"input_d\":");
+        match input_d {
+            Some(d) => json::push_str(&mut out, d),
+            None => out.push_str("null"),
+        }
+        out.push_str(",\"children\":[");
+        for (i, (svg, bbox)) in children.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"svg\":");
+            json::push_str(&mut out, svg);
+            out.push_str(",\"bbox\":");
+            match bbox {
+                Some(b) => {
+                    out.push('[');
+                    for (j, v) in b.iter().enumerate() {
+                        if j > 0 {
+                            out.push(',');
+                        }
+                        out.push_str(&num_json(*v));
+                    }
+                    out.push(']');
+                }
+                None => out.push_str("null"),
+            }
+            out.push('}');
+        }
+        out.push_str("],\"tolerance\":");
+        out.push_str(&num_json(tolerance));
+        out.push('}');
+        out
+    }
+
+    /// JSON has no way to spell a non-finite number, and a plugin should never be
+    /// handed one anyway — they collapse to zero, as they do everywhere else in
+    /// the compiler.
+    fn num_json(v: f64) -> String {
+        if v.is_finite() {
+            format!("{v}")
+        } else {
+            "0".to_string()
+        }
+    }
+
+    /// Read a `{"svg":…}` / `{"error":…}` reply.
+    pub fn decode_reply(src: &str) -> Result<String, String> {
+        let Some(v) = json::parse(src) else {
+            return Err("generator reply is not valid JSON".to_string());
+        };
+        if let Some(svg) = v.get("svg").and_then(crate::Json::as_str) {
+            return Ok(svg.to_string());
+        }
+        Err(v
+            .get("error")
+            .and_then(crate::Json::as_str)
+            .unwrap_or("generator reply has neither svg nor error")
+            .to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two halves of the ABI must agree; this is the round trip that says so.
+    #[test]
+    fn a_host_encoded_request_decodes_to_what_was_sent() {
+        let attrs = vec![
+            ("length".to_string(), "10".to_string()),
+            ("fill".to_string(), "a\"b\\c".to_string()),
+        ];
+        let kids: Vec<host::ChildIn> = vec![
+            ("<path d=\"M0 0\"/>", Some([1.0, 2.0, 3.0, 4.5])),
+            ("<g/>", None),
+        ];
+        let src = host::encode_request("arrow", &attrs, Some("M0 0 L1 1"), &kids, 0.25);
+        let v = json::parse(&src).expect("encodes valid JSON");
+        assert_eq!(v.get("tag").and_then(Json::as_str), Some("arrow"));
+        let req = Request::decode(&v).expect("decodes");
+        assert_eq!(req.attr("fill"), Some("a\"b\\c"));
+        assert_eq!(req.num("length", 0.0), 10.0);
+        assert_eq!(req.input_d.as_deref(), Some("M0 0 L1 1"));
+        assert_eq!(req.tolerance, 0.25);
+        assert_eq!(req.children.len(), 2);
+        assert_eq!(req.children[0].bbox, Some([1.0, 2.0, 3.0, 4.5]));
+        assert_eq!(req.children[1].bbox, None);
+        assert_eq!(req.children_bbox(), Some([1.0, 2.0, 3.0, 4.5]));
+    }
+
+    #[test]
+    fn non_finite_numbers_never_reach_a_plugin() {
+        let kids: Vec<host::ChildIn> = vec![("<g/>", Some([f64::NAN, 0.0, f64::INFINITY, 1.0]))];
+        let src = host::encode_request("x", &[], None, &kids, f64::NAN);
+        assert!(json::parse(&src).is_some(), "still valid JSON: {src}");
+        assert!(!src.contains("NaN") && !src.contains("inf"), "{src}");
+    }
+
+    #[test]
+    fn replies_carry_either_markup_or_a_reason() {
+        assert_eq!(
+            host::decode_reply(r#"{"svg":"<path/>"}"#).as_deref(),
+            Ok("<path/>")
+        );
+        assert_eq!(
+            host::decode_reply(r#"{"error":"nope"}"#).unwrap_err(),
+            "nope"
+        );
+        assert!(host::decode_reply("not json").is_err());
+        assert!(host::decode_reply("{}").is_err());
+    }
+}

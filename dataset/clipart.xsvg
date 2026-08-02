@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loadable geometry generators (docs/Extensibility.md): the clipart module
+     supplies <clip:arrow> and <clip:callout>, neither of which the compiler
+     knows anything about. -->
+<xsvg viewBox="0 0 420 260"
+      xmlns="http://www.w3.org/2000/svg"
+      xmlns:x="https://xsvg.visioncortex.org"
+      xmlns:clip="https://xsvg.visioncortex.org/ext/clipart">
+
+  <x:import ns="https://xsvg.visioncortex.org/ext/clipart" src="clipart.wasm"/>
+
+  <x:theme>
+    <x:color name="ink" value="#1e1b4b"/>
+    <x:color name="accent" value="#6366f1"/>
+    <x:color name="paper" value="#eef2ff"/>
+  </x:theme>
+
+  <rect x="0" y="0" width="420" height="260" fill="var(paper)"/>
+
+  <!-- a leaf generator: parameters in, geometry out -->
+  <clip:arrow x1="30" y1="60" x2="240" y2="60"
+              thickness="22" head-width="56" head-length="44"
+              fill="var(accent)" stroke="var(ink)" outline="3"/>
+
+  <!-- rotation is baked into the coordinates, so no transform blocks reuse -->
+  <clip:arrow x1="300" y1="30" x2="380" y2="130"
+              thickness="16" heads="both" radius="4"
+              fill="var(ink)"/>
+
+  <!-- a container: the compiler lowers and measures the children, the module
+       wraps them -->
+  <clip:callout pad="16" radius="12" tail="bottom" tail-size="18"
+                fill="#fff" stroke="var(ink)" outline="2">
+    <x:textbox x="40" y="150" width="200" height="52"
+               font-family="Georgia" font-size="19" fill="var(ink)">
+      Sized to fit whatever it wraps.
+    </x:textbox>
+  </clip:callout>
+</xsvg>
