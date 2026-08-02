@@ -57,32 +57,36 @@ enum Tail {
     doc = "An outlined thick arrow. Either give it two endpoints (x1,y1,x2,y2) or an origin plus length and angle."
 )]
 struct Arrow {
-    #[param(default = 0.0, superseded_by = "x")]
+    #[param(default = 0.0, superseded_by = "x", geometry)]
     x1: f64,
-    #[param(default = 0.0, superseded_by = "y")]
+    #[param(default = 0.0, superseded_by = "y", geometry)]
     y1: f64,
     /// Endpoint form. Absent means the origin/length/angle form is used instead,
     /// which is why these are optional rather than defaulted.
+    #[param(geometry)]
     x2: Option<f64>,
+    #[param(geometry)]
     y2: Option<f64>,
     /// Aliases for `x1`/`y1`. Declared, so the panel offers them and they cannot
     /// quietly become attributes that work but nothing knows about.
-    #[param(doc = "alias for x1")]
+    #[param(doc = "alias for x1", geometry)]
     x: Option<f64>,
-    #[param(doc = "alias for y1")]
+    #[param(doc = "alias for y1", geometry)]
     y: Option<f64>,
     #[param(
         default = 100.0,
         min = 0.0,
         max = 2000.0,
         superseded_by = "x2, y2",
-        doc = "polar form; ignored once x2/y2 give the endpoint outright"
+        doc = "polar form; ignored once x2/y2 give the endpoint outright",
+        geometry
     )]
     length: f64,
     #[param(
         default = 0.0,
         superseded_by = "x2, y2",
-        doc = "degrees clockwise from +x; ignored once x2/y2 give the endpoint outright"
+        doc = "degrees clockwise from +x; ignored once x2/y2 give the endpoint outright",
+        geometry
     )]
     angle: f64,
     #[param(default = 16.0, min = 0.0, max = 200.0)]

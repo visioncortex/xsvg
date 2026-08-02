@@ -124,6 +124,29 @@ pub struct ParamSpec {
     /// outline availability for the whole document. An editor that offered a field
     /// there would silently lay the document out in a fallback face.
     pub read_only: Option<&'static str>,
+    /// Whether this parameter places or sizes the element — the position and extent
+    /// a selection rectangle and its handles would express (`x`/`y`, `width`/`height`,
+    /// `cx`/`cy`/`r`, endpoints, and polar substitutes for an endpoint).
+    ///
+    /// A **fact**, not a policy: the element states what the parameter *is*, and each
+    /// host decides what to do with it. An editor with drag handles on canvas owns
+    /// geometry there and would not want a duplicate numeric field; the viewer's
+    /// inspector, which has no handles, leaves geometry to the source pane and offers
+    /// only the styling half. Either way a host that ignores this keeps working.
+    ///
+    /// Not every dimension is geometry. `stroke-width`, `inner-radius`, and `bulge`
+    /// shape the drawing without placing or sizing the element, and stay editable.
+    pub geometry: bool,
+    /// The XML namespace this attribute lives in, or `None` for a plain unprefixed
+    /// name (nearly all of them).
+    ///
+    /// `x:border-width` is `border-width` in the xsvg namespace, and the compiler
+    /// reads it by namespace — so the prefix a document happens to bind is the
+    /// document's business. A host must resolve this namespace to *that document's*
+    /// prefix before reading or writing the attribute: hard-coding `x:` would write
+    /// an unbound prefix into a document that spells it otherwise, which is not
+    /// merely wrong but malformed XML.
+    pub ns: Option<&'static str>,
 }
 
 impl ParamSpec {
@@ -140,6 +163,8 @@ impl ParamSpec {
             doc: None,
             superseded_by: &[],
             read_only: None,
+            geometry: false,
+            ns: None,
         }
     }
 }
@@ -260,6 +285,13 @@ impl ParamSpec {
         if let Some(r) = self.read_only {
             out.push_str(",\"readOnly\":");
             push_json_str(out, r);
+        }
+        if self.geometry {
+            out.push_str(",\"geometry\":true");
+        }
+        if let Some(ns) = self.ns {
+            out.push_str(",\"ns\":");
+            push_json_str(out, ns);
         }
         if let Some(d) = self.doc {
             out.push_str(",\"doc\":");
@@ -398,6 +430,10 @@ mod tests {
         /// knows, so it has to be declared for a host to act on.
         #[param(default = 100.0, superseded_by = "x2, y2")]
         length: f64,
+        /// Places the element. Declared so a host can decide where geometry is
+        /// edited — on canvas with handles, or not at all.
+        #[param(default = 0.0, geometry)]
+        x: f64,
     }
 
     #[test]
@@ -427,6 +463,12 @@ mod tests {
         // does nothing
         assert_eq!(by("length").superseded_by, ["x2", "y2"]);
         assert!(by("thickness").superseded_by.is_empty());
+        // geometry is a declared fact, and dimensions that merely shape the drawing
+        // are not it — `thickness` stays editable wherever `x` is not offered
+        assert!(by("x").geometry);
+        assert!(!by("thickness").geometry);
+        // a plain attribute names no namespace; only hand-written specs do
+        assert_eq!(by("x").ns, None);
     }
 
     #[test]
@@ -495,5 +537,8 @@ mod tests {
         assert!(json.contains(r#""children":"container""#), "{json}");
         assert!(json.contains(r#""ns":"https://x.example/c""#), "{json}");
         assert!(json.contains(r#""supersededBy":["x2","y2"]"#), "{json}");
+        assert!(json.contains(r#""geometry":true"#), "{json}");
+        // absent rather than false, so a manifest costs nothing for the common case
+        assert!(!json.contains(r#""geometry":false"#), "{json}");
     }
 }

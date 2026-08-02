@@ -29,6 +29,15 @@ export interface ParamSpec {
    *  face that has to be loaded before anything can be measured in it, which is
    *  asynchronous and document-wide. Absent means it is editable. */
   readOnly?: string;
+  /** Whether this parameter places or sizes the element (`x`/`y`, `width`/`height`,
+   *  `cx`/`cy`/`r`, endpoints). A fact the element declares; what a host does with
+   *  it is the host's call — this panel offers no control, leaving position and
+   *  extent to the canvas and the source pane. */
+  geometry?: boolean;
+  /** The XML namespace the attribute lives in — `x:border-width` is `border-width`
+   *  in the xsvg namespace. A host must resolve this to the prefix *this document*
+   *  binds; writing a hard-coded prefix a document does not bind is malformed XML. */
+  ns?: string;
 }
 
 /** One element a module provides. */
@@ -165,33 +174,60 @@ export function setAttribute(
  * the drawing in place instead of rebuilding the panel (docs/Incremental.md §4), so
  * the control survives its own edit and the drawing tracks the drag. Typed values
  * still commit on `change` — a half-written `var(acc` is not worth compiling.
+ *
+ * What it offers is the **styling** half of an element: paint, stroke, typography,
+ * layout options. Geometry is deliberately absent — position and extent want handles
+ * on the canvas, not a number field that fights the document's own arrangement, and
+ * the attribute table above already shows those values. So this reads like a style
+ * block, and moving something stays the source pane's job.
+ *
+ * `prefixFor` resolves a namespace to the prefix *this document* binds, for
+ * attributes like `x:border-width` that live in the xsvg namespace. Without it (or
+ * when a document binds no prefix for that namespace) such attributes are skipped
+ * rather than guessed at: writing an unbound prefix would not merely be wrong, it
+ * would make the document malformed.
  */
 export function renderParams(
   spec: ElementSpec,
   current: Map<string, AttrSlot>,
   onChange: (name: string, value: string) => void,
+  prefixFor?: (ns: string) => string | null,
 ): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "xsvg-params";
 
   const params = spec.params ?? {};
   const names = Object.keys(params);
-  if (names.length === 0) {
-    const hint = document.createElement("span");
-    hint.className = "hint";
-    hint.textContent = "this element declares no parameters";
-    wrap.append(hint);
+  const hint = (text: string) => {
+    const el = document.createElement("span");
+    el.className = "hint";
+    el.textContent = text;
+    wrap.append(el);
     return wrap;
-  }
+  };
+  if (names.length === 0) return hint("this element declares no attributes");
 
+  let offered = 0;
   for (const name of names) {
     const p = params[name];
+    // Geometry is shown in the attribute table above, not offered here.
+    if (p.geometry) continue;
+    // The name as this document must spell it: a namespaced attribute takes the
+    // document's own prefix, and is skipped when it binds none.
+    let attr = name;
+    if (p.ns) {
+      const prefix = prefixFor?.(p.ns);
+      if (!prefix) continue;
+      attr = `${prefix}:${name}`;
+    }
+    offered++;
+
     const row = document.createElement("label");
     row.className = "xsvg-param";
 
     const label = document.createElement("span");
     label.className = "xsvg-param-name";
-    label.textContent = name;
+    label.textContent = attr;
     row.append(label);
 
     // Two reasons a control is shown but not offered, both of which are worse to
@@ -205,8 +241,8 @@ export function renderParams(
         ? `no effect while ${by.join(" and ")} ${by.length > 1 ? "are" : "is"} set`
         : null;
 
-    const value = current.get(name)?.value ?? "";
-    const control = makeControl(p, value, (v) => onChange(name, v));
+    const value = current.get(attr)?.value ?? "";
+    const control = makeControl(p, value, (v) => onChange(attr, v));
     if (why) {
       row.classList.add("superseded");
       for (const el of control.querySelectorAll("input, select")) {
@@ -223,7 +259,25 @@ export function renderParams(
     row.append(control);
     wrap.append(row);
   }
+  // Everything this element declares turns out to be geometry (or unbindable), so
+  // say why the block is empty rather than showing a blank panel.
+  if (offered === 0) {
+    return hint("this element declares only geometry — edit it in the source");
+  }
   return wrap;
+}
+
+/**
+ * The prefix `source` binds to `ns`, or null when it binds none.
+ *
+ * Only a real `xmlns:p=` binding counts. An unprefixed attribute is in *no*
+ * namespace in XML — the default `xmlns` governs elements, not attributes — so a
+ * document that binds the xsvg namespace only as its default cannot spell
+ * `border-width` in it at all.
+ */
+export function prefixOf(source: string, ns: string): string | null {
+  const quoted = ns.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`xmlns:([\\w.-]+)\\s*=\\s*["']${quoted}["']`).exec(source)?.[1] ?? null;
 }
 
 /** Build the control for one parameter, already wired to `commit`. */

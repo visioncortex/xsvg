@@ -855,6 +855,11 @@ is **doubled**, because a centered stroke is half-hidden by the fill — so `x:b
 `4` units of border. Applies to `<x:textbox>`, `<x:textpath>` (§6.13), and outlined text (§6.12). Any
 raw SVG `stroke*` attributes still pass through unchanged when no `x:border-*` is present.
 
+These are **declared** parameters (`describe()` reports them on `<x:textbox>` and `<x:textpath>`),
+so an editing host offers them like any other. They carry their namespace in the declaration:
+they are `border-width` *in the xsvg namespace*, and a host spells them with whatever prefix the
+document binds — see docs/Extensibility.md §10.3.
+
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,

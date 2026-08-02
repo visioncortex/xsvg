@@ -87,6 +87,28 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   otherwise only ever degrade to silent full recompiles. The incremental check also refuses
   any new call site that reads `data-xsvg-pos`/`data-xsvg-node` outside the sanctioned
   funnels, so dual-spelling handling cannot leak per call site.
+- **`geometry`** on a parameter declaration, and the inspector stops offering it. Position and
+  extent — `x`/`y`, `width`/`height`, `cx`/`cy`/`r`, endpoints, and polar substitutes for an
+  endpoint — want handles on the canvas, not a number field beside a colour picker that fights
+  the arrangement the document already expresses; the attribute table above shows the values
+  regardless. What is left is the styling half, so the panel reads as a style block and moving
+  something stays the source pane's job. Declared on every element we ship, built-in and
+  `clipart` alike. It is a **fact, not a policy**: an editor with handles reads the same flag to
+  know what its handles own, undeclared means editable, and dimensions that shape the drawing
+  without placing it (`stroke-width`, `inner-radius`, `bulge`, `padding`) stay editable.
+- **`x:border-width` / `x:border-color` / `x:border-opacity` are declared** (§6.17) and appear in
+  the panel for `<x:textbox>` and `<x:textpath>`. The compiler had always read them straight off
+  the node — and reading an attribute is invisible to a host, so the convenience worked while no
+  property panel could know it existed. Anything an emitter reads but nothing declares is in the
+  same position; `in` still is.
+- **`ns` on a parameter declaration**, for attributes that live in another namespace. `x:border-width`
+  is `border-width` *in the xsvg namespace* (the plain spellings stay reserved for raw SVG stroke
+  passthrough), so a host resolves the namespace to the prefix **that document** binds and skips
+  the control when it binds none — hard-coding `x:` would write an unbound prefix, which is not
+  merely wrong but malformed XML.
+- The panel's heading is now **attributes** rather than "parameters", matching what they are in the
+  document. `ParamSpec` / `#[param]` / the manifest's `params` are unchanged: that vocabulary is
+  the plugin ABI and describes the declaration, not the XML.
 - **`read_only`** on a parameter declaration, with `font-family` as its first use: selecting a
   face needs it *loaded* before anything can be measured, which is asynchronous and
   document-wide, so an attribute edit alone would lay the document out in a fallback face and

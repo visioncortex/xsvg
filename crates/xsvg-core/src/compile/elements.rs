@@ -123,11 +123,11 @@ pub(super) enum WarpAxisParam {
 #[derive(Params)]
 #[element(name = "pie", doc = "A pie or donut chart built from <x:slice> children.")]
 pub(super) struct Pie {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub cx: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub cy: f64,
-    #[param(default = 100.0, min = 0.0, max = 2000.0)]
+    #[param(default = 100.0, min = 0.0, max = 2000.0, geometry)]
     pub r: f64,
     #[param(default = 0.0, min = 0.0, max = 2000.0, doc = "non-zero makes a donut")]
     pub inner_radius: f64,
@@ -148,13 +148,13 @@ pub(super) struct Pie {
     input = "optional"
 )]
 pub(super) struct Plot {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub x: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub y: f64,
-    #[param(default = 400.0, min = 0.0, max = 4000.0)]
+    #[param(default = 400.0, min = 0.0, max = 4000.0, geometry)]
     pub width: f64,
-    #[param(default = 200.0, min = 0.0, max = 4000.0)]
+    #[param(default = 200.0, min = 0.0, max = 4000.0, geometry)]
     pub height: f64,
     #[param(color, default = "#e2e8f0")]
     pub grid_color: String,
@@ -173,13 +173,13 @@ pub(super) struct Plot {
 #[derive(Params)]
 #[element(name = "mesh", doc = "A gradient mesh, rasterized to a texel-aligned image.")]
 pub(super) struct Mesh {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub x: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub y: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, geometry)]
     pub width: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, geometry)]
     pub height: f64,
     #[param(default = 0.0, min = 0.0, max = 64.0, doc = "with rows, builds a uniform grid")]
     pub cols: f64,
@@ -285,19 +285,20 @@ pub(super) enum FitParam {
     name = "textbox",
     doc = "Text laid out inside a box — wrapping, alignment, shrink-to-fit, and flow into a referenced shape.",
     input = "optional",
-    group = TextFont
+    group = TextFont,
+    group = TextBorder
 )]
 pub(super) struct Textbox {
     // `in="#shape"` takes the box from the referenced shape instead (see
     // `textbox_area_spec`, which reads geometry from the target and only the layout
     // options from the textbox), so these four stop governing the moment it is set.
-    #[param(default = 0.0, superseded_by = "in")]
+    #[param(default = 0.0, superseded_by = "in", geometry)]
     pub x: f64,
-    #[param(default = 0.0, superseded_by = "in")]
+    #[param(default = 0.0, superseded_by = "in", geometry)]
     pub y: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in")]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in", geometry)]
     pub width: f64,
-    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in")]
+    #[param(default = 0.0, min = 0.0, max = 4000.0, superseded_by = "in", geometry)]
     pub height: f64,
     #[param(default = 0.0, min = 0.0, max = 400.0)]
     pub padding: f64,
@@ -333,12 +334,37 @@ impl Params for TextFont {
     }
 }
 
+/// The bordered-text block (§6.17), on the elements whose emitters read it —
+/// `<x:textbox>` and `<x:textpath>`. Described beside [`super::text_border_attrs`].
+///
+/// Declaring it is what puts it in the property panel at all: the compiler reads
+/// these straight off the node, so before this they worked but nothing could
+/// *report* them, and an editor had no way to know they existed.
+pub(super) struct TextBorder;
+
+impl Params for TextBorder {
+    const SPEC: ElementSpec = ElementSpec {
+        name: "border",
+        doc: None,
+        params: super::TEXT_BORDER_PARAMS,
+        groups: &[],
+        input: xsvg_schema::InputMode::None,
+        children: xsvg_schema::ChildMode::None,
+    };
+    fn from_attrs(_: &dyn AttrSource) -> Self {
+        // text_border_attrs() does the reading: it needs the node to look the
+        // attributes up by namespace rather than by written prefix.
+        TextBorder
+    }
+}
+
 #[derive(Params)]
 #[element(
     name = "textpath",
     doc = "Text set along a referenced path.",
     input = "required",
-    group = TextFont
+    group = TextFont,
+    group = TextBorder
 )]
 pub(super) struct Textpath {
     #[param(default = 0.0)]
@@ -358,11 +384,11 @@ pub(super) struct Textpath {
     group = TextFont
 )]
 pub(super) struct List {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub x: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub y: f64,
-    #[param(default = 320.0, min = 0.0, max = 4000.0)]
+    #[param(default = 320.0, min = 0.0, max = 4000.0, geometry)]
     pub width: f64,
     #[param(default = "bullet", doc = "bullet or number; marker glyphs cycle by depth")]
     pub list: String,
@@ -391,11 +417,11 @@ pub(super) struct List {
     group = TextFont
 )]
 pub(super) struct Table {
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub x: f64,
-    #[param(default = 0.0)]
+    #[param(default = 0.0, geometry)]
     pub y: f64,
-    #[param(default = 400.0, min = 0.0, max = 4000.0)]
+    #[param(default = 400.0, min = 0.0, max = 4000.0, geometry)]
     pub width: f64,
     #[param(doc = "explicit column widths, space or comma separated")]
     pub cols: Option<String>,

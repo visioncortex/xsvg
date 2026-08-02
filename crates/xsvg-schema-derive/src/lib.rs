@@ -136,6 +136,8 @@ struct ParamOpts {
     superseded_by: Vec<String>,
     /// `read_only = "why"` — a host must not offer an editing control for this.
     read_only: Option<String>,
+    /// `geometry` — this parameter places or sizes the element (see `ParamSpec`).
+    geometry: bool,
     color: bool,
     skip: bool,
     flatten: bool,
@@ -256,6 +258,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                             .collect();
                     }
                     "read_only" => opts.read_only = expr.and_then(expr_text),
+                    "geometry" => opts.geometry = true,
                     "color" => opts.color = true,
                     "skip" => opts.skip = true,
                     "flatten" => opts.flatten = true,
@@ -340,6 +343,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let doc_tokens = opt_str(&opts.doc);
         let superseded = &opts.superseded_by;
         let read_only = opt_str(&opts.read_only);
+        let geometry = opts.geometry;
         let min = opt_f64(opts.min);
         let max = opt_f64(opts.max);
         let step = opt_f64(opts.step);
@@ -356,6 +360,10 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 doc: #doc_tokens,
                 superseded_by: &[#(#superseded),*],
                 read_only: #read_only,
+                geometry: #geometry,
+                // Namespaced attributes are declared by hand (see TEXT_BORDER_PARAMS):
+                // a derived struct field names a plain attribute.
+                ns: None,
             }
         });
         reads.push(quote!(#ident: #read));

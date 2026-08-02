@@ -2336,6 +2336,40 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
 }
 
+/// The bordered-text block every text element accepts (§6.17), declared beside
+/// [`text_border_attrs`], which reads it.
+///
+/// Declared by hand for two reasons the derive cannot express: these live in the
+/// **xsvg namespace** (`x:border-width`, not `border-width` — the plain spellings
+/// are reserved for raw SVG stroke passthrough, which this element also honors),
+/// and each one's default is contingent — naming either of the first two makes the
+/// other take a default rather than stay absent.
+pub(super) const TEXT_BORDER_PARAMS: &[xsvg_schema::ParamSpec] = &[
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        default: Some("3"),
+        min: Some(0.0),
+        max: Some(100.0),
+        step: Some(0.5),
+        doc: Some("width visible OUTSIDE each glyph; the emitted stroke is doubled, since the fill covers the inner half"),
+        ..ParamSpec::new("border-width", xsvg_schema::ParamKind::Number)
+    },
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        default: Some("#000000"),
+        doc: Some("border paint; accepts a var(token)"),
+        ..ParamSpec::new("border-color", xsvg_schema::ParamKind::Color)
+    },
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        min: Some(0.0),
+        max: Some(1.0),
+        step: Some(0.05),
+        doc: Some("optional border opacity"),
+        ..ParamSpec::new("border-opacity", xsvg_schema::ParamKind::Number)
+    },
+];
+
 /// Stroke/border paint attributes for a text element, honored on both live `<text>` and
 /// outlined glyphs. The `x:border-width` / `x:border-color` convenience (§6.17) emits a
 /// clean bordered-text effect: the stroke sits *behind* the fill (`paint-order="stroke"`,

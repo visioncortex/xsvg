@@ -8,7 +8,17 @@
 //   node --experimental-strip-types scripts/params-check.mjs
 
 import assert from "node:assert/strict";
-import { namespaceOf, parseStartTag, setAttribute } from "../packages/xsvg-viewer/src/params.ts";
+import { JSDOM } from "jsdom";
+import {
+  namespaceOf,
+  parseStartTag,
+  prefixOf,
+  renderParams,
+  setAttribute,
+} from "../packages/xsvg-viewer/src/params.ts";
+
+// renderParams builds DOM, exactly as it does in the browser; give it jsdom's.
+globalThis.document = new JSDOM("<!doctype html><body></body>").window.document;
 
 let passed = 0;
 function check(name, fn) {
@@ -88,6 +98,88 @@ check("multi-byte text before the tag does not shift the edit", () => {
   const src = `<t>héllo → 世界 🌍</t><clip:arrow x1="1"/>`;
   const at = src.indexOf("<clip:arrow");
   assert.equal(setAttribute(src, at, "x1", "2"), `<t>héllo → 世界 🌍</t><clip:arrow x1="2"/>`);
+});
+
+// ---- what the panel offers ------------------------------------------------
+
+const XSVG_NS = "https://xsvg.visioncortex.org";
+const DOC = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="${XSVG_NS}">`;
+
+/** The controls rendered for a spec, as `name → the element that carries value`. */
+function offered(spec, tagSource, source = DOC) {
+  const tag = parseStartTag(tagSource);
+  const wrap = renderParams(spec, tag.attrs, () => {}, (ns) => prefixOf(source, ns));
+  const out = new Map();
+  for (const row of wrap.querySelectorAll(".xsvg-param")) {
+    out.set(row.querySelector(".xsvg-param-name").textContent, row);
+  }
+  return { names: [...out.keys()], rows: out, text: wrap.textContent };
+}
+
+check("resolves a namespace to the prefix this document binds", () => {
+  assert.equal(prefixOf(DOC, XSVG_NS), "x");
+  assert.equal(prefixOf(`<svg xmlns:xsvg="${XSVG_NS}">`, XSVG_NS), "xsvg");
+  // a default xmlns binds elements, not attributes — it cannot spell one
+  assert.equal(prefixOf(`<svg xmlns="${XSVG_NS}">`, XSVG_NS), null);
+  assert.equal(prefixOf(DOC, "https://other.example/"), null);
+});
+
+check("geometry is not offered as a control", () => {
+  const spec = {
+    params: {
+      x: { type: "number", geometry: true },
+      width: { type: "number", min: 0, max: 100, geometry: true },
+      fill: { type: "color" },
+      "stroke-width": { type: "number", min: 0, max: 40 },
+    },
+  };
+  const { names } = offered(spec, `<x:pie x="10" width="80" fill="#48a"/>`);
+  // position and extent belong to the canvas and the source pane; what is left is
+  // the styling half, which is the whole point of the panel
+  assert.deepEqual(names, ["fill", "stroke-width"]);
+});
+
+check("an element that is all geometry says so instead of showing a blank block", () => {
+  const spec = { params: { x: { type: "number", geometry: true } } };
+  const { names, text } = offered(spec, `<x:thing x="1"/>`);
+  assert.deepEqual(names, []);
+  assert.match(text, /only geometry/);
+});
+
+check("a namespaced attribute takes the document's own prefix", () => {
+  const spec = { params: { "border-width": { type: "number", min: 0, max: 100, ns: XSVG_NS } } };
+
+  // labelled and read under the prefix this document binds...
+  const bound = offered(spec, `<x:textbox x:border-width="4"/>`);
+  assert.deepEqual(bound.names, ["x:border-width"]);
+  assert.equal(bound.rows.get("x:border-width").querySelector("input").value, "4");
+
+  // ...which is whatever the document chose, not a hard-coded `x`
+  const other = `<svg xmlns:xs="${XSVG_NS}">`;
+  const renamed = offered(spec, `<xs:textbox xs:border-width="7"/>`, other);
+  assert.deepEqual(renamed.names, ["xs:border-width"]);
+  assert.equal(renamed.rows.get("xs:border-width").querySelector("input").value, "7");
+
+  // and is skipped outright when the document binds no prefix for it: writing an
+  // unbound prefix would not merely be wrong, it would be malformed XML
+  const unbound = offered(spec, `<textbox/>`, `<svg xmlns="http://www.w3.org/2000/svg">`);
+  assert.deepEqual(unbound.names, []);
+});
+
+check("editing a namespaced attribute commits under its qualified name", () => {
+  const spec = { params: { "border-color": { type: "color", ns: XSVG_NS } } };
+  const tag = parseStartTag(`<x:textbox/>`);
+  const commits = [];
+  const wrap = renderParams(spec, tag.attrs, (n, v) => commits.push([n, v]), (ns) => prefixOf(DOC, ns));
+  const input = wrap.querySelector("input");
+  input.value = "#111";
+  input.dispatchEvent(new globalThis.document.defaultView.Event("change"));
+  assert.deepEqual(commits, [["x:border-color", "#111"]]);
+  // and that qualified name is what the source surgery writes
+  assert.equal(
+    setAttribute(`<x:textbox/>`, 0, "x:border-color", "#111"),
+    `<x:textbox x:border-color="#111"/>`,
+  );
 });
 
 if (!process.exitCode) console.log(`params: ${passed} checks passed`);

@@ -425,6 +425,46 @@ So it is declared: `#[param(superseded_by = "x2, y2")]`, carried through the man
 present and says which one is winning. The value stays visible — it is still what the source
 says — but it is visibly not in play.
 
+### 10.2 What the panel edits: style, not geometry
+
+The panel offers an element's **styling** — paint, stroke, typography, layout options — and
+not its position or extent. `x`/`y`, `width`/`height`, `cx`/`cy`/`r`, endpoints and the polar
+substitutes for an endpoint are declared `#[param(geometry)]`, carried through the manifest as
+`"geometry": true`, and given no control.
+
+The reason is modality, not safety. Moving something wants handles on the canvas — you drag the
+thing itself, against the drawing, seeing what it collides with. A number field beside a colour
+picker is a poor substitute that also fights the arrangement the document already expresses,
+and the values are visible in the attribute table above regardless. So geometry stays the
+source pane's job until there are handles to give it to.
+
+`geometry` is a **fact the element declares, not a policy it imposes**: an editor with canvas
+handles reads the same flag to know what *its* handles own. Undeclared means editable, so a
+module that says nothing keeps working exactly as before. Not every dimension qualifies —
+`stroke-width`, `inner-radius`, `bulge` and `padding` shape the drawing without placing or
+sizing it, and stay editable.
+
+Naming things: the panel calls these **attributes**, because that is what they are in the
+document. `ParamSpec`, `#[param]`, and the manifest's `params` keep their names — that
+vocabulary is the plugin ABI, and it describes the declaration rather than the XML.
+
+### 10.3 Attributes in another namespace
+
+`x:border-width` (§6.17) is `border-width` **in the xsvg namespace**, not an attribute called
+`x:border-width` — the plain spellings are reserved for raw SVG stroke passthrough on the same
+elements. A declaration says so with `ns`, and a host must resolve that namespace to the prefix
+*the document being edited* binds.
+
+This is not pedantry. A host that hard-codes `x:` and writes it into a document spelling the
+namespace `xsvg:` produces an unbound prefix — not a wrong value but malformed XML, from an
+editor the author trusted with their file. So the viewer resolves the prefix per document
+(`prefixOf`) and skips the control entirely when a document binds none, rather than guessing.
+
+Declaring these is also what made them *reachable*: the compiler reads them straight off the
+node, and reading an attribute is invisible to a host, so the convenience worked for a year
+while no property panel could know it existed. Anything an emitter reads but nothing declares
+is in the same position — `in` on `<x:textbox>`/`<x:textpath>`/`<x:warp>` still is.
+
 Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) remains, and is
 deliberately skipped for now.
 

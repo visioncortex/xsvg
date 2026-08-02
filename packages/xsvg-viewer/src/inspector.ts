@@ -15,6 +15,7 @@ import type { EditorHandle } from "./editor";
 import {
   namespaceOf,
   parseStartTag,
+  prefixOf,
   renderParams,
   setAttribute,
   type PluginSchemas,
@@ -127,10 +128,12 @@ export function createInspector({
     editor.highlight(bytes.toStr(range.start), bytes.toStr(range.end));
   };
 
-  // Offer the pinned element's declared parameters as controls. The schema comes
+  // Offer the pinned element's declared attributes as controls. The schema comes
   // from the same derived declarations for every tier — the compiler's own `x:`
   // elements and a third-party module's alike — so this never branches on who
   // provides the element, and reading it runs no generator.
+  //
+  // Geometry is not offered (see `renderParams`); the table above already shows it.
   const addParams = (range: SourceRange) => {
     controls.innerHTML = "";
     if (!schemas || !onEdit) return;
@@ -144,7 +147,7 @@ export function createInspector({
     head.className = "row";
     const label = document.createElement("span");
     label.className = "label";
-    label.textContent = "parameters";
+    label.textContent = "attributes";
     head.append(label);
     controls.append(head);
     if (spec.doc) {
@@ -154,14 +157,20 @@ export function createInspector({
       controls.append(doc);
     }
     controls.append(
-      renderParams(spec, tag.attrs, (name, value) => {
-        // Resolved at edit time, not capture time: a live control outlives several
-        // patches, and both the text and the element's offset move under it.
-        if (!pinned) return;
-        const at = bytes.toStr(pinned.range.start);
-        const next = setAttribute(source, at, name, value);
-        if (next != null && next !== source) onEdit(next, at);
-      }),
+      renderParams(
+        spec,
+        tag.attrs,
+        (name, value) => {
+          // Resolved at edit time, not capture time: a live control outlives several
+          // patches, and both the text and the element's offset move under it.
+          if (!pinned) return;
+          const at = bytes.toStr(pinned.range.start);
+          const next = setAttribute(source, at, name, value);
+          if (next != null && next !== source) onEdit(next, at);
+        },
+        // Namespaced attributes (`x:border-width`) take this document's own prefix.
+        (attrNs) => prefixOf(source, attrNs),
+      ),
     );
   };
 

@@ -4072,3 +4072,74 @@ fn a_document_without_generators_still_compiles() {
     let out = compile_test(&plug_doc(r##"<c:bar width="2"/>"##));
     assert!(out.contains("no generator bound"), "{out}");
 }
+
+// ------------------------------------------------- what the elements declare
+
+#[test]
+fn every_bordered_text_element_declares_the_border_block() {
+    // `x:border-*` (§6.17) is read straight off the node by `text_border_attrs`,
+    // which is exactly why it needs declaring: reading an attribute is invisible to
+    // a host, so before this the convenience worked and no property panel could
+    // know it existed. Pinned against the emitters that call it — textbox and
+    // textpath — so adding a third caller without declaring the block fails here.
+    for spec in crate::built_in_elements() {
+        let declares = spec
+            .all_params()
+            .any(|p| p.name == "border-width" && p.ns == Some(XSVG_NS));
+        let expected = matches!(spec.name, "textbox" | "textpath");
+        assert_eq!(
+            declares, expected,
+            "<x:{}> declares the border block: {declares}, expected {expected}",
+            spec.name
+        );
+    }
+
+    // Declared in the xsvg namespace, never as a plain name: the unprefixed
+    // spellings belong to raw SVG stroke passthrough, which the same emitter
+    // honours when no `x:border-*` is present.
+    let textbox = crate::built_in_elements()
+        .iter()
+        .find(|s| s.name == "textbox")
+        .unwrap();
+    for p in textbox.all_params().filter(|p| p.name.starts_with("border-")) {
+        assert_eq!(p.ns, Some(XSVG_NS), "border param `{}` names no namespace", p.name);
+    }
+    assert!(
+        !textbox.all_params().any(|p| p.name == "stroke-width"),
+        "the plain stroke spellings are passthrough, not declared parameters"
+    );
+}
+
+#[test]
+fn placement_and_extent_are_declared_as_geometry() {
+    // A host decides where geometry is edited (the viewer leaves it to the source
+    // pane; an editor with handles owns it on canvas) — but only if the element
+    // says which parameters place and size it. Every built-in that takes a position
+    // must mark it, or that host silently offers a number field for something it
+    // means to handle itself.
+    for spec in crate::built_in_elements() {
+        for p in spec.all_params() {
+            let places = matches!(p.name, "x" | "y" | "width" | "height" | "cx" | "cy" | "r");
+            if places {
+                assert!(
+                    p.geometry,
+                    "<x:{}> `{}` places or sizes the element but is not declared geometry",
+                    spec.name, p.name
+                );
+            }
+        }
+    }
+
+    // And not everything with a length is geometry: these shape the drawing without
+    // placing or sizing it, so they stay editable.
+    for (el, name) in [
+        ("pie", "inner-radius"),
+        ("pie", "stroke-width"),
+        ("connector", "bulge"),
+        ("textbox", "padding"),
+    ] {
+        let spec = crate::built_in_elements().iter().find(|s| s.name == el).unwrap();
+        let p = spec.all_params().find(|p| p.name == name).unwrap();
+        assert!(!p.geometry, "<x:{el}> `{name}` is not placement or extent");
+    }
+}
