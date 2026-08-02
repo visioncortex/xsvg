@@ -204,8 +204,10 @@ elements the compiler knows nothing about. Design rationale, ABI, and the extens
 ```
 
 - **`ns`** (required) — the namespace URI to bind. **`src`** (required) — the module, resolved like
-  a cross-file `href` (§4.2). **`integrity`** (optional) — an SRI-style `sha256-…` hash checked
-  before the module runs; a host SHOULD refuse a cross-origin `src` without one.
+  a cross-file `href` (§4.2); the CLI and Node hosts accept **local paths only**. **`integrity`**
+  (optional) — an SRI-style `sha256-…` hash checked before the module runs; the browser host
+  refuses a cross-origin `src` without one. The same hash spelling (padded base64) satisfies
+  every host.
 - Like `<x:theme>`, it is a **definition**: collected before serialization, emits nothing, and may
   appear anywhere (forward references work).
 - **The core namespace can never be bound** — a module must not be able to shadow a built-in — and

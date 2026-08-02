@@ -1,12 +1,13 @@
 //! Headless xsvg compiler — a pure-Rust binary, no browser. Wires the native platform
 //! seams (fonts via ttf-parser, shape flow via kurbo) to the shared `xsvg-core` compiler.
 //!
-//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [-o OUT] INPUT
+//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [--no-plugins] [-o OUT] INPUT
 //!
 //! INPUT is a path or `-` for stdin; OUT defaults to stdout.
 
 mod fonts;
 mod platform;
+mod plugins;
 
 use fonts::FontDb;
 use std::io::{Read, Write};
@@ -30,12 +31,15 @@ impl xsvg_core::Resolver for DiskResolver {
 /// measurement and `outline="true"` baking; with `None` (or an empty directory) text
 /// falls back to default metrics and stays live `<text>` (no outline baking). `base` is
 /// the source's path — the anchor for resolving relative `<use href>` cross-file links.
+/// With `plugins` false, no `<x:import>` module is loaded or run and every generator
+/// element degrades with a marker (docs/Extensibility.md).
 pub fn compile(
     source: &str,
     quality: &str,
     sourcemap: bool,
     font_dir: Option<&Path>,
     base: &str,
+    plugins: bool,
 ) -> Result<String, String> {
     let fonts = match font_dir {
         Some(d) => {
@@ -44,7 +48,23 @@ pub fn compile(
         None => FontDb::default(),
     };
     let p = platform::Native { fonts };
-    xsvg_core::compile_linked_impl(source, quality, sourcemap, &p, &p, &p, &DiskResolver, base)
+    // Generator modules are loaded from disk before compiling: <x:import> is a
+    // declaration, so the compiler can report a document's bindings from a parse
+    // alone and nothing has to be discovered by lowering.
+    let generators = if plugins {
+        plugins::DiskGenerators::load(&xsvg_core::imports_impl(source), base)
+    } else {
+        plugins::DiskGenerators::default()
+    };
+    xsvg_core::compile_seams_impl(
+        source,
+        quality,
+        sourcemap,
+        base,
+        &xsvg_core::Seams::new(&p, &p, &p)
+            .with_resolver(&DiskResolver)
+            .with_generators(&generators),
+    )
 }
 
 fn main() -> ExitCode {
@@ -63,6 +83,7 @@ fn run() -> Result<(), String> {
     let mut quality = "balanced".to_string();
     let mut sourcemap = false;
     let mut font_dir: Option<String> = None;
+    let mut plugins = true;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -77,13 +98,15 @@ fn run() -> Result<(), String> {
                 font_dir = Some(args.next().ok_or("--font-directory needs a path")?);
             }
             "--sourcemap" => sourcemap = true,
+            "--no-plugins" => plugins = false,
             "-h" | "--help" => {
                 println!(
                     "usage: xsvg [--quality fast|balanced|highest] [--font-directory DIR] \
-                     [--sourcemap] [-o OUT] INPUT\n\
+                     [--sourcemap] [--no-plugins] [-o OUT] INPUT\n\
                      INPUT is a path or - for stdin; OUT defaults to stdout.\n\
                      --font-directory loads .ttf/.otf fonts for text measurement and \
-                     outline baking (without it, text uses default metrics and stays live)."
+                     outline baking (without it, text uses default metrics and stays live).\n\
+                     --no-plugins skips every <x:import> module, so no third-party code runs."
                 );
                 return Ok(());
             }
@@ -114,6 +137,7 @@ fn run() -> Result<(), String> {
         sourcemap,
         font_dir.as_deref().map(Path::new),
         &base,
+        plugins,
     )?;
 
     match output {

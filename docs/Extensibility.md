@@ -9,9 +9,9 @@ weight), but the mechanism is general: anything that today would be a hand-writt
 
 This document is grounded in the shipped architecture ([Plan.md](Plan.md) §1.5 already commits to
 *"many WASM modules, JS as orchestrator"* and describes optional engines as *"a plugin a document
-pulls only if it needs it"*). Status: **implemented** — the core seam, the `clipart` extension, and the browser host
-have landed; the native (CLI/Node) host has not. Where this document and the code differ,
-the code wins; the notes below were reconciled after building it.
+pulls only if it needs it"*). Status: **implemented** on every host — core seam, the `clipart` extension, and the
+browser, CLI, and Node hosts. Where this document and the code differ, the code wins;
+the notes below were reconciled after building it.
 
 > **The spreadsheet framing.** xsvg already has the skeleton of a spreadsheet: `baked_refs`
 > (`compile/mod.rs:386`) defines the dependency edges, `dependents_multi_impl` (`:428`) is the
@@ -110,6 +110,9 @@ provenance and governance, not mechanism:
   marker naming the reason).
 - One import per namespace; a second import of the same `ns` with a different `src` is a
   degradation (first wins, marker emitted).
+- The **native hosts accept local paths only** — a `src` with a scheme degrades rather than
+  being fetched, because a CLI or a synchronous Node call reaching the network would be a
+  surprise. Vendor the module next to the document, as with any other dependency.
 - Plugin elements compose exactly like built-ins: their emitted `d` geometry is harvested by
   `x_output_geometry` (`compile/mod.rs:1887`), so a `<clip:gear>` is a valid `<x:boolean>` operand,
   warp target, or `<x:textbox in=…>` container with **zero additional plumbing**.
@@ -247,6 +250,16 @@ the whole namespace, named in the marker). The manifest is also the **authoring 
 editor host can generate property panels from `params` without instantiating anything else — the
 same way a spreadsheet surfaces a UDF's signature.
 
+**The param schema is a shared contract with editors, not a compiler-local detail.** The set of
+param types is deliberately small and is kept a **strict subset of the editor-side declared-UI
+widget vocabulary** (stylus `DESIGN.md` §3.2): every type + constraint combination legal in a
+manifest must map totally onto one native control, so manifest-driven property panels are a pure
+function of the manifest — no per-plugin rendering code in any host. Consequences: the manifest
+never grows layout (presentation is the editor's; a plugin wanting a richer panel ships a
+companion editor extension), and growth is **ordered** — an editor vocabulary gains the control
+first, the manifest schema adopts the type second. ABI 1's shipped types are the frozen seed of
+the shared set; adding a param type is a cross-spec act, not a manifest patch.
+
 **Generate**: request JSON is `{tag, attrs, input_d, children, tolerance}` — one entry point for
 every element the module provides, so a module needs no per-element export. Response is
 `{ "svg": "…" }` or `{ "error": "reason" }` (degrades with the reason in the marker). Unknown
@@ -284,8 +297,8 @@ Per platform:
 | Host | Runtime for plugin modules | Wiring |
 |---|---|---|
 | Browser (`xsvg-viewer`) | `WebAssembly.instantiate` in JS | `JsGeneratorHost` trampoline in `crates/xsvg-wasm`, same pattern as `JsMeasurer` (`src/lib.rs:23`); `DepLoader` grows a `loadModule(src)` hook |
-| Node (`xsvg-compile`) | same, via Node's WebAssembly API | modules read from disk relative to `basePath` |
-| CLI (`xsvg-cli`) | `wasmtime`, behind a `plugins` cargo feature | `DiskGeneratorHost`; feature off = `NoGenerators`, keeping the default build light |
+| Node (`xsvg-compile`) | Node's own `WebAssembly` | modules read from disk relative to `basePath`; `plugins: false` opts out |
+| CLI (`xsvg-cli`) | `wasmi` — a pure-Rust interpreter | `DiskGenerators`; **on by default**, `--no-plugins` opts out |
 | Official `xsvg:` modules | same as any imported module — no special path | artifacts published per release (project CDN + npm package); documents import them by URL or a vendored local copy |
 
 Instantiated modules are cached per host by `(src, integrity)` across compiles — recompiling on
@@ -295,7 +308,7 @@ every keystroke must not re-instantiate.
 
 WASM gives isolation; the host adds **liveness and purity**:
 
-- **Fuel / time**: a native host runs each `xsvg_generate` call under wasmtime fuel, so
+- **Fuel / time**: the native hosts run each `xsvg_generate` call under **wasmi fuel**, so
   exhaustion degrades that element with a marker, extending the existing budget family
   (`MAX_REF_DEPTH`, `REF_FUEL`, `compile/mod.rs:33-44`).
   **The browser host cannot do this**, and does not pretend to: a synchronous WASM call on the
@@ -347,10 +360,15 @@ this design is laid out so it composes rather than conflicts:
 
 ## 9. Phasing
 
-Steps 1–3 and 5 are done (`crates/xsvg-core/src/compile/plugin.rs`, `crates/xsvg-plugin`,
-`crates/ext/clipart`, `packages/xsvg-viewer/src/plugins.ts`, `dataset/clipart.xsvg`).
-Step 4 — the native host — is not, which is why `dataset/clipart.xsvg` is excluded from
-the native-vs-browser parity harness.
+Steps 1–5 are done: `crates/xsvg-core/src/compile/plugin.rs`, `crates/xsvg-plugin`,
+`crates/ext/clipart`, and the three hosts (`packages/xsvg-viewer/src/plugins.ts`,
+`crates/xsvg-cli/src/plugins.rs`, `packages/xsvg-compile/src/plugins.ts`).
+`dataset/clipart.xsvg` is in the native-vs-browser parity harness and matches
+structurally at 0.205% pixel difference — the same font-rendering delta every other
+sample shows, since both hosts run identical module bytes.
+
+Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) and step 7
+(manifest-driven property panels) remain.
 
 1. **Seam** — `GeneratorHost` + `ImportTable` pre-scan + dispatch arm + output sanitizer +
    `baked_refs` edges. Core-only, `NoGenerators` default, all existing tests green. Unit-test with
@@ -386,6 +404,10 @@ the native-vs-browser parity harness.
   stroke-width inflation worth doing in v1, or is `bbox: null`-style degradation enough?
 - **Params in `<x:theme>`** — should plugin parameters accept `var()` tokens? (Almost certainly
   yes and nearly free, since `resolve_var` runs over attribute values — confirm ordering when
-  implementing the pre-scan.)
+  implementing the pre-scan.) Note this is also a §4 shared-contract question: accepting tokens
+  implies every mapped editor widget needs a token-picker mode — a vocabulary capability that
+  must land editor-side first, per the ordering rule.
 - **Manifest-driven validation strictness** — warn-and-pass vs. clamp-to-schema when an attribute
-  violates `min`/`max`. Leaning: clamp, marker comment, keep totality.
+  violates `min`/`max`. Leaning: clamp, marker comment, keep totality. Clamp also matches native
+  editor widgets (a bounded number field clamps at the control), keeping authoring-time and
+  compile-time semantics identical — a point for clamp under the §4 shared contract.

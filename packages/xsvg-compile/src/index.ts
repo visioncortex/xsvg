@@ -13,10 +13,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { EMPTY_FONTS, loadFontDir, type Font, type FontDb } from "./fonts.js";
 import { rasterize } from "./rasterize.js";
+import { noPlugins, PluginRegistry, type ImportDecl } from "./plugins.js";
 
 type Cb = (...args: unknown[]) => unknown;
 interface WasmModule {
-  compile(
+  compile_ext(
     input: string,
     quality: string,
     sourcemap: boolean,
@@ -27,7 +28,11 @@ interface WasmModule {
     advanceWidth: Cb,
     resolve: Cb,
     base: string,
+    pluginElement: Cb,
+    pluginGenerate: Cb,
   ): string;
+  /** The `<x:import>` bindings a document declares, as JSON. */
+  imports(input: string): string;
 }
 
 // wasm-pack --target nodejs emits a CommonJS module that loads the .wasm synchronously.
@@ -102,6 +107,10 @@ export interface CompileOptions {
    *  `<use href="…">` links (read synchronously from disk). Defaults to a file in the
    *  current working directory. */
   basePath?: string;
+  /** Set false to load no `<x:import>` generator modules, so every plugin element
+   *  degrades with a marker (docs/Extensibility.md). Modules are read from disk
+   *  relative to `basePath`; a document that imports nothing pays nothing either way. */
+  plugins?: boolean;
 }
 
 const fontCache = new Map<string, FontDb>();
@@ -129,7 +138,20 @@ export function compile(source: string, opts: CompileOptions = {}): string {
     }
   };
   const src = stripGooglePrefix(source);
-  return wasm.compile(
+  // <x:import> is a declaration, so the compiler reports a document's bindings from
+  // a parse alone — no throwaway compile round to discover them.
+  let plugins = noPlugins;
+  if (opts.plugins !== false) {
+    let decls: ImportDecl[] = [];
+    try {
+      decls = JSON.parse(wasm.imports(src));
+    } catch {
+      decls = [];
+    }
+    if (decls.length) plugins = PluginRegistry.load(decls, base);
+  }
+  plugins.beginCompile();
+  return wasm.compile_ext(
     src,
     quality,
     sourcemap,
@@ -144,8 +166,12 @@ export function compile(source: string, opts: CompileOptions = {}): string {
     },
     resolve,
     base,
+    (ns, tag) => plugins.element(ns as string, tag as string),
+    (ns, tag, req) => plugins.generate(ns as string, tag as string, req as string),
   );
 }
 
 export { loadFontDir } from "./fonts.js";
 export type { FontDb } from "./fonts.js";
+export { PluginRegistry } from "./plugins.js";
+export type { ImportDecl } from "./plugins.js";

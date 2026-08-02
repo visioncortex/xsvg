@@ -25,8 +25,13 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 - **`clipart`**, the first official extension (`crates/ext/clipart`) — `<arrow>` (thick shafted
   arrow, one or two heads, optional outline and corner rounding) and `<callout>` (a bubble sized
   to its children). Official extensions load through the same public seam as anyone else's.
-- Browser host (`PluginRegistry`) with integrity checking, plus `imports()` so a host can load
-  modules without a throwaway compile round. The native (CLI/Node) host is not done yet.
+- Generators run on **all three hosts** — browser, CLI, and Node — from the same module bytes,
+  which is what makes their output identical by construction rather than by matching two
+  implementations. `dataset/clipart.xsvg` is in the native-vs-browser parity harness and
+  matches. Each host checks `integrity` (one padded-base64 spelling works everywhere) and
+  isolates modules from each other and from successive compiles; the native hosts additionally
+  bound a runaway generator with wasmi fuel, which the browser cannot do on the main thread.
+  Opt out with `xsvg --no-plugins` or `compile(src, { plugins: false })`.
 
 ### Fixed
 
