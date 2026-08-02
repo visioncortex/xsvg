@@ -10,6 +10,22 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-02
+
+A minor rather than a patch, because **the same document can compile to different
+bytes**: with `sourcemap` on, `<x:table>` and `<x:pie>` wrappers now carry their own
+source range (they carried none, so every edit to one silently fell back to a whole
+document recompile), and connectors attached by anchor route differently. No exported
+API changed shape — the viewer's exports and `<xsvg-view-interactive>`'s attributes are
+identical to 0.1.6, and older 12-argument `compile_ext` calls still work — but rendered
+output moving under a patch bump is not something to do to a downstream host.
+
+The panel also offers a **different set of controls**: geometry is gone from it, and the
+`x:border-*` block is new. A host building its own panel from `describe()` should note
+that those border attributes carry an `ns` and must be written with the prefix the
+document binds — writing them unprefixed compiles to nothing at all. Crates unchanged
+at 0.1.0.
+
 ### Added
 
 - **Loadable geometry generators** — `<x:import ns src integrity>` binds an XML namespace to a
@@ -292,7 +308,8 @@ Deprecated on npm — published with debug WebAssembly. Use 0.1.2 or later.
   - **`@visioncortex/xsvg-compile`** (Node): browser-free `compile()`.
   - Rust crates on crates.io: `xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`.
 
-[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.0
 [0.1.6]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.6
 [0.1.5]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.5
 [0.1.4]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.4
