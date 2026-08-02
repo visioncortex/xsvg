@@ -364,6 +364,17 @@ export const CATALOG: Category[] = [
     ],
   },
   {
+    name: "Plugins — loadable generators",
+    note: '<x:import ns src integrity> binds a namespace to a compiled WASM module, so a document can use elements the compiler knows nothing about (docs/Extensibility.md).',
+    samples: [
+      {
+        file: "clipart.xsvg",
+        title: "Third-party elements",
+        blurb: "<clip:arrow> and <clip:callout> come from a WASM module the compiler has never heard of — one a leaf (parameters in, geometry out), one a container sized to the textbox it wraps",
+      },
+    ],
+  },
+  {
     name: "Edge cases & invariants",
     samples: [
       {

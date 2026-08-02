@@ -153,6 +153,12 @@ Realistic composites that combine several features into one artifact.
 |---|---|
 | [layers.xsvg](layers.xsvg) | `x:layer="background"`/`"foreground"` buckets restacking a watermark, card, grid, and badge at compile time — with `x:order` refining within a band and `x:hidden` dropping a debug overlay. The layer-ness is ignorable `x:` attributes on plain `<g>`s (Inkscape's model), so the uncompiled file still renders in any viewer |
 
+## Plugins — loadable generators (`<x:import>`, docs/Extensibility.md)
+
+| File | Shows |
+|---|---|
+| [clipart.xsvg](clipart.xsvg) | `<x:import ns src>` binds a namespace to a compiled WASM module, and `<clip:arrow>` / `<clip:callout>` are then used like any built-in — **neither is known to the compiler**. Shows both generator shapes: a *leaf* (parameters in, geometry out) and a *container* whose children the compiler lowers and measures first, so the callout sizes itself to the `<x:textbox>` it wraps. `var(…)` theme tokens resolve through plugin elements, rotation is baked into the emitted coordinates rather than a `transform` (so the output stays harvestable by `in="#id"`, `<x:boolean>`, and `<x:warp>`), and the module's markup is re-parsed by the compiler so it cannot escape the static SVG subset. Needs `clipart.wasm` beside it — `npm run ext:build` |
+
 ## Edge cases & invariants
 
 | File | Shows |
