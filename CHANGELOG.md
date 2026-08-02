@@ -65,8 +65,9 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   bugs fixed below, and reports its own length-changing count because the first version of it
   did not: nine in ten arithmetic edits keep their width and shift nothing, so it passed
   confidently while barely exercising the mapping it exists to check.
-- **Host node keys, wired end to end** (docs/Incremental.md §3.1). `compile_keyed_ext` /
-  `compile_fragment_keyed_ext` and `node_spans` in the browser and Node hosts, plus
+- **Host node keys, wired end to end** (docs/Incremental.md §3.1). An optional trailing
+  `key` callback on `compile_ext` / `compile_fragment_ext` (briefly separate `*_keyed_ext`
+  entry points, folded in before release) and `node_spans` in the browser and Node hosts, plus
   `NodeKeyStore` as the reference implementation: the host names every element, the compiler
   stamps the name instead of the byte offset, and an element compiles to the same bytes however
   far an edit elsewhere has moved it. The offset arithmetic moves into the host and stops
@@ -74,6 +75,18 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   would go stale. On the dataset that took the fast path from 326 patches with 23 declines to
   **347 with 2**, and the 2 remaining are elements that compile to nothing rather than anything
   offsets caused. 3251 unedited elements are checked byte-stable across shifting edits.
+- A keyed full compile that had to fall back to byte spans **says so in its own output** — a
+  trailing `<!-- xsvg: N element(s) unkeyed … -->` comment. "Key every element" is a host
+  contract nothing can enforce, so the violation is reported where the sloppy host (and its
+  tests) will see it; complete hosts pay nothing, and fragment output never carries it, so
+  every fragment stays a verbatim slice.
+- `npm run check:dom` drives the real `patchDocument` (now its own module,
+  `packages/xsvg-viewer/src/patch.ts`, with type-only imports so it runs anywhere) over a jsdom
+  tree and demands the patched DOM serialize identically to a full recompile parsed fresh —
+  the sibling-run walking the string harness deliberately does not share, whose failures
+  otherwise only ever degrade to silent full recompiles. The incremental check also refuses
+  any new call site that reads `data-xsvg-pos`/`data-xsvg-node` outside the sanctioned
+  funnels, so dual-spelling handling cannot leak per call site.
 - **`read_only`** on a parameter declaration, with `font-family` as its first use: selecting a
   face needs it *loaded* before anything can be measured, which is asynchronous and
   document-wide, so an attribute edit alone would lay the document out in a fallback face and

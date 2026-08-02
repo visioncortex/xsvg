@@ -36,7 +36,7 @@ export class NodeKeyStore implements NodeIndex {
   private ranges = new Map<string, SourceRange>();
   private next = 0;
 
-  /** The callback shape `compile_keyed_ext` wants. */
+  /** The callback shape `compile_ext`'s trailing `key` argument wants. */
   readonly key = (byteStart: number): string | null => this.byStart.get(byteStart) ?? null;
 
   rangeOf(key: string): SourceRange | null {

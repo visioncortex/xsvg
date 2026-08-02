@@ -71,15 +71,22 @@ keys, identity emits as `data-xsvg-node="<key>"`, def ids become `x-flt-<key>` e
 and an unchanged fragment's output is **byte-stable under text shifts** (pinned by
 `keyed_fragment_output_is_byte_stable_under_text_shifts`). Hosts MUST key every
 element — emitters tag nested elements too (warp children, paragraphs); an unkeyed
-element falls back to byte spans. Keys are never consulted inside linked
+element falls back to byte spans. Nothing can *enforce* that contract, so a keyed
+full compile that had to fall back appends a trailing comment to its own output —
+`<!-- xsvg: N element(s) unkeyed; … -->` — where the sloppy host (and its tests)
+will actually see it. Complete hosts pay nothing; fragment compiles never carry it,
+so every fragment stays a verbatim slice. Keys are never consulted inside linked
 dependencies (their offsets index the dependency file). `dependents_multi_impl`
 computes the union closure from several seed fragments in one parse.
 
-**Shipped in the browser and Node hosts.** `compile_keyed_ext` /
-`compile_fragment_keyed_ext` take a `key(byteStart) => string | null` callback;
+**Shipped in the browser and Node hosts.** `compile_ext` / `compile_fragment_ext`
+take a `key(byteStart) => string | null` callback as an optional trailing argument
+(dedicated `*_keyed_ext` entry points existed briefly and were folded in — one entry
+per capability doubles the surface per axis, so new capabilities extend the argument
+list instead);
 `node_spans(input)` reports every element's range, which is how a host outside Rust
-learns what there is to name (the seam demands *every* element be keyed, and an
-unkeyed one silently reverts to byte spans). `NodeKeyStore`
+learns what there is to name (the seam demands *every* element be keyed; an unkeyed
+one reverts to byte spans and the compile says so in its output). `NodeKeyStore`
 (`packages/xsvg-viewer/src/keys.ts`) is the reference host implementation: it mints a
 name per element, carries names across an edit through the same pivot the patch uses,
 and answers name→range so the inspector can still project rendered elements back to

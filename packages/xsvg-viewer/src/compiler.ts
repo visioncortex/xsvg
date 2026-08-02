@@ -12,8 +12,6 @@
 import init, {
   compile_ext,
   compile_fragment_ext,
-  compile_fragment_keyed_ext,
-  compile_keyed_ext,
   dependents as fragmentDependents,
   describe,
   fragment_range,
@@ -480,9 +478,7 @@ function makeSession(
       plugins.beginCompile();
       try {
         const resolve = resolveFor(misses);
-        const markup = keys
-          ? compile_fragment_keyed_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys)
-          : compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
+        const markup = compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys);
         return misses.size === 0 ? markup : null;
       } catch {
         // The offset is not a fragment unit (inter-element whitespace, the root
@@ -589,9 +585,7 @@ async function compileFixpoint(
       }
     } else {
       plugins.beginCompile();
-      const svg = keys
-        ? compile_keyed_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys)
-        : compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
+      const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys);
       if (misses.size === 0) {
         // Converged: the cache now holds every dependency this document reaches,
         // so fragment re-emits can run against it without fetching.
@@ -664,9 +658,7 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
     // Sync resolver (bundled/in-memory deps): the compiler links on demand, one pass.
     const resolve = opts.resolve;
     plugins.beginCompile();
-    const svg = opts.keys
-      ? compile_keyed_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, opts.keys)
-      : compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
+    const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, opts.keys);
     // This resolver answers on demand and never misses pending bytes, so a fragment
     // re-emit resolves exactly what the full compile did.
     opts.onSession?.(makeSession(source, quality, sourcemap, base, () => resolve, plugins, opts.keys));

@@ -30,6 +30,8 @@ interface WasmModule {
     base: string,
     pluginElement: Cb,
     pluginGenerate: Cb,
+    /** Host node keys (docs/Incremental.md §3.1); absent means byte-span identity. */
+    key?: Cb | null,
   ): string;
   compile_fragment_ext(
     input: string,
@@ -45,37 +47,7 @@ interface WasmModule {
     base: string,
     pluginElement: Cb,
     pluginGenerate: Cb,
-  ): string;
-  compile_keyed_ext(
-    input: string,
-    quality: string,
-    sourcemap: boolean,
-    measure: Cb,
-    metrics: Cb,
-    rasterize: Cb,
-    outlineRun: Cb,
-    advanceWidth: Cb,
-    resolve: Cb,
-    base: string,
-    pluginElement: Cb,
-    pluginGenerate: Cb,
-    key: Cb,
-  ): string;
-  compile_fragment_keyed_ext(
-    input: string,
-    quality: string,
-    sourcemap: boolean,
-    offset: number,
-    measure: Cb,
-    metrics: Cb,
-    rasterize: Cb,
-    outlineRun: Cb,
-    advanceWidth: Cb,
-    resolve: Cb,
-    base: string,
-    pluginElement: Cb,
-    pluginGenerate: Cb,
-    key: Cb,
+    key?: Cb | null,
   ): string;
   fragment_range(input: string, offset: number): Uint32Array;
   dependents(input: string, offset: number): Uint32Array;
@@ -238,9 +210,7 @@ function session(source: string, opts: CompileOptions) {
 export function compile(source: string, opts: CompileOptions = {}): string {
   const s = session(source, opts);
   s.plugins.beginCompile();
-  return s.keys
-    ? wasm.compile_keyed_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts, s.keys)
-    : wasm.compile_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts);
+  return wasm.compile_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts, s.keys);
 }
 
 /**
@@ -260,9 +230,7 @@ export function compileFragment(source: string, offset: number, opts: CompileOpt
   const s = session(source, opts);
   s.plugins.beginCompile();
   try {
-    return s.keys
-      ? wasm.compile_fragment_keyed_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts, s.keys)
-      : wasm.compile_fragment_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts);
+    return wasm.compile_fragment_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts, s.keys);
   } catch {
     return null;
   }
