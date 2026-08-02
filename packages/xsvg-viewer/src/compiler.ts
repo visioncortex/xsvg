@@ -37,11 +37,23 @@ export {
 } from "./plugins.js";
 export type { ElementSpec, ParamSpec, PluginSchemas } from "./params.js";
 
-let ready: Promise<unknown> | null = null;
+let initialized: Promise<unknown> | null = null;
 
 function ensureReady(): Promise<unknown> {
-  if (!ready) ready = init();
-  return ready;
+  if (!initialized) initialized = init();
+  return initialized;
+}
+
+/**
+ * Resolve once the WASM compiler is usable.
+ *
+ * `compileXsvg` awaits this itself, so callers only need it before the **synchronous**
+ * entry points — `nodeSpans`, `describe`. Those are wasm exports like any other, and
+ * reaching one before init fails deep inside the bindings (`__wbindgen_malloc` of
+ * undefined) rather than saying what is wrong.
+ */
+export function ready(): Promise<void> {
+  return ensureReady().then(() => undefined);
 }
 
 /**
@@ -50,9 +62,9 @@ function ensureReady(): Promise<unknown> {
  * A no-op if the module is already initialized.
  */
 export function initFromBytes(bytes: Uint8Array): void {
-  if (ready) return;
+  if (initialized) return;
   initSync({ module: bytes });
-  ready = Promise.resolve();
+  initialized = Promise.resolve();
 }
 
 // Font metrics for text layout — the browser implementation of the core's
@@ -393,7 +405,7 @@ export function normalizeSource(source: string): string {
 }
 
 /** Byte ranges of every element in a document, in document order. Parse-only — the
- *  input a host needs to name them all. */
+ *  input a host needs to name them all. Synchronous, so `await ready()` first. */
 export function nodeSpans(source: string): [number, number][] {
   const flat = node_spans(source);
   const out: [number, number][] = [];

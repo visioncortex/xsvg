@@ -16,6 +16,7 @@ import {
   compileXsvg,
   nodeSpans,
   normalizeSource,
+  ready,
   type CompileSession,
   type PluginSchemas,
 } from "./compiler";
@@ -392,7 +393,13 @@ export class XsvgViewInteractive extends HTMLElement {
       // Name every element before compiling: the compiler asks for a key the moment
       // it stamps identity, and an element it cannot name falls back to a byte span.
       // `-x-google-` markers shift offsets, so key against the normalized text.
-      if (withInspector) this.keys.sync(nodeSpans(normalizeSource(source)));
+      // `nodeSpans` is a synchronous wasm export and this runs before the compile
+      // that would otherwise have initialized it, so wait for the module here.
+      if (withInspector) {
+        await ready();
+        if (mine !== this.token) return;
+        this.keys.sync(nodeSpans(normalizeSource(source)));
+      }
       const svg = await compileXsvg(source, {
         quality,
         sourcemap: withInspector,
