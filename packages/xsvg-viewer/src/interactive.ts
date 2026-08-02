@@ -23,6 +23,7 @@ import {
 import { findArtboards, makeThumb, paintThumb, type Artboard } from "./artboards";
 import { createPanZoom, type PanZoom, type ViewState } from "./pan-zoom";
 import { NodeKeyStore } from "./keys";
+import { patchDocument } from "./patch";
 import { ByteIndex, singleEdit } from "./sourcemap";
 import type { MountedInspector } from "./interactive-inspector";
 
@@ -492,6 +493,9 @@ export class XsvgViewInteractive extends HTMLElement {
    * Patch the rendered drawing in place for a single contiguous source edit.
    * Returns false — having changed nothing — whenever the edit's effect cannot be
    * confined to a known set of top-level elements, leaving the caller to recompile.
+   *
+   * The protocol itself lives in `patch.ts`; this wires it to the component's
+   * state and tells the surviving surfaces (source pane, deck) about the edit.
    */
   private tryPatch(next: string): boolean {
     const session = this.session;
@@ -503,58 +507,14 @@ export class XsvgViewInteractive extends HTMLElement {
     if (!edit) return true; // identical text — the edit was a no-op
     const oldBytes = (this.compiledBytes ??= new ByteIndex(this.compiled));
     const newBytes = new ByteIndex(next);
-
-    // The common prefix ends at the same byte offset in both versions, so that one
-    // offset is the pivot: everything before it is unmoved, everything after shifts
-    // by the length difference.
-    const pivot = newBytes.toByte(edit.from);
-    const delta = newBytes.byteLength - oldBytes.byteLength;
-
-    // Which elements have to be re-emitted. Parse-only, so it needs no keys and can
-    // run while the store still describes the document as rendered.
-    const unit = session.range(next, pivot);
-    if (!unit) return false; // the edit is in the root tag or between elements
-    const targets = [unit, ...session.dependents(next, pivot)];
-
-    // Reproduce each target as it currently stands, to learn how many sibling nodes
-    // it occupies. This must happen while the store still holds the *old* naming,
-    // hence before the shift below.
-    const current = targets.map(([start]) =>
-      session.fragment(this.compiled, keptStart(start, pivot, delta)),
-    );
-
-    // Carry every element's name across the edit. From here the arithmetic is done:
-    // a name is what the DOM is anchored on *and* what the compiler stamps, and
-    // neither moves when the text does. That is the whole point of keys — the
-    // shifting is confined to these two lines instead of being chased through span
-    // attributes and generated def ids, one of which the host cannot chase at all.
-    this.keys.shift(pivot, delta);
-    this.keys.sync(nodeSpans(next));
-
-    // Resolve, compile and parse everything before mutating anything: a patch that
-    // failed halfway would leave the drawing disagreeing with its own source.
-    const swaps: { run: ChildNode[]; nodes: ChildNode[] }[] = [];
-    for (const [i, [start]] of targets.entries()) {
-      // Unchanged by construction: the element kept its name across the shift, so
-      // the name the store answers with now is the one already in the DOM.
-      const name = this.keys.key(start);
-      if (!name) return false;
-      // The store mints names as `n<digits>`, so they need no selector escaping.
-      const anchor = svgEl.querySelector(`[data-xsvg-node="${name}"]`);
-      // No anchor: this fragment emitted no element last time (a degradation marker
-      // is a comment, which carries no attributes), so there is nothing to replace.
-      if (!anchor) return false;
-      const run = fragmentRun(anchor, name, current[i]);
-      if (!run) return false;
-      const markup = session.fragment(next, start);
-      if (markup == null) return false;
-      swaps.push({ run, nodes: parseSvgFragment(markup) });
-    }
-
-    for (const { run, nodes } of swaps) {
-      run[0].replaceWith(...nodes);
-      for (let i = 1; i < run.length; i++) run[i].remove();
-    }
+    const ok = patchDocument({ session, keys: this.keys, spans: nodeSpans }, svgEl, {
+      compiled: this.compiled,
+      next,
+      edit,
+      oldBytes,
+      newBytes,
+    });
+    if (!ok) return false;
 
     this.compiled = next;
     this.compiledBytes = newBytes;
@@ -665,66 +625,6 @@ export class XsvgViewInteractive extends HTMLElement {
       window.addEventListener("pointerup", up);
     });
   }
-}
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** Where an offset in the edited source sat in the previous one — for asking the
- *  session to reproduce a fragment as it currently stands in the DOM. */
-function keptStart(start: number, pivot: number, delta: number): number {
-  return start <= pivot ? start : start - delta;
-}
-
-/**
- * The consecutive sibling nodes in the rendered document that together are one
- * fragment's output.
- *
- * A fragment is not always a single element. It may emit a `<filter>` definition
- * ahead of the shape that references it, or a degradation comment ahead of both,
- * and replacing only the element would strand the rest — leaving a second `<filter>`
- * with a duplicate id, which the browser resolves to the *stale* one. So the run is
- * measured against a re-compile of the fragment as it currently stands (byte-identical
- * to what is in the DOM, by the incremental invariant): its node count gives the run's
- * length, and the position of the keyed node within it gives where the run starts
- * relative to the anchor.
- *
- * Null when the current markup cannot be reproduced, or when the DOM does not hold as
- * many siblings as it claims — either way the caller falls back to a full compile.
- */
-function fragmentRun(anchor: Element, name: string, current: string | null): ChildNode[] | null {
-  if (current == null) return null;
-  const nodes = parseSvgFragment(current);
-  const at = nodes.findIndex(
-    (n) => n.nodeType === 1 && (n as Element).getAttribute("data-xsvg-node") === name,
-  );
-  if (at < 0) return null;
-  const run: ChildNode[] = [anchor];
-  let before: ChildNode = anchor;
-  for (let i = 0; i < at; i++) {
-    if (!before.previousSibling) return null;
-    run.unshift((before = before.previousSibling));
-  }
-  let after: ChildNode = anchor;
-  for (let i = at + 1; i < nodes.length; i++) {
-    if (!after.nextSibling) return null;
-    run.push((after = after.nextSibling));
-  }
-  return run;
-}
-
-/**
- * Parse re-emitted fragment markup into nodes ready to splice into the drawing.
- *
- * Parsed against an `<svg>` context element, so `<path>` and friends land in the
- * SVG namespace rather than becoming inert unknown HTML elements. All child nodes
- * are returned, not just the first element: a fragment may be preceded by
- * degradation marker comments, and dropping those would lose the compiler's
- * explanation of what it declined to draw.
- */
-function parseSvgFragment(markup: string): ChildNode[] {
-  const holder = document.createElementNS(SVG_NS, "svg");
-  holder.innerHTML = markup;
-  return Array.from(holder.childNodes);
 }
 
 /** Give the compiled SVG an explicit pixel size from its viewBox, so the pan/zoom
