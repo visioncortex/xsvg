@@ -48,9 +48,39 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   document and recompiles, keeping the element pinned. Reading a schema runs no
   generator, so this works for elements the compiler has never heard of. Hosts can reach
   the same schemas via `compileXsvg`'s `onPlugins`.
+- **Live editing** — an edit now re-emits only the elements it can have changed and patches
+  them into the rendered document, instead of recompiling and replacing the whole drawing
+  (docs/Incremental.md §4). Pan/zoom, the source pane, the slide deck, the pinned selection
+  and the control under the pointer all survive an edit, so a parameter with a declared
+  `min`/`max` gets a slider that **commits as it moves**. When the fast path declines, the
+  full recompile now also preserves pan/zoom, so the fallback costs latency and nothing else.
+- **Incremental compilation from Node** — `compileFragment`, `fragmentRange`, `dependents` and
+  `normalizeSource` in `@visioncortex/xsvg-compile`, and `CompileSession` (via `compileXsvg`'s
+  `onSession`) in the browser. A session holds the document's already-compiled generator
+  modules and resolved dependencies, so re-emitting a fragment costs one parse plus one
+  element's lowering, with no fetching and no module compilation.
+- `npm run check:incremental` reconstructs a patch the way the viewer does, headlessly, and
+  requires the result to be byte-identical to a full recompile — 354 patches across the whole
+  dataset. It found both of the bugs fixed below.
 
 ### Fixed
 
+- The incremental dependency scan **missed connectors attached by anchor**. A `<x:connector>`
+  bakes its endpoint boxes into the routed path, but an endpoint written `from="#box:right"` was
+  compared whole against element ids, so `#box:right` never matched `box` and editing the box
+  reported no dependents. An editor moving a shape would leave every connector anchored to it
+  drawn to where it used to be. Both spellings are now reported.
+- **Composite emitters were unaddressable for incremental re-emission.** `<x:table>` and `<x:pie>`
+  wrapped their output in a bare `<g>`, tagging only the cells and slices inside it, so no element
+  carried the range `fragment_range` reports and a host could not find what to replace — every
+  edit to a table or pie silently degraded to a whole-document recompile. Both wrappers now carry
+  their element's own span alongside the finer per-cell mapping, and the rule is pinned as a
+  normative invariant (docs/Incremental.md §4.1) rather than left to each emitter to remember.
+  Affects `sourcemap` output only; compiled output is byte-identical.
+- Source ranges were **off by ten bytes per `-x-google-` font marker** in the interactive viewer:
+  the compiler is handed the source with those markers stripped, but the inspector indexed the
+  original text, so on the affected documents clicking an element highlighted the wrong source and
+  vice versa. The viewer now takes the text the compiler actually saw as its source of record.
 - Connector rails flip to a 4-turn detour when the endpoints don't face each other with room
   (e.g. `a:right → b:left` where `b`'s left edge is at or behind `a`'s right edge). Previously the
   `x-major`/`y-major` rail always drew a 2-turn Z, which doubled the line straight back through its

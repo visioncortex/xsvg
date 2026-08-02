@@ -393,17 +393,23 @@ offers **editable controls** for a pinned generator element
 (`packages/xsvg-viewer/src/params.ts`). Reading a schema runs no generator, so a host
 can build UI for an element the compiler has never heard of.
 
-Two limits worth knowing:
+Both limits this section used to record are now closed, and it is worth saying how,
+because each was closed by removing a special case rather than by adding one:
 
-- **Edits commit on `change`, not `input`.** Applying one recompiles the document and
-  rebuilds the panel, which would yank a control out from under a drag in progress.
-  Live dragging needs the parameter panel to survive a recompile — i.e. to be owned by
-  the host rather than rebuilt with the inspector — which is a worthwhile follow-up.
-- **Only plugin elements get generated panels**, because only they have manifests. The
-  built-ins' parameters live in Rust source, so `<clip:arrow>` gets controls while
-  `<x:pie>` still shows a read-only attribute table. Closing that gap means giving the
-  built-ins machine-readable schemas too — a separate piece of work, and the point at
-  which the "plugins are UDFs" analogy would extend to the whole language.
+- **Every tier gets the same panel.** The compiler describes its own elements through the
+  same derived declarations a module uses (§11), so the panel does one schema lookup and
+  never branches on who provides the element. `<x:pie>` and `<clip:arrow>` are the same
+  kind of thing to it.
+- **Edits are live.** A bounded number — one whose schema declares `min` and `max` — gets
+  a slider that commits as it moves. What made that possible is not the control but the
+  incremental path underneath it (docs/Incremental.md §4): an edit now re-emits only the
+  elements it can have changed and patches them into the live DOM, so the pan/zoom, the
+  source pane, the deck and the control under the pointer all survive their own edit.
+  Typed values still commit on `change` — a half-written `var(acc` is not worth compiling.
+
+A parameter is draggable exactly when the module said what its useful range is, which is a
+reason to declare `min`/`max` rather than decoration: the host offers a slider over the
+declared span instead of guessing one.
 
 Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) remains, and is
 deliberately skipped for now.

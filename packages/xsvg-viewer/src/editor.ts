@@ -32,8 +32,14 @@ export interface EditorHandle {
   view: EditorView;
   getDoc(): string;
   setDoc(text: string): void;
-  /** Highlight [from, to) (UTF-16 indices) and scroll it into view; clears if empty. */
-  highlight(from: number, to: number): void;
+  /** Apply one contiguous change (UTF-16 indices). Preferred over `setDoc` for a
+   *  live edit: the view keeps its scroll position and CodeMirror maps its
+   *  decorations through the change instead of re-parsing the whole document. */
+  replace(from: number, to: number, insert: string): void;
+  /** Highlight [from, to) (UTF-16 indices) and scroll it into view; clears if empty.
+   *  Pass `scroll: false` when re-stating a highlight the user did not ask to move
+   *  to — following a live edit shouldn't yank the source pane around. */
+  highlight(from: number, to: number, scroll?: boolean): void;
   destroy(): void;
 }
 
@@ -72,14 +78,20 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     getDoc: () => view.state.doc.toString(),
     setDoc: (text) =>
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),
-    highlight: (from, to) => {
+    replace: (from, to, insert) => {
+      const len = view.state.doc.length;
+      const a = Math.max(0, Math.min(from, len));
+      const b = Math.max(a, Math.min(to, len));
+      view.dispatch({ changes: { from: a, to: b, insert } });
+    },
+    highlight: (from, to, scroll = true) => {
       const len = view.state.doc.length;
       const a = Math.max(0, Math.min(from, len));
       const b = Math.max(0, Math.min(to, len));
       const value = b > a ? { from: a, to: b } : null;
-      view.dispatch({
-        effects: value ? [setHighlight.of(value), EditorView.scrollIntoView(a, { y: "center" })] : [setHighlight.of(null)],
-      });
+      const effects: StateEffect<unknown>[] = [setHighlight.of(value)];
+      if (value && scroll) effects.push(EditorView.scrollIntoView(a, { y: "center" }));
+      view.dispatch({ effects });
     },
     destroy: () => view.destroy(),
   };

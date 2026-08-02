@@ -17,15 +17,26 @@ export function makeThumb(svg: SVGSVGElement, board: Artboard): HTMLDivElement {
   const thumb = document.createElement("div");
   thumb.className = "deck-thumb";
   thumb.style.aspectRatio = `${board.frame[2]} / ${board.frame[3]}`;
+  paintThumb(thumb, svg, board.frame);
+  return thumb;
+}
+
+/** (Re)fill a thumb with a reframed clone of the current drawing, leaving the thumb
+ *  element — and so its click handler and selected state — in place. Called again
+ *  after an incremental patch, so the rail keeps up with a live edit. */
+export function paintThumb(
+  thumb: HTMLDivElement,
+  svg: SVGSVGElement,
+  frame: [number, number, number, number],
+): void {
   const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("viewBox", board.frame.join(" "));
+  clone.setAttribute("viewBox", frame.join(" "));
   clone.removeAttribute("width");
   clone.removeAttribute("height");
   // The thumb box already has the frame's aspect ratio, so fill it exactly —
   // "meet" would letterbox with hairline bars (the thumb's white bg showing).
   clone.setAttribute("preserveAspectRatio", "none");
-  thumb.appendChild(clone);
-  return thumb;
+  thumb.replaceChildren(clone);
 }
 
 /** All artboards in a compiled SVG, in document order. Falls back to the

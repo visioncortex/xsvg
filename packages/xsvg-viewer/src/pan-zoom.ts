@@ -10,6 +10,13 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/** A pan/zoom transform, in the form the content element's CSS transform takes. */
+export interface ViewState {
+  scale: number;
+  tx: number;
+  ty: number;
+}
+
 export interface PanZoom {
   /** Center the content at 1:1. */
   reset(): void;
@@ -26,6 +33,11 @@ export interface PanZoom {
   zoomOut(): void;
   /** Current scale factor, for callers that need to convert screen↔content units. */
   scale(): number;
+  /** The whole transform, so a host that rebuilds the content can put the user back
+   *  where they were instead of snapping to a fresh fit. */
+  view(): ViewState;
+  /** Restore a transform captured by `view()`. */
+  setView(v: ViewState): void;
   /** Register a callback fired whenever the transform changes. Returns an unsubscribe. */
   onChange(cb: () => void): () => void;
   /** Register a callback fired on a genuine click (press without drag) on the empty
@@ -219,6 +231,13 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     zoomIn: () => zoomAtCenter(1.25),
     zoomOut: () => zoomAtCenter(1 / 1.25),
     scale: () => scale,
+    view: () => ({ scale, tx, ty }),
+    setView: (v) => {
+      scale = v.scale;
+      tx = v.tx;
+      ty = v.ty;
+      apply();
+    },
     onChange: (cb) => {
       listeners.add(cb);
       return () => listeners.delete(cb);

@@ -34,15 +34,65 @@ export class ByteIndex {
 
   /** UTF-16 string index at (or just before) the given byte offset. */
   toStr(byte: number): number {
+    return this.units[this.seek(this.bytes, byte)];
+  }
+
+  /** Byte offset at (or just before) the given UTF-16 string index — the inverse of
+   *  `toStr`, for handing an edit position back to the compiler's byte-based API. */
+  toByte(unit: number): number {
+    return this.bytes[this.seek(this.units, unit)];
+  }
+
+  /** Total length of the source in UTF-8 bytes. */
+  get byteLength(): number {
+    return this.bytes[this.bytes.length - 1];
+  }
+
+  // Largest index whose value is ≤ `at`, over an ascending table.
+  private seek(table: number[], at: number): number {
     let lo = 0;
-    let hi = this.bytes.length - 1;
+    let hi = table.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (this.bytes[mid] <= byte) lo = mid;
+      if (table[mid] <= at) lo = mid;
       else hi = mid - 1;
     }
-    return this.units[lo];
+    return lo;
   }
+}
+
+/** One contiguous replacement turning `a` into `b`: `a.slice(from, to)` became
+ *  `b.slice(from, insertEnd)`. */
+export interface SingleEdit {
+  from: number;
+  /** End of the replaced span in the **old** string. */
+  to: number;
+  /** End of the replacement in the **new** string. */
+  insertEnd: number;
+}
+
+/**
+ * Describe the difference between two versions of a source as one contiguous
+ * replacement — the common prefix and suffix pared away.
+ *
+ * This is what lets the viewer patch instead of recompile: with the change
+ * localized to `[from, to)`, every source offset outside it maps between the two
+ * versions by a constant shift, so the DOM's `data-xsvg-pos` anchors stay findable.
+ * Any edit *is* representable this way; a scattered multi-site change just yields a
+ * span wide enough to cover them all, which the caller will find spans several
+ * fragments and fall back on.
+ *
+ * Returns null when the strings are identical.
+ */
+export function singleEdit(a: string, b: string): SingleEdit | null {
+  if (a === b) return null;
+  const max = Math.min(a.length, b.length);
+  let from = 0;
+  while (from < max && a[from] === b[from]) from++;
+  // Stop the suffix scan at `from` so the two spans can never overlap it.
+  let tail = 0;
+  while (tail < max - from && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  return { from, to: a.length - tail, insertEnd: b.length - tail };
 }
 
 function utf8Len(cp: number): number {

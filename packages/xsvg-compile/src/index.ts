@@ -31,6 +31,23 @@ interface WasmModule {
     pluginElement: Cb,
     pluginGenerate: Cb,
   ): string;
+  compile_fragment_ext(
+    input: string,
+    quality: string,
+    sourcemap: boolean,
+    offset: number,
+    measure: Cb,
+    metrics: Cb,
+    rasterize: Cb,
+    outlineRun: Cb,
+    advanceWidth: Cb,
+    resolve: Cb,
+    base: string,
+    pluginElement: Cb,
+    pluginGenerate: Cb,
+  ): string;
+  fragment_range(input: string, offset: number): Uint32Array;
+  dependents(input: string, offset: number): Uint32Array;
   /** The `<x:import>` bindings a document declares, as JSON. */
   imports(input: string): string;
 }
@@ -115,9 +132,11 @@ export interface CompileOptions {
 
 const fontCache = new Map<string, FontDb>();
 
-/** Compile an xsvg source string to a plain-SVG string. Synchronous — cross-file
- *  `<use href="…">` links are read from disk on demand, relative to `basePath`. */
-export function compile(source: string, opts: CompileOptions = {}): string {
+// Everything a compile call needs beyond the source: the resolved font database, the
+// disk resolver, the document's generator modules, and the arguments derived from the
+// options. Built once per call and shared by the whole-document and single-fragment
+// entry points, so the two can never be lowering against different seams.
+function session(source: string, opts: CompileOptions) {
   const { quality = "balanced", sourcemap = false, fontDir } = opts;
   let fonts = EMPTY_FONTS;
   if (fontDir) {
@@ -150,25 +169,85 @@ export function compile(source: string, opts: CompileOptions = {}): string {
     }
     if (decls.length) plugins = PluginRegistry.load(decls, base);
   }
-  plugins.beginCompile();
-  return wasm.compile_ext(
-    src,
-    quality,
-    sourcemap,
-    (text, css) => measure(fonts, text as string, css as string),
-    (css) => metrics(fonts, css as string),
-    (d, rowH) => rasterize(d as string, rowH as number),
-    (text, fam, _w, style, size, x, b) =>
+  // The seam callbacks, in the order every compiler entry point takes them.
+  const seams = [
+    (text: unknown, css: unknown) => measure(fonts, text as string, css as string),
+    (css: unknown) => metrics(fonts, css as string),
+    (d: unknown, rowH: unknown) => rasterize(d as string, rowH as number),
+    (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown, x: unknown, b: unknown) =>
       outlineRun(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number, x as number, b as number),
-    (text, fam, _w, style, size) => {
+    (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown) => {
       const font = fonts.resolve(firstFamily(fam as string), style as string);
       return font ? font.getAdvanceWidth(text as string, size as number) : NaN;
     },
     resolve,
-    base,
-    (ns, tag) => plugins.element(ns as string, tag as string),
-    (ns, tag, req) => plugins.generate(ns as string, tag as string, req as string),
-  );
+  ] as const;
+  const hosts = [
+    (ns: unknown, tag: unknown) => plugins.element(ns as string, tag as string),
+    (ns: unknown, tag: unknown, req: unknown) => plugins.generate(ns as string, tag as string, req as string),
+  ] as const;
+  return { src, quality, sourcemap, base, plugins, seams, hosts };
+}
+
+/** Compile an xsvg source string to a plain-SVG string. Synchronous — cross-file
+ *  `<use href="…">` links are read from disk on demand, relative to `basePath`. */
+export function compile(source: string, opts: CompileOptions = {}): string {
+  const s = session(source, opts);
+  s.plugins.beginCompile();
+  return wasm.compile_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts);
+}
+
+/**
+ * Re-emit just the top-level element containing byte `offset` (docs/Incremental.md).
+ *
+ * The markup is byte-identical to that element's span in a full `compile` of the same
+ * source, which is what lets a live-editing host swap it into an already-rendered
+ * document instead of replacing the whole drawing. Returns null when `offset` is not
+ * inside a top-level element (inter-element whitespace, or the root tag itself) —
+ * the caller falls back to a full compile.
+ *
+ * Offsets are UTF-8 byte offsets, matching the `data-xsvg-pos` attributes `sourcemap`
+ * emits. Note that `-x-google-` font markers are stripped before compiling, so a
+ * document using them must be measured in the same stripped coordinates.
+ */
+export function compileFragment(source: string, offset: number, opts: CompileOptions = {}): string | null {
+  const s = session(source, opts);
+  s.plugins.beginCompile();
+  try {
+    return wasm.compile_fragment_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts);
+  } catch {
+    return null;
+  }
+}
+
+/** Byte range of the fragment unit containing `offset`, or null when the offset falls
+ *  outside every top-level element. Parse-only — nothing is lowered. */
+export function fragmentRange(source: string, offset: number): [number, number] | null {
+  const r = wasm.fragment_range(stripGooglePrefix(source), offset);
+  return r.length === 2 ? [r[0], r[1]] : null;
+}
+
+/** Byte ranges of the other top-level elements that must be re-emitted alongside the
+ *  fragment at `offset` — the transitive closure over baked `in="#id"` references.
+ *  Parse-only. */
+export function dependents(source: string, offset: number): [number, number][] {
+  const flat = wasm.dependents(stripGooglePrefix(source), offset);
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], flat[i + 1]]);
+  return out;
+}
+
+/**
+ * The text the compiler actually sees for a given source — `-x-google-<Name>` font
+ * markers resolved away.
+ *
+ * Every byte offset in this module's incremental API, and every `data-xsvg-pos` the
+ * compiler emits, indexes *this* string. A host that maps output back to source must
+ * normalize first, or a document using those markers is off by ten bytes per marker
+ * ahead of the element it is looking at.
+ */
+export function normalizeSource(source: string): string {
+  return stripGooglePrefix(source);
 }
 
 export { loadFontDir } from "./fonts.js";

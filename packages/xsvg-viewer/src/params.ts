@@ -152,10 +152,10 @@ export function setAttribute(
 /**
  * Build the editing controls for one element from its declared schema.
  *
- * Values commit on `change`, not `input`: applying an edit recompiles the
- * document and rebuilds this panel, which would yank a control out from under a
- * drag in progress. Committing on release keeps every control usable. (Live
- * dragging needs the panel to survive a recompile — see docs/Extensibility.md §9.)
+ * A bounded number gets a slider that commits **as it moves**: an edit now patches
+ * the drawing in place instead of rebuilding the panel (docs/Incremental.md §4), so
+ * the control survives its own edit and the drawing tracks the drag. Typed values
+ * still commit on `change` — a half-written `var(acc` is not worth compiling.
  */
 export function renderParams(
   spec: ElementSpec,
@@ -187,17 +187,16 @@ export function renderParams(
     row.append(label);
 
     const value = current.get(name)?.value ?? "";
-    const control = makeControl(p, value);
-    // An unset parameter shows the module's default as a placeholder, so the
-    // panel distinguishes "inherited the default" from "explicitly set to it".
-    control.addEventListener("change", () => onChange(name, control.value.trim()));
-    row.append(control);
+    row.append(makeControl(p, value, (v) => onChange(name, v)));
     wrap.append(row);
   }
   return wrap;
 }
 
-function makeControl(p: ParamSpec, value: string): HTMLInputElement | HTMLSelectElement {
+/** Build the control for one parameter, already wired to `commit`. */
+function makeControl(p: ParamSpec, value: string, commit: (v: string) => void): HTMLElement {
+  // An unset parameter shows the module's default as a placeholder, so the panel
+  // distinguishes "inherited the default" from "explicitly set to it".
   const fallback = p.default == null ? "" : String(p.default);
 
   if (p.type === "enum" && p.values?.length) {
@@ -210,29 +209,83 @@ function makeControl(p: ParamSpec, value: string): HTMLInputElement | HTMLSelect
       sel.append(opt);
     }
     sel.value = p.values.includes(value) ? value : "";
+    sel.addEventListener("change", () => commit(sel.value.trim()));
     return sel;
   }
 
+  if (p.type === "number" && p.min != null && p.max != null) return makeSlider(p, value, fallback, commit);
+
   const input = document.createElement("input");
-  if (p.type === "color") {
-    // Deliberately a text field, not `<input type="color">`: a paint value here is
-    // often `var(accent)`, `currentColor`, or `none`, none of which a colour picker
-    // can hold — and silently rewriting a theme token to a literal hex would
-    // quietly sever the document from its palette.
-    input.type = "text";
-    input.value = value;
-    input.placeholder = fallback;
-    return input;
-  }
   if (p.type === "number") {
     input.type = "number";
     if (p.min != null) input.min = String(p.min);
     if (p.max != null) input.max = String(p.max);
     input.step = String(p.step ?? 1);
   } else {
+    // `color` is deliberately a text field, not `<input type="color">`: a paint
+    // value here is often `var(accent)`, `currentColor`, or `none`, none of which a
+    // colour picker can hold — and silently rewriting a theme token to a literal hex
+    // would quietly sever the document from its palette.
     input.type = "text";
   }
   input.value = value;
   input.placeholder = fallback;
+  input.addEventListener("change", () => commit(input.value.trim()));
   return input;
+}
+
+/**
+ * A declared `min`/`max` is what makes a parameter draggable: the module has said
+ * what the useful span is, so the host can offer a slider over exactly that range
+ * rather than guessing one. The paired number box keeps precise entry available —
+ * and stays the only way to clear the value back to the default, since a slider has
+ * no position meaning "unset".
+ */
+function makeSlider(
+  p: ParamSpec,
+  value: string,
+  fallback: string,
+  commit: (v: string) => void,
+): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.className = "xsvg-slider";
+
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = String(p.min);
+  range.max = String(p.max);
+  range.step = String(p.step ?? guessStep(p.min!, p.max!));
+
+  const box = document.createElement("input");
+  box.type = "number";
+  box.min = range.min;
+  box.max = range.max;
+  box.step = range.step;
+  box.value = value;
+  box.placeholder = fallback;
+
+  // With nothing set, the slider sits at whatever the module says it will draw.
+  range.value = value || fallback || range.min;
+
+  range.addEventListener("input", () => {
+    box.value = range.value;
+    commit(range.value);
+  });
+  box.addEventListener("change", () => {
+    const v = box.value.trim();
+    if (v) range.value = v;
+    commit(v);
+  });
+
+  wrap.append(range, box);
+  return wrap;
+}
+
+/** A sane step for a range the module bounded but did not quantize: fine enough to
+ *  feel continuous, coarse enough not to write noise into the source. */
+function guessStep(min: number, max: number): number {
+  const span = Math.abs(max - min);
+  if (span <= 2) return 0.01;
+  if (span <= 20) return 0.1;
+  return 1;
 }

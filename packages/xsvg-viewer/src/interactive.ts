@@ -12,9 +12,10 @@
 //!
 //! The inspector is a lazy `import()` — its CodeMirror dependency (an optional peer)
 //! loads only when `inspector` is set. Bundler-only: not in the CDN bundle.
-import { compileXsvg, type PluginSchemas } from "./compiler";
-import { findArtboards, makeThumb, type Artboard } from "./artboards";
-import { createPanZoom, type PanZoom } from "./pan-zoom";
+import { compileXsvg, type CompileSession, type PluginSchemas } from "./compiler";
+import { findArtboards, makeThumb, paintThumb, type Artboard } from "./artboards";
+import { createPanZoom, type PanZoom, type ViewState } from "./pan-zoom";
+import { ByteIndex, singleEdit } from "./sourcemap";
 import type { MountedInspector } from "./interactive-inspector";
 
 const CODE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 7 3 12 8 17"/><polyline points="16 7 21 12 16 17"/><line x1="13.5" y1="4" x2="10.5" y2="20"/></svg>`;
@@ -102,6 +103,10 @@ const STYLE = `
 .xsvg-param input, .xsvg-param select { width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 5px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #0f172a; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .xsvg-param input:focus, .xsvg-param select:focus { outline: 2px solid #93c5fd; outline-offset: -1px; border-color: #60a5fa; }
 .xsvg-param input::placeholder { color: #94a3b8; }
+/* A bounded number: drag the rail, or type in the box beside it. */
+.xsvg-slider { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.xsvg-slider input[type=range] { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: none; accent-color: #2563eb; }
+.xsvg-slider input[type=number] { flex: 0 0 62px; width: 62px; }
 .source-pane { flex: 1; border-top: 1px solid #e2e8f0; }
 .source { flex: 1; min-height: 0; overflow: hidden; }
 .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(225,29,72,.16); outline: 1px solid rgba(225,29,72,.45); }
@@ -137,6 +142,7 @@ const STYLE = `
   .xsvg-param-name { color: #c4b5fd; }
   .xsvg-param input, .xsvg-param select { background: #1e293b; border-color: #475569; color: #e2e8f0; }
   .xsvg-param input::placeholder { color: #64748b; }
+  .xsvg-slider input[type=range] { background: none; border: 0; accent-color: #60a5fa; }
   .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(251,113,133,.22); outline-color: rgba(251,113,133,.5); }
   /* CodeMirror source pane: dark gutter (line numbers), surface, and native scrollbar.
      Prefixed with .source to outweigh CodeMirror's own injected single-class rules. */
@@ -172,9 +178,17 @@ export class XsvgViewInteractive extends HTMLElement {
   private pluginSchemas: PluginSchemas | null = null;
   /** UTF-16 source offset to re-pin after a parameter edit recompiles. */
   private repin: number | null = null;
+  /** Incremental handle on the last compile, and the exact text it was given —
+   *  the two things an edit needs to patch the drawing instead of rebuilding it. */
+  private session: CompileSession | null = null;
+  private compiled = "";
+  private compiledBytes: ByteIndex | null = null;
+  /** Pan/zoom to restore across a full recompile, so an edit never moves the view. */
+  private keepView: ViewState | null = null;
   private fitted = true;
   private deckFrame: [number, number, number, number] | null = null;
   private deckSelectFn: ((i: number) => void) | null = null;
+  private deckThumbs: { el: HTMLDivElement; frame: [number, number, number, number] }[] = [];
   private deckActive = 0;
   private dropped: string | null = null;
   private srcProp: string | null = null;
@@ -367,9 +381,19 @@ export class XsvgViewInteractive extends HTMLElement {
         baseUrl,
         resolve: this.resolveFn ?? undefined,
         loader: this.loaderObj ?? undefined,
-        onPlugins: (s) => { this.pluginSchemas = s; },
+        // Guarded on the token: a superseded compile must not leave its schemas or
+        // its incremental handle behind for the current document to edit through.
+        onPlugins: (s) => { if (mine === this.token) this.pluginSchemas = s; },
+        onSession: (s) => { if (mine === this.token) this.session = s; },
       });
       if (mine !== this.token) return;
+
+      // The source of record is what the compiler actually saw, not what we handed
+      // it: `-x-google-` font markers are resolved away first, which shifts every
+      // later offset. Indexing the original text would put every `data-xsvg-pos`
+      // out by the markers ahead of it.
+      this.compiled = this.session?.source ?? source;
+      this.compiledBytes = null;
 
       this.teardown();
       this.errBox.hidden = true;
@@ -380,6 +404,14 @@ export class XsvgViewInteractive extends HTMLElement {
 
       this.panzoom = createPanZoom(this.stage, this.content);
       this.setupDeck(svgEl);
+      // A recompile the user didn't ask for (a parameter edit that couldn't be
+      // patched) must not throw away where they were looking.
+      if (this.keepView) {
+        this.panzoom.setView(this.keepView);
+        this.fitted = false;
+        this.updateFitIcon();
+      }
+      this.keepView = null;
 
       if (withInspector) {
         const { mountInspector } = await import("./interactive-inspector");
@@ -388,15 +420,9 @@ export class XsvgViewInteractive extends HTMLElement {
           svgRoot: svgEl,
           panel: this.panel,
           sourcePane: this.sourcePane,
-          source,
+          source: this.compiled,
           schemas: this.pluginSchemas,
-          // A parameter edit rewrites the document and recompiles it. The edit is
-          // inside the element, so its start offset does not move — re-pin there so
-          // the panel stays on the element being adjusted.
-          onEdit: (next, pinAt) => {
-            this.repin = pinAt;
-            this.source = next;
-          },
+          onEdit: (next, pinAt) => this.applyEdit(next, pinAt),
         });
         this.panzoom.onBackgroundClick(() => this.inspector?.clear());
         if (this.root.classList.contains("inspector-open")) this.inspector.remeasure();
@@ -409,16 +435,111 @@ export class XsvgViewInteractive extends HTMLElement {
     } catch (err) {
       if (mine !== this.token) return;
       this.teardown();
+      this.session = null; // nothing rendered — there is nothing to patch
+      this.compiled = "";
+      this.compiledBytes = null;
       this.content.innerHTML = "";
       this.errBox.hidden = false;
       this.errBox.textContent = String(err);
     }
   }
 
+  /**
+   * Take an edit to the document — today, always from the parameter panel.
+   *
+   * The fast path re-emits only the elements the edit can have changed and swaps
+   * them into the live DOM (docs/Incremental.md §4). What that buys is not really
+   * speed: it is that the pan/zoom, the source pane, the deck and the control under
+   * the user's pointer all *survive*, which is what makes dragging a value feel
+   * live. The slow path is a full recompile, and stays correct for every case the
+   * patch declines.
+   */
+  private applyEdit(next: string, pinAt: number) {
+    if (this.tryPatch(next)) return;
+    this.repin = pinAt;
+    this.keepView = this.panzoom?.view() ?? null;
+    this.source = next;
+  }
+
+  /**
+   * Patch the rendered drawing in place for a single contiguous source edit.
+   * Returns false — having changed nothing — whenever the edit's effect cannot be
+   * confined to a known set of top-level elements, leaving the caller to recompile.
+   */
+  private tryPatch(next: string): boolean {
+    const session = this.session;
+    const inspector = this.inspector;
+    const svgEl = this.content.querySelector("svg") as SVGSVGElement | null;
+    if (!session || !inspector || !svgEl) return false;
+
+    const edit = singleEdit(this.compiled, next);
+    if (!edit) return true; // identical text — the edit was a no-op
+    const oldBytes = (this.compiledBytes ??= new ByteIndex(this.compiled));
+    const newBytes = new ByteIndex(next);
+
+    // The common prefix ends at the same byte offset in both versions, so that one
+    // offset is the pivot: everything before it is unmoved, everything after shifts
+    // by the length difference. That is what lets the DOM's old `data-xsvg-pos`
+    // anchors be found from the new source's fragment ranges, and back.
+    const pivot = newBytes.toByte(edit.from);
+    const delta = newBytes.byteLength - oldBytes.byteLength;
+    const toOld = (b: number) => (b <= pivot ? b : b - delta);
+    const toNew = (b: number) => (b <= pivot ? b : b + delta);
+
+    const unit = session.range(next, pivot);
+    if (!unit) return false; // the edit is in the root tag or between elements
+    const targets = [unit, ...session.dependents(next, pivot)];
+
+    // Resolve, compile and parse everything before mutating anything: a patch that
+    // failed halfway would leave the drawing disagreeing with its own source.
+    const swaps: { run: ChildNode[]; nodes: ChildNode[] }[] = [];
+    for (const [start, end] of targets) {
+      const key = `${toOld(start)}-${toOld(end)}`;
+      const anchor = svgEl.querySelector(`[data-xsvg-pos="${key}"]`);
+      // No anchor: this fragment emitted no element last time (a degradation marker
+      // is a comment, which carries no attributes), so there is nothing to replace.
+      if (!anchor) return false;
+      const run = fragmentRun(anchor, key, session.fragment(this.compiled, toOld(start)));
+      if (!run) return false;
+      const markup = session.fragment(next, start);
+      if (markup == null) return false;
+      swaps.push({ run, nodes: parseSvgFragment(markup) });
+    }
+
+    // Re-stamp the spans of everything we are *not* replacing: their source moved
+    // under them even though their output did not.
+    for (const el of Array.from(svgEl.querySelectorAll("[data-xsvg-pos]"))) {
+      const v = el.getAttribute("data-xsvg-pos")!;
+      const dash = v.indexOf("-");
+      const a = Number(v.slice(0, dash));
+      const b = Number(v.slice(dash + 1));
+      if (Number.isFinite(a) && Number.isFinite(b)) el.setAttribute("data-xsvg-pos", `${toNew(a)}-${toNew(b)}`);
+    }
+    // The re-emitted markup already carries new-source spans, so it goes in after.
+    for (const { run, nodes } of swaps) {
+      run[0].replaceWith(...nodes);
+      for (let i = 1; i < run.length; i++) run[i].remove();
+    }
+
+    this.compiled = next;
+    this.compiledBytes = newBytes;
+    this.srcProp = next; // adopt the edit without triggering a render
+    inspector.refresh(next, edit, toNew);
+    this.repaintThumbs(svgEl);
+    return true;
+  }
+
+  /** Keep the deck rail current after a patch, without disturbing the selection or
+   *  refitting the stage the way a fresh `setupDeck` would. */
+  private repaintThumbs(svg: SVGSVGElement) {
+    for (const t of this.deckThumbs) paintThumb(t.el, svg, t.frame);
+  }
+
   private setupDeck(svg: SVGSVGElement) {
     this.rail.innerHTML = "";
     this.deckFrame = null;
     this.deckSelectFn = null;
+    this.deckThumbs = [];
     const boards = findArtboards(svg);
     this.deckToggle.hidden = boards.length < 2;
     if (boards.length < 2) {
@@ -433,6 +554,7 @@ export class XsvgViewInteractive extends HTMLElement {
       const t = makeThumb(svg, b);
       t.addEventListener("click", () => this.deckSelectFn?.(i));
       this.rail.appendChild(t);
+      this.deckThumbs.push({ el: t, frame: b.frame });
       return t;
     });
     this.deckSelectFn = (i: number) => {
@@ -508,6 +630,60 @@ export class XsvgViewInteractive extends HTMLElement {
       window.addEventListener("pointerup", up);
     });
   }
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * The consecutive sibling nodes in the rendered document that together are one
+ * fragment's output.
+ *
+ * A fragment is not always a single element. It may emit a `<filter>` definition
+ * ahead of the shape that references it, or a degradation comment ahead of both,
+ * and replacing only the element would strand the rest — leaving a second `<filter>`
+ * with a duplicate id, which the browser resolves to the *stale* one. So the run is
+ * measured against a re-compile of the fragment as it currently stands (byte-identical
+ * to what is in the DOM, by the incremental invariant): its node count gives the run's
+ * length, and the position of the keyed node within it gives where the run starts
+ * relative to the anchor.
+ *
+ * Null when the current markup cannot be reproduced, or when the DOM does not hold as
+ * many siblings as it claims — either way the caller falls back to a full compile.
+ */
+function fragmentRun(anchor: Element, key: string, current: string | null): ChildNode[] | null {
+  if (current == null) return null;
+  const nodes = parseSvgFragment(current);
+  const at = nodes.findIndex(
+    (n) => n.nodeType === 1 && (n as Element).getAttribute("data-xsvg-pos") === key,
+  );
+  if (at < 0) return null;
+  const run: ChildNode[] = [anchor];
+  let before: ChildNode = anchor;
+  for (let i = 0; i < at; i++) {
+    if (!before.previousSibling) return null;
+    run.unshift((before = before.previousSibling));
+  }
+  let after: ChildNode = anchor;
+  for (let i = at + 1; i < nodes.length; i++) {
+    if (!after.nextSibling) return null;
+    run.push((after = after.nextSibling));
+  }
+  return run;
+}
+
+/**
+ * Parse re-emitted fragment markup into nodes ready to splice into the drawing.
+ *
+ * Parsed against an `<svg>` context element, so `<path>` and friends land in the
+ * SVG namespace rather than becoming inert unknown HTML elements. All child nodes
+ * are returned, not just the first element: a fragment may be preceded by
+ * degradation marker comments, and dropping those would lose the compiler's
+ * explanation of what it declined to draw.
+ */
+function parseSvgFragment(markup: string): ChildNode[] {
+  const holder = document.createElementNS(SVG_NS, "svg");
+  holder.innerHTML = markup;
+  return Array.from(holder.childNodes);
 }
 
 /** Give the compiled SVG an explicit pixel size from its viewBox, so the pan/zoom

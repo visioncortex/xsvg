@@ -8,6 +8,7 @@
 import { createEditor } from "./editor";
 import { createInspector } from "./inspector";
 import type { PluginSchemas } from "./params";
+import type { SingleEdit } from "./sourcemap";
 
 export interface MountedInspector {
   clear(): void;
@@ -16,6 +17,9 @@ export interface MountedInspector {
   /** Re-pin the element at a UTF-16 source offset (used to restore the selection
    *  after a parameter edit recompiles the document). */
   selectAtSourceOffset(offset: number): void;
+  /** Adopt a document patched in place — see `Inspector.refresh`. Applies the edit
+   *  to the source pane as one contiguous change so it keeps its scroll position. */
+  refresh(source: string, edit: SingleEdit, mapOffset: (byte: number) => number): void;
   destroy(): void;
 }
 
@@ -49,6 +53,10 @@ export function mountInspector(opts: {
     clear: () => inspector.clear(),
     remeasure: () => editor.view.requestMeasure(),
     selectAtSourceOffset: (offset: number) => inspector.selectAtSourceOffset(offset),
+    refresh: (source, edit, mapOffset) => {
+      editor.replace(edit.from, edit.to, source.slice(edit.from, edit.insertEnd));
+      inspector.refresh(source, mapOffset);
+    },
     destroy: () => {
       editor.view.dom.removeEventListener("mousedown", onSrcDown);
       inspector.destroy();

@@ -20,6 +20,7 @@
     "start": "vite preview",
     "typecheck": "tsc --noEmit",
     "check:params": "node --experimental-strip-types scripts/params-check.mjs",
+    "check:incremental": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/incremental-check.mjs",
     "compare": "cargo build --release -p xsvg-cli && node scripts/compare.mjs"
   },
   "devDependencies": {
