@@ -2852,6 +2852,10 @@ mod mesh;
 use mesh::*;
 mod pathops;
 use pathops::*;
+pub mod elements;
+use elements::params_of;
+// so submodules reach `.as_str()` on a declared enum parameter through `super::*`
+pub(crate) use xsvg_schema::ParamEnum;
 pub mod plugin;
 use plugin::{
     check_import, emit_plugin, load_imports, GeneratorHost, ImportTable, NoGenerators,

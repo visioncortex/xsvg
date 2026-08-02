@@ -109,14 +109,14 @@ pub(super) fn sector_path(cx: f64, cy: f64, ro: f64, ri: f64, a0deg: f64, a1deg:
 /// `start` sets the first slice's angle (default −90°, top). Each slice bakes to
 /// one `<path>` sector carrying its own source range.
 pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    let cx = attr_num(node, "cx", 0.0);
-    let cy = attr_num(node, "cy", 0.0);
-    let r = attr_num(node, "r", 100.0).max(0.0);
-    let inner = attr_num(node, "inner-radius", 0.0).max(0.0).min(r);
-    let start = attr_num(node, "start", -90.0);
-    let gap = attr_num(node, "gap", 0.0).max(0.0);
-    let pie_stroke = node.attribute("stroke");
-    let pie_sw = attr_num(node, "stroke-width", 0.0);
+    let p: super::elements::Pie = params_of(node);
+    let (cx, cy) = (p.cx, p.cy);
+    let r = p.r.max(0.0);
+    let inner = p.inner_radius.max(0.0).min(r);
+    let start = p.start;
+    let gap = p.gap.max(0.0);
+    let pie_stroke = p.stroke.as_deref();
+    let pie_sw = p.stroke_width;
 
     let slices: Vec<roxmltree::Node> = node
         .children()
@@ -226,10 +226,11 @@ pub(super) fn parse_points(s: &str) -> Vec<(f64, f64)> {
 /// spread) and `<x:line points>` (polyline + optional dots / area). `y-ticks`
 /// draws gridlines with value labels.
 pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    let (mut px, mut py) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    let pl: super::elements::Plot = params_of(node);
+    let (mut px, mut py) = (pl.x, pl.y);
     let (mut pw, mut ph) = (
-        attr_num(node, "width", 400.0),
-        attr_num(node, "height", 200.0),
+        pl.width,
+        pl.height,
     );
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
@@ -273,17 +274,17 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let mapy = |dy: f64| py + ph - (dy - yd0) / (yd1 - yd0) * ph;
     let clamp_y = |y: f64| y.clamp(py, py + ph);
 
-    let grid = resolve_var(node.attribute("grid-color").unwrap_or("#e2e8f0")).into_owned();
-    let grid_w = attr_num(node, "grid-width", 1.0).max(0.0);
-    let label_fill = resolve_var(node.attribute("label-fill").unwrap_or("#64748b")).into_owned();
-    let label_size = attr_num(node, "label-size", 11.0);
+    let grid = resolve_var(&pl.grid_color).into_owned();
+    let grid_w = pl.grid_width.max(0.0);
+    let label_fill = resolve_var(&pl.label_fill).into_owned();
+    let label_size = pl.label_size;
 
     out.push_str("<g");
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
 
     // y gridlines + value labels
-    let yticks = attr_num(node, "y-ticks", 0.0).max(0.0) as usize;
+    let yticks = pl.y_ticks.max(0.0) as usize;
     if yticks >= 1 {
         for k in 0..=yticks {
             let v = yd0 + (yd1 - yd0) * k as f64 / yticks as f64;

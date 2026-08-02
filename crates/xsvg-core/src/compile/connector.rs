@@ -12,6 +12,8 @@ use super::*;
 pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     use crate::kurbo::{Point, Rect};
 
+    let cn: super::elements::Connector = params_of(node);
+
     // §7.6 endpoints. `from`/`to` reference an element by id, optionally with an
     // `:anchor` suffix forcing which of the box's 9 connection points to attach to —
     // an edge midpoint (`left|right|top|bottom`), a corner (`left-top`, `right-bottom`,
@@ -56,8 +58,8 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         Some(Point::new(x, y))
     };
     // A resolved endpoint: its box (a point is a zero-size box) + an optional forced anchor.
-    let resolve_end = |ref_attr: &str, pt_attr: &str| -> Option<(Rect, Option<Anchor>)> {
-        if let Some(r) = node.attribute(ref_attr) {
+    let resolve_end = |reference: Option<&str>, point: Option<&str>| -> Option<(Rect, Option<Anchor>)> {
+        if let Some(r) = reference {
             let (id, anchor) = match r.rsplit_once(':') {
                 Some((base, suf)) => match parse_anchor(suf) {
                     Some(an) => (base, Some(an)),
@@ -69,14 +71,16 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                 .ok()
                 .and_then(|d| svg_path_bbox(&d))?;
             Some((rect, anchor))
-        } else if let Some(pt) = node.attribute(pt_attr).and_then(|p| parse_point(p)) {
+        } else if let Some(pt) = point.and_then(parse_point) {
             Some((Rect::new(pt.x, pt.y, pt.x, pt.y), None))
         } else {
             None
         }
     };
-    let (Some((a, anchor_a)), Some((b, anchor_b))) =
-        (resolve_end("from", "from-point"), resolve_end("to", "to-point"))
+    let (Some((a, anchor_a)), Some((b, anchor_b))) = (
+        resolve_end(cn.from.as_deref(), cn.from_point.as_deref()),
+        resolve_end(cn.to.as_deref(), cn.to_point.as_deref()),
+    )
     else {
         out.push_str("<!-- xsvg: <x:connector> endpoint not found or not geometry -->");
         return;
@@ -113,12 +117,12 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     };
     let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
 
-    let stroke = resolve_var(node.attribute("stroke").unwrap_or("#334155")).into_owned();
-    let sw = attr_num(node, "stroke-width", 1.0);
-    let size = attr_num(node, "arrow-size", (sw * 3.5).max(7.0)).max(0.0);
+    let stroke = resolve_var(&cn.stroke).into_owned();
+    let sw = cn.stroke_width;
+    let size = cn.arrow_size.unwrap_or((sw * 3.5).max(7.0)).max(0.0);
     // How far a `route="curve"` bows out, in px — a FIXED amount (not scaled by the
     // endpoint distance), so wide and narrow connectors bow the same. Author-controllable.
-    let bulge = attr_num(node, "bulge", 44.0).max(0.0);
+    let bulge = cn.bulge.max(0.0);
 
     let cubic_at = |p0: Point, p1: Point, p2: Point, p3: Point, t: f64| -> Point {
         let mt = 1.0 - t;
@@ -196,9 +200,9 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         [q0, a, d, f]
     };
 
-    let arrow = node.attribute("arrow").unwrap_or("end");
-    let arrow_start = arrow == "start" || arrow == "both";
-    let arrow_end = arrow == "end" || arrow == "both";
+    use super::elements::ConnectorArrow as Arw;
+    let arrow_start = matches!(cn.arrow, Arw::Start | Arw::Both);
+    let arrow_end = matches!(cn.arrow, Arw::End | Arw::Both);
     // Trim `from` toward `toward` by the arrowhead height, so the stroked line
     // stops at the triangle's base instead of running under (and past) the tip.
     // Clamped to the segment so a short segment doesn't invert.
@@ -323,7 +327,7 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // neighbouring path point, so unit(tip − adj) is the direction the line
     // travels OUT of that end — the way its arrowhead points.
     let (d, start_tip, start_adj, end_tip, end_adj) =
-        match node.attribute("route").unwrap_or("straight") {
+        match cn.route.as_str() {
             "x-major" => {
                 let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
                 let ax = match anchor_a {

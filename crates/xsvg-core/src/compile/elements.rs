@@ -1,0 +1,258 @@
+//! Declarations for the built-in `x:` elements (docs/Extensibility.md §11).
+//!
+//! Every element's parameters live here as a struct, and the derive generates
+//! both the machine-readable description and the code that reads it — the same
+//! mechanism a plugin uses for its manifest. That is what lets the compiler
+//! answer `describe(ns, tag)` for its own elements, so an editor building
+//! property controls never has to know which tier it is editing.
+//!
+//! A parameter with no field cannot be read, and a field nothing reads is a
+//! `dead_code` warning, so the description cannot drift from the behaviour.
+
+use xsvg_schema::{AttrSource, ElementSpec, ParamEnum, Params};
+
+/// Read attributes straight off an XML node, so the derived parsing works
+/// against the document with no intermediate copy.
+pub(super) struct Attrs<'a, 'i>(pub roxmltree::Node<'a, 'i>);
+
+impl AttrSource for Attrs<'_, '_> {
+    fn attr(&self, name: &str) -> Option<&str> {
+        self.0.attribute(name)
+    }
+}
+
+/// Parse an element's declared parameters from its node.
+pub(super) fn params_of<P: Params>(node: roxmltree::Node) -> P {
+    P::from_attrs(&Attrs(node))
+}
+
+// ---- geometry -------------------------------------------------------------
+
+#[derive(Params)]
+#[element(
+    name = "offset",
+    doc = "Grow or shrink a referenced region by a distance (Minkowski offset).",
+    input = "required"
+)]
+pub(super) struct Offset {
+    #[param(default = 0.0, min = -1000.0, max = 1000.0, doc = "negative shrinks")]
+    pub distance: f64,
+    #[param(default = "round")]
+    pub join: OffsetJoin,
+    #[param(default = 4.0, min = 1.0, max = 100.0)]
+    pub miter_limit: f64,
+    #[param(default = "nonzero", doc = "how the referenced region reads its own winding")]
+    pub fill_rule: FillRule,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum OffsetJoin {
+    /// The true disc offset.
+    #[default]
+    Round,
+    Miter,
+    Bevel,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum FillRule {
+    #[default]
+    Nonzero,
+    #[value("evenodd")]
+    EvenOdd,
+}
+
+#[derive(Params)]
+#[element(name = "boolean", doc = "Combine its operand shapes with a path-algebra operation.")]
+pub(super) struct Boolean {
+    /// Optional on purpose. A non-`Option` enum falls back to its default when a
+    /// value is misspelled, which is right for a forgiving parameter like
+    /// alignment — but `<x:boolean>` must degrade with a marker instead of
+    /// silently unioning, so absence and "unknown spelling" have to stay
+    /// distinguishable.
+    #[param(default = "union")]
+    pub op: Option<BooleanOp>,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum BooleanOp {
+    #[default]
+    Union,
+    Intersect,
+    Subtract,
+    Exclude,
+}
+
+#[derive(Params)]
+#[element(
+    name = "warp",
+    doc = "Distort its children through a field — a preset envelope, a bend along a spine, or free corner distortion."
+)]
+pub(super) struct Warp {
+    #[param(doc = "envelope preset name; empty means none")]
+    pub field: Option<String>,
+    #[param(default = 0.0, min = -100.0, max = 100.0, doc = "percent")]
+    pub bend: f64,
+    #[param(default = "h")]
+    pub axis: WarpAxisParam,
+    #[param(default = 10.0, min = 0.0, max = 100.0, doc = "roughen detail")]
+    pub detail: f64,
+    #[param(default = 0.0, min = -100.0, max = 100.0, doc = "horizontal distortion, percent")]
+    pub distort_h: f64,
+    #[param(default = 0.0, min = -100.0, max = 100.0, doc = "vertical distortion, percent")]
+    pub distort_v: f64,
+    #[param(default = "start", doc = "alignment along the spine")]
+    pub align: String,
+    #[param(default = 0.0, doc = "offset along the spine")]
+    pub start: f64,
+    #[param(doc = "four x,y pairs for free distortion")]
+    pub corners: Option<String>,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum WarpAxisParam {
+    #[default]
+    #[value("h")]
+    Horizontal,
+    #[value("v")]
+    Vertical,
+}
+
+// ---- charts ---------------------------------------------------------------
+
+#[derive(Params)]
+#[element(name = "pie", doc = "A pie or donut chart built from <x:slice> children.")]
+pub(super) struct Pie {
+    #[param(default = 0.0)]
+    pub cx: f64,
+    #[param(default = 0.0)]
+    pub cy: f64,
+    #[param(default = 100.0, min = 0.0, max = 2000.0)]
+    pub r: f64,
+    #[param(default = 0.0, min = 0.0, max = 2000.0, doc = "non-zero makes a donut")]
+    pub inner_radius: f64,
+    #[param(default = -90.0, min = -360.0, max = 360.0, doc = "degrees; -90 starts at 12 o'clock")]
+    pub start: f64,
+    #[param(default = 0.0, min = 0.0, max = 45.0, doc = "degrees between slices")]
+    pub gap: f64,
+    #[param(color)]
+    pub stroke: Option<String>,
+    #[param(default = 0.0, min = 0.0, max = 40.0)]
+    pub stroke_width: f64,
+}
+
+#[derive(Params)]
+#[element(
+    name = "plot",
+    doc = "A cartesian plot frame for <x:bars> and <x:line> children.",
+    input = "optional"
+)]
+pub(super) struct Plot {
+    #[param(default = 0.0)]
+    pub x: f64,
+    #[param(default = 0.0)]
+    pub y: f64,
+    #[param(default = 400.0, min = 0.0, max = 4000.0)]
+    pub width: f64,
+    #[param(default = 200.0, min = 0.0, max = 4000.0)]
+    pub height: f64,
+    #[param(color, default = "#e2e8f0")]
+    pub grid_color: String,
+    #[param(default = 1.0, min = 0.0, max = 20.0)]
+    pub grid_width: f64,
+    #[param(color, default = "#64748b")]
+    pub label_fill: String,
+    #[param(default = 11.0, min = 0.0, max = 200.0)]
+    pub label_size: f64,
+    #[param(default = 0.0, min = 0.0, max = 20.0, doc = "0 draws no y axis labels")]
+    pub y_ticks: f64,
+}
+
+// ---- mesh -----------------------------------------------------------------
+
+#[derive(Params)]
+#[element(name = "mesh", doc = "A gradient mesh, rasterized to a texel-aligned image.")]
+pub(super) struct Mesh {
+    #[param(default = 0.0)]
+    pub x: f64,
+    #[param(default = 0.0)]
+    pub y: f64,
+    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    pub width: f64,
+    #[param(default = 0.0, min = 0.0, max = 4000.0)]
+    pub height: f64,
+    #[param(default = 0.0, min = 0.0, max = 64.0, doc = "with rows, builds a uniform grid")]
+    pub cols: f64,
+    #[param(default = 0.0, min = 0.0, max = 64.0)]
+    pub rows: f64,
+}
+
+// ---- connector ------------------------------------------------------------
+
+#[derive(Params)]
+#[element(name = "connector", doc = "A routed line between two elements, with arrowheads.")]
+pub(super) struct Connector {
+    #[param(doc = "#id of the element the line leaves")]
+    pub from: Option<String>,
+    #[param(doc = "#id of the element the line reaches")]
+    pub to: Option<String>,
+    #[param(doc = "which side to leave from: top, right, bottom, left")]
+    pub from_point: Option<String>,
+    #[param(doc = "which side to arrive at")]
+    pub to_point: Option<String>,
+    #[param(default = "straight")]
+    pub route: ConnectorRoute,
+    #[param(default = "end")]
+    pub arrow: ConnectorArrow,
+    #[param(min = 0.0, max = 100.0, doc = "defaults to 3.5x stroke-width, minimum 7")]
+    pub arrow_size: Option<f64>,
+    #[param(default = 44.0, min = 0.0, max = 500.0, doc = "curve bow, for route=curve")]
+    pub bulge: f64,
+    #[param(color, default = "#334155")]
+    pub stroke: String,
+    #[param(default = 1.0, min = 0.0, max = 40.0)]
+    pub stroke_width: f64,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum ConnectorRoute {
+    #[default]
+    Straight,
+    Curve,
+    #[value("x-major")]
+    XMajor,
+    #[value("y-major")]
+    YMajor,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum ConnectorArrow {
+    #[default]
+    End,
+    Start,
+    Both,
+    None,
+}
+
+/// Every built-in element, for the compiler's own `describe` surface — the same
+/// shape a plugin's manifest takes, so a host merges the two without branching.
+pub fn built_in_elements() -> &'static [ElementSpec] {
+    ELEMENTS
+}
+
+/// The built-in elements as a manifest, in the shape a plugin module answers
+/// with. A property panel therefore reads both tiers through one path and never
+/// has to know which it is editing.
+pub fn describe_impl() -> String {
+    xsvg_schema::manifest_json(1, super::XSVG_NS, "xsvg", env!("CARGO_PKG_VERSION"), ELEMENTS)
+}
+
+static ELEMENTS: &[ElementSpec] = &[
+    Offset::SPEC,
+    Boolean::SPEC,
+    Warp::SPEC,
+    Pie::SPEC,
+    Plot::SPEC,
+    Mesh::SPEC,
+    Connector::SPEC,
+];

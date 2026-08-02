@@ -23,6 +23,7 @@ i_overlay = "7.0.2"
 i_shape = "3.0.0"
 kurbo = "0.13.1"
 roxmltree = { version = "0.20", optional = true }
+xsvg-schema = { version = "0.1.0", path = "../xsvg-schema" }
 
 [dev-dependencies]
 # depend on ourselves with `compile` on, so `cargo test` always builds the compiler + its

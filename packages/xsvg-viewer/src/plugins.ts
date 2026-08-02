@@ -54,6 +54,9 @@ interface Manifest {
 /** The ABI this host speaks (docs/Extensibility.md §4). */
 const ABI_VERSION = 1;
 
+/** The core namespace, whose elements the compiler describes itself. */
+const XSVG_NS = "https://xsvg.visioncortex.org";
+
 interface Exports {
   memory: WebAssembly.Memory;
   xsvg_abi_version(): number;
@@ -200,14 +203,18 @@ export class PluginRegistry {
   }
 
   /**
-   * The parameter schemas the loaded modules declare, for a host building UI.
-   * Reading this runs no generator — a manifest is answered from the module's
-   * own description, so an editor can offer controls for an element the
-   * compiler has never heard of.
+   * Parameter schemas for **every** element the document can use — the
+   * compiler's own `x:` elements alongside whatever the loaded modules declare
+   * (docs/Extensibility.md §11). Both come from the same derived declarations,
+   * so a property panel reads one lookup and never branches on tier.
+   *
+   * Reading this runs no generator.
    */
-  schemas(): PluginSchemas {
+  schemas(builtIns?: Record<string, ElementSpec>): PluginSchemas {
+    const core = builtIns ?? {};
     return {
-      spec: (ns, tag) => this.loaded.get(ns)?.manifest.elements?.[tag] ?? null,
+      spec: (ns, tag) =>
+        (ns === XSVG_NS ? core[tag] : this.loaded.get(ns)?.manifest.elements?.[tag]) ?? null,
     };
   }
 

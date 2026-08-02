@@ -28,6 +28,10 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   module actually reads: a parameter with no field cannot be read, and a field nothing reads is
   a `dead_code` warning. (The hand-written manifest this replaced already omitted `x` and `y`.)
   The derives are compile-time only — nothing reaches the emitted wasm.
+- The compiler **describes its own elements** through the same declarations, exposed as
+  `describe()`, so the viewer merges built-ins and plugin manifests into one lookup and a
+  property panel treats both tiers identically. Seven `x:` elements are converted (`offset`,
+  `boolean`, `warp`, `pie`, `plot`, `mesh`, `connector`); the text elements follow.
 - **`clipart`**, the first official extension (`crates/ext/clipart`) — `<arrow>` (thick shafted
   arrow, one or two heads, optional outline and corner rounding) and `<callout>` (a bubble sized
   to its children). Official extensions load through the same public seam as anyone else's.

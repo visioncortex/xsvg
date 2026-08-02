@@ -23,10 +23,11 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // <x:mesh x y width height cols rows fill="(cols+1)·(rows+1) vertex
         // colors, row-major"/> — per-VERTEX colors, smooth by construction
         // (cracks are the indexed form's job)
-        let cols = attr_num(node, "cols", 0.0) as usize;
-        let rows = attr_num(node, "rows", 0.0) as usize;
-        let (gx, gy) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
-        let (gw, gh) = (attr_num(node, "width", 0.0), attr_num(node, "height", 0.0));
+        let mp: super::elements::Mesh = params_of(node);
+        let cols = mp.cols as usize;
+        let rows = mp.rows as usize;
+        let (gx, gy) = (mp.x, mp.y);
+        let (gw, gh) = (mp.width, mp.height);
         let cols_ok = (1..=64).contains(&cols) && (1..=64).contains(&rows);
         let vcols: Vec<(crate::gradient::LinRgb, f32)> = node
             .attribute("fill")

@@ -33,6 +33,13 @@ pub use compile::{
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.
 #[cfg(feature = "compile")]
+// The compiler describing its own elements (docs/Extensibility.md §11), in the
+// same shape a plugin's manifest takes.
+#[cfg(feature = "compile")]
+pub use compile::elements::{built_in_elements, describe_impl};
+#[cfg(feature = "compile")]
+pub use xsvg_schema::{ElementSpec, ParamKind, ParamSpec};
+#[cfg(feature = "compile")]
 pub use compile::plugin::{
     imports_impl, ChildFragment, ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost,
     Import, ImportTable, InputMode, NoGenerators,

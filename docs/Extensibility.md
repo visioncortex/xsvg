@@ -412,9 +412,24 @@ deliberately skipped for now.
 
 Both tiers describe themselves through one mechanism: `crates/xsvg-schema` (traits and JSON
 emission) plus `crates/xsvg-schema-derive` (the `Params` / `ParamEnum` derives). A plugin
-generates its manifest from it; the built-in `x:` elements are being moved onto it so the
-compiler can answer `describe(ns, tag)` for its own elements too, and a property panel never
-has to know which tier it is editing.
+generates its manifest from it, and the compiler answers `describe()` for its own elements in
+the same shape (`crates/xsvg-core/src/compile/elements.rs`), so a host merges the two into one
+lookup and a property panel never has to know which tier it is editing.
+
+Converted so far: `offset`, `boolean`, `warp`, `pie`, `plot`, `mesh`, `connector`. The text
+elements (`textbox`, `textpath`, `list`, `table`, and revived `<textArea>`) still read their
+attributes by hand; they share a font-property group, so finishing them wants a
+`#[param(flatten)]` on the derive rather than the same seven fields restated five times.
+
+The enforcement is not theoretical. Converting these caught three would-be drifts immediately:
+`<x:boolean>`'s fourth operation is `exclude`, not the `xor` first declared; and `dead_code`
+flagged `warp`'s `corners` and `pie`'s `stroke` as declared-but-not-read, because their
+emitters were still reading the node directly.
+
+One semantic worth knowing: a non-`Option` enum parameter falls back to its default when a
+value is misspelled, which matches how this codebase's `Align::parse` and friends already
+behave. An element that must **degrade instead** — `<x:boolean>` emits a marker for an unknown
+`op` — declares the field `Option<T>`, so absence and a bad spelling stay distinguishable.
 
 Costs and limits, honestly:
 

@@ -542,6 +542,7 @@ dependencies = [
  "serde_json",
  "xsvg-core",
  "xsvg-gradient",
+ "xsvg-schema",
 ]
 
 [[package]]

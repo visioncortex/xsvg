@@ -63,20 +63,29 @@ fn kebab_variant(ident: &Ident) -> String {
     out
 }
 
+/// A literal, or a negated one — `min = -100.0` reaches us as a unary
+/// expression rather than a literal, and a range that cannot go negative would
+/// be a poor thing to discover at runtime.
+fn expr_text(e: &syn::Expr) -> Option<String> {
+    match e {
+        syn::Expr::Lit(l) => lit_text(&l.lit),
+        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => {
+            expr_text(&u.expr).map(|t| format!("-{t}"))
+        }
+        _ => None,
+    }
+}
+
+fn expr_f64(e: &syn::Expr) -> Option<f64> {
+    expr_text(e).and_then(|t| t.parse().ok())
+}
+
 fn lit_text(lit: &Lit) -> Option<String> {
     match lit {
         Lit::Str(s) => Some(s.value()),
         Lit::Int(i) => Some(i.base10_digits().to_string()),
         Lit::Float(f) => Some(f.base10_digits().to_string()),
         Lit::Bool(b) => Some(b.value.to_string()),
-        _ => None,
-    }
-}
-
-fn lit_f64(lit: &Lit) -> Option<f64> {
-    match lit {
-        Lit::Int(i) => i.base10_parse().ok(),
-        Lit::Float(f) => f.base10_parse().ok(),
         _ => None,
     }
 }
@@ -124,7 +133,10 @@ struct ParamOpts {
 }
 
 /// Read `key = value` pairs (and bare flags) out of one `#[attr(…)]`.
-fn parse_meta_list(meta: &Meta, mut on: impl FnMut(&str, Option<&Lit>, proc_macro2::Span) -> syn::Result<()>) -> syn::Result<()> {
+fn parse_meta_list(
+    meta: &Meta,
+    mut on: impl FnMut(&str, Option<&syn::Expr>, proc_macro2::Span) -> syn::Result<()>,
+) -> syn::Result<()> {
     let Meta::List(list) = meta else {
         return Ok(());
     };
@@ -135,10 +147,7 @@ fn parse_meta_list(meta: &Meta, mut on: impl FnMut(&str, Option<&Lit>, proc_macr
         match &m {
             Meta::NameValue(nv) => {
                 let key = nv.path.get_ident().map(Ident::to_string).unwrap_or_default();
-                let syn::Expr::Lit(expr) = &nv.value else {
-                    return err(nv.value_span(), "expected a literal");
-                };
-                on(&key, Some(&expr.lit), nv.path.span())?;
+                on(&key, Some(&nv.value), nv.path.span())?;
             }
             Meta::Path(p) => {
                 let key = p.get_ident().map(Ident::to_string).unwrap_or_default();
@@ -155,15 +164,6 @@ fn parse_meta_list(meta: &Meta, mut on: impl FnMut(&str, Option<&Lit>, proc_macr
 
 use syn::spanned::Spanned;
 
-trait ValueSpan {
-    fn value_span(&self) -> proc_macro2::Span;
-}
-impl ValueSpan for syn::MetaNameValue {
-    fn value_span(&self) -> proc_macro2::Span {
-        self.value.span()
-    }
-}
-
 fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let Data::Struct(data) = &ast.data else {
         return err(ast.ident.span(), "Params can only be derived for a struct");
@@ -177,8 +177,8 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         if !attr.path().is_ident("element") {
             continue;
         }
-        parse_meta_list(&attr.meta, |key, lit, span| {
-            let text = lit.and_then(lit_text);
+        parse_meta_list(&attr.meta, |key, expr, span| {
+            let text = expr.and_then(expr_text);
             match key {
                 "name" => el.name = text,
                 "doc" => el.doc = text,
@@ -218,14 +218,14 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     }
                 }
             }
-            parse_meta_list(&attr.meta, |key, lit, span| {
+            parse_meta_list(&attr.meta, |key, expr, span| {
                 match key {
-                    "name" => opts.name = lit.and_then(lit_text),
-                    "default" => opts.default = lit.and_then(lit_text),
-                    "min" => opts.min = lit.and_then(lit_f64),
-                    "max" => opts.max = lit.and_then(lit_f64),
-                    "step" => opts.step = lit.and_then(lit_f64),
-                    "doc" => opts.doc = lit.and_then(lit_text),
+                    "name" => opts.name = expr.and_then(expr_text),
+                    "default" => opts.default = expr.and_then(expr_text),
+                    "min" => opts.min = expr.and_then(expr_f64),
+                    "max" => opts.max = expr.and_then(expr_f64),
+                    "step" => opts.step = expr.and_then(expr_f64),
+                    "doc" => opts.doc = expr.and_then(expr_text),
                     "color" => opts.color = true,
                     "skip" => opts.skip = true,
                     "values" => {} // handled above

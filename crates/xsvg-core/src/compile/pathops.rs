@@ -24,20 +24,20 @@ pub(super) fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             return;
         }
     };
-    let distance = attr_num(node, "distance", 0.0);
-    let join = match node.attribute("join") {
-        Some("miter") => Join::Miter,
-        Some("bevel") => Join::Bevel,
-        _ => Join::Round, // round = the true disc offset
+    let p: super::elements::Offset = params_of(node);
+    let join = match p.join {
+        super::elements::OffsetJoin::Miter => Join::Miter,
+        super::elements::OffsetJoin::Bevel => Join::Bevel,
+        // round = the true disc offset
+        super::elements::OffsetJoin::Round => Join::Round,
     };
-    let miter_limit = attr_num(node, "miter-limit", 4.0);
-    let even_odd = node.attribute("fill-rule") == Some("evenodd");
+    let even_odd = p.fill_rule == super::elements::FillRule::EvenOdd;
     let skip = &["in", "distance", "join", "miter-limit"];
     match offset_svg_paths(
         &[&d],
-        distance,
+        p.distance,
         join,
-        miter_limit,
+        p.miter_limit,
         even_odd,
         ctx.quality.tolerance(),
     ) {
@@ -89,16 +89,17 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             }
         });
 
-    let field_name = node.attribute("field").unwrap_or("");
-    let bend = attr_num(node, "bend", 0.0) / 100.0; // authored as −100…100 %
-    let axis = WarpAxis::parse(node.attribute("axis").unwrap_or("h"));
+    let w: super::elements::Warp = params_of(node);
+    let field_name = w.field.as_deref().unwrap_or("");
+    let bend = w.bend / 100.0; // authored as −100…100 %
+    let axis = WarpAxis::parse(w.axis.as_str());
     // the base field: an envelope preset, a corner-driven map, a spine follow, or
     // seeded noise (§7.3)
     let base: Option<Box<dyn Field>> = bbox.and_then(|b| match field_name {
-        "perspective" => parse_corners(node)
+        "perspective" => parse_corners(w.corners.as_deref())
             .and_then(|t| Homography::new(b, t))
             .map(|h| Box::new(h) as Box<dyn Field>),
-        "free" => parse_corners(node)
+        "free" => parse_corners(w.corners.as_deref())
             .and_then(|t| FreeDistort::new(b, t))
             .map(|f| Box::new(f) as Box<dyn Field>),
         "bend" => {
@@ -109,23 +110,18 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 .attribute("in")
                 .and_then(|r| ref_geometry(node, r, ctx).ok())
                 .and_then(|d| PathFrame::new(&d, ctx.quality.tolerance()))?;
-            let s0 = run_offset(
-                frame.len(),
-                b.width(),
-                node.attribute("align").unwrap_or("start"),
-                attr_num(node, "start", 0.0),
-            );
+            let s0 = run_offset(frame.len(), b.width(), &w.align, w.start);
             let anchor = crate::kurbo::Point::new(b.min_x(), b.center().y);
             Some(Box::new(BendField { frame, s0, anchor }) as Box<dyn Field>)
         }
         "roughen" => Some(
-            Box::new(RoughenField::new(bend, attr_num(node, "detail", 10.0), b)) as Box<dyn Field>,
+            Box::new(RoughenField::new(bend, w.detail, b)) as Box<dyn Field>,
         ),
         name => EnvelopePreset::new(name, bend, axis, b).map(|p| Box::new(p) as Box<dyn Field>),
     });
     // the Warp-Options distortion sliders compose a projective taper after the field
-    let dh = attr_num(node, "distort-h", 0.0) / 100.0;
-    let dv = attr_num(node, "distort-v", 0.0) / 100.0;
+    let dh = w.distort_h / 100.0;
+    let dv = w.distort_v / 100.0;
     let field: Option<Box<dyn Field>> = match (base, bbox) {
         (Some(f), Some(b)) if dh != 0.0 || dv != 0.0 => {
             Some(Box::new(Chain(vec![f, Box::new(Taper::new(b, dh, dv))])))
@@ -181,9 +177,8 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
 /// `corners="x0,y0 x1,y1 x2,y2 x3,y3"` — the four target corners (**TL TR BR BL**)
 /// for `field="perspective"` / `"free"`. `None` unless exactly 8 finite numbers.
-pub(super) fn parse_corners(node: roxmltree::Node) -> Option<[crate::kurbo::Point; 4]> {
-    let nums: Vec<f64> = node
-        .attribute("corners")?
+pub(super) fn parse_corners(corners: Option<&str>) -> Option<[crate::kurbo::Point; 4]> {
+    let nums: Vec<f64> = corners?
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
         .filter_map(parse_num)
@@ -331,7 +326,13 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         }
     }
 
-    let op = BoolOp::parse(node.attribute("op").unwrap_or("union"));
+    let declared: super::elements::Boolean = params_of(node);
+    let op = match (declared.op, node.attribute("op")) {
+        (Some(o), _) => BoolOp::parse(o.as_str()),
+        // absent → the declared default; present but unknown → degrade below
+        (None, None) => BoolOp::parse("union"),
+        (None, Some(_)) => None,
+    };
     let Some(op) = op else {
         // unknown op → children un-operated behind a marker (never silent)
         out.push_str(&format!(

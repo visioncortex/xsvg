@@ -428,6 +428,14 @@ pub fn imports(input: &str) -> String {
     out
 }
 
+/// The compiler's **own** elements as a manifest, in the same shape a plugin
+/// module answers with (docs/Extensibility.md §11). A host merges this with the
+/// loaded modules' manifests so a property panel treats both tiers identically.
+#[wasm_bindgen]
+pub fn describe() -> String {
+    xsvg_core::describe_impl()
+}
+
 /// [`compile`] with loadable generators. Separate entry rather than extra
 /// parameters so existing embedders keep working unchanged.
 #[wasm_bindgen]
