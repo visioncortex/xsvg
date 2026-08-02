@@ -110,6 +110,10 @@ struct Ctx<'a> {
     /// xsvg-kit). With keys, emitted identity and generated filter ids become
     /// independent of byte offsets. [`NoKeys`] preserves byte-span behavior.
     keys: &'a dyn NodeKeys,
+    /// Byte starts an **active** key provider answered `None` for — elements the
+    /// host was required to name and did not. A set, not a count: the same node can
+    /// be asked twice (identity stamping and def-id seeding, plus scratch passes).
+    key_misses: std::cell::RefCell<std::collections::HashSet<usize>>,
     /// Loadable geometry generators (docs/Extensibility.md). [`NoGenerators`]
     /// degrades every plugin element, the default for hosts that load nothing.
     generators: &'a dyn GeneratorHost,
@@ -180,10 +184,22 @@ impl<'a> Ctx<'a> {
             files: std::cell::RefCell::new(vec![base.to_string()]),
             base: std::cell::RefCell::new(base.to_string()),
             keys: seams.keys,
+            key_misses: std::cell::RefCell::new(std::collections::HashSet::new()),
             generators: seams.generators,
             imports,
             in_plugin: std::cell::Cell::new(false),
         }
+    }
+
+    /// The host's key for the node starting at `start`, recording a miss when an
+    /// **active** provider fails to name it. Every key lookup goes through here, so
+    /// the unkeyed marker in [`compile_seams_impl`] sees every violation.
+    fn key_for(&self, start: usize) -> Option<String> {
+        let k = self.keys.key(start);
+        if k.is_none() && self.keys.active() {
+            self.key_misses.borrow_mut().insert(start);
+        }
+        k
     }
 }
 
@@ -202,6 +218,14 @@ impl<'a> Ctx<'a> {
 /// back to byte spans — silently reintroducing offset-dependence.
 pub trait NodeKeys {
     fn key(&self, byte_start: usize) -> Option<String>;
+
+    /// Whether a host actually supplied this provider. `None` from [`key`](Self::key)
+    /// then means *this element was missed* — a contract violation worth reporting —
+    /// rather than "no keys in play". Defaulted so existing implementors (xsvg-kit)
+    /// need not change; only [`NoKeys`] answers `false`.
+    fn active(&self) -> bool {
+        true
+    }
 }
 
 /// No host keys: byte-span behavior, the default for every pre-existing entry point.
@@ -209,6 +233,9 @@ pub struct NoKeys;
 impl NodeKeys for NoKeys {
     fn key(&self, _: usize) -> Option<String> {
         None
+    }
+    fn active(&self) -> bool {
+        false
     }
 }
 
@@ -220,7 +247,7 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
         return String::new();
     }
     let r = node.range();
-    if let Some(k) = ctx.keys.key(r.start) {
+    if let Some(k) = ctx.key_for(r.start) {
         return format!(" data-xsvg-node=\"{k}\"");
     }
     format!(" data-xsvg-pos=\"{}-{}\"", r.start, r.end)
@@ -313,12 +340,18 @@ pub fn compile_seams_impl(
         "<!-- compiled by xsvg v0 (quality={}) -->\n",
         q.as_str()
     ));
-    serialize(
-        doc.root_element(),
-        &mut out,
-        true,
-        &Ctx::new(seams, q, sourcemap, base, imports),
-    );
+    let ctx = Ctx::new(seams, q, sourcemap, base, imports);
+    serialize(doc.root_element(), &mut out, true, &ctx);
+    // "Key every element" is a host contract this crate cannot enforce, so a
+    // violation gets reported where the sloppy host will actually see it: in its own
+    // output. Nothing for correct hosts (and the byte-span default is not a keyed
+    // compile at all); trailing, so every fragment is still a verbatim slice.
+    let missed = ctx.key_misses.borrow().len();
+    if missed > 0 {
+        out.push_str(&format!(
+            "\n<!-- xsvg: {missed} element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"
+        ));
+    }
     Ok(out)
 }
 
@@ -644,7 +677,7 @@ pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)
 /// when one is provided (offset-independent, see [`NodeKeys`]), else the node's
 /// byte start — the legacy form, byte-for-byte.
 fn gen_id_seed(node: roxmltree::Node, ctx: &Ctx) -> String {
-    match ctx.sourcemap.get().then(|| ctx.keys.key(node.range().start)).flatten() {
+    match ctx.sourcemap.get().then(|| ctx.key_for(node.range().start)).flatten() {
         Some(k) => k,
         None => node.range().start.to_string(),
     }

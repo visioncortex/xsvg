@@ -3392,6 +3392,43 @@ fn keyed_fragment_output_is_byte_stable_under_text_shifts() {
 }
 
 #[test]
+fn a_keyed_compile_reports_elements_the_host_failed_to_name() {
+    // "Key every element" is a host contract nothing else enforces — an unkeyed
+    // element silently falls back to a byte span, degrading incremental patching
+    // with no error anywhere. So the compiler reports the violation in the sloppy
+    // host's own output, where it will actually be seen (and where a host's tests
+    // can grep for it).
+    let victim = top_level_offsets(INC)[1];
+
+    // A complete provider — and the byte-span default — get no marker.
+    let full = compile_keyed_impl(INC, "balanced", true, &keys_for(INC), &Mono, &BoxShaper, &BoxOutliner)
+        .unwrap();
+    assert!(!full.contains("unkeyed"), "{full}");
+    let plain = compile_impl(INC, "balanced", true, &Mono, &BoxShaper, &BoxOutliner).unwrap();
+    assert!(!plain.contains("unkeyed"), "byte-span identity is not a violation: {plain}");
+
+    // A provider that missed one element: the output says so, once, at the end —
+    // trailing so every fragment span is untouched.
+    let mut partial = keys_for(INC);
+    partial.0.remove(&victim);
+    let out = compile_keyed_impl(INC, "balanced", true, &partial, &Mono, &BoxShaper, &BoxOutliner)
+        .unwrap();
+    assert!(
+        out.ends_with("<!-- xsvg: 1 element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"),
+        "{out}"
+    );
+    assert!(out.contains("data-xsvg-pos"), "the miss fell back to a byte span: {out}");
+
+    // Fragment compiles never carry the marker — their output must stay a verbatim
+    // slice of the full compile, and the marker sits outside every fragment span.
+    let frag = compile_fragment_keyed_impl(
+        INC, "balanced", true, victim, &partial, &Mono, &BoxShaper, &BoxOutliner,
+    )
+    .unwrap();
+    assert!(!frag.contains("unkeyed"), "{frag}");
+}
+
+#[test]
 fn dependents_multi_is_the_union_closure() {
     let wave = fragment_range_impl(INC, INC.find("id=\"wave\"").unwrap()).unwrap().0;
     let blob = fragment_range_impl(INC, INC.find("id=\"blob\"").unwrap()).unwrap().0;
