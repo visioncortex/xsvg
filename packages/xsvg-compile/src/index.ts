@@ -46,8 +46,40 @@ interface WasmModule {
     pluginElement: Cb,
     pluginGenerate: Cb,
   ): string;
+  compile_keyed_ext(
+    input: string,
+    quality: string,
+    sourcemap: boolean,
+    measure: Cb,
+    metrics: Cb,
+    rasterize: Cb,
+    outlineRun: Cb,
+    advanceWidth: Cb,
+    resolve: Cb,
+    base: string,
+    pluginElement: Cb,
+    pluginGenerate: Cb,
+    key: Cb,
+  ): string;
+  compile_fragment_keyed_ext(
+    input: string,
+    quality: string,
+    sourcemap: boolean,
+    offset: number,
+    measure: Cb,
+    metrics: Cb,
+    rasterize: Cb,
+    outlineRun: Cb,
+    advanceWidth: Cb,
+    resolve: Cb,
+    base: string,
+    pluginElement: Cb,
+    pluginGenerate: Cb,
+    key: Cb,
+  ): string;
   fragment_range(input: string, offset: number): Uint32Array;
   dependents(input: string, offset: number): Uint32Array;
+  node_spans(input: string): Uint32Array;
   /** The `<x:import>` bindings a document declares, as JSON. */
   imports(input: string): string;
 }
@@ -128,6 +160,17 @@ export interface CompileOptions {
    *  degrades with a marker (docs/Extensibility.md). Modules are read from disk
    *  relative to `basePath`; a document that imports nothing pays nothing either way. */
   plugins?: boolean;
+  /**
+   * Host-assigned node names (docs/Incremental.md §3.1). With these, identity emits
+   * as `data-xsvg-node="<key>"` and generated def ids seed on the key, so an element
+   * compiles to the same bytes however far the text around it has moved — which is
+   * what lets an editing host replace one element and leave the rest alone.
+   *
+   * The host must name **every** element (see `nodeSpans`); an unnamed one falls back
+   * to a byte span and quietly reintroduces the dependence keys remove. Only consulted
+   * when `sourcemap` is on.
+   */
+  keys?: (byteStart: number) => string | null;
 }
 
 const fontCache = new Map<string, FontDb>();
@@ -186,7 +229,8 @@ function session(source: string, opts: CompileOptions) {
     (ns: unknown, tag: unknown) => plugins.element(ns as string, tag as string),
     (ns: unknown, tag: unknown, req: unknown) => plugins.generate(ns as string, tag as string, req as string),
   ] as const;
-  return { src, quality, sourcemap, base, plugins, seams, hosts };
+  const keys: Cb | null = opts.keys ? ((b: unknown) => opts.keys!(b as number)) : null;
+  return { src, quality, sourcemap, base, plugins, seams, hosts, keys };
 }
 
 /** Compile an xsvg source string to a plain-SVG string. Synchronous — cross-file
@@ -194,7 +238,9 @@ function session(source: string, opts: CompileOptions) {
 export function compile(source: string, opts: CompileOptions = {}): string {
   const s = session(source, opts);
   s.plugins.beginCompile();
-  return wasm.compile_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts);
+  return s.keys
+    ? wasm.compile_keyed_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts, s.keys)
+    : wasm.compile_ext(s.src, s.quality, s.sourcemap, ...s.seams, s.base, ...s.hosts);
 }
 
 /**
@@ -214,10 +260,21 @@ export function compileFragment(source: string, offset: number, opts: CompileOpt
   const s = session(source, opts);
   s.plugins.beginCompile();
   try {
-    return wasm.compile_fragment_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts);
+    return s.keys
+      ? wasm.compile_fragment_keyed_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts, s.keys)
+      : wasm.compile_fragment_ext(s.src, s.quality, s.sourcemap, offset, ...s.seams, s.base, ...s.hosts);
   } catch {
     return null;
   }
+}
+
+/** Byte ranges of every element in the document, in document order. Parse-only — the
+ *  input a host needs to name them all for `CompileOptions.keys`. */
+export function nodeSpans(source: string): [number, number][] {
+  const flat = wasm.node_spans(stripGooglePrefix(source));
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], flat[i + 1]]);
+  return out;
 }
 
 /** Byte range of the fragment unit containing `offset`, or null when the offset falls

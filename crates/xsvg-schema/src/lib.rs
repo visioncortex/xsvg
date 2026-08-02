@@ -115,6 +115,15 @@ pub struct ParamSpec {
     /// silently does nothing, which reads as a broken editor rather than as an
     /// inapplicable parameter. Declaring it is what lets the host say *why*.
     pub superseded_by: &'static [&'static str],
+    /// Why a host must not offer this parameter for editing, or `None` when it may.
+    ///
+    /// Not about permission — the attribute is the author's to write, and the panel
+    /// still shows its value. It is about effects a host cannot carry out from an
+    /// attribute edit alone: `font-family` selects a face that has to be *loaded*
+    /// before anything can be measured in it, asynchronously, changing layout and
+    /// outline availability for the whole document. An editor that offered a field
+    /// there would silently lay the document out in a fallback face.
+    pub read_only: Option<&'static str>,
 }
 
 impl ParamSpec {
@@ -130,6 +139,7 @@ impl ParamSpec {
             values: &[],
             doc: None,
             superseded_by: &[],
+            read_only: None,
         }
     }
 }
@@ -246,6 +256,10 @@ impl ParamSpec {
                 push_json_str(out, v);
             }
             out.push(']');
+        }
+        if let Some(r) = self.read_only {
+            out.push_str(",\"readOnly\":");
+            push_json_str(out, r);
         }
         if let Some(d) = self.doc {
             out.push_str(",\"doc\":");

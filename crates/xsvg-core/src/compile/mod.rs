@@ -450,6 +450,28 @@ pub fn compile_fragment_seams_impl(
     Ok(out)
 }
 
+/// Source byte range of **every** element in the document, in document order
+/// (the root included). Parse-only — nothing is lowered.
+///
+/// The companion to [`NodeKeys`]: that seam requires a host to key every element,
+/// not just top-level fragments, and a host outside Rust has no other way to learn
+/// what the elements *are*. It also gives such a host the key→range table it needs
+/// to keep projecting rendered elements back to source once identity stops being a
+/// byte range.
+pub fn node_spans_impl(input: &str) -> Vec<(usize, usize)> {
+    let Ok(doc) = roxmltree::Document::parse(input) else {
+        return Vec::new();
+    };
+    doc.root_element()
+        .descendants()
+        .filter(|n| n.is_element())
+        .map(|n| {
+            let r = n.range();
+            (r.start, r.end)
+        })
+        .collect()
+}
+
 /// Source byte range of the fragment unit containing `offset` (for the caller's
 /// identity bookkeeping — ranges shift by the edit delta between compiles).
 pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)> {
@@ -2517,6 +2539,14 @@ fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
 pub(super) const FONT_PARAMS: &[xsvg_schema::ParamSpec] = &[
     ParamSpec {
         default: Some("sans-serif"),
+        // Naming a face is not an attribute edit like the others: the face has to be
+        // *loaded* before a single glyph can be measured in it, and that is
+        // asynchronous and document-wide. A host that offered a field here would lay
+        // the whole document out in a fallback face and show the result as if it were
+        // the real one — and outline baking would silently stop working besides. Until
+        // a host can await font loading as part of applying an edit, this is
+        // read-only.
+        read_only: Some("changing the face needs it loaded first, which is asynchronous and affects the whole document"),
         ..ParamSpec::new("font-family", xsvg_schema::ParamKind::Text)
     },
     ParamSpec {

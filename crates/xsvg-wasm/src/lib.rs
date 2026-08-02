@@ -7,7 +7,8 @@
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
     compile_fragment_linked_impl, compile_fragment_seams_impl, compile_linked_impl,
-    compile_seams_impl, dependents_impl, fragment_range_impl, imports_impl, Seams,
+    compile_seams_impl, dependents_impl, fragment_range_impl, imports_impl, node_spans_impl,
+    NodeKeys, Seams,
 };
 use xsvg_core::{ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, InputMode};
 use xsvg_core::{
@@ -475,6 +476,127 @@ pub fn compile_ext(
             .with_generators(&generators),
     )
     .map_err(|e| JsError::new(&e))
+}
+
+/// Host-supplied node keys ([`NodeKeys`]): `key(byteStart) => string | null`.
+struct JsKeys<'a> {
+    key: &'a js_sys::Function,
+}
+
+impl NodeKeys for JsKeys<'_> {
+    fn key(&self, byte_start: usize) -> Option<String> {
+        self.key
+            .call1(&JsValue::NULL, &JsValue::from_f64(byte_start as f64))
+            .ok()?
+            .as_string()
+    }
+}
+
+/// [`compile_ext`] with host-supplied node keys (docs/Incremental.md §3.1).
+///
+/// Identity emits as `data-xsvg-node="<key>"` and generated def ids seed on the key,
+/// so an element the host keys the same way twice compiles to the same bytes however
+/// far the text around it has moved. That is what lets an editing host replace one
+/// element and leave the rest of the document alone — with byte spans, an edit
+/// renames every span and every generated id after it.
+///
+/// The host must key **every** element (see `node_spans`); an unkeyed one falls back
+/// to byte spans and quietly reintroduces the dependence this removes.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_keyed_ext(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
+    plugin_element: &js_sys::Function,
+    plugin_generate: &js_sys::Function,
+    key: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
+    let shaper = JsShaper { rasterize };
+    let outliner = JsOutliner {
+        outline_run,
+        advance_width,
+    };
+    let resolver = JsResolver { resolve };
+    let generators = JsGeneratorHost {
+        element: plugin_element,
+        generate: plugin_generate,
+    };
+    let keys = JsKeys { key };
+    compile_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        base,
+        &Seams::new(&m, &shaper, &outliner)
+            .with_resolver(&resolver)
+            .with_generators(&generators)
+            .with_keys(&keys),
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// [`compile_fragment_ext`] with host-supplied node keys — see [`compile_keyed_ext`].
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_keyed_ext(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: u32,
+    measure: &js_sys::Function,
+    metrics: &js_sys::Function,
+    rasterize: &js_sys::Function,
+    outline_run: &js_sys::Function,
+    advance_width: &js_sys::Function,
+    resolve: &js_sys::Function,
+    base: &str,
+    plugin_element: &js_sys::Function,
+    plugin_generate: &js_sys::Function,
+    key: &js_sys::Function,
+) -> Result<String, JsError> {
+    let m = JsMeasurer { measure, metrics };
+    let shaper = JsShaper { rasterize };
+    let outliner = JsOutliner {
+        outline_run,
+        advance_width,
+    };
+    let resolver = JsResolver { resolve };
+    let generators = JsGeneratorHost {
+        element: plugin_element,
+        generate: plugin_generate,
+    };
+    let keys = JsKeys { key };
+    compile_fragment_seams_impl(
+        input,
+        quality,
+        sourcemap,
+        offset as usize,
+        base,
+        &Seams::new(&m, &shaper, &outliner)
+            .with_resolver(&resolver)
+            .with_generators(&generators)
+            .with_keys(&keys),
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Byte ranges `[start, end, start, end, …]` of **every** element in the document,
+/// in document order. Parse-only; the host's input for keying every element.
+#[wasm_bindgen]
+pub fn node_spans(input: &str) -> Vec<u32> {
+    node_spans_impl(input)
+        .into_iter()
+        .flat_map(|(s, e)| [s as u32, e as u32])
+        .collect()
 }
 
 /// [`compile_fragment`] with loadable generators.

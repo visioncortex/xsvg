@@ -2,14 +2,15 @@
 //
 // The engine's own invariant — that a fragment compile is a verbatim slice of the
 // full compile — is pinned in Rust. What is *not* pinned there is the half the
-// viewer implements in JS: locating the fragment an edit falls in, mapping source
-// offsets across the edit so the already-rendered output can be re-anchored, and
-// re-stamping the spans of everything that did not change.
+// viewer implements in JS: naming every element, carrying those names across an
+// edit, and locating the run of rendered nodes each re-emitted fragment replaces.
 //
 // So this reconstructs a patch the way the viewer does, purely as strings, and
 // demands the result be byte-identical to a full recompile of the edited source.
 // A discrepancy here is a viewer that silently renders something the document does
-// not say. Run with:
+// not say. It also checks the property host keys exist for — that an element nobody
+// touched compiles to identical bytes after an edit moved it — directly, rather than
+// inferring it from a patch that happened to succeed. Run with:
 //
 //   npm run check:incremental
 //
@@ -24,9 +25,11 @@ import {
   compileFragment,
   dependents,
   fragmentRange,
+  nodeSpans,
   normalizeSource,
 } from "../packages/xsvg-compile/dist/index.js";
 import { singleEdit } from "../packages/xsvg-viewer/src/sourcemap.ts";
+import { NodeKeyStore } from "../packages/xsvg-viewer/src/keys.ts";
 
 const DATASET = resolve(import.meta.dirname, "../dataset");
 const FONTS = resolve(import.meta.dirname, "../assets/fonts");
@@ -82,93 +85,84 @@ check("singleEdit spans a scattered change rather than mis-describing it", () =>
 
 // ---- the protocol, against real documents ---------------------------------
 
-/** Rewrite the source spans a patch leaves in place: everything after the edit
- *  moved by the edit's length, everything before it did not. */
-const restamp = (text, toNew) =>
-  text.replace(
-    /data-xsvg-pos="(\d+)-(\d+)"/g,
-    (_m, a, b) => `data-xsvg-pos="${toNew(+a)}-${toNew(+b)}"`,
-  );
-
 /**
  * Rebuild a rendered document for an edited source the way the viewer patches its
  * DOM, and hand back the result for comparison against a real recompile.
  *
+ * Models the **keyed** path, because that is what ships: every element is named
+ * before compiling, the names ride across the edit, and the anchor is a name rather
+ * than a byte range. What is conspicuously absent is the bookkeeping the unkeyed
+ * path needed — no span re-stamping, and no declining because a generated def id
+ * would go stale. Untouched output is untouched, byte for byte.
+ *
  * Returns `{ skipped }` for the cases the viewer itself declines — those fall back
  * to a full compile, where there is nothing to verify.
  */
-function patch(rendered, source, next, o) {
+function patch(source, next, o) {
   const edit = singleEdit(source, next);
   if (!edit) return { skipped: "no change" };
 
-  // The common prefix ends at one offset in both versions; it is the pivot every
-  // other offset is mapped around.
+  // Key assignment is a deterministic walk in document order, so a store synced to
+  // the same text always produces the same names — the harness can rebuild the
+  // "rendered" document rather than thread one through.
+  const keys = new NodeKeyStore();
+  keys.sync(nodeSpans(source));
+  const before = { ...o, keys: keys.key };
+  const rendered = compile(source, before);
+
+  // The common prefix ends at one offset in both versions; it is the pivot.
   const pivot = bytes(next.slice(0, edit.from));
   const delta = bytes(next) - bytes(source);
-  const toOld = (b) => (b <= pivot ? b : b - delta);
-  const toNew = (b) => (b <= pivot ? b : b + delta);
 
   const unit = fragmentRange(next, pivot);
   if (!unit) return { skipped: "edit is not inside a top-level element" };
   const targets = [unit, ...dependents(next, pivot)];
 
+  // Reproduce each target as it currently stands, while the store still describes
+  // the document as rendered.
+  const current = targets.map(([start]) =>
+    compileFragment(source, start <= pivot ? start : start - delta, before),
+  );
+
+  keys.shift(pivot, delta);
+  keys.sync(nodeSpans(next));
+  const after = { ...o, keys: keys.key };
+
   const swaps = [];
-  for (const [start, end] of targets) {
-    const before = compileFragment(source, toOld(start), o);
-    if (before == null) return { skipped: "fragment had no previous emission" };
-    const key = `data-xsvg-pos="${toOld(start)}-${toOld(end)}"`;
-    // The viewer anchors on the fragment's own range, then takes the whole run of
-    // sibling nodes around it. A fragment carrying no such key — an element that
-    // compiles to nothing, like a declaration or a hidden layer — is unaddressable,
-    // and the viewer recompiles rather than guessing.
-    if (!before.includes(key)) return { skipped: "fragment carries no anchor of its own" };
-    assert.equal(
-      before.split(key).length - 1,
-      1,
-      `fragment ${toOld(start)}-${toOld(end)} claims its own range more than once`,
-    );
+  for (const [i, [start]] of targets.entries()) {
+    const was = current[i];
+    if (was == null) return { skipped: "fragment had no previous emission" };
+    const name = keys.key(start);
+    if (!name) return { skipped: "fragment has no name" };
+    const anchor = `data-xsvg-node="${name}"`;
+    // A fragment carrying no anchor of its own — an element that compiles to nothing,
+    // like a declaration or a hidden layer — is unaddressable, and the viewer
+    // recompiles rather than guessing.
+    if (!was.includes(anchor)) return { skipped: "fragment carries no anchor of its own" };
+    assert.equal(was.split(anchor).length - 1, 1, `fragment ${name} claims its own name twice`);
     // Locating the run by its markup is the string equivalent of walking siblings
     // from the anchor: both rest on the fragment being a verbatim slice of the whole.
-    const at = rendered.indexOf(before);
-    assert.ok(at >= 0, `fragment ${toOld(start)}-${toOld(end)} is not a slice of the rendered output`);
-    assert.equal(
-      rendered.indexOf(before, at + 1),
-      -1,
-      `fragment markup at ${toOld(start)}-${toOld(end)} is not unique in the output`,
-    );
-    const after = compileFragment(next, start, o);
-    if (after == null) return { skipped: "fragment cannot be re-emitted" };
-    swaps.push({ at, len: before.length, after });
+    const at = rendered.indexOf(was);
+    assert.ok(at >= 0, `fragment ${name} is not a slice of the rendered output`);
+    assert.equal(rendered.indexOf(was, at + 1), -1, `fragment ${name} is not unique in the output`);
+    const now = compileFragment(next, start, after);
+    if (now == null) return { skipped: "fragment cannot be re-emitted" };
+    swaps.push({ at, len: was.length, now });
   }
 
   swaps.sort((x, y) => x.at - y.at);
-
-  // Generated def ids (`x-flt-…`, `x-mesh-…`, `x-mgc-…`) seed on the node's byte
-  // start, so an offset shift renames them — and a fragment we do not re-emit keeps
-  // the old name. The viewer declines rather than reimplement the compiler's id
-  // scheme; model that here, or the harness reports a divergence the shipped code
-  // never produces. `NodeKeys` removes the offset-dependence for good.
-  if (delta !== 0) {
-    let outside = "";
-    let end = 0;
-    for (const s of swaps) {
-      outside += rendered.slice(end, s.at);
-      end = s.at + s.len;
-    }
-    outside += rendered.slice(end);
-    if (/\bid="x-/.test(outside)) return { skipped: "would strand a byte-seeded def id" };
-  }
-
   let out = "";
   let cursor = 0;
   for (const s of swaps) {
     assert.ok(s.at >= cursor, "fragments to replace overlap");
-    // Re-emitted markup already carries new-source spans; everything between the
-    // replacements has to be shifted onto them.
-    out += restamp(rendered.slice(cursor, s.at), toNew) + s.after;
+    out += rendered.slice(cursor, s.at) + s.now;
     cursor = s.at + s.len;
   }
-  return { out: out + restamp(rendered.slice(cursor), toNew), shifted: delta !== 0 };
+  return {
+    out: out + rendered.slice(cursor),
+    expected: compile(next, after),
+    shifted: delta !== 0,
+  };
 }
 
 /**
@@ -207,6 +201,54 @@ function edits(source) {
   return out;
 }
 
+/**
+ * The property host keys exist for: an element nobody touched compiles to the same
+ * bytes after an edit that moved it (docs/Incremental.md §3.1).
+ *
+ * Checked directly rather than inferred from a successful patch, because a patch can
+ * succeed while quietly depending on the host having chased a rename. If this holds,
+ * the whole class of chasing — span re-stamping, def-id tracking — is unnecessary
+ * rather than merely working.
+ */
+function keyedStabilityHolds(source, next, o) {
+  const keys = new NodeKeyStore();
+  keys.sync(nodeSpans(source));
+  const before = new Map();
+  for (const [start] of nodeSpans(source)) {
+    const r = fragmentRange(source, start);
+    if (r && r[0] === start) before.set(keys.key(start), compileFragment(source, start, { ...o, keys: keys.key }));
+  }
+
+  const edit = singleEdit(source, next);
+  const pivot = bytes(next.slice(0, edit.from));
+  const delta = bytes(next) - bytes(source);
+  keys.shift(pivot, delta);
+  keys.sync(nodeSpans(next));
+
+  // Everything the edit can legitimately have changed.
+  const unit = fragmentRange(next, pivot);
+  if (!unit) return { skipped: true };
+  const dirty = new Set(
+    [unit, ...dependents(next, pivot)].map(([s]) => keys.key(s)).filter(Boolean),
+  );
+
+  let compared = 0;
+  for (const [start] of nodeSpans(next)) {
+    const r = fragmentRange(next, start);
+    if (!r || r[0] !== start) continue;
+    const name = keys.key(start);
+    if (!name || dirty.has(name) || !before.has(name)) continue;
+    const after = compileFragment(next, start, { ...o, keys: keys.key });
+    assert.equal(
+      after,
+      before.get(name),
+      `element ${name} was not edited, yet its output changed — keys did not make it offset-independent`,
+    );
+    compared++;
+  }
+  return { compared };
+}
+
 const samples = readdirSync(DATASET).filter((f) => f.endsWith(".xsvg")).sort();
 const PER_SAMPLE = 6;
 let patched = 0;
@@ -216,6 +258,9 @@ let skipped = 0;
 // and exercises none of the mapping, and an earlier version of this harness was
 // almost entirely made of those without saying so.
 let shifting = 0;
+// Unedited elements confirmed to compile to identical bytes after an edit moved them —
+// the property host keys exist for.
+let stable = 0;
 
 for (const file of samples) {
   const path = join(DATASET, file);
@@ -223,7 +268,6 @@ for (const file of samples) {
   // Normalize up front: every offset below indexes the text the compiler sees, not
   // the text on disk (see `normalizeSource`).
   const source = normalizeSource(readFileSync(path, "utf8"));
-  const rendered = compile(source, o);
 
   const candidates = edits(source);
   // Spread the picks across the document instead of taking the first few, which
@@ -232,7 +276,7 @@ for (const file of samples) {
   for (let i = 0; i < candidates.length; i += stride) {
     const c = candidates[i];
     check(`${file}: ${c.label}`, () => {
-      const result = patch(rendered, source, c.source, o);
+      const result = patch(source, c.source, o);
       if (result.skipped) {
         skipped++;
         return;
@@ -241,9 +285,14 @@ for (const file of samples) {
       if (result.shifted) shifting++;
       assert.equal(
         result.out,
-        compile(c.source, o),
+        result.expected,
         "patched output differs from a full recompile of the edited source",
       );
+      // Only meaningful when something moved; a same-length edit is stable trivially.
+      if (result.shifted) {
+        const k = keyedStabilityHolds(source, c.source, o);
+        if (k.compared) stable += k.compared;
+      }
     });
   }
 }
@@ -251,6 +300,7 @@ for (const file of samples) {
 console.log(
   `incremental: ${passed} checks passed (${patched} patches verified byte-identical, ` +
     `${shifting} of them shifting every later offset; ${skipped} declined to a full ` +
-    `compile) over ${samples.length} samples`,
+    `compile) over ${samples.length} samples\n` +
+    `             ${stable} unedited elements confirmed byte-stable across a shifting edit`,
 );
 if (failed) console.error(`${failed} failed`);

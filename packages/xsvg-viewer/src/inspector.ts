@@ -10,6 +10,7 @@
 // rectangles live *inside* the SVG (user space) with a non-scaling stroke, so they
 // track pan/zoom for free without recomputing on every transform change.
 import { ByteIndex, nearestSource, posAttr, type SourceRange } from "./sourcemap";
+import type { NodeIndex } from "./keys";
 import type { EditorHandle } from "./editor";
 import {
   namespaceOf,
@@ -28,16 +29,18 @@ export interface Inspector {
   selectAtSourceOffset(offset: number): void;
   /**
    * Adopt a document that was patched in place (docs/Incremental.md §4): re-index
-   * the spans against the new DOM, take `source` as the new text, and follow the
-   * pinned element through the edit — `mapOffset` carries an old source byte offset
-   * to where it now sits.
+   * the spans against the new DOM and take `source` as the new text.
+   *
+   * The pinned element is followed by its **identity attribute**, not by a mapped
+   * offset — with host keys that value is stable across the edit, so following it is
+   * a lookup rather than arithmetic that has to agree with the compiler's.
    *
    * The panel's parameter controls are deliberately **left standing**. A patch is
    * normally the result of the user moving one of them, and rebuilding the panel
    * mid-gesture would destroy the control under the pointer — the very thing the
    * incremental path exists to avoid.
    */
-  refresh(source: string, mapOffset: (byte: number) => number): void;
+  refresh(source: string): void;
   destroy(): void;
 }
 
@@ -49,6 +52,10 @@ export interface InspectorOptions {
   /** Parameter schemas of the document's generator modules. With these, a pinned
    *  plugin element gets editable controls instead of a read-only attribute table. */
   schemas?: PluginSchemas | null;
+  /** Resolves `data-xsvg-node` names back to source ranges. Required whenever the
+   *  document was compiled with host keys, since identity is then a name rather
+   *  than the range itself. */
+  index?: NodeIndex | null;
   /** Apply an edit made in the panel. `pinAt` is the UTF-16 offset of the edited
    *  element, so the host can re-pin it after the document recompiles. */
   onEdit?: (source: string, pinAt: number) => void;
@@ -60,6 +67,7 @@ export function createInspector({
   source,
   editor,
   schemas,
+  index,
   onEdit,
 }: InspectorOptions): Inspector {
   // Mutable across an incremental patch: the document's text changes under us, and
@@ -102,14 +110,17 @@ export function createInspector({
     rect.style.display = "";
   };
 
-  // The element the panel is currently describing. Tracked by source range rather
-  // than by node, because a patch replaces the node itself.
-  let pinned: { el: SVGGraphicsElement; range: SourceRange } | null = null;
+  // The element the panel is currently describing. A patch replaces the node, so it
+  // is tracked by the compiler's identity attribute — stable across an edit when the
+  // host supplies keys, which is how the pin survives without re-deriving offsets.
+  let pinned: { el: SVGGraphicsElement; range: SourceRange; id: string | null } | null = null;
+  const identity = (el: Element) =>
+    el.getAttribute("data-xsvg-node") ?? el.getAttribute("data-xsvg-pos");
 
   // Pin an element (both directions funnel through here): outline it on the canvas,
   // fill the panel, and highlight its source range in the editor.
   const selectElement = (el: SVGGraphicsElement, range: SourceRange) => {
-    pinned = { el, range };
+    pinned = { el, range, id: identity(el) };
     place(pinRect, el);
     fillPanel(info, el);
     addParams(range);
@@ -159,8 +170,10 @@ export function createInspector({
   let items: { el: SVGGraphicsElement; range: SourceRange; from: number; to: number }[] = [];
   const indexSpans = () => {
     items = [];
-    for (const el of Array.from(svgRoot.querySelectorAll<SVGGraphicsElement>("[data-xsvg-pos]"))) {
-      const range = posAttr(el);
+    // Both identity spellings: a byte range, or a host key resolved through `index`.
+    const tagged = svgRoot.querySelectorAll<SVGGraphicsElement>("[data-xsvg-pos],[data-xsvg-node]");
+    for (const el of Array.from(tagged)) {
+      const range = posAttr(el, index);
       if (range) items.push({ el, range, from: bytes.toStr(range.start), to: bytes.toStr(range.end) });
     }
   };
@@ -168,13 +181,13 @@ export function createInspector({
 
   // Adopt a patched document. Everything derived from the text is rebuilt; the
   // parameter controls are not (see `Inspector.refresh`).
-  const refresh = (nextSource: string, mapOffset: (byte: number) => number) => {
+  const refresh = (nextSource: string) => {
     source = nextSource;
     bytes = new ByteIndex(source);
     indexSpans();
     if (!pinned) return;
-    const start = mapOffset(pinned.range.start);
-    const hit = items.find((it) => it.range.start === start);
+    const id = pinned.id;
+    const hit = id ? items.find((it) => identity(it.el) === id) : undefined;
     if (!hit) {
       // The pinned element no longer has a span of its own — it degraded to a
       // marker, or the edit dissolved it. Drop the pin rather than point at a stale
@@ -183,14 +196,14 @@ export function createInspector({
       pinRect.style.display = "none";
       return;
     }
-    pinned = { el: hit.el, range: hit.range };
+    pinned = { el: hit.el, range: hit.range, id };
     place(pinRect, hit.el);
     fillPanel(info, hit.el);
     editor.highlight(hit.from, hit.to, false);
   };
 
   const onMove = (e: MouseEvent) => {
-    const hit = nearestSource(e.target as Element, svgRoot);
+    const hit = nearestSource(e.target as Element, svgRoot, index);
     const el = asGraphics(hit?.el ?? null);
     if (hit && el && el !== svgRoot) place(hoverRect, el);
     else hoverRect.style.display = "none";
@@ -201,7 +214,7 @@ export function createInspector({
   };
 
   const onClick = (e: MouseEvent) => {
-    const hit = nearestSource(e.target as Element, svgRoot);
+    const hit = nearestSource(e.target as Element, svgRoot, index);
     const el = asGraphics(hit?.el ?? null);
     if (!hit || !el || el === svgRoot) return;
     selectElement(el, hit.range);

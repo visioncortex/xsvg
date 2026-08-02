@@ -65,6 +65,19 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   bugs fixed below, and reports its own length-changing count because the first version of it
   did not: nine in ten arithmetic edits keep their width and shift nothing, so it passed
   confidently while barely exercising the mapping it exists to check.
+- **Host node keys, wired end to end** (docs/Incremental.md §3.1). `compile_keyed_ext` /
+  `compile_fragment_keyed_ext` and `node_spans` in the browser and Node hosts, plus
+  `NodeKeyStore` as the reference implementation: the host names every element, the compiler
+  stamps the name instead of the byte offset, and an element compiles to the same bytes however
+  far an edit elsewhere has moved it. The offset arithmetic moves into the host and stops
+  reaching the output — no span re-stamping, and no declining a patch because a generated def id
+  would go stale. On the dataset that took the fast path from 326 patches with 23 declines to
+  **347 with 2**, and the 2 remaining are elements that compile to nothing rather than anything
+  offsets caused. 3251 unedited elements are checked byte-stable across shifting edits.
+- **`read_only`** on a parameter declaration, with `font-family` as its first use: selecting a
+  face needs it *loaded* before anything can be measured, which is asynchronous and
+  document-wide, so an attribute edit alone would lay the document out in a fallback face and
+  show the result as if it were real. The panel disables the control and says why.
 - **`superseded_by`** on a parameter declaration: the other parameters whose presence makes it
   inert (`<clip:arrow length>` is read only in the polar form; `<x:textbox>` takes its box from
   `in="#shape"`). Carried through the manifest as `supersededBy`, and the panel disables such a

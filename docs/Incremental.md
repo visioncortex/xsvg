@@ -73,8 +73,23 @@ and an unchanged fragment's output is **byte-stable under text shifts** (pinned 
 element — emitters tag nested elements too (warp children, paragraphs); an unkeyed
 element falls back to byte spans. Keys are never consulted inside linked
 dependencies (their offsets index the dependency file). `dependents_multi_impl`
-computes the union closure from several seed fragments in one parse. The first
-consumer is xsvg-kit (the editor core).
+computes the union closure from several seed fragments in one parse.
+
+**Shipped in the browser and Node hosts.** `compile_keyed_ext` /
+`compile_fragment_keyed_ext` take a `key(byteStart) => string | null` callback;
+`node_spans(input)` reports every element's range, which is how a host outside Rust
+learns what there is to name (the seam demands *every* element be keyed, and an
+unkeyed one silently reverts to byte spans). `NodeKeyStore`
+(`packages/xsvg-viewer/src/keys.ts`) is the reference host implementation: it mints a
+name per element, carries names across an edit through the same pivot the patch uses,
+and answers name→range so the inspector can still project rendered elements back to
+source once identity stops being a range.
+
+The arithmetic does not disappear — it moves into the host, where it belongs, and
+stops reaching the output. Measured on the dataset, adopting keys took the fast path
+from 326 patches with 23 declines to **347 patches with 2**, and the 2 that remain are
+elements that compile to nothing (a declaration, a hidden layer) rather than anything
+offsets caused. xsvg-kit (the editor core) is the other consumer.
 
 ## 4. JS-side protocol (shipped)
 
@@ -89,8 +104,10 @@ Implemented by `<xsvg-view-interactive>` (`packages/xsvg-viewer/src/interactive.
    source offset at or before it is unmoved, every offset after it shifts by the length
    difference. Any edit is representable this way — a scattered one just yields a span wide
    enough to cover it, which then spans several fragments and falls back.
-3. `fragment_range(newSource, pivot)` → the unit to re-emit; `dependents(…)` → the rest.
-   Map each range **back** through the pivot to find the node the old output left in the DOM.
+3. `fragment_range(newSource, pivot)` → the unit to re-emit; `dependents(…)` → the rest. Then
+   carry every element's **name** across the pivot (§3.1) and re-sync against the new text. From
+   here the arithmetic is finished: a name is what the DOM is anchored on *and* what the compiler
+   stamps, and neither moves when text does.
 4. Re-emit with `compile_fragment(…)` and parse in an **SVG namespace context** (an `<svg>`
    context element, so `<path>` lands in the SVG namespace rather than becoming inert HTML).
 5. **Replace the run, not the node.** A fragment may emit several sibling nodes — a `<filter>`
@@ -99,8 +116,8 @@ Implemented by `<xsvg-view-interactive>` (`packages/xsvg-viewer/src/interactive.
    `<filter>` with a duplicate id, which the browser resolves to the *stale* one. Recompile the
    fragment as it currently stands to learn the run's length and where the keyed node sits
    inside it, then replace that whole span of siblings.
-6. Re-stamp `data-xsvg-pos` on everything *not* replaced: their source moved even though their
-   output did not. Re-emitted markup already carries new-source spans, so it goes in afterwards.
+6. Everything not replaced is left completely alone — no attribute rewriting of any kind. That
+   is the payoff of step 3: unedited output is byte-identical, so there is nothing to fix up.
 7. Fall back to a full compile when: the fragment carries no anchor of its own (it emitted
    nothing — a declaration like `<x:theme>`, or a hidden layer), the edit touches the root
    element's own tag/attributes, a dependency would have to be fetched, fonts finish loading
@@ -109,6 +126,11 @@ Implemented by `<xsvg-view-interactive>` (`packages/xsvg-viewer/src/interactive.
    top-level fragments appear in *sorted* order and their positions shift (each fragment is
    still byte-verbatim; only its placement moves). Editing *within* a layer is a normal in-place
    re-emit.
+
+`font-family` is deliberately not editable at all: selecting a face requires *loading* it before
+anything can be measured, which is asynchronous and document-wide, so an attribute edit alone
+would lay the document out in a fallback face and present the result as real. The schema says so
+(`read_only`) and the panel disables the control rather than leaving that trap live.
 
 The fallback must stay *invisible*: it is a performance path, not a behaviour path. The viewer
 therefore carries pan/zoom across a recompile (`PanZoom.view()`/`setView()`), so declining to
@@ -155,16 +177,17 @@ in Node.
   The JS layer should insert all parsed nodes, not just the first element.
 - **`<defs>` content** passes through and participates like any top-level unit; editing a gradient
   needs no dependent re-emits (live references).
-- **Stale generated def ids** — the sharpest reason to want §3.1. Ids the compiler invents
-  (`x-flt-…`, `x-mesh-…`, `x-mgc-…`) seed on the node's byte start, so a length-changing edit
-  renames every one after it. A fragment that is *not* re-emitted keeps its old id, which still
-  matches its own `url(#…)` and so still renders — but a re-emitted dependent can land on an id an
-  untouched fragment is still using, and a duplicate id resolves to the wrong element. Re-stamping
-  them host-side would mean reimplementing `gen_id_seed` outside the compiler, so the host
-  **declines the patch** instead: when the edit changes length and any `[id^="x-"]` sits outside
-  the replaced runs, it recompiles. The `x-` prefix is the only signal the host has for telling a
-  generated id from an authored one, and is pinned by `generated_def_ids_are_all_prefixed_x`.
-  Adopting `NodeKeys` removes the condition entirely rather than detecting it.
+- ~~Stale generated def ids~~ — **fixed by adopting `NodeKeys` (§3.1).** Worth recording what the
+  problem was, because it is the clearest illustration of what keys buy. Ids the compiler invents
+  (`x-flt-…`, `x-mesh-…`, `x-mgc-…`) seeded on the node's byte start, so a length-changing edit
+  renamed every one after it. A fragment that was not re-emitted kept its old id — which still
+  matched its own `url(#…)` and so still rendered — but a re-emitted dependent could land on an id
+  an untouched fragment was still using, and a duplicate id resolves to the wrong element.
+  Re-stamping host-side would have meant reimplementing `gen_id_seed` outside the compiler, so the
+  host declined the patch instead, on documents using filters or meshes. With keys the ids seed on
+  the key, nothing renames, and the condition does not arise. (`generated_def_ids_are_all_prefixed_x`
+  survives from that era: the `x-` prefix is still the only signal distinguishing a generated id
+  from an authored one, and is worth keeping true.)
 
 ## 5.1 End-to-end check
 

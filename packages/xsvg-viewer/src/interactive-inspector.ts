@@ -19,7 +19,7 @@ export interface MountedInspector {
   selectAtSourceOffset(offset: number): void;
   /** Adopt a document patched in place — see `Inspector.refresh`. Applies the edit
    *  to the source pane as one contiguous change so it keeps its scroll position. */
-  refresh(source: string, edit: SingleEdit, mapOffset: (byte: number) => number): void;
+  refresh(source: string, edit: SingleEdit): void;
   destroy(): void;
 }
 
@@ -29,6 +29,8 @@ export function mountInspector(opts: {
   sourcePane: HTMLElement;
   source: string;
   schemas?: PluginSchemas | null;
+  /** Resolves host-keyed identity back to source ranges — see `Inspector.index`. */
+  index?: import("./keys").NodeIndex | null;
   onEdit?: (source: string, pinAt: number) => void;
 }): MountedInspector {
   const editor = createEditor({ parent: opts.sourcePane, doc: opts.source, readOnly: true });
@@ -38,6 +40,7 @@ export function mountInspector(opts: {
     source: opts.source,
     editor,
     schemas: opts.schemas,
+    index: opts.index,
     onEdit: opts.onEdit,
   });
 
@@ -53,9 +56,9 @@ export function mountInspector(opts: {
     clear: () => inspector.clear(),
     remeasure: () => editor.view.requestMeasure(),
     selectAtSourceOffset: (offset: number) => inspector.selectAtSourceOffset(offset),
-    refresh: (source, edit, mapOffset) => {
+    refresh: (source, edit) => {
       editor.replace(edit.from, edit.to, source.slice(edit.from, edit.insertEnd));
-      inspector.refresh(source, mapOffset);
+      inspector.refresh(source);
     },
     destroy: () => {
       editor.view.dom.removeEventListener("mousedown", onSrcDown);

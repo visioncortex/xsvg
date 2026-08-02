@@ -25,6 +25,10 @@ export interface ParamSpec {
    *  knows this; the panel uses it to disable a control that would otherwise look
    *  live and do nothing. */
   supersededBy?: string[];
+  /** Why this parameter must not be offered for editing — `font-family` selects a
+   *  face that has to be loaded before anything can be measured in it, which is
+   *  asynchronous and document-wide. Absent means it is editable. */
+  readOnly?: string;
 }
 
 /** One element a module provides. */
@@ -190,24 +194,28 @@ export function renderParams(
     label.textContent = name;
     row.append(label);
 
-    // A parameter the element's own attributes have made inert. Offering a live
-    // control for it is worse than offering none: the user drags it, nothing moves,
-    // and the reasonable conclusion is that the editor is broken rather than that
-    // the parameter does not apply. Say which attribute is winning.
+    // Two reasons a control is shown but not offered, both of which are worse to
+    // leave live than to disable: a parameter the element's own attributes have made
+    // inert (drag it, nothing moves, and the editor looks broken), and one whose
+    // effects a host cannot carry out from an attribute edit alone. Say which.
     const by = (p.supersededBy ?? []).filter((n) => current.has(n));
+    const why = p.readOnly
+      ? p.readOnly
+      : by.length
+        ? `no effect while ${by.join(" and ")} ${by.length > 1 ? "are" : "is"} set`
+        : null;
+
     const value = current.get(name)?.value ?? "";
     const control = makeControl(p, value, (v) => onChange(name, v));
-    if (by.length) {
+    if (why) {
       row.classList.add("superseded");
-      for (const el of control.querySelectorAll?.("input, select") ?? []) {
-        (el as HTMLInputElement).disabled = true;
+      for (const el of control.querySelectorAll("input, select")) {
+        (el as HTMLInputElement | HTMLSelectElement).disabled = true;
       }
       if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) {
         control.disabled = true;
       }
-      row.title = `no effect while ${by.join(" and ")} ${by.length > 1 ? "are" : "is"} set${
-        p.doc ? ` — ${p.doc}` : ""
-      }`;
+      row.title = p.doc ? `${why} — ${p.doc}` : why;
     } else if (p.doc) {
       row.title = p.doc;
     }

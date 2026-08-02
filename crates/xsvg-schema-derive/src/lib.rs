@@ -134,6 +134,8 @@ struct ParamOpts {
     doc: Option<String>,
     /// `superseded_by = "x2, y2"` — parameters whose presence makes this one inert.
     superseded_by: Vec<String>,
+    /// `read_only = "why"` — a host must not offer an editing control for this.
+    read_only: Option<String>,
     color: bool,
     skip: bool,
     flatten: bool,
@@ -253,6 +255,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                             .filter(|s| !s.is_empty())
                             .collect();
                     }
+                    "read_only" => opts.read_only = expr.and_then(expr_text),
                     "color" => opts.color = true,
                     "skip" => opts.skip = true,
                     "flatten" => opts.flatten = true,
@@ -336,6 +339,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let default_tokens = opt_str(&opts.default);
         let doc_tokens = opt_str(&opts.doc);
         let superseded = &opts.superseded_by;
+        let read_only = opt_str(&opts.read_only);
         let min = opt_f64(opts.min);
         let max = opt_f64(opts.max);
         let step = opt_f64(opts.step);
@@ -351,6 +355,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 values: #values_tokens,
                 doc: #doc_tokens,
                 superseded_by: &[#(#superseded),*],
+                read_only: #read_only,
             }
         });
         reads.push(quote!(#ident: #read));

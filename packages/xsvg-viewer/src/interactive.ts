@@ -12,9 +12,16 @@
 //!
 //! The inspector is a lazy `import()` — its CodeMirror dependency (an optional peer)
 //! loads only when `inspector` is set. Bundler-only: not in the CDN bundle.
-import { compileXsvg, type CompileSession, type PluginSchemas } from "./compiler";
+import {
+  compileXsvg,
+  nodeSpans,
+  normalizeSource,
+  type CompileSession,
+  type PluginSchemas,
+} from "./compiler";
 import { findArtboards, makeThumb, paintThumb, type Artboard } from "./artboards";
 import { createPanZoom, type PanZoom, type ViewState } from "./pan-zoom";
+import { NodeKeyStore } from "./keys";
 import { ByteIndex, singleEdit } from "./sourcemap";
 import type { MountedInspector } from "./interactive-inspector";
 
@@ -187,6 +194,9 @@ export class XsvgViewInteractive extends HTMLElement {
   private session: CompileSession | null = null;
   private compiled = "";
   private compiledBytes: ByteIndex | null = null;
+  /** Names for every element, so an unchanged one compiles to unchanged bytes no
+   *  matter how far an edit elsewhere has moved it (docs/Incremental.md §3.1). */
+  private keys = new NodeKeyStore();
   /** Pan/zoom to restore across a full recompile, so an edit never moves the view. */
   private keepView: ViewState | null = null;
   private fitted = true;
@@ -379,9 +389,14 @@ export class XsvgViewInteractive extends HTMLElement {
       const src = this.getAttribute("src");
       const baseUrl =
         this.baseUrlProp ?? (src ? new URL(src, location.href).href : undefined);
+      // Name every element before compiling: the compiler asks for a key the moment
+      // it stamps identity, and an element it cannot name falls back to a byte span.
+      // `-x-google-` markers shift offsets, so key against the normalized text.
+      if (withInspector) this.keys.sync(nodeSpans(normalizeSource(source)));
       const svg = await compileXsvg(source, {
         quality,
         sourcemap: withInspector,
+        keys: withInspector ? this.keys.key : undefined,
         baseUrl,
         resolve: this.resolveFn ?? undefined,
         loader: this.loaderObj ?? undefined,
@@ -426,6 +441,7 @@ export class XsvgViewInteractive extends HTMLElement {
           sourcePane: this.sourcePane,
           source: this.compiled,
           schemas: this.pluginSchemas,
+          index: this.keys,
           onEdit: (next, pinAt) => this.applyEdit(next, pinAt),
         });
         this.panzoom.onBackgroundClick(() => this.inspector?.clear());
@@ -483,59 +499,51 @@ export class XsvgViewInteractive extends HTMLElement {
 
     // The common prefix ends at the same byte offset in both versions, so that one
     // offset is the pivot: everything before it is unmoved, everything after shifts
-    // by the length difference. That is what lets the DOM's old `data-xsvg-pos`
-    // anchors be found from the new source's fragment ranges, and back.
+    // by the length difference.
     const pivot = newBytes.toByte(edit.from);
     const delta = newBytes.byteLength - oldBytes.byteLength;
-    const toOld = (b: number) => (b <= pivot ? b : b - delta);
-    const toNew = (b: number) => (b <= pivot ? b : b + delta);
 
+    // Which elements have to be re-emitted. Parse-only, so it needs no keys and can
+    // run while the store still describes the document as rendered.
     const unit = session.range(next, pivot);
     if (!unit) return false; // the edit is in the root tag or between elements
     const targets = [unit, ...session.dependents(next, pivot)];
 
+    // Reproduce each target as it currently stands, to learn how many sibling nodes
+    // it occupies. This must happen while the store still holds the *old* naming,
+    // hence before the shift below.
+    const current = targets.map(([start]) =>
+      session.fragment(this.compiled, keptStart(start, pivot, delta)),
+    );
+
+    // Carry every element's name across the edit. From here the arithmetic is done:
+    // a name is what the DOM is anchored on *and* what the compiler stamps, and
+    // neither moves when the text does. That is the whole point of keys — the
+    // shifting is confined to these two lines instead of being chased through span
+    // attributes and generated def ids, one of which the host cannot chase at all.
+    this.keys.shift(pivot, delta);
+    this.keys.sync(nodeSpans(next));
+
     // Resolve, compile and parse everything before mutating anything: a patch that
     // failed halfway would leave the drawing disagreeing with its own source.
     const swaps: { run: ChildNode[]; nodes: ChildNode[] }[] = [];
-    for (const [start, end] of targets) {
-      const key = `${toOld(start)}-${toOld(end)}`;
-      const anchor = svgEl.querySelector(`[data-xsvg-pos="${key}"]`);
+    for (const [i, [start]] of targets.entries()) {
+      // Unchanged by construction: the element kept its name across the shift, so
+      // the name the store answers with now is the one already in the DOM.
+      const name = this.keys.key(start);
+      if (!name) return false;
+      // The store mints names as `n<digits>`, so they need no selector escaping.
+      const anchor = svgEl.querySelector(`[data-xsvg-node="${name}"]`);
       // No anchor: this fragment emitted no element last time (a degradation marker
       // is a comment, which carries no attributes), so there is nothing to replace.
       if (!anchor) return false;
-      const run = fragmentRun(anchor, key, session.fragment(this.compiled, toOld(start)));
+      const run = fragmentRun(anchor, name, current[i]);
       if (!run) return false;
       const markup = session.fragment(next, start);
       if (markup == null) return false;
       swaps.push({ run, nodes: parseSvgFragment(markup) });
     }
 
-    // The compiler seeds the ids of defs it invents — `x-flt-…`, `x-mesh-…`,
-    // `x-mgc-…` — on the node's byte start, so an offset shift renames them. A
-    // fragment we do not re-emit keeps its old id, which still matches its own
-    // `url(#…)` and so still renders; but a re-emitted dependent can land on an id
-    // an untouched fragment is still using, and a duplicate id resolves to the wrong
-    // one. Re-stamping them here would mean reimplementing the compiler's id scheme
-    // in the host, so decline instead — `NodeKeys` is the real answer, and removes
-    // the offset-dependence rather than tracking it (docs/Incremental.md §3.1).
-    if (delta !== 0) {
-      const beingReplaced = (el: Element) =>
-        swaps.some((s) => s.run.some((n) => n === el || n.contains(el)));
-      if (Array.from(svgEl.querySelectorAll('[id^="x-"]')).some((el) => !beingReplaced(el))) {
-        return false;
-      }
-    }
-
-    // Re-stamp the spans of everything we are *not* replacing: their source moved
-    // under them even though their output did not.
-    for (const el of Array.from(svgEl.querySelectorAll("[data-xsvg-pos]"))) {
-      const v = el.getAttribute("data-xsvg-pos")!;
-      const dash = v.indexOf("-");
-      const a = Number(v.slice(0, dash));
-      const b = Number(v.slice(dash + 1));
-      if (Number.isFinite(a) && Number.isFinite(b)) el.setAttribute("data-xsvg-pos", `${toNew(a)}-${toNew(b)}`);
-    }
-    // The re-emitted markup already carries new-source spans, so it goes in after.
     for (const { run, nodes } of swaps) {
       run[0].replaceWith(...nodes);
       for (let i = 1; i < run.length; i++) run[i].remove();
@@ -544,7 +552,7 @@ export class XsvgViewInteractive extends HTMLElement {
     this.compiled = next;
     this.compiledBytes = newBytes;
     this.srcProp = next; // adopt the edit without triggering a render
-    inspector.refresh(next, edit, toNew);
+    inspector.refresh(next, edit);
     this.repaintThumbs(svgEl);
     return true;
   }
@@ -654,6 +662,12 @@ export class XsvgViewInteractive extends HTMLElement {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** Where an offset in the edited source sat in the previous one — for asking the
+ *  session to reproduce a fragment as it currently stands in the DOM. */
+function keptStart(start: number, pivot: number, delta: number): number {
+  return start <= pivot ? start : start - delta;
+}
+
 /**
  * The consecutive sibling nodes in the rendered document that together are one
  * fragment's output.
@@ -670,11 +684,11 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * Null when the current markup cannot be reproduced, or when the DOM does not hold as
  * many siblings as it claims — either way the caller falls back to a full compile.
  */
-function fragmentRun(anchor: Element, key: string, current: string | null): ChildNode[] | null {
+function fragmentRun(anchor: Element, name: string, current: string | null): ChildNode[] | null {
   if (current == null) return null;
   const nodes = parseSvgFragment(current);
   const at = nodes.findIndex(
-    (n) => n.nodeType === 1 && (n as Element).getAttribute("data-xsvg-pos") === key,
+    (n) => n.nodeType === 1 && (n as Element).getAttribute("data-xsvg-node") === name,
   );
   if (at < 0) return null;
   const run: ChildNode[] = [anchor];

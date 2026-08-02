@@ -5,6 +5,8 @@
 // indices, so `ByteIndex` converts between the two. Synthesized subtrees tag only
 // their root element, so `nearestSource` walks up to the nearest tagged ancestor.
 
+import type { NodeIndex } from "./keys";
+
 export interface SourceRange {
   /** UTF-8 byte offset into the xsvg source. */
   start: number;
@@ -102,8 +104,17 @@ function utf8Len(cp: number): number {
   return 4;
 }
 
-/** Parse `data-xsvg-pos="a-b"` on an element, or null if absent/malformed. */
-export function posAttr(el: Element): SourceRange | null {
+/**
+ * The source range an emitted element stands for, however the compiler stamped it.
+ *
+ * Two spellings, because there are two identity schemes. `data-xsvg-pos="a-b"` is
+ * the range itself; `data-xsvg-node="<key>"` is a host-assigned name, which the host
+ * resolves through `index` (docs/Incremental.md §3.1). Passing no index simply means
+ * keyed elements do not resolve — never that they resolve to something wrong.
+ */
+export function posAttr(el: Element, index?: NodeIndex | null): SourceRange | null {
+  const key = el.getAttribute("data-xsvg-node");
+  if (key) return index?.rangeOf(key) ?? null;
   const v = el.getAttribute("data-xsvg-pos");
   if (!v) return null;
   const dash = v.indexOf("-");
@@ -121,10 +132,11 @@ export function posAttr(el: Element): SourceRange | null {
 export function nearestSource(
   el: Element | null,
   root: Element,
+  index?: NodeIndex | null,
 ): { el: Element; range: SourceRange } | null {
   let cur: Element | null = el;
   while (cur) {
-    const range = posAttr(cur);
+    const range = posAttr(cur, index);
     if (range) return { el: cur, range };
     if (cur === root) break;
     cur = cur.parentElement;

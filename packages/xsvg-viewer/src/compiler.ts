@@ -12,11 +12,14 @@
 import init, {
   compile_ext,
   compile_fragment_ext,
+  compile_fragment_keyed_ext,
+  compile_keyed_ext,
   dependents as fragmentDependents,
   describe,
   fragment_range,
   imports,
   initSync,
+  node_spans,
 } from "../pkg/xsvg_wasm.js";
 import {
   fetchPluginLoader,
@@ -362,6 +365,40 @@ export interface CompileOptions {
    * instead of replacing it. Valid until the next compile.
    */
   onSession?: (session: CompileSession) => void;
+  /**
+   * Host-assigned node names (docs/Incremental.md §3.1). With these, identity emits
+   * as `data-xsvg-node="<key>"` and generated def ids seed on the key, so an element
+   * compiles to the same bytes however far the text around it has moved — which is
+   * what lets an editing host replace one element and leave the rest alone.
+   *
+   * The host must name **every** element (see `nodeSpans`); an unnamed one falls
+   * back to a byte span and quietly reintroduces the dependence keys remove. Only
+   * consulted when `sourcemap` is on.
+   */
+  keys?: (byteStart: number) => string | null;
+}
+
+/**
+ * The text the compiler actually sees for a given source — `-x-google-<Name>` font
+ * markers resolved away.
+ *
+ * Every byte offset in the incremental API, and every source range the compiler
+ * emits, indexes *this* string. A host that maps output back to source, or names
+ * elements by offset, must normalize first or it is off by ten bytes per marker
+ * ahead of the element it is looking at. (`CompileSession.source` reports the same
+ * text after the fact; this is for hosts that need it before.)
+ */
+export function normalizeSource(source: string): string {
+  return stripGooglePrefix(source);
+}
+
+/** Byte ranges of every element in a document, in document order. Parse-only — the
+ *  input a host needs to name them all. */
+export function nodeSpans(source: string): [number, number][] {
+  const flat = node_spans(source);
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], flat[i + 1]]);
+  return out;
 }
 
 /**
@@ -403,6 +440,7 @@ export interface CompileSession {
 }
 
 type ResolveFn = (base: string, href: string) => [string, string] | null;
+type KeyFn = ((byteStart: number) => string | null) | undefined;
 
 function makeSession(
   source: string,
@@ -411,6 +449,7 @@ function makeSession(
   base: string,
   resolveFor: (misses: Set<string>) => ResolveFn,
   plugins: PluginRegistry,
+  keys: KeyFn,
 ): CompileSession {
   return {
     source,
@@ -428,7 +467,10 @@ function makeSession(
       const misses = new Set<string>();
       plugins.beginCompile();
       try {
-        const markup = compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolveFor(misses), base, plugins.element, plugins.generate);
+        const resolve = resolveFor(misses);
+        const markup = keys
+          ? compile_fragment_keyed_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys)
+          : compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
         return misses.size === 0 ? markup : null;
       } catch {
         // The offset is not a fragment unit (inter-element whitespace, the root
@@ -494,6 +536,7 @@ async function compileFixpoint(
   base: string,
   plugins: PluginRegistry,
   onSession: ((s: CompileSession) => void) | undefined,
+  keys: KeyFn,
 ): Promise<string> {
   // canonical key → source text, or null = known-missing (tombstone: degrade, don't refetch)
   const cache = new Map<string, string | null>();
@@ -534,11 +577,13 @@ async function compileFixpoint(
       }
     } else {
       plugins.beginCompile();
-      const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
+      const svg = keys
+        ? compile_keyed_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys)
+        : compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
       if (misses.size === 0) {
         // Converged: the cache now holds every dependency this document reaches,
         // so fragment re-emits can run against it without fetching.
-        onSession?.(makeSession(source, quality, sourcemap, base, makeResolve, plugins));
+        onSession?.(makeSession(source, quality, sourcemap, base, makeResolve, plugins, keys));
         return svg;
       }
       probing = true; // deps discovered → cheap rounds until the set closes
@@ -607,11 +652,13 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
     // Sync resolver (bundled/in-memory deps): the compiler links on demand, one pass.
     const resolve = opts.resolve;
     plugins.beginCompile();
-    const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
+    const svg = opts.keys
+      ? compile_keyed_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, opts.keys)
+      : compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate);
     // This resolver answers on demand and never misses pending bytes, so a fragment
     // re-emit resolves exactly what the full compile did.
-    opts.onSession?.(makeSession(source, quality, sourcemap, base, () => resolve, plugins));
+    opts.onSession?.(makeSession(source, quality, sourcemap, base, () => resolve, plugins, opts.keys));
     return svg;
   }
-  return compileFixpoint(source, quality, sourcemap, opts.loader ?? fetchLoader(base), base, plugins, opts.onSession);
+  return compileFixpoint(source, quality, sourcemap, opts.loader ?? fetchLoader(base), base, plugins, opts.onSession, opts.keys);
 }
