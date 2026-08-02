@@ -93,6 +93,12 @@ export class NodeKeyStore implements NodeIndex {
       // one of them no longer exists; rather than guess which, let both be renamed by
       // the next `sync` — a fresh key costs a re-emit, a wrong key costs a wrong
       // element.
+      //
+      // Delete-and-skip handles the pair correctly only because a collision is
+      // always exactly a pair: two unmoved starts were distinct before, two moved
+      // starts shift in lockstep, so a slot can only be claimed by one of each. A
+      // third claimant would find the slot empty again and silently keep its key —
+      // if either branch of `to` ever stops being a constant shift, revisit this.
       if (moved.has(to)) {
         moved.delete(to);
         continue;

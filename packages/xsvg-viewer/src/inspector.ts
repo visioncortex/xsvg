@@ -309,7 +309,9 @@ function emptyPanel(): string {
 
 function fillPanel(info: HTMLElement, el: SVGGraphicsElement): void {
   const rows = Array.from(el.attributes)
-    .filter((a) => a.name !== "data-xsvg-pos")
+    // Neither identity spelling is an authored attribute — the byte span nor the
+    // host-assigned key — so neither belongs in a table of the element's own attrs.
+    .filter((a) => a.name !== "data-xsvg-pos" && a.name !== "data-xsvg-node")
     .map(
       (a) =>
         `<tr><th scope="row">${escapeHtml(a.name)}</th><td>${escapeHtml(a.value)}</td></tr>`,
