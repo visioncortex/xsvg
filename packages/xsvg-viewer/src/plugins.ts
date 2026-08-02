@@ -6,6 +6,8 @@
 // the registry below fetches, verifies, instantiates, and then answers the two
 // synchronous callbacks the compiler calls during lowering.
 
+import type { ElementSpec, PluginSchemas } from "./params.js";
+
 /** One `<x:import>` binding, as reported by the compiler's pre-scan. */
 export interface ImportDecl {
   ns: string;
@@ -46,7 +48,7 @@ export function fetchPluginLoader(base: string): PluginLoader {
 interface Manifest {
   abi?: number;
   ns?: string;
-  elements?: Record<string, { input?: string; children?: string }>;
+  elements?: Record<string, ElementSpec>;
 }
 
 /** The ABI this host speaks (docs/Extensibility.md §4). */
@@ -195,6 +197,18 @@ export class PluginRegistry {
   /** Start a fresh compile: no module carries state across this boundary. */
   beginCompile(): void {
     for (const m of this.loaded.values()) m.reset();
+  }
+
+  /**
+   * The parameter schemas the loaded modules declare, for a host building UI.
+   * Reading this runs no generator — a manifest is answered from the module's
+   * own description, so an editor can offer controls for an element the
+   * compiler has never heard of.
+   */
+  schemas(): PluginSchemas {
+    return {
+      spec: (ns, tag) => this.loaded.get(ns)?.manifest.elements?.[tag] ?? null,
+    };
   }
 
   /** The compiler's `element(ns, tag)` callback. */

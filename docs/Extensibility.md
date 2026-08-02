@@ -367,8 +367,25 @@ Steps 1–5 are done: `crates/xsvg-core/src/compile/plugin.rs`, `crates/xsvg-plu
 structurally at 0.205% pixel difference — the same font-rendering delta every other
 sample shows, since both hosts run identical module bytes.
 
-Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) and step 7
-(manifest-driven property panels) remain.
+Step 7 is done too: the interactive viewer's inspector reads a module's manifest and
+offers **editable controls** for a pinned generator element
+(`packages/xsvg-viewer/src/params.ts`). Reading a schema runs no generator, so a host
+can build UI for an element the compiler has never heard of.
+
+Two limits worth knowing:
+
+- **Edits commit on `change`, not `input`.** Applying one recompiles the document and
+  rebuilds the panel, which would yank a control out from under a drag in progress.
+  Live dragging needs the parameter panel to survive a recompile — i.e. to be owned by
+  the host rather than rebuilt with the inspector — which is a worthwhile follow-up.
+- **Only plugin elements get generated panels**, because only they have manifests. The
+  built-ins' parameters live in Rust source, so `<clip:arrow>` gets controls while
+  `<x:pie>` still shows a read-only attribute table. Closing that gap means giving the
+  built-ins machine-readable schemas too — a separate piece of work, and the point at
+  which the "plugins are UDFs" analogy would extend to the whole language.
+
+Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) remains, and is
+deliberately skipped for now.
 
 1. **Seam** — `GeneratorHost` + `ImportTable` pre-scan + dispatch arm + output sanitizer +
    `baked_refs` edges. Core-only, `NoGenerators` default, all existing tests green. Unit-test with

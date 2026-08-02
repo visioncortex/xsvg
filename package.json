@@ -19,6 +19,7 @@
     "build:packages": "npm run badges && npm run sync:readme && npm run wasm:build && npm run wasm:node && npm -w @visioncortex/xsvg-viewer run build && npm -w @visioncortex/xsvg-compile run build",
     "start": "vite preview",
     "typecheck": "tsc --noEmit",
+    "check:params": "node --experimental-strip-types scripts/params-check.mjs",
     "compare": "cargo build --release -p xsvg-cli && node scripts/compare.mjs"
   },
   "devDependencies": {

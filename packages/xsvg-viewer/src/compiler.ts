@@ -24,6 +24,7 @@ export {
   type ImportDecl,
   type PluginLoader,
 } from "./plugins.js";
+export type { ElementSpec, ParamSpec, PluginSchemas } from "./params.js";
 
 let ready: Promise<unknown> | null = null;
 
@@ -341,6 +342,12 @@ export interface CompileOptions {
    * never pays for this either way.
    */
   plugins?: PluginLoader | false;
+  /**
+   * Receives the parameter schemas of whatever generator modules the document
+   * loaded (docs/Extensibility.md §4). An editing host uses these to build
+   * controls for plugin elements; reading them runs no generator.
+   */
+  onPlugins?: (schemas: import("./params.js").PluginSchemas) => void;
 }
 
 // The default browser loader: URL canonicalization + same-origin fetch. Policy lives
@@ -485,6 +492,7 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
   source = stripGooglePrefix(source);
   const { quality = "balanced", sourcemap = false } = opts;
   const plugins = await loadPlugins(source, base, opts.plugins);
+  opts.onPlugins?.(plugins.schemas());
   if (opts.resolve) {
     // Sync resolver (bundled/in-memory deps): the compiler links on demand, one pass.
     plugins.beginCompile();

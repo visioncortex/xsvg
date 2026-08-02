@@ -11,6 +11,13 @@
 // track pan/zoom for free without recomputing on every transform change.
 import { ByteIndex, nearestSource, posAttr, type SourceRange } from "./sourcemap";
 import type { EditorHandle } from "./editor";
+import {
+  namespaceOf,
+  parseStartTag,
+  renderParams,
+  setAttribute,
+  type PluginSchemas,
+} from "./params";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -27,9 +34,22 @@ export interface InspectorOptions {
   panel: HTMLElement;
   source: string;
   editor: EditorHandle;
+  /** Parameter schemas of the document's generator modules. With these, a pinned
+   *  plugin element gets editable controls instead of a read-only attribute table. */
+  schemas?: PluginSchemas | null;
+  /** Apply an edit made in the panel. `pinAt` is the UTF-16 offset of the edited
+   *  element, so the host can re-pin it after the document recompiles. */
+  onEdit?: (source: string, pinAt: number) => void;
 }
 
-export function createInspector({ svgRoot, panel, source, editor }: InspectorOptions): Inspector {
+export function createInspector({
+  svgRoot,
+  panel,
+  source,
+  editor,
+  schemas,
+  onEdit,
+}: InspectorOptions): Inspector {
   const bytes = new ByteIndex(source);
 
   const hoverRect = mkRect("xsvg-hl-hover");
@@ -66,7 +86,41 @@ export function createInspector({ svgRoot, panel, source, editor }: InspectorOpt
   const selectElement = (el: SVGGraphicsElement, range: SourceRange) => {
     place(pinRect, el);
     fillPanel(panel, el);
+    addParams(range);
     editor.highlight(bytes.toStr(range.start), bytes.toStr(range.end));
+  };
+
+  // If the pinned element came from a generator, offer its declared parameters as
+  // controls. The schema comes from the module's own manifest, so this works for
+  // elements the compiler has never heard of — and reading it runs no generator.
+  const addParams = (range: SourceRange) => {
+    if (!schemas || !onEdit) return;
+    const at = bytes.toStr(range.start);
+    const tag = parseStartTag(source.slice(at));
+    if (!tag) return;
+    const ns = namespaceOf(source, tag.prefix);
+    const spec = ns ? schemas.spec(ns, tag.local) : null;
+    if (!spec) return;
+
+    const head = document.createElement("div");
+    head.className = "row";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = "parameters";
+    head.append(label);
+    panel.append(head);
+    if (spec.doc) {
+      const doc = document.createElement("p");
+      doc.className = "hint";
+      doc.textContent = spec.doc;
+      panel.append(doc);
+    }
+    panel.append(
+      renderParams(spec, tag.attrs, (name, value) => {
+        const next = setAttribute(source, at, name, value);
+        if (next != null && next !== source) onEdit(next, at);
+      }),
+    );
   };
 
   // Tagged elements with their source ranges as UTF-16 char offsets, for the

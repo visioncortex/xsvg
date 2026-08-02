@@ -32,6 +32,12 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   isolates modules from each other and from successive compiles; the native hosts additionally
   bound a runaway generator with wasmi fuel, which the browser cannot do on the main thread.
   Opt out with `xsvg --no-plugins` or `compile(src, { plugins: false })`.
+- **Manifest-driven parameter controls** in the interactive viewer's inspector: pinning a
+  generator element offers editable fields for the parameters its module declares —
+  typed, defaulted, with the manifest's help text as tooltips — and an edit rewrites the
+  document and recompiles, keeping the element pinned. Reading a schema runs no
+  generator, so this works for elements the compiler has never heard of. Hosts can reach
+  the same schemas via `compileXsvg`'s `onPlugins`.
 
 ### Fixed
 

@@ -11,17 +11,17 @@
         "y1": { "type": "number", "default": 0 },
         "x2": { "type": "number" },
         "y2": { "type": "number" },
-        "length": { "type": "number", "default": 100, "min": 0 },
+        "length": { "type": "number", "default": 100, "min": 0, "max": 2000 },
         "angle": { "type": "number", "default": 0, "doc": "degrees clockwise from +x" },
-        "thickness": { "type": "number", "default": 16, "min": 0 },
-        "head-width": { "type": "number", "doc": "defaults to 2.5x thickness" },
-        "head-length": { "type": "number", "doc": "defaults to head-width" },
+        "thickness": { "type": "number", "default": 16, "min": 0, "max": 200 },
+        "head-width": { "type": "number", "min": 0, "max": 400, "doc": "defaults to 2.5x thickness" },
+        "head-length": { "type": "number", "min": 0, "max": 400, "doc": "defaults to head-width" },
         "heads": { "type": "enum", "values": ["end", "start", "both", "none"], "default": "end" },
-        "notch": { "type": "number", "default": 0, "doc": "chevron notch depth at the tail, as a fraction of head-length" },
-        "radius": { "type": "number", "default": 0, "min": 0, "doc": "corner rounding" },
-        "fill": { "type": "string", "default": "currentColor" },
-        "stroke": { "type": "string" },
-        "outline": { "type": "number", "default": 0, "min": 0, "doc": "outline width; needs stroke to be visible" }
+        "notch": { "type": "number", "default": 0, "min": 0, "max": 1, "step": 0.05, "doc": "chevron notch depth at the tail, as a fraction of head-length" },
+        "radius": { "type": "number", "default": 0, "min": 0, "max": 100, "doc": "corner rounding" },
+        "fill": { "type": "color", "default": "currentColor" },
+        "stroke": { "type": "color", "doc": "outline colour" },
+        "outline": { "type": "number", "default": 0, "min": 0, "max": 40, "doc": "outline width; needs stroke to be visible" }
       },
       "input": "none",
       "children": "none"
@@ -29,14 +29,14 @@
     "callout": {
       "doc": "A rounded speech bubble sized to its children, with an optional tail.",
       "params": {
-        "pad": { "type": "number", "default": 12, "min": 0 },
-        "radius": { "type": "number", "default": 8, "min": 0 },
+        "pad": { "type": "number", "default": 12, "min": 0, "max": 200 },
+        "radius": { "type": "number", "default": 8, "min": 0, "max": 100 },
         "tail": { "type": "enum", "values": ["none", "left", "right", "top", "bottom"], "default": "bottom" },
-        "tail-size": { "type": "number", "default": 14, "min": 0 },
-        "tail-offset": { "type": "number", "default": 0.5, "doc": "0..1 along the tailed edge" },
-        "fill": { "type": "string", "default": "#fff" },
-        "stroke": { "type": "string" },
-        "outline": { "type": "number", "default": 0, "min": 0 }
+        "tail-size": { "type": "number", "default": 14, "min": 0, "max": 100 },
+        "tail-offset": { "type": "number", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "doc": "0..1 along the tailed edge" },
+        "fill": { "type": "color", "default": "#fff" },
+        "stroke": { "type": "color", "doc": "outline colour" },
+        "outline": { "type": "number", "default": 0, "min": 0, "max": 40 }
       },
       "input": "none",
       "children": "container"

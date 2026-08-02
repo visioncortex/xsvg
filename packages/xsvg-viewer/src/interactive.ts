@@ -12,7 +12,7 @@
 //!
 //! The inspector is a lazy `import()` — its CodeMirror dependency (an optional peer)
 //! loads only when `inspector` is set. Bundler-only: not in the CDN bundle.
-import { compileXsvg } from "./compiler";
+import { compileXsvg, type PluginSchemas } from "./compiler";
 import { findArtboards, makeThumb, type Artboard } from "./artboards";
 import { createPanZoom, type PanZoom } from "./pan-zoom";
 import type { MountedInspector } from "./interactive-inspector";
@@ -94,6 +94,14 @@ const STYLE = `
 .panel table.attrs th, .panel table.attrs td { text-align: left; vertical-align: top; padding: 1px 0; word-break: break-word; }
 .panel table.attrs th { width: 92px; padding-right: 8px; font-weight: normal; color: #7c3aed; }
 .panel table.attrs td { color: #0f172a; }
+/* Manifest-driven parameter controls for generator elements (docs/Extensibility.md). */
+.panel .row .label { font-weight: 600; }
+.xsvg-params { margin: 6px 0 2px; display: flex; flex-direction: column; gap: 4px; }
+.xsvg-param { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; }
+.xsvg-param-name { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #7c3aed; overflow: hidden; text-overflow: ellipsis; }
+.xsvg-param input, .xsvg-param select { width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 5px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #0f172a; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.xsvg-param input:focus, .xsvg-param select:focus { outline: 2px solid #93c5fd; outline-offset: -1px; border-color: #60a5fa; }
+.xsvg-param input::placeholder { color: #94a3b8; }
 .source-pane { flex: 1; border-top: 1px solid #e2e8f0; }
 .source { flex: 1; min-height: 0; overflow: hidden; }
 .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(225,29,72,.16); outline: 1px solid rgba(225,29,72,.45); }
@@ -126,6 +134,9 @@ const STYLE = `
   .panel .hint { color: #64748b; }
   .panel table.attrs th { color: #c4b5fd; }
   .panel table.attrs td { color: #e2e8f0; }
+  .xsvg-param-name { color: #c4b5fd; }
+  .xsvg-param input, .xsvg-param select { background: #1e293b; border-color: #475569; color: #e2e8f0; }
+  .xsvg-param input::placeholder { color: #64748b; }
   .cm-editor .xsvg-src-hl, .xsvg-src-hl { background: rgba(251,113,133,.22); outline-color: rgba(251,113,133,.5); }
   /* CodeMirror source pane: dark gutter (line numbers), surface, and native scrollbar.
      Prefixed with .source to outweigh CodeMirror's own injected single-class rules. */
@@ -157,6 +168,10 @@ export class XsvgViewInteractive extends HTMLElement {
   private token = 0;
   private panzoom: PanZoom | null = null;
   private inspector: MountedInspector | null = null;
+  /** Parameter schemas of whatever generator modules the last compile loaded. */
+  private pluginSchemas: PluginSchemas | null = null;
+  /** UTF-16 source offset to re-pin after a parameter edit recompiles. */
+  private repin: number | null = null;
   private fitted = true;
   private deckFrame: [number, number, number, number] | null = null;
   private deckSelectFn: ((i: number) => void) | null = null;
@@ -352,6 +367,7 @@ export class XsvgViewInteractive extends HTMLElement {
         baseUrl,
         resolve: this.resolveFn ?? undefined,
         loader: this.loaderObj ?? undefined,
+        onPlugins: (s) => { this.pluginSchemas = s; },
       });
       if (mine !== this.token) return;
 
@@ -368,9 +384,27 @@ export class XsvgViewInteractive extends HTMLElement {
       if (withInspector) {
         const { mountInspector } = await import("./interactive-inspector");
         if (mine !== this.token) return;
-        this.inspector = mountInspector({ svgRoot: svgEl, panel: this.panel, sourcePane: this.sourcePane, source });
+        this.inspector = mountInspector({
+          svgRoot: svgEl,
+          panel: this.panel,
+          sourcePane: this.sourcePane,
+          source,
+          schemas: this.pluginSchemas,
+          // A parameter edit rewrites the document and recompiles it. The edit is
+          // inside the element, so its start offset does not move — re-pin there so
+          // the panel stays on the element being adjusted.
+          onEdit: (next, pinAt) => {
+            this.repin = pinAt;
+            this.source = next;
+          },
+        });
         this.panzoom.onBackgroundClick(() => this.inspector?.clear());
         if (this.root.classList.contains("inspector-open")) this.inspector.remeasure();
+        if (this.repin != null) {
+          const at = this.repin;
+          this.repin = null;
+          this.inspector.selectAtSourceOffset(at);
+        }
       }
     } catch (err) {
       if (mine !== this.token) return;
