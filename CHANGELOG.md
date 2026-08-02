@@ -10,6 +10,24 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+### Added
+
+- **Loadable geometry generators** — `<x:import ns src integrity>` binds an XML namespace to a
+  compiled WASM module, so a document can use elements the compiler knows nothing about
+  (procedural clipart, custom diagram shapes). Modules are pure functions from parameters to
+  markup: no host callbacks, no document access, and their output is re-parsed by the compiler,
+  so it cannot escape the static SVG subset. Generator elements compose like built-ins — a
+  `<clip:arrow>` is a valid `<x:boolean>` operand or `<x:warp>` target — and participate in
+  incremental recompilation. Container elements get their children compiled and measured first,
+  so a generator can size itself to what it wraps.
+  Design: [docs/Extensibility.md](docs/Extensibility.md); spec: §4.3.
+- **`xsvg-plugin`** — the SDK for writing generators: implement one trait, call one macro.
+- **`clipart`**, the first official extension (`crates/ext/clipart`) — `<arrow>` (thick shafted
+  arrow, one or two heads, optional outline and corner rounding) and `<callout>` (a bubble sized
+  to its children). Official extensions load through the same public seam as anyone else's.
+- Browser host (`PluginRegistry`) with integrity checking, plus `imports()` so a host can load
+  modules without a throwaway compile round. The native (CLI/Node) host is not done yet.
+
 ### Fixed
 
 - Connector rails flip to a 4-turn detour when the endpoints don't face each other with room

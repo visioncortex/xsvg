@@ -9,7 +9,9 @@ weight), but the mechanism is general: anything that today would be a hand-writt
 
 This document is grounded in the shipped architecture ([Plan.md](Plan.md) §1.5 already commits to
 *"many WASM modules, JS as orchestrator"* and describes optional engines as *"a plugin a document
-pulls only if it needs it"*). Status: **design — not implemented**.
+pulls only if it needs it"*). Status: **implemented** — the core seam, the `clipart` extension, and the browser host
+have landed; the native (CLI/Node) host has not. Where this document and the code differ,
+the code wins; the notes below were reconciled after building it.
 
 > **The spreadsheet framing.** xsvg already has the skeleton of a spreadsheet: `baked_refs`
 > (`compile/mod.rs:386`) defines the dependency edges, `dependents_multi_impl` (`:428`) is the
@@ -134,7 +136,6 @@ pub struct GenRequest<'a> {
     pub input_d: Option<String>,             // resolved `in="#id"` geometry, if declared
     pub children: Vec<ChildFragment>,        // compiled children, if the element declares them
     pub tolerance: f64,                      // QualityProfile::tolerance()
-    pub imports: &'a ImportTable,            // ns → (src, integrity), from the pre-scan
 }
 
 /// One child of a container element, already lowered by the core.
@@ -246,8 +247,8 @@ the whole namespace, named in the marker). The manifest is also the **authoring 
 editor host can generate property panels from `params` without instantiating anything else — the
 same way a spreadsheet surfaces a UDF's signature.
 
-**Generate**: request JSON is `GenRequest` (attrs, resolved `input_d`, compiled `children`,
-`tolerance`); response is
+**Generate**: request JSON is `{tag, attrs, input_d, children, tolerance}` — one entry point for
+every element the module provides, so a module needs no per-element export. Response is
 `{ "svg": "…" }` or `{ "error": "reason" }` (degrades with the reason in the marker). Unknown
 attributes are passed through to the plugin (its schema, its call); unknown *elements* in a bound
 namespace degrade in the core.
@@ -264,18 +265,21 @@ from request to fragment. Purity across calls is *enforced* by the host: see §6
 
 ## 5. Host integration
 
-The core asks `GeneratorHost` synchronously; module *acquisition* is async. This is the same
-sync/async mismatch the `Resolver` already has, and it reuses the same solution — the
-**fixpoint driver** (`compileFixpoint`, `packages/xsvg-viewer/src/compiler.ts:372`):
+The core asks `GeneratorHost` synchronously; module *acquisition* is async. Unlike the
+`Resolver`'s dependency discovery, this needs **no fixpoint round**: `<x:import>` is a
+declaration, not something discovered by lowering, so `imports_impl` reports a document's
+bindings from a parse alone and the host loads modules **before** the first compile.
 
-```
-round 1: compile → plugin elements degrade to Pending, host records (ns → src) misses
-         → loader fetches + instantiates exactly those modules (integrity-checked)
-round 2: compile → generators bound → output complete
-```
+`ElementInfo::Pending` remains for hosts that skip the pre-scan (and for a module still in
+flight): those elements degrade with a marker and the host recompiles once loading finishes.
+Correctness never depends on the pre-scan — only the wasted round does.
 
-Intermediate rounds already run at `quality="fast"` with output discarded; `MAX_ROUNDS=20` bounds
-pathological import chains. Per platform:
+*Limitation.* Imports are read from the **entry document** only. A cross-file dependency's own
+`<x:import>` is not visible, so plugin elements inside a linked file degrade. Lifting this means
+either recursing the pre-scan through the resolver or merging per-file import tables during
+`emit_link`; neither is done.
+
+Per platform:
 
 | Host | Runtime for plugin modules | Wiring |
 |---|---|---|
@@ -291,18 +295,23 @@ every keystroke must not re-instantiate.
 
 WASM gives isolation; the host adds **liveness and purity**:
 
-- **Fuel / time**: each `xsvg_generate` call runs under a bound (wasmtime fuel natively; a
-  watchdog + instance teardown in the browser). Exhaustion degrades that element with a marker —
-  a hostile or buggy plugin cannot hang the compile. This extends the existing budget family
+- **Fuel / time**: a native host runs each `xsvg_generate` call under wasmtime fuel, so
+  exhaustion degrades that element with a marker, extending the existing budget family
   (`MAX_REF_DEPTH`, `REF_FUEL`, `compile/mod.rs:33-44`).
-- **Memory cap** on the instance; growth beyond it degrades.
+  **The browser host cannot do this**, and does not pretend to: a synchronous WASM call on the
+  main thread is not interruptible, so a non-terminating generator hangs the tab. Bounding it
+  needs the compile moved to a Worker (terminable) — worth doing before third-party modules are
+  loaded from anywhere untrusted, and out of scope here. A module that *traps* is handled: the
+  instance is dropped and that element degrades.
+- **Memory**: a trap from exhausting memory degrades the element rather than the compile.
 - **Purity by construction**: a module keeping mutable globals could return different output for
-  the same request. The host may **re-instantiate (or restore a snapshot of) the instance per
-  compile**, making retained state unobservable across compiles — cheap at these module sizes, and
-  it is what makes the incremental canary (`fragments_are_verbatim_slices_of_the_full_compile`,
-  [Incremental.md](Incremental.md)) hold for plugin content. Within one compile, memoization by
-  request hash (the same memo discipline as `Ctx.ref_memo`) both speeds up repeated elements and
-  masks intra-compile statefulness.
+  the same request. The browser host **drops every instance between compiles** (the compiled
+  `WebAssembly.Module` is kept, so this costs an instantiation, not a compilation), making
+  retained state unobservable across compiles — which is what makes the incremental canary
+  (`fragments_are_verbatim_slices_of_the_full_compile`, [Incremental.md](Incremental.md)) hold
+  for plugin content. Statefulness *within* one compile is still possible in principle; memoizing
+  by request hash (the `Ctx.ref_memo` discipline) would close that and speed up repeated elements,
+  and is not yet done.
 - **Output sanitization** in the core (§3, item 4) — the security boundary does not depend on the
   host doing it.
 - **Supply chain**: `integrity` pins bytes; hosts SHOULD refuse remote (cross-origin) `src`
@@ -337,6 +346,11 @@ this design is laid out so it composes rather than conflicts:
   `dependents_multi_impl` — one recalc engine for links, plugin inputs, and formulas.
 
 ## 9. Phasing
+
+Steps 1–3 and 5 are done (`crates/xsvg-core/src/compile/plugin.rs`, `crates/xsvg-plugin`,
+`crates/ext/clipart`, `packages/xsvg-viewer/src/plugins.ts`, `dataset/clipart.xsvg`).
+Step 4 — the native host — is not, which is why `dataset/clipart.xsvg` is excluded from
+the native-vs-browser parity harness.
 
 1. **Seam** — `GeneratorHost` + `ImportTable` pre-scan + dispatch arm + output sanitizer +
    `baked_refs` edges. Core-only, `NoGenerators` default, all existing tests green. Unit-test with

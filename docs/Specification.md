@@ -192,6 +192,44 @@ compiler the dependency's source:
 
 Links are **baked references** like §4: editing a dependency re-emits its dependents.
 
+### 4.3 Extensions — `<x:import>` [implemented]
+
+`<x:import>` binds an **XML namespace** to a compiled **generator module**, so a document can use
+elements the compiler knows nothing about. Design rationale, ABI, and the extension tiers:
+[Extensibility.md](Extensibility.md).
+
+```xml
+<x:import ns="https://example.com/clipart" src="clipart.wasm" integrity="sha256-…"/>
+<clip:arrow xmlns:clip="https://example.com/clipart" x1="10" y1="40" x2="160" y2="40"/>
+```
+
+- **`ns`** (required) — the namespace URI to bind. **`src`** (required) — the module, resolved like
+  a cross-file `href` (§4.2). **`integrity`** (optional) — an SRI-style `sha256-…` hash checked
+  before the module runs; a host SHOULD refuse a cross-origin `src` without one.
+- Like `<x:theme>`, it is a **definition**: collected before serialization, emits nothing, and may
+  appear anywhere (forward references work).
+- **The core namespace can never be bound** — a module must not be able to shadow a built-in — and
+  **a namespace binds once**; a conflicting second binding degrades with a marker (first wins).
+- An element in a bound namespace is lowered by its module. A **foreign namespace that is not
+  bound** still drops as editor metadata (§2), so `<x:import>` is what turns unknown markup into an
+  extension point rather than noise.
+- Generator output is **re-parsed and re-emitted by the compiler**, so it is confined to the same
+  static subset as document content (§9) no matter what a module returns; it may itself contain
+  `x:` elements, which lower normally. Elements in generator namespaces do not nest inside
+  generator output.
+- Attributes reach the generator with theme `var()` tokens (§4.1) already resolved. `id`,
+  `transform`, and `in` are reserved by the compiler: `in="#id"` resolves to geometry (§4) and is
+  passed as a path, while `id`/`transform` land on the emitted wrapper so the element stays
+  referenceable and placeable.
+- Elements whose module declares them **containers** have their children compiled first and handed
+  over as markup plus measured boxes, so a generator can size itself to what it wraps.
+- **Totality holds throughout** (§3): a module that fails to load, is missing, declines an element,
+  or returns malformed markup degrades that element with a marker naming the reason.
+- Imports are read from the **entry document**; a linked dependency's own imports are not visible,
+  and plugin elements inside it degrade.
+- A plugin element is a **baked reference** like §4 in both directions: its `in="#id"` re-emits it
+  when the target changes, and editing an `<x:import>` re-emits every element in that namespace.
+
 ## 5. Graphics elements (reused SVG) [implemented]
 
 `<g>`, `<path>`, basic shapes, gradients, `transform`, `fill`/`stroke` are normalized or passed
@@ -673,8 +711,10 @@ native-`<textPath>` non-deforming follow is future work.
 A `<x:list>` is a vertical stack of `<x:li>` items, each flowed and wrapped like a mini
 `<x:textbox>` but with a **hanging indent**: the marker sits in the gutter and continuation lines
 align to the text column, not back under the marker. It is the ordered/unordered list SVG never
-got, and lowers to a `<g>` of drawn bullet shapes plus one plain `<text>` of positioned `<tspan>`s
-(item text + number/character markers) — live and selectable.
+got, and lowers to a `<g>` of drawn bullet shapes, one plain `<text>` of generated
+number/character markers, and **one `<text>` of positioned `<tspan>`s per item** — live and
+selectable, with each item's `<text>` source-mapped to its `<x:li>` (like table cells and
+paragraphs) so editors can address every item's rendered glyphs individually.
 
 ```xml
 <x:list x="40" y="80" width="300" list="bullet" font-size="14" item-spacing="5">
