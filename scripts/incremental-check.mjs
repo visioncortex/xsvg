@@ -83,6 +83,34 @@ check("singleEdit spans a scattered change rather than mis-describing it", () =>
   assert.equal(old.slice(e.from, e.to), `1"/><b y="1`);
 });
 
+// ---- identity spellings stay funneled -------------------------------------
+
+check("identity attributes are read only through the sanctioned funnels", () => {
+  // There are two identity spellings — `data-xsvg-pos` byte ranges and
+  // `data-xsvg-node` host keys — and every consumer must handle both. That stays
+  // manageable only while the handling is funneled: `posAttr` (sourcemap.ts)
+  // resolves either spelling, the inspector tracks its pin through one `identity`
+  // helper, and the patch path anchors on names in patch.ts. A new call site
+  // reading the attributes directly would handle one spelling and silently break
+  // on documents using the other, so it fails here instead.
+  const sanctioned = new Set(["sourcemap.ts", "inspector.ts", "patch.ts"]);
+  const reads =
+    /(?:getAttribute|setAttribute|hasAttribute|closest|querySelector(?:All)?)\s*\(\s*[`"'][^`"')]*data-xsvg-(?:pos|node)/;
+  for (const pkg of ["xsvg-viewer", "xsvg-compile"]) {
+    const dir = resolve(import.meta.dirname, `../packages/${pkg}/src`);
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+      if (sanctioned.has(file)) continue;
+      const hit = readFileSync(join(dir, file), "utf8").match(reads);
+      assert.equal(
+        hit,
+        null,
+        `${pkg}/src/${file} reads an identity attribute directly (${hit?.[0]}); ` +
+          `resolve it through posAttr/nearestSource or the patch path instead`,
+      );
+    }
+  }
+});
+
 // ---- the protocol, against real documents ---------------------------------
 
 /**
@@ -109,6 +137,9 @@ function patch(source, next, o) {
   keys.sync(nodeSpans(source));
   const before = { ...o, keys: keys.key };
   const rendered = compile(source, before);
+  // The store names every element, and the compiler seconds that by staying silent:
+  // a keyed compile that had to fall back to byte spans says so in its own output.
+  assert.ok(!rendered.includes("element(s) unkeyed"), "the key store missed an element");
 
   // The common prefix ends at one offset in both versions; it is the pivot.
   const pivot = bytes(next.slice(0, edit.from));
