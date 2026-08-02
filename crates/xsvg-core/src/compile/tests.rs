@@ -305,6 +305,28 @@ fn list_item_font_size_override() {
 }
 
 #[test]
+fn empty_list_item_keeps_its_row_and_marker() {
+    // an empty <x:li> is a real row: it advances the flow by its own line
+    // height, and its marker sits on THAT row (an editor's Enter-at-end
+    // creates one; the bullet must appear on the new line, not at the top)
+    let svg = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10" line-height="1.2"><x:li>a</x:li><x:li></x:li><x:li>b</x:li></x:list></svg>"##
+    );
+    let out = compile_test(&svg);
+    // rows: baseline 0 / 15.5 / 31 (advance 12 + item-spacing 3.5), offset 7
+    // (cap height); marker cy = baseline + 7 − x-height/2
+    assert!(out.contains("cy=\"4.5\""), "first item's marker row: {out}");
+    assert!(
+        out.contains("cy=\"20\""),
+        "the EMPTY item's marker on its own row, between its neighbors: {out}"
+    );
+    assert!(out.contains("cy=\"35.5\""), "third item's marker row: {out}");
+    // the empty item emits no <text>: two keyed texts, three markers
+    assert_eq!(out.matches("<circle").count(), 3, "{out}");
+    assert!(out.contains("y=\"7\">a</tspan>") && out.contains("y=\"38\">b</tspan>"), "{out}");
+}
+
+#[test]
 fn theme_color_tokens_resolve_in_paint() {
     let svg = format!(
         r##"{XW}<x:theme><x:color name="accent" value="#6366f1"/></x:theme><rect x="0" y="0" width="10" height="10" fill="var(accent)"/><circle cx="5" cy="5" r="3" fill="var(missing, #ff0000)"/></svg>"##

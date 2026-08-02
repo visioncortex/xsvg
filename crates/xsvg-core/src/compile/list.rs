@@ -57,6 +57,10 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         col: f64,
         marker: Marker,
         lines: Vec<PlacedLine>,
+        baseline: f64, // the item's first-line baseline (relative frame) —
+        // kept OUTSIDE `lines` so an EMPTY item (whose text laid out to
+        // nothing) still knows its row: it takes vertical space like any
+        // item, and its marker must sit on that row, not at the block top
         size: f64, // per-item font size (defaults to the list's)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
@@ -124,6 +128,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             col,
             marker,
             lines,
+            baseline: first_baseline,
             size: item_size,
             src: li,
         });
@@ -152,7 +157,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let mut markers = String::new(); // generated text markers, one shared <text>
     let mut body = String::new(); // one keyed <text> per item: its OWN source text
     for it in &items {
-        let item_baseline = it.lines.first().map(|l| l.baseline).unwrap_or(0.0) + offset;
+        let item_baseline = it.baseline + offset;
         let item_fm = m.font_metrics(
             &TextStyle {
                 size: it.size,
