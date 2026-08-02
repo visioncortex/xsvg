@@ -3697,7 +3697,7 @@ impl GeneratorHost for MockHost {
             return ElementInfo::Unbound;
         }
         match tag {
-            "bar" | "evil" | "nested" | "warped" => ElementInfo::Ready {
+            "bar" | "evil" | "nested" | "warped" | "exfil" | "shadow" => ElementInfo::Ready {
                 input: InputMode::None,
                 children: ChildMode::None,
             },
@@ -3753,6 +3753,17 @@ impl GeneratorHost for MockHost {
             // a module trying to escape the static subset
             "evil" => GenResult::Svg(
                 r##"<script>alert(1)</script><rect x="0" y="0" width="1" height="1" onclick="x()"/><animate dur="1s"/>"##
+                    .into(),
+            ),
+            // a module reaching for the network, or for the document's own ids
+            // (docs/Sandbox.md §4) — none of this is caught by the static subset
+            "exfil" => GenResult::Svg(
+                r##"<a href="javascript:alert(1)"><rect x="0" y="0" width="1" height="1"/></a><image href="https://attacker.example/p.png" x="0" y="0" width="1" height="1"/><foreignObject x="0" y="0" width="1" height="1"><iframe src="https://attacker.example/"/></foreignObject><rect x="0" y="0" width="2" height="2" fill="url(https://attacker.example/p.svg#g)" style="stroke: url('https://attacker.example/s.svg#h')"/><use href="#authored"/>"##
+                    .into(),
+            ),
+            // a module naming ids the document also uses, and referring to its own
+            "shadow" => GenResult::Svg(
+                r##"<linearGradient id="brand"><stop offset="0" stop-color="#000"/></linearGradient><rect id="authored" x="0" y="0" width="3" height="3" fill="url(#brand)"/>"##
                     .into(),
             ),
             // a module emitting an element in its own namespace (must not recurse)
@@ -4270,4 +4281,70 @@ fn a_rail_never_repeats_or_runs_straight_through_a_waypoint() {
             );
         }
     }
+}
+
+
+// ------------------------------------------------ the plugin sandbox (Sandbox.md)
+
+#[test]
+fn plugin_output_cannot_reach_the_network() {
+    // The static subset stops output from *executing*; it never stopped it from
+    // *fetching*. A generator that can make the renderer issue a request has an
+    // outbound channel — and a container generator is handed its children already
+    // compiled, so "read the document, encode it into a URL, emit an <image>" is
+    // exfiltration built entirely from primitives that individually look benign.
+    let out = compile_plug(&plug_doc(r##"<c:exfil/>"##));
+
+    assert!(!out.contains("attacker.example"), "output reaches a remote origin: {out}");
+    assert!(!out.contains("javascript:"), "output can run script on click: {out}");
+    // the elements themselves may stay — inert, having lost only the URL
+    assert!(out.contains("<a"), "the anchor is kept, just defused: {out}");
+    // a paint server pointing out of the document collapses rather than fetching
+    assert!(out.contains(r##"fill="none""##), "remote paint not neutralized: {out}");
+    // <foreignObject> is an HTML escape hatch a geometry generator has no use for
+    assert!(!out.contains("<iframe"), "{out}");
+    assert!(out.contains("<foreignObject> from a generator"), "{out}");
+    // and the document says what it lost rather than quietly rendering less
+    assert!(out.contains("pointed outside the document"), "{out}");
+}
+
+#[test]
+fn plugin_ids_cannot_shadow_the_document() {
+    // An unscoped id from a generator captures the document's own references: emit
+    // `id="brand"` and every authored `url(#brand)` resolves to plugin geometry.
+    let svg = plug_doc(
+        r##"<linearGradient id="brand"><stop offset="0" stop-color="#f00"/></linearGradient><rect id="authored" x="0" y="0" width="4" height="4" fill="url(#brand)"/><c:shadow/>"##,
+    );
+    let out = compile_plug(&svg);
+
+    // the authored pair is untouched
+    assert!(out.contains(r##"<linearGradient id="brand">"##), "{out}");
+    assert!(out.contains(r##"fill="url(#brand)""##), "{out}");
+    // the generator's are namespaced to the element that produced them
+    assert_eq!(out.matches(r##"id="brand""##).count(), 1, "id collision: {out}");
+    assert_eq!(out.matches(r##"id="authored""##).count(), 1, "id collision: {out}");
+    assert!(out.contains("id=\"x-plg-"), "generator ids are not scoped: {out}");
+    // and a reference *within* the generator's own output still resolves, rewritten
+    // to match — scoping ids must not break the module's own paint
+    let scoped = out
+        .split("id=\"x-plg-")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap()
+        .to_string();
+    assert!(
+        out.contains(&format!("url(#x-plg-{scoped})")),
+        "the module's own reference did not follow its id: {out}"
+    );
+}
+
+#[test]
+fn an_author_may_still_write_what_a_generator_may_not() {
+    // The asymmetry is the point (docs/Sandbox.md §1): the author's own markup is
+    // their decision, and tightening it here would be a different, breaking change.
+    let out = compile_test(&format!(
+        r##"{XW}<image href="https://example.com/p.png" x="0" y="0" width="1" height="1"/><rect id="brand" x="0" y="0" width="1" height="1"/></svg>"##
+    ));
+    assert!(out.contains("https://example.com/p.png"), "{out}");
+    assert!(out.contains(r##"id="brand""##), "{out}");
 }

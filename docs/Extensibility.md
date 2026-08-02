@@ -339,7 +339,11 @@ every keystroke must not re-instantiate.
 
 ## 6. Safety & resource bounds
 
-WASM gives isolation; the host adds **liveness and purity**:
+The full trust model — who is trusted with what, which component holds each guarantee,
+and what is explicitly *not* guaranteed — is [Sandbox.md](Sandbox.md). Summary: WASM
+gives isolation; the host adds **liveness and purity**; the core constrains **output**,
+and constrains generator output more tightly than authored markup, because an author
+chose their own words and only *referenced* the module:
 
 - **Fuel / time**: the native hosts run each `xsvg_generate` call under **wasmi fuel**, so
   exhaustion degrades that element with a marker, extending the existing budget family
@@ -359,7 +363,11 @@ WASM gives isolation; the host adds **liveness and purity**:
   by request hash (the `Ctx.ref_memo` discipline) would close that and speed up repeated elements,
   and is not yet done.
 - **Output sanitization** in the core (§3, item 4) — the security boundary does not depend on the
-  host doing it.
+  host doing it. Beyond the static subset every document gets, generator output may not reach the
+  network (`href`/`src`/`url()` are held to same-document fragments and `data:image/…`), may not
+  emit `<foreignObject>`, and has its ids namespaced so it cannot capture an authored `url(#…)`.
+  Egress is what keeps the one deliberate hole in isolation — a container is handed its children
+  *compiled* — from becoming an exfiltration channel ([Sandbox.md](Sandbox.md) §4).
 - **Supply chain**: `integrity` pins bytes; hosts SHOULD refuse remote (cross-origin) `src`
   without it. A future registry/signing story is out of scope here.
 

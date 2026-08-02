@@ -598,6 +598,7 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         node,
         out,
         &["from", "to", "from-point", "to-point", "route", "arrow", "arrow-size", "bulge", "fill"],
+        ctx,
     );
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));

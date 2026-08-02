@@ -123,6 +123,14 @@ struct Ctx<'a> {
     /// Set while generator output is being sanitized, so a module emitting an
     /// element in its own namespace degrades instead of recursing forever.
     in_plugin: std::cell::Cell<bool>,
+    /// Prefix for ids a generator emits, unique to the element that produced them —
+    /// empty outside plugin output (docs/Sandbox.md §4). Without it a module could
+    /// emit `id="logo"` and capture the document's own `url(#logo)`.
+    plugin_ids: std::cell::RefCell<String>,
+    /// URL-valued attributes dropped from generator output because they pointed
+    /// somewhere the sandbox does not allow. Counted rather than silently swallowed,
+    /// so the wrapper can say the drawing is missing something and why.
+    plugin_drops: std::cell::Cell<u32>,
 }
 
 /// The platform seams a compile runs against, bundled so entry points don't grow
@@ -188,6 +196,8 @@ impl<'a> Ctx<'a> {
             generators: seams.generators,
             imports,
             in_plugin: std::cell::Cell::new(false),
+            plugin_ids: std::cell::RefCell::new(String::new()),
+            plugin_drops: std::cell::Cell::new(0),
         }
     }
 
@@ -865,6 +875,14 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    // `<foreignObject>` is an escape hatch out of SVG and into HTML parsing rules. An
+    // author may have a reason for one; a geometry generator does not, and its output
+    // is untrusted (docs/Sandbox.md §4), so it does not get to open that door.
+    if name == "foreignObject" && ctx.in_plugin.get() {
+        out.push_str("<!-- xsvg: <foreignObject> from a generator — dropped -->");
+        return;
+    }
+
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);
         return;
@@ -900,10 +918,10 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     }
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["filter"]);
+            copy_attrs(node, out, &["filter"], ctx);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &[]),
+        None => copy_attrs(node, out, &[], ctx),
     }
     out.push_str(&pos_attr(node, ctx));
     if !is_root {
@@ -961,10 +979,10 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("<path");
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["x", "y", "width", "height", "filter"]);
+            copy_attrs(node, out, &["x", "y", "width", "height", "filter"], ctx);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &["x", "y", "width", "height"]),
+        None => copy_attrs(node, out, &["x", "y", "width", "height"], ctx),
     }
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" d=\"M{x},{y} h{w} v{h} h{} Z\"/>", -w));
@@ -981,7 +999,7 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
 
     out.push_str("<text");
-    copy_attrs(node, out, &["inline-size", "line-height"]);
+    copy_attrs(node, out, &["inline-size", "line-height"], ctx);
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let base = [EmitAttrs::default()];
@@ -2919,7 +2937,50 @@ fn font_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
     THEME.with(|t| t.borrow().fonts.get(name).cloned())
 }
 
-fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
+/// Attributes whose value is a URL, and so a way for markup to reach the network
+/// rather than merely draw (docs/Sandbox.md §4).
+const URL_ATTRS: [&str; 3] = ["href", "src", "xlink:href"];
+
+/// Whether a URL is one generator output may name: a same-document fragment, or an
+/// inline image. Everything else — a remote origin, `javascript:`, any other scheme —
+/// would let untrusted output *act* instead of draw.
+fn plugin_url_ok(url: &str) -> bool {
+    let u = url.trim();
+    u.starts_with('#') || u.to_ascii_lowercase().starts_with("data:image/")
+}
+
+/// Rewrite a generator's attribute value for the sandbox: namespace the ids it
+/// mentions, and neutralize any `url(…)` that points out of the document.
+///
+/// Applies to **every** value, not just `style`: `fill`, `stroke` and `filter` all
+/// take a `url(…)`, so a paint server is the same egress channel wearing a different
+/// attribute name.
+fn scope_plugin_value(value: &str, prefix: &str, drops: &std::cell::Cell<u32>) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(at) = rest.find("url(") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 4..];
+        let Some(close) = after.find(')') else {
+            break; // malformed; leave the remainder to the copy below
+        };
+        let target = after[..close].trim().trim_matches(['"', '\''].as_slice());
+        if let Some(id) = target.strip_prefix('#') {
+            out.push_str(&format!("url(#{prefix}{id})"));
+        } else {
+            drops.set(drops.get() + 1);
+            out.push_str("none");
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx) {
+    // Generator output is untrusted in ways authored markup is not (docs/Sandbox.md).
+    let scope = ctx.plugin_ids.borrow();
+    let plugin = !scope.is_empty();
     for attr in node.attributes() {
         if skip.contains(&attr.name()) {
             continue;
@@ -2934,11 +2995,28 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
             Some(XML_NS) => "xml:",
             Some(_) => continue, // x: (consumed) and foreign metadata
         };
+        let mut value = resolve_var(attr.value()).into_owned();
+        if plugin {
+            if URL_ATTRS.contains(&attr.name()) {
+                if !plugin_url_ok(&value) {
+                    ctx.plugin_drops.set(ctx.plugin_drops.get() + 1);
+                    continue; // drop the attribute; the element stays, inert
+                }
+                if let Some(id) = value.trim().strip_prefix('#') {
+                    value = format!("#{}{}", *scope, id);
+                }
+            } else if attr.name() == "id" {
+                value = format!("{}{}", *scope, value);
+            }
+            if value.contains("url(") {
+                value = scope_plugin_value(&value, &scope, &ctx.plugin_drops);
+            }
+        }
         out.push(' ');
         out.push_str(prefix);
         out.push_str(attr.name());
         out.push_str("=\"");
-        push_escaped(out, &resolve_var(attr.value()), true);
+        push_escaped(out, &value, true);
         out.push('"');
     }
     // Font token (§4.1): apply the named `<x:font>`'s props the element did not

@@ -10,6 +10,34 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+### Added
+
+- **[docs/Sandbox.md](docs/Sandbox.md) — the plugin sandbox model written down**: who is trusted
+  with what, which component enforces each guarantee, and what is deliberately *not* guaranteed
+  (the browser cannot bound a generator's execution time; a same-origin module without
+  `integrity` is trust-on-first-use). Worth stating plainly because the guarantees were real but
+  scattered across three hosts and a serializer.
+
+### Security
+
+- **Generator output can no longer reach the network.** The static subset stopped output from
+  *executing* — `<script>`, `on*` handlers — but never from *fetching*: `<a href="javascript:…">`,
+  `<image href="https://…">`, `<foreignObject><iframe>` and `fill="url(https://…)"` all passed
+  through. Inside generator output, `href`/`src`/`xlink:href` and every `url(…)` are now held to
+  a same-document `#fragment` or a `data:image/…` payload, `<foreignObject>` is dropped, and what
+  was removed is counted in a marker rather than silently swallowed.
+
+  This mattered more than each vector suggests alone. A **container** generator is handed its
+  children already compiled — real document content entering third-party code — which was safe
+  only because a module has no way to transmit. Any outbound request composes with it into
+  exfiltration of document content with no script involved: read the children, encode them into a
+  URL, let the renderer fetch it.
+- **Generator-emitted ids are namespaced** to the element that produced them (`x-plg-<seed>-`),
+  with the module's own `url(#…)` references rewritten to match. An unscoped id could shadow an
+  authored one and capture the document's own paint references or `<use href="#…">`.
+- Authored markup is deliberately **unchanged** — an author writing a remote `<image href>` chose
+  it; someone who wrote `<clip:arrow thickness="8"/>` chose nothing of the kind.
+
 ### Fixed
 
 - **An element edited into invisibility could not be edited back.** Dragging

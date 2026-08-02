@@ -325,7 +325,7 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
         }
     };
 
-    let Some(body) = sanitize(&svg, ctx) else {
+    let Some(body) = sanitize(&svg, node, ctx) else {
         marker(out, ns, tag, "generator output is not well-formed XML");
         return;
     };
@@ -360,19 +360,40 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
 /// output string, not the document the viewer maps against, so stamping them
 /// would point a click at nothing. The wrapper's own range covers it, exactly as
 /// for a linked dependency (§4.2).
-fn sanitize(svg: &str, ctx: &Ctx) -> Option<String> {
+fn sanitize(svg: &str, node: roxmltree::Node, ctx: &Ctx) -> Option<String> {
     let wrapped = format!("<svg xmlns=\"{SVG_NS}\">{svg}</svg>");
     check_nesting_depth(&wrapped, MAX_NESTING_DEPTH).ok()?;
     let doc = roxmltree::Document::parse(&wrapped).ok()?;
 
     let prev_sourcemap = ctx.sourcemap.replace(false);
     let prev_in_plugin = ctx.in_plugin.replace(true);
+    // Ids this module emits are namespaced to *this* element, so two instances of the
+    // same generator cannot collide with each other either (docs/Sandbox.md §4).
+    let prev_ids = ctx
+        .plugin_ids
+        .replace(format!("x-plg-{}-", super::gen_id_seed(node, ctx)));
+    let before = ctx.plugin_drops.get();
+
     let mut buf = String::new();
     for child in doc.root_element().children() {
         serialize(child, &mut buf, false, ctx);
     }
+
+    // Say what was taken away. A generator whose output reached for the network is
+    // either compromised or confused, and either way the drawing is now missing
+    // something the module meant to draw — that is worth surfacing, not swallowing.
+    let dropped = ctx.plugin_drops.get() - before;
+    if dropped > 0 {
+        buf.insert_str(
+            0,
+            &format!(
+                "<!-- xsvg: {dropped} URL(s) in generator output pointed outside the document — dropped (docs/Sandbox.md) -->"
+            ),
+        );
+    }
     ctx.sourcemap.set(prev_sourcemap);
     ctx.in_plugin.set(prev_in_plugin);
+    *ctx.plugin_ids.borrow_mut() = prev_ids;
     Some(buf)
 }
 
