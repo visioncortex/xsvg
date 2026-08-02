@@ -10,7 +10,12 @@ use super::*;
 /// item sets its nesting level; each level steps the text column right by `indent`
 /// (default 1.5em) and cycles the marker style (bullet •◦▪ / number 1. a. i.).
 /// Numbered items keep an outline counter per level, restarted when nesting pops.
-/// Compiles to one plain `<text>` of positioned `<tspan>`s — live and selectable.
+/// Compiles to plain positioned `<tspan>`s — live and selectable — with **one
+/// `<text>` per item**, keyed to its `<x:li>` via [`pos_attr`] (the same
+/// per-source-node tagging paragraphs and table cells get): an editor can
+/// address each item's rendered glyphs individually, and the item's text
+/// content is exactly its own source text. Generated markers ("1.", "▸") live
+/// in a separate untagged `<text>` so they never pollute an item's char stream.
 pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node);
@@ -51,11 +56,12 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // Pass 1: resolve each item's marker and wrap its text, with baselines laid
     // out relative to a zero origin (0, advance, 2·advance, …). The absolute
     // vertical offset is applied in pass 2 once the block height is known.
-    struct Item {
+    struct Item<'n> {
         col: f64,
         marker: Marker,
         lines: Vec<PlacedLine>,
         size: f64, // per-item font size (defaults to the list's)
+        src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
     let mut items: Vec<Item> = Vec::new();
     let mut last_baseline = 0.0; // baseline of the last line placed (relative frame)
@@ -122,6 +128,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             marker,
             lines,
             size: item_size,
+            src: li,
         });
         first = false;
     }
@@ -145,7 +152,8 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // scale with the item's own size; a per-line `font-size` overrides the <text>
     // base only when the item differs from the list size.
     let mut shapes = String::new(); // drawn bullet markers (siblings of the text)
-    let mut body = String::new(); // the <text> block: item lines + text markers
+    let mut markers = String::new(); // generated text markers, one shared <text>
+    let mut body = String::new(); // one keyed <text> per item: its OWN source text
     for it in &items {
         let item_baseline = it.lines.first().map(|l| l.baseline).unwrap_or(0.0) + offset;
         let item_fm = m.font_metrics(
@@ -170,41 +178,53 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             }
             Marker::Text(mk) => {
                 // right-aligned into the gutter so "1." and "10." share a column edge
-                body.push_str(&format!(
+                markers.push_str(&format!(
                     "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\"{}>",
                     fmt(it.col),
                     fmt(item_baseline),
                     marker_fill,
                     fs
                 ));
-                push_escaped(&mut body, mk, false);
-                body.push_str("</tspan>");
+                push_escaped(&mut markers, mk, false);
+                markers.push_str("</tspan>");
             }
         }
-        // list items are single-style plain text — one positioned <tspan> per line
-        for line in &it.lines {
-            body.push_str(&format!(
-                "<tspan x=\"{}\" y=\"{}\"{}>",
-                fmt(line.x),
-                fmt(line.baseline + offset),
-                fs
-            ));
-            push_escaped(&mut body, &line.text, false);
-            body.push_str("</tspan>");
+        // list items are single-style plain text — one positioned <tspan> per
+        // line, wrapped in the item's OWN keyed <text> (empty items emit none)
+        if !it.lines.is_empty() {
+            body.push_str("<text text-anchor=\"start\"");
+            push_font_attrs(&mut body, &style, size, fill);
+            body.push_str(&pos_attr(it.src, ctx)); // per-item source map
+            body.push('>');
+            for line in &it.lines {
+                body.push_str(&format!(
+                    "<tspan x=\"{}\" y=\"{}\"{}>",
+                    fmt(line.x),
+                    fmt(line.baseline + offset),
+                    fs
+                ));
+                push_escaped(&mut body, &line.text, false);
+                body.push_str("</tspan>");
+            }
+            body.push_str("</text>");
         }
     }
 
-    // wrap in a <g> so the block position/transform covers both the drawn
-    // markers and the text
+    // wrap in a <g> so the block position/transform covers the drawn markers,
+    // the generated-marker text, and the per-item texts
     out.push_str("<g");
     out.push_str(&pos);
     out.push('>');
     out.push_str(&shapes);
-    out.push_str("<text text-anchor=\"start\"");
-    push_font_attrs(out, &style, size, fill);
-    out.push('>');
+    if !markers.is_empty() {
+        out.push_str("<text text-anchor=\"start\"");
+        push_font_attrs(out, &style, size, fill);
+        out.push('>');
+        out.push_str(&markers);
+        out.push_str("</text>");
+    }
     out.push_str(&body);
-    out.push_str("</text></g>");
+    out.push_str("</g>");
 }
 
 /// A resolved `<x:li>` marker: a drawn shape token, a literal text string
