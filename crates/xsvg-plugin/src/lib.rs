@@ -5,13 +5,27 @@
 //! is just a [`Plugin`] impl plus [`export_plugin!`]:
 //!
 //! ```ignore
+//! #[derive(Params)]
+//! #[element(name = "arrow", doc = "a thick arrow")]
+//! struct Arrow {
+//!     #[param(default = 16.0, min = 0.0)] thickness: f64,
+//!     heads: Heads,                                   // enum → its own spellings
+//! }
+//!
 //! struct MyClipart;
 //! impl xsvg_plugin::Plugin for MyClipart {
-//!     const MANIFEST: &'static str = include_str!("manifest.json");
+//!     const NS: &'static str = "https://example.com/clipart";
+//!     const NAME: &'static str = "clipart";
+//!     const VERSION: &'static str = "0.1.0";
+//!     fn elements() -> &'static [ElementSpec] { &[Arrow::SPEC] }
 //!     fn generate(tag: &str, req: &Request) -> Result<String, String> { … }
 //! }
 //! xsvg_plugin::export_plugin!(MyClipart);
 //! ```
+//!
+//! The manifest is **generated from those declarations**, so a module's published
+//! description cannot disagree with the code that reads its parameters — the two
+//! are the same struct.
 //!
 //! The module gets no imports, no WASI, and no host callbacks: a generator is a
 //! pure function from request to SVG fragment. Whatever it returns is re-parsed
@@ -35,6 +49,10 @@
 pub mod json;
 
 pub use json::Json;
+// Declare parameters once; the description and the parsing are both derived.
+pub use xsvg_schema::{
+    AttrSource, ChildMode, ElementSpec, InputMode, ParamEnum, ParamKind, ParamSpec, Params,
+};
 
 /// The ABI version this SDK implements.
 pub const ABI_VERSION: i32 = 1;
@@ -61,6 +79,13 @@ pub struct Request {
     /// The active quality profile's flattening tolerance, for anything this
     /// generator approximates with line or curve segments.
     pub tolerance: f64,
+}
+
+/// Lets the derived parsing read straight from a request.
+impl xsvg_schema::AttrSource for Request {
+    fn attr(&self, name: &str) -> Option<&str> {
+        Request::attr(self, name)
+    }
 }
 
 impl Request {
@@ -149,14 +174,25 @@ impl Request {
 
 /// What a plugin must provide.
 pub trait Plugin {
-    /// The manifest (docs/Extensibility.md §4): the namespace this module claims,
-    /// and the elements it provides with their parameters. The compiler's host
-    /// validates that the declared `ns` matches the `<x:import>` that bound it.
-    const MANIFEST: &'static str;
+    /// The namespace this module claims. A host checks it against the
+    /// `<x:import>` that bound the module, so one cannot answer for another's
+    /// elements.
+    const NS: &'static str;
+    const NAME: &'static str;
+    const VERSION: &'static str;
+
+    /// The elements this module provides, as derived descriptions. The manifest
+    /// (docs/Extensibility.md §4) is generated from these.
+    fn elements() -> &'static [ElementSpec];
 
     /// Lower one element. `Err` degrades that element with the given reason
     /// rather than failing the compile.
     fn generate(tag: &str, req: &Request) -> Result<String, String>;
+}
+
+/// The manifest JSON for a plugin, built from its declarations.
+pub fn manifest<P: Plugin>() -> String {
+    xsvg_schema::manifest_json(ABI_VERSION, P::NS, P::NAME, P::VERSION, P::elements())
 }
 
 /// Format a number for SVG output: short, locale-free, and never `NaN`/`inf`.
@@ -293,7 +329,7 @@ macro_rules! export_plugin {
 
         #[no_mangle]
         pub extern "C" fn xsvg_describe() -> *mut u8 {
-            $crate::reply(<$ty as $crate::Plugin>::MANIFEST)
+            $crate::reply(&$crate::manifest::<$ty>())
         }
 
         /// # Safety

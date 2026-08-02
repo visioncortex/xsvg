@@ -549,6 +549,7 @@ name = "xsvg-ext-clipart"
 version = "0.1.0"
 dependencies = [
  "xsvg-plugin",
+ "xsvg-schema",
 ]
 
 [[package]]
@@ -558,6 +559,25 @@ version = "0.1.0"
 [[package]]
 name = "xsvg-plugin"
 version = "0.1.0"
+dependencies = [
+ "xsvg-schema",
+]
+
+[[package]]
+name = "xsvg-schema"
+version = "0.1.0"
+dependencies = [
+ "xsvg-schema-derive",
+]
+
+[[package]]
+name = "xsvg-schema-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "xsvg-wasm"

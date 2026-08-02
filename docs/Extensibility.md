@@ -198,7 +198,28 @@ xsvg_describe() -> ptr                    ; UTF-8 JSON manifest, length-prefixed
 xsvg_generate(req_ptr: i32, req_len: i32) -> ptr   ; request JSON in → response, length-prefixed
 ```
 
-**Manifest** (`xsvg_describe`) — validated once at instantiation:
+**Manifest** (`xsvg_describe`) — **generated from declarations, not hand-written**. A module
+declares each element as a Rust struct and derives both its description and the code that reads
+it (`xsvg-schema`), so the published manifest cannot disagree with the parameters the module
+actually reads:
+
+```rust
+#[derive(Params)]
+#[element(name = "arrow", doc = "An outlined thick arrow.")]
+struct Arrow {
+    #[param(default = 16.0, min = 0.0, max = 200.0)] thickness: f64,
+    #[param(min = 0.0, doc = "defaults to 2.5x thickness")] head_width: Option<f64>,
+    heads: Heads,                                   // enum → its own spellings
+    #[param(color, default = "currentColor")] fill: String,
+}
+```
+
+A parameter with no field cannot be read; a field with nothing reading it is a `dead_code`
+warning. This is not a theoretical worry — the first hand-written `manifest.json` in this repo
+omitted `x` and `y` (working aliases for `x1`/`y1`) within an hour of being written, which no
+property panel could then offer.
+
+The generated JSON, validated once at instantiation:
 
 ```json
 {
@@ -386,6 +407,28 @@ Two limits worth knowing:
 
 Step 6 (a non-Rust plugin example proving the ABI is toolchain-neutral) remains, and is
 deliberately skipped for now.
+
+## 11. Describing elements (`xsvg-schema`)
+
+Both tiers describe themselves through one mechanism: `crates/xsvg-schema` (traits and JSON
+emission) plus `crates/xsvg-schema-derive` (the `Params` / `ParamEnum` derives). A plugin
+generates its manifest from it; the built-in `x:` elements are being moved onto it so the
+compiler can answer `describe(ns, tag)` for its own elements too, and a property panel never
+has to know which tier it is editing.
+
+Costs and limits, honestly:
+
+- The derives are **compile-time only** — `syn`/`quote` never reach the output, so neither the
+  compiler's wasm nor a plugin module grows. Converting `clipart` moved its module from 111 KB
+  to 120 KB, and that is the manifest string it now builds at runtime rather than any macro
+  machinery.
+- **Computed defaults** (`head-width` defaults to 2.5× `thickness`) are declared as an
+  `Option<f64>` with a `doc` and no `default` — the schema says what happens instead of
+  inventing a constant that isn't true.
+- **Irregular reads** (e.g. `<x:textbox>` taking geometry from a referenced `<rect>`) stay
+  manual; the struct covers the declared surface and the escape hatch is visible in the code.
+- A non-`Option` number with no declared default is a **compile error**, since it would
+  silently become `0.0`, which is rarely what an element means.
 
 1. **Seam** — `GeneratorHost` + `ImportTable` pre-scan + dispatch arm + output sanitizer +
    `baked_refs` edges. Core-only, `NoGenerators` default, all existing tests green. Unit-test with

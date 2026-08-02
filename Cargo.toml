@@ -8,6 +8,8 @@ members = [
     "crates/xsvg-cli",
     "crates/xsvg-wasm",
     "crates/xsvg-plugin",
+    "crates/xsvg-schema",
+    "crates/xsvg-schema-derive",
     "crates/ext/clipart",
 ]
 

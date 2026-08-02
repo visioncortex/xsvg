@@ -22,6 +22,12 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
   so a generator can size itself to what it wraps.
   Design: [docs/Extensibility.md](docs/Extensibility.md); spec: §4.3.
 - **`xsvg-plugin`** — the SDK for writing generators: implement one trait, call one macro.
+- **`xsvg-schema` + `xsvg-schema-derive`** — declare an element's parameters as a Rust struct
+  and derive both its machine-readable description and the code that reads it. A plugin's
+  manifest is generated from the declarations, so it cannot drift from the parameters the
+  module actually reads: a parameter with no field cannot be read, and a field nothing reads is
+  a `dead_code` warning. (The hand-written manifest this replaced already omitted `x` and `y`.)
+  The derives are compile-time only — nothing reaches the emitted wasm.
 - **`clipart`**, the first official extension (`crates/ext/clipart`) — `<arrow>` (thick shafted
   arrow, one or two heads, optional outline and corner rounding) and `<callout>` (a bubble sized
   to its children). Official extensions load through the same public seam as anyone else's.

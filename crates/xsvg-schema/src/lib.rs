@@ -1,0 +1,424 @@
+//! Machine-readable descriptions of xsvg elements (docs/Extensibility.md §4).
+//!
+//! An element's parameters — names, types, defaults, ranges, help text — are what
+//! a property panel, a plugin manifest, and generated documentation all need, and
+//! what a hand-maintained table gets wrong. Declaring them **as a Rust struct**
+//! and deriving both the description and the parsing makes the two impossible to
+//! separate: a parameter with no field cannot be read, and a field with no use is
+//! a `dead_code` warning.
+//!
+//! ```ignore
+//! #[derive(Params)]
+//! #[element(name = "offset", doc = "Minkowski grow/shrink of a referenced region")]
+//! struct Offset {
+//!     #[param(default = 0.0, min = 0.0)] distance: f64,
+//!     #[param(default = 4.0)] miter_limit: f64,   // → "miter-limit"
+//!     join: Join,                                  // enum → its values, free
+//! }
+//! ```
+//!
+//! Both tiers use this: `xsvg-core` describes its built-in `x:` elements, and
+//! `xsvg-plugin` generates a module's manifest from it — so a plugin author writes
+//! one struct instead of keeping JSON and parsing code in agreement by hand.
+
+#![forbid(unsafe_code)]
+
+// The derive expands to `::xsvg_schema::…` paths, so this crate must be able to
+// name itself for its own tests and doc examples.
+extern crate self as xsvg_schema;
+
+pub use xsvg_schema_derive::{ParamEnum, Params};
+
+/// How a parameter's value should be read and edited.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ParamKind {
+    Number,
+    /// A paint value. Deliberately distinct from `Text`: an editor should offer a
+    /// colour affordance but must still accept `var(accent)`, `currentColor`, or
+    /// `none`, which no colour picker can hold.
+    Color,
+    /// One of [`ParamSpec::values`].
+    Enum,
+    Text,
+    Bool,
+}
+
+impl ParamKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Number => "number",
+            Self::Color => "color",
+            Self::Enum => "enum",
+            Self::Text => "string",
+            Self::Bool => "boolean",
+        }
+    }
+}
+
+/// Whether an element consumes referenced geometry via `in="#id"`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InputMode {
+    #[default]
+    None,
+    Optional,
+    Required,
+}
+
+impl InputMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Optional => "optional",
+            Self::Required => "required",
+        }
+    }
+}
+
+/// Whether an element is a leaf or a container whose children are compiled first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ChildMode {
+    #[default]
+    None,
+    Container,
+}
+
+impl ChildMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Container => "container",
+        }
+    }
+}
+
+/// One declared parameter.
+#[derive(Clone, Copy, Debug)]
+pub struct ParamSpec {
+    /// The attribute name as authored, e.g. `head-width`.
+    pub name: &'static str,
+    pub kind: ParamKind,
+    /// The value used when the attribute is absent, rendered as text. `None` means
+    /// the element computes one (e.g. "defaults to 2.5x thickness") — say so in
+    /// [`Self::doc`] rather than inventing a constant that isn't true.
+    pub default: Option<&'static str>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    /// Allowed values when `kind` is [`ParamKind::Enum`], else empty.
+    pub values: &'static [&'static str],
+    pub doc: Option<&'static str>,
+}
+
+impl ParamSpec {
+    /// A minimal spec, for `const` construction by the derive.
+    pub const fn new(name: &'static str, kind: ParamKind) -> Self {
+        Self {
+            name,
+            kind,
+            default: None,
+            min: None,
+            max: None,
+            step: None,
+            values: &[],
+            doc: None,
+        }
+    }
+}
+
+/// One element: what it is called, what it takes, and what it does with children.
+#[derive(Clone, Copy, Debug)]
+pub struct ElementSpec {
+    pub name: &'static str,
+    pub doc: Option<&'static str>,
+    pub params: &'static [ParamSpec],
+    pub input: InputMode,
+    pub children: ChildMode,
+}
+
+/// Read attributes from wherever they live — an XML node in the compiler, a
+/// decoded request in a plugin. The one seam the generated parsing needs.
+pub trait AttrSource {
+    fn attr(&self, name: &str) -> Option<&str>;
+}
+
+/// An element described by a struct. Both halves are derived together, which is
+/// what keeps them in agreement.
+pub trait Params: Sized {
+    const SPEC: ElementSpec;
+    fn from_attrs(src: &dyn AttrSource) -> Self;
+}
+
+/// A parameter type with a closed set of spellings.
+pub trait ParamEnum: Sized {
+    const VALUES: &'static [&'static str];
+    fn parse(s: &str) -> Option<Self>;
+    fn as_str(&self) -> &'static str;
+}
+
+// ---- JSON -----------------------------------------------------------------
+
+/// Append `s` as a quoted JSON string.
+pub fn push_json_str(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str("\\u");
+                for shift in [12, 8, 4, 0] {
+                    out.push(char::from_digit((c as u32 >> shift) & 0xF, 16).unwrap_or('0'));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn push_num(out: &mut String, v: f64) {
+    if v.is_finite() {
+        out.push_str(&format!("{v}"));
+    } else {
+        out.push('0');
+    }
+}
+
+impl ParamSpec {
+    fn write_json(&self, out: &mut String) {
+        out.push_str("{\"type\":");
+        push_json_str(out, self.kind.as_str());
+        if let Some(d) = self.default {
+            out.push_str(",\"default\":");
+            // numbers and booleans stay unquoted so the JSON types match the kind
+            match self.kind {
+                ParamKind::Number | ParamKind::Bool => out.push_str(d),
+                _ => push_json_str(out, d),
+            }
+        }
+        for (key, v) in [("min", self.min), ("max", self.max), ("step", self.step)] {
+            if let Some(v) = v {
+                out.push_str(&format!(",\"{key}\":"));
+                push_num(out, v);
+            }
+        }
+        if !self.values.is_empty() {
+            out.push_str(",\"values\":[");
+            for (i, v) in self.values.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                push_json_str(out, v);
+            }
+            out.push(']');
+        }
+        if let Some(d) = self.doc {
+            out.push_str(",\"doc\":");
+            push_json_str(out, d);
+        }
+        out.push('}');
+    }
+}
+
+impl ElementSpec {
+    /// This element as a manifest entry (the value side of `elements`).
+    pub fn write_json(&self, out: &mut String) {
+        out.push('{');
+        if let Some(d) = self.doc {
+            out.push_str("\"doc\":");
+            push_json_str(out, d);
+            out.push(',');
+        }
+        out.push_str("\"params\":{");
+        for (i, p) in self.params.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_json_str(out, p.name);
+            out.push(':');
+            p.write_json(out);
+        }
+        out.push_str("},\"input\":");
+        push_json_str(out, self.input.as_str());
+        out.push_str(",\"children\":");
+        push_json_str(out, self.children.as_str());
+        out.push('}');
+    }
+}
+
+/// Build a plugin manifest (docs/Extensibility.md §4) from declared elements.
+/// Generated rather than hand-written, so a module's description cannot drift
+/// from the code that reads its parameters.
+pub fn manifest_json(
+    abi: i32,
+    ns: &str,
+    name: &str,
+    version: &str,
+    elements: &[ElementSpec],
+) -> String {
+    let mut out = format!("{{\"abi\":{abi},\"ns\":");
+    push_json_str(&mut out, ns);
+    out.push_str(",\"name\":");
+    push_json_str(&mut out, name);
+    out.push_str(",\"version\":");
+    push_json_str(&mut out, version);
+    out.push_str(",\"elements\":{");
+    for (i, e) in elements.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_json_str(&mut out, e.name);
+        out.push(':');
+        e.write_json(&mut out);
+    }
+    out.push_str("}}");
+    out
+}
+
+// ---- parsing helpers the derive calls -------------------------------------
+
+/// Parse a number, rejecting non-finite input — totality is the compiler's
+/// contract and a parameter must not be the thing that breaks it.
+pub fn parse_num(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+pub fn parse_bool(s: &str) -> Option<bool> {
+    match s.trim() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    struct Attrs(HashMap<&'static str, &'static str>);
+    impl AttrSource for Attrs {
+        fn attr(&self, name: &str) -> Option<&str> {
+            self.0.get(name).copied()
+        }
+    }
+    fn attrs(pairs: &[(&'static str, &'static str)]) -> Attrs {
+        Attrs(pairs.iter().copied().collect())
+    }
+
+    #[derive(ParamEnum, PartialEq, Debug, Default)]
+    enum Heads {
+        #[default]
+        End,
+        Start,
+        Both,
+        None,
+    }
+
+    #[derive(ParamEnum, PartialEq, Debug, Default)]
+    enum Marker {
+        #[default]
+        Bullet,
+        /// A spelling that is not just the lower-cased variant name.
+        LowerAlpha,
+        #[value("1.")]
+        Decimal,
+    }
+
+    #[derive(Params, Debug)]
+    #[element(name = "arrow", doc = "a thick arrow", children = "container")]
+    struct Arrow {
+        #[param(default = 16.0, min = 0.0, max = 200.0)]
+        thickness: f64,
+        /// No default: the element computes one, and the schema says so instead
+        /// of inventing a constant that isn't true.
+        #[param(doc = "defaults to 2.5x thickness")]
+        head_width: Option<f64>,
+        heads: Heads,
+        #[param(color, default = "currentColor")]
+        fill: String,
+        stroke: Option<String>,
+        #[param(default = false)]
+        outlined: bool,
+    }
+
+    #[test]
+    fn a_field_name_becomes_its_attribute_name() {
+        let p = Arrow::SPEC.params;
+        assert_eq!(p[1].name, "head-width", "underscores become dashes");
+        assert_eq!(Arrow::SPEC.name, "arrow");
+        assert_eq!(Arrow::SPEC.children, ChildMode::Container);
+        assert_eq!(Arrow::SPEC.input, InputMode::None, "defaults when unstated");
+    }
+
+    #[test]
+    fn declared_metadata_reaches_the_spec() {
+        let by = |n: &str| Arrow::SPEC.params.iter().find(|p| p.name == n).unwrap();
+        assert_eq!(by("thickness").kind, ParamKind::Number);
+        assert_eq!(by("thickness").default, Some("16.0"));
+        assert_eq!(by("thickness").min, Some(0.0));
+        assert_eq!(by("thickness").max, Some(200.0));
+        assert_eq!(by("fill").kind, ParamKind::Color, "#[param(color)]");
+        assert_eq!(by("stroke").kind, ParamKind::Text);
+        assert_eq!(by("outlined").kind, ParamKind::Bool);
+        // an element that computes its default declares none, and says why
+        assert_eq!(by("head-width").default, None);
+        assert_eq!(by("head-width").doc, Some("defaults to 2.5x thickness"));
+    }
+
+    #[test]
+    fn an_enum_parameter_carries_its_own_spellings() {
+        let heads = Arrow::SPEC.params.iter().find(|p| p.name == "heads").unwrap();
+        assert_eq!(heads.kind, ParamKind::Enum);
+        // the values come from the enum's own derive — they cannot be restated wrongly
+        assert_eq!(heads.values, &["end", "start", "both", "none"]);
+        assert_eq!(Marker::VALUES, &["bullet", "lower-alpha", "1."]);
+        assert_eq!(Marker::parse("lower-alpha"), Some(Marker::LowerAlpha));
+        assert_eq!(Marker::parse("1."), Some(Marker::Decimal));
+        assert_eq!(Marker::parse("nope"), None);
+    }
+
+    #[test]
+    fn reading_uses_the_same_declarations() {
+        let a = Arrow::from_attrs(&attrs(&[
+            ("thickness", "24"),
+            ("heads", "both"),
+            ("stroke", "#111"),
+            ("outlined", "true"),
+        ]));
+        assert_eq!(a.thickness, 24.0);
+        assert_eq!(a.heads, Heads::Both);
+        assert_eq!(a.head_width, None);
+        assert_eq!(a.fill, "currentColor", "declared default applies");
+        assert_eq!(a.stroke.as_deref(), Some("#111"));
+        assert!(a.outlined);
+    }
+
+    #[test]
+    fn nonsense_values_fall_back_rather_than_poisoning_the_output() {
+        // totality: a parameter must never be the thing that emits NaN
+        let a = Arrow::from_attrs(&attrs(&[
+            ("thickness", "banana"),
+            ("head-width", "NaN"),
+            ("heads", "sideways"),
+            ("outlined", "maybe"),
+        ]));
+        assert_eq!(a.thickness, 16.0);
+        assert_eq!(a.head_width, None);
+        assert_eq!(a.heads, Heads::End, "unknown spelling → the default variant");
+        assert!(!a.outlined);
+    }
+
+    #[test]
+    fn a_manifest_is_generated_from_the_declarations() {
+        let json = manifest_json(1, "https://x.example/c", "clip", "0.1.0", &[Arrow::SPEC]);
+        // numbers stay unquoted so a consumer's types match the declared kind
+        assert!(json.contains(r#""thickness":{"type":"number","default":16.0,"min":0,"max":200}"#), "{json}");
+        assert!(json.contains(r#""values":["end","start","both","none"]"#), "{json}");
+        assert!(json.contains(r#""children":"container""#), "{json}");
+        assert!(json.contains(r#""ns":"https://x.example/c""#), "{json}");
+    }
+}

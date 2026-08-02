@@ -6,3 +6,4 @@ license = "MIT OR Apache-2.0"
 description = "SDK for writing xsvg geometry plugins (docs/Extensibility.md)"
 
 [dependencies]
+xsvg-schema = { version = "0.1.0", path = "../xsvg-schema" }

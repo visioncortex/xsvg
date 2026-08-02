@@ -8,20 +8,120 @@
 //! Everything is emitted as explicit coordinates — no `transform` — so a shape
 //! stays harvestable as geometry by `in="#id"`, `<x:boolean>`, and `<x:warp>`.
 
-use xsvg_plugin::{esc, num, Plugin, Request};
+use xsvg_plugin::{esc, num, ElementSpec, ParamEnum, Params, Plugin, Request};
 
 struct Clipart;
 
 impl Plugin for Clipart {
-    const MANIFEST: &'static str = include_str!("manifest.json");
+    const NS: &'static str = "https://xsvg.visioncortex.org/ext/clipart";
+    const NAME: &'static str = "clipart";
+    const VERSION: &'static str = "0.1.0";
+
+    fn elements() -> &'static [ElementSpec] {
+        &[Arrow::SPEC, Callout::SPEC]
+    }
 
     fn generate(tag: &str, req: &Request) -> Result<String, String> {
         match tag {
-            "arrow" => arrow(req),
-            "callout" => callout(req),
+            "arrow" => arrow(&Arrow::from_attrs(req), req),
+            "callout" => callout(&Callout::from_attrs(req), req),
             other => Err(format!("<{other}> is not a clipart element")),
         }
     }
+}
+
+/// Which ends of an arrow carry a head.
+#[derive(ParamEnum, PartialEq, Default)]
+enum Heads {
+    #[default]
+    End,
+    Start,
+    Both,
+    None,
+}
+
+/// Which edge a callout's tail leaves from.
+#[derive(ParamEnum, PartialEq, Default)]
+enum Tail {
+    None,
+    Left,
+    Right,
+    Top,
+    #[default]
+    Bottom,
+}
+
+#[derive(Params)]
+#[element(
+    name = "arrow",
+    doc = "An outlined thick arrow. Either give it two endpoints (x1,y1,x2,y2) or an origin plus length and angle."
+)]
+struct Arrow {
+    #[param(default = 0.0)]
+    x1: f64,
+    #[param(default = 0.0)]
+    y1: f64,
+    /// Endpoint form. Absent means the origin/length/angle form is used instead,
+    /// which is why these are optional rather than defaulted.
+    x2: Option<f64>,
+    y2: Option<f64>,
+    /// Aliases for `x1`/`y1`. Declared, so the panel offers them and they cannot
+    /// quietly become attributes that work but nothing knows about.
+    #[param(doc = "alias for x1")]
+    x: Option<f64>,
+    #[param(doc = "alias for y1")]
+    y: Option<f64>,
+    #[param(default = 100.0, min = 0.0, max = 2000.0)]
+    length: f64,
+    #[param(default = 0.0, doc = "degrees clockwise from +x")]
+    angle: f64,
+    #[param(default = 16.0, min = 0.0, max = 200.0)]
+    thickness: f64,
+    #[param(min = 0.0, max = 400.0, doc = "defaults to 2.5x thickness")]
+    head_width: Option<f64>,
+    #[param(min = 0.0, max = 400.0, doc = "defaults to head-width")]
+    head_length: Option<f64>,
+    heads: Heads,
+    #[param(
+        default = 0.0,
+        min = 0.0,
+        max = 1.0,
+        step = 0.05,
+        doc = "chevron notch depth at the tail, as a fraction of head-length"
+    )]
+    notch: f64,
+    #[param(default = 0.0, min = 0.0, max = 100.0, doc = "corner rounding")]
+    radius: f64,
+    #[param(color, default = "currentColor")]
+    fill: String,
+    #[param(color, doc = "outline colour")]
+    stroke: Option<String>,
+    #[param(default = 0.0, min = 0.0, max = 40.0, doc = "outline width; needs stroke to be visible")]
+    outline: f64,
+}
+
+#[derive(Params)]
+#[element(
+    name = "callout",
+    doc = "A rounded speech bubble sized to its children, with an optional tail.",
+    children = "container"
+)]
+struct Callout {
+    #[param(default = 12.0, min = 0.0, max = 200.0)]
+    pad: f64,
+    #[param(default = 8.0, min = 0.0, max = 100.0)]
+    radius: f64,
+    tail: Tail,
+    #[param(default = 14.0, min = 0.0, max = 100.0)]
+    tail_size: f64,
+    #[param(default = 0.5, min = 0.0, max = 1.0, step = 0.05, doc = "0..1 along the tailed edge")]
+    tail_offset: f64,
+    #[param(color, default = "#fff")]
+    fill: String,
+    #[param(color, doc = "outline colour")]
+    stroke: Option<String>,
+    #[param(default = 0.0, min = 0.0, max = 40.0)]
+    outline: f64,
 }
 
 xsvg_plugin::export_plugin!(Clipart);
@@ -30,19 +130,15 @@ xsvg_plugin::export_plugin!(Clipart);
 type P = (f64, f64);
 
 /// Paint attributes shared by every shape here.
-fn paint(req: &Request, default_fill: &str) -> String {
-    let mut s = format!(
-        r#" fill="{}""#,
-        esc(req.attr("fill").unwrap_or(default_fill))
-    );
+fn paint(fill: &str, stroke: Option<&str>, width: f64) -> String {
+    let mut s = format!(r#" fill="{}""#, esc(fill));
     // an outline only paints if there is something to paint it with
-    let w = req.num("outline", 0.0);
-    if let Some(stroke) = req.attr("stroke") {
+    if let Some(stroke) = stroke {
         s.push_str(&format!(r#" stroke="{}""#, esc(stroke)));
-        if w > 0.0 {
+        if width > 0.0 {
             s.push_str(&format!(
                 r#" stroke-width="{}" stroke-linejoin="round""#,
-                num(w)
+                num(width)
             ));
         }
     }
@@ -125,34 +221,30 @@ fn trim(from: P, to: P, r: f64) -> P {
 ///
 /// The profile is built along the +x axis from the origin and then mapped onto
 /// the requested endpoints, so rotation is baked into the coordinates.
-fn arrow(req: &Request) -> Result<String, String> {
-    let (x1, y1) = (
-        req.num("x1", req.num("x", 0.0)),
-        req.num("y1", req.num("y", 0.0)),
-    );
-    let (x2, y2) = match (req.attr("x2"), req.attr("y2")) {
-        (Some(_), _) | (_, Some(_)) => (req.num("x2", x1), req.num("y2", y1)),
-        _ => {
-            let a = req.num("angle", 0.0).to_radians();
-            let len = req.num("length", 100.0);
-            (x1 + len * a.cos(), y1 + len * a.sin())
+fn arrow(p: &Arrow, _req: &Request) -> Result<String, String> {
+    let (x1, y1) = (p.x.unwrap_or(p.x1), p.y.unwrap_or(p.y1));
+    let (x2, y2) = match (p.x2, p.y2) {
+        (None, None) => {
+            let a = p.angle.to_radians();
+            (x1 + p.length * a.cos(), y1 + p.length * a.sin())
         }
+        (x2, y2) => (x2.unwrap_or(x1), y2.unwrap_or(y1)),
     };
 
     let (dx, dy) = (x2 - x1, y2 - y1);
     let len = (dx * dx + dy * dy).sqrt();
-    let t = req.num("thickness", 16.0).max(0.0);
+    let t = p.thickness.max(0.0);
     if !len.is_finite() || len <= 0.0 || t <= 0.0 {
         return Err("arrow has no length or no thickness".to_string());
     }
 
-    let hw = req.num("head-width", t * 2.5).max(t);
-    let hl = req.num("head-length", hw).max(0.0);
-    let (start_head, end_head) = match req.attr("heads").unwrap_or("end") {
-        "none" => (false, false),
-        "start" => (true, false),
-        "both" => (true, true),
-        _ => (false, true),
+    let hw = p.head_width.unwrap_or(t * 2.5).max(t);
+    let hl = p.head_length.unwrap_or(hw).max(0.0);
+    let (start_head, end_head) = match p.heads {
+        Heads::None => (false, false),
+        Heads::Start => (true, false),
+        Heads::Both => (true, true),
+        Heads::End => (false, true),
     };
 
     // Both heads must fit in the shaft; shrink them together if they don't.
@@ -168,7 +260,7 @@ fn arrow(req: &Request) -> Result<String, String> {
     );
 
     // Profile along +x, walking the outline counter-clockwise from the tail.
-    let notch = req.num("notch", 0.0).clamp(0.0, 1.0) * hl;
+    let notch = p.notch.clamp(0.0, 1.0) * hl;
     let mut pts: Vec<P> = Vec::with_capacity(10);
     if start_head {
         pts.push((0.0, 0.0));
@@ -207,10 +299,10 @@ fn arrow(req: &Request) -> Result<String, String> {
         .map(|&(px, py)| (x1 + ux * px - uy * py, y1 + uy * px + ux * py))
         .collect();
 
-    let radii = uniform(&placed, req.num("radius", 0.0).max(0.0));
+    let radii = uniform(&placed, p.radius.max(0.0));
     Ok(format!(
         r#"<path{} d="{}"/>"#,
-        paint(req, "currentColor"),
+        paint(&p.fill, p.stroke.as_deref(), p.outline),
         polygon(&placed, &radii)
     ))
 }
@@ -220,18 +312,17 @@ fn arrow(req: &Request) -> Result<String, String> {
 /// This is the container case: the compiler has already lowered the children and
 /// measured what they paint, so the bubble is derived from real geometry rather
 /// than from author-supplied dimensions.
-fn callout(req: &Request) -> Result<String, String> {
+fn callout(p: &Callout, req: &Request) -> Result<String, String> {
     let Some(b) = req.children_bbox() else {
         return Err("callout has no measurable children to wrap".to_string());
     };
-    let pad = req.num("pad", 12.0).max(0.0);
+    let pad = p.pad.max(0.0);
     let (x0, y0) = (b[0] - pad, b[1] - pad);
     let (x1, y1) = (b[0] + b[2] + pad, b[1] + b[3] + pad);
-    let r = req.num("radius", 8.0).max(0.0);
+    let r = p.radius.max(0.0);
 
-    let ts = req.num("tail-size", 14.0).max(0.0);
-    let off = req.num("tail-offset", 0.5).clamp(0.0, 1.0);
-    let tail = req.attr("tail").unwrap_or("bottom");
+    let ts = p.tail_size.max(0.0);
+    let off = p.tail_offset.clamp(0.0, 1.0);
 
     // Walk the rectangle clockwise, splicing the tail into the chosen edge. The
     // tail is part of the outline, not a separate shape, so a stroked bubble has
@@ -274,15 +365,15 @@ fn callout(req: &Request) -> Result<String, String> {
                 radii.push(0.0);
             }
         };
-        edge((x0, y0), (x1, y0), tail == "top");
-        edge((x1, y0), (x1, y1), tail == "right");
-        edge((x1, y1), (x0, y1), tail == "bottom");
-        edge((x0, y1), (x0, y0), tail == "left");
+        edge((x0, y0), (x1, y0), p.tail == Tail::Top);
+        edge((x1, y0), (x1, y1), p.tail == Tail::Right);
+        edge((x1, y1), (x0, y1), p.tail == Tail::Bottom);
+        edge((x0, y1), (x0, y0), p.tail == Tail::Left);
     }
 
     let mut out = format!(
         r#"<path{} d="{}"/>"#,
-        paint(req, "#fff"),
+        paint(&p.fill, p.stroke.as_deref(), p.outline),
         polygon(&pts, &radii)
     );
     // children last, so the bubble sits behind them
@@ -295,6 +386,13 @@ fn callout(req: &Request) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a request, then the declared params the emitter actually takes —
+    /// so a test exercises the same parsing the ABI does.
+    fn arrow_of(pairs: &[(&str, &str)]) -> Result<String, String> {
+        let r = req(pairs);
+        arrow(&Arrow::from_attrs(&r), &r)
+    }
 
     fn req(pairs: &[(&str, &str)]) -> Request {
         Request {
@@ -330,7 +428,7 @@ mod tests {
 
     #[test]
     fn an_arrow_spans_its_endpoints_and_its_head_is_widest() {
-        let out = arrow(&req(&[
+        let out = arrow_of(&[
             ("x1", "0"),
             ("y1", "0"),
             ("x2", "100"),
@@ -338,7 +436,7 @@ mod tests {
             ("thickness", "20"),
             ("head-width", "50"),
             ("head-length", "30"),
-        ]))
+        ])
         .unwrap();
         let d = out
             .split(r#"d=""#)
@@ -359,13 +457,13 @@ mod tests {
     fn an_arrow_bakes_its_rotation_into_coordinates() {
         // a transform in generator output would make the shape unharvestable as
         // geometry, so rotation must land in the numbers
-        let out = arrow(&req(&[
+        let out = arrow_of(&[
             ("x1", "0"),
             ("y1", "0"),
             ("length", "100"),
             ("angle", "90"),
             ("thickness", "20"),
-        ]))
+        ])
         .unwrap();
         assert!(!out.contains("transform"), "{out}");
         let d = out
@@ -385,7 +483,7 @@ mod tests {
     fn two_heads_shrink_to_fit_a_short_shaft() {
         // heads that would overlap are scaled down together rather than
         // producing a self-intersecting outline
-        let out = arrow(&req(&[
+        let out = arrow_of(&[
             ("x1", "0"),
             ("y1", "0"),
             ("x2", "20"),
@@ -393,7 +491,7 @@ mod tests {
             ("thickness", "6"),
             ("head-length", "30"),
             ("heads", "both"),
-        ]))
+        ])
         .unwrap();
         let d = out
             .split(r#"d=""#)
@@ -418,21 +516,21 @@ mod tests {
             vec![("thickness", "0")],
             vec![("length", "50"), ("thickness", "-3")],
         ] {
-            assert!(arrow(&req(&bad)).is_err(), "{bad:?}");
+            assert!(arrow_of(&bad).is_err(), "{bad:?}");
         }
         // a nonsense attribute value falls back to the default rather than NaN
-        let out = arrow(&req(&[("length", "banana"), ("thickness", "oops")])).unwrap();
+        let out = arrow_of(&[("length", "banana"), ("thickness", "oops")]).unwrap();
         assert!(!out.contains("NaN") && !out.contains("inf"), "{out}");
     }
 
     #[test]
     fn rounding_keeps_the_outline_inside_the_unrounded_one() {
-        let plain = arrow(&req(&[("length", "100"), ("thickness", "20")])).unwrap();
-        let round = arrow(&req(&[
+        let plain = arrow_of(&[("length", "100"), ("thickness", "20")]).unwrap();
+        let round = arrow_of(&[
             ("length", "100"),
             ("thickness", "20"),
             ("radius", "4"),
-        ]))
+        ])
         .unwrap();
         assert!(
             round.contains(" Q"),
@@ -448,7 +546,7 @@ mod tests {
             svg: "<path d=\"M0,0 h40 v20 h-40 Z\"/>".to_string(),
             bbox: Some([0.0, 0.0, 40.0, 20.0]),
         }];
-        let out = callout(&r).unwrap();
+        let out = callout(&Callout::from_attrs(&r), &r).unwrap();
         let d = out
             .split(r#"d=""#)
             .nth(1)
@@ -471,7 +569,7 @@ mod tests {
         };
         let mut r = req(&[("pad", "0"), ("radius", "0"), ("tail-size", "12")]);
         r.children = vec![kid];
-        let d = callout(&r).unwrap();
+        let d = callout(&Callout::from_attrs(&r), &r).unwrap();
         let d = d.split(r#"d=""#).nth(1).unwrap().split('"').next().unwrap();
         // default tail is at the bottom: it reaches below the box
         assert!(bbox(d).3 > 20.0, "bottom tail: {d}");
@@ -486,7 +584,7 @@ mod tests {
             svg: String::new(),
             bbox: Some([0.0, 0.0, 40.0, 20.0]),
         }];
-        let d = callout(&r).unwrap();
+        let d = callout(&Callout::from_attrs(&r), &r).unwrap();
         let d = d.split(r#"d=""#).nth(1).unwrap().split('"').next().unwrap();
         assert!(bbox(d).1 < 0.0, "top tail: {d}");
     }
@@ -500,7 +598,7 @@ mod tests {
             svg: String::new(),
             bbox: Some([0.0, 0.0, 80.0, 20.0]),
         }];
-        let out = callout(&r).unwrap();
+        let out = callout(&Callout::from_attrs(&r), &r).unwrap();
         let d = out
             .split(r#"d=""#)
             .nth(1)
@@ -516,24 +614,26 @@ mod tests {
 
     #[test]
     fn a_callout_with_nothing_measurable_degrades() {
-        assert!(callout(&req(&[])).is_err());
+        let empty = req(&[]);
+        assert!(callout(&Callout::from_attrs(&empty), &empty).is_err());
     }
 
     #[test]
     fn paint_attributes_are_escaped() {
-        let out = arrow(&req(&[
+        let out = arrow_of(&[
             ("length", "10"),
             ("thickness", "2"),
             ("fill", "\"><script>"),
-        ]))
+        ])
         .unwrap();
         assert!(!out.contains("<script"), "{out}");
         assert!(out.contains("&quot;&gt;&lt;script&gt;"), "{out}");
     }
 
     #[test]
-    fn the_manifest_is_valid_json_naming_the_official_namespace() {
-        let m = xsvg_plugin::json::parse(Clipart::MANIFEST).expect("manifest parses");
+    fn the_manifest_is_generated_from_the_declarations() {
+        let text = xsvg_plugin::manifest::<Clipart>();
+        let m = xsvg_plugin::json::parse(&text).expect("manifest parses");
         assert_eq!(
             m.get("ns").and_then(|v| v.as_str()),
             Some("https://xsvg.visioncortex.org/ext/clipart")
@@ -547,5 +647,20 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("container")
         );
+    }
+
+    #[test]
+    fn every_attribute_the_code_reads_is_declared() {
+        // The hand-written manifest this replaced omitted `x` and `y` — readable
+        // aliases for x1/y1 that no property panel could see. With the struct as
+        // the single source there is no field to read that isn't described, so
+        // this pins the specific bug rather than the general property.
+        let names: Vec<&str> = Arrow::SPEC.params.iter().map(|p| p.name).collect();
+        for n in ["x", "y", "x1", "y1", "x2", "y2", "head-width", "head-length"] {
+            assert!(names.contains(&n), "{n} is not declared: {names:?}");
+        }
+        // and the alias really is an alias
+        let d = arrow_of(&[("x", "5"), ("y", "5"), ("length", "10"), ("thickness", "2")]).unwrap();
+        assert!(d.contains("M5 4"), "x/y position the arrow: {d}");
     }
 }
