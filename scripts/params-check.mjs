@@ -16,6 +16,8 @@ import {
   renderParams,
   setAttribute,
 } from "../packages/xsvg-viewer/src/params.ts";
+import { createInspector } from "../packages/xsvg-viewer/src/inspector.ts";
+import { NodeKeyStore } from "../packages/xsvg-viewer/src/keys.ts";
 
 // renderParams builds DOM, exactly as it does in the browser; give it jsdom's.
 globalThis.document = new JSDOM("<!doctype html><body></body>").window.document;
@@ -180,6 +182,101 @@ check("editing a namespaced attribute commits under its qualified name", () => {
     setAttribute(`<x:textbox/>`, 0, "x:border-color", "#111"),
     `<x:textbox x:border-color="#111"/>`,
   );
+});
+
+// ---- the panel survives an element it edited into invisibility ------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** A pinned `<clip:arrow>` and the levers to make it vanish, wired the way the
+ *  interactive viewer wires them. */
+function pinnedArrow(attrs = 'thickness="8"', rendered = true) {
+  const source = `<svg xmlns:clip="https://x.example/c"><clip:arrow ${attrs}/></svg>`;
+  const start = source.indexOf("<clip:arrow");
+  const end = source.indexOf("/>", start) + 2;
+
+  const svgRoot = document.createElementNS(SVG_NS, "svg");
+  const el = document.createElementNS(SVG_NS, "path");
+  // the store mints names in document order, so this element is `n0`
+  el.setAttribute("data-xsvg-node", "n0");
+  // A compiled shape carries the geometry the generator emitted, not the author's
+  // attributes — and that `d` is routinely enormous.
+  el.setAttribute("d", `M0,0 ${"L1,1 ".repeat(400)}Z`);
+  // `rendered: false` is the state after a recompile of a document whose generator
+  // emitted only a marker: the element is in the source, and in no DOM at all.
+  if (rendered) svgRoot.append(el);
+
+  const keys = new NodeKeyStore();
+  keys.sync([[start, end]]);
+
+  const panel = document.createElement("div");
+  const edits = [];
+  const inspector = createInspector({
+    svgRoot,
+    panel,
+    source,
+    editor: { highlight() {} },
+    schemas: { spec: () => ({ params: { thickness: { type: "number", min: 0, max: 200 } } }) },
+    index: keys,
+    onEdit: (next, at) => edits.push([next, at]),
+  });
+  return { inspector, panel, svgRoot, el, source, start, edits };
+}
+
+/** Fire the panel's thickness control, as a user dragging the slider does. */
+function drag(panel, value) {
+  const range = panel.querySelector('input[type=range]');
+  assert.ok(range, "no thickness slider in the panel");
+  range.value = String(value);
+  range.dispatchEvent(new panel.ownerDocument.defaultView.Event("input"));
+}
+
+check("an element edited into invisibility can still be edited back", () => {
+  // <clip:arrow thickness="0"> has no area, so the generator degrades it to a marker
+  // comment and the element leaves the drawing entirely. The author's next move is to
+  // undo that — but the canvas now offers nothing to click, so the panel is the only
+  // way back. Dropping the pin when the element vanished left the controls standing
+  // and inert: visibly live, silently doing nothing.
+  const { inspector, panel, el, source, start, edits } = pinnedArrow();
+  inspector.selectAtSourceOffset(start + 2);
+  assert.ok(panel.querySelector("input[type=range]"), "the arrow did not pin");
+  assert.ok(panel.querySelector("table.attrs"), "should pin the rendered element first");
+
+  // thickness=0 → the generator emits only a marker, so nothing is rendered for it
+  const gone = source.replace('thickness="8"', 'thickness="0"');
+  el.remove();
+  inspector.refresh(gone);
+
+  assert.match(panel.textContent, /renders nothing/, "the panel should say why it is empty");
+  drag(panel, 12);
+  assert.equal(edits.length, 1, "the control is dead — the author cannot undo the edit");
+  assert.match(edits[0][0], /thickness="12"/);
+  // and it edits the right element: the range, not a stale DOM node
+  assert.equal(edits[0][1], gone.indexOf("<clip:arrow"));
+});
+
+check("a re-pin after a full recompile finds an element that renders nothing", () => {
+  // The patch path declines when a fragment has no anchor, so the viewer recompiles
+  // and re-pins by source offset. Nothing rendered covers that offset any more, so
+  // without the source-span fallback the panel would come back dead.
+  const { inspector, panel, start, edits } = pinnedArrow('thickness="0"', false);
+  inspector.selectAtSourceOffset(start + 2);
+
+  assert.match(panel.textContent, /renders nothing/);
+  drag(panel, 9);
+  assert.equal(edits.length, 1, "re-pinning an unrendered element left the panel dead");
+});
+
+check("a long attribute value is elided rather than flooding the panel", () => {
+  const { inspector, panel, start } = pinnedArrow();
+  inspector.selectAtSourceOffset(start + 2);
+  const d = panel.querySelector("table.attrs td[title]");
+  assert.ok(d, "a 2000-char d should be elided and carry the full value as a tooltip");
+  assert.ok(d.textContent.includes("…"), `not elided: ${d.textContent.slice(0, 40)}`);
+  assert.match(d.textContent, /\d[\d,]* chars/, "should say how much was hidden");
+  assert.ok(d.textContent.length < 140, `still too long: ${d.textContent.length}`);
+  // the head survives — it is what identifies the value
+  assert.ok(d.textContent.startsWith("M0,0 L1,1"), d.textContent.slice(0, 20));
 });
 
 if (!process.exitCode) console.log(`params: ${passed} checks passed`);

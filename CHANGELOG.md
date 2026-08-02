@@ -10,6 +10,22 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An element edited into invisibility could not be edited back.** Dragging
+  `<clip:arrow thickness="0">` to zero is legitimate — the arrow has no area, so the
+  generator degrades it to a marker and it leaves the drawing — but the inspector then
+  dropped its pin, leaving the controls standing and inert. The canvas offered nothing
+  left to click, so the one edit the author needed to reverse was the one that removed
+  every way of reversing it. The panel now pins a **source range** and treats the
+  rendered element as optional: it says the element renders nothing, keeps its
+  attributes editable, and re-pins the same way after a full recompile (resolving
+  through the key store, which is built from source spans rather than the DOM).
+- **Long attribute values are elided in the inspector.** A compiled `d` is routinely
+  thousands of characters — baked outlines, a warped path — and one of them buried
+  every other row. Values over 96 characters keep their head, which is what identifies
+  them, and report how much was hidden; the full value is on the row's tooltip.
+
 ## [0.2.0] — 2026-08-02
 
 A minor rather than a patch, because **the same document can compile to different

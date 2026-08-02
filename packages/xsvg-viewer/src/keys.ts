@@ -14,9 +14,15 @@
 
 import type { SourceRange } from "./sourcemap";
 
-/** Resolves a rendered element's identity attribute back to a source range. */
+/** Resolves a rendered element's identity attribute back to a source range.
+ *
+ *  Built from the document's **source** spans, not from what it rendered — so an
+ *  element that currently draws nothing still resolves, which is what lets an editor
+ *  keep working on one the author has (temporarily) edited into invisibility. */
 export interface NodeIndex {
   rangeOf(key: string): SourceRange | null;
+  /** The key of the innermost element whose range contains `byte`, or null. */
+  keyAt(byte: number): string | null;
 }
 
 /**

@@ -21,7 +21,7 @@
     "build:packages": "npm run badges && npm run sync:readme && npm run wasm:build && npm run wasm:node && npm -w @visioncortex/xsvg-viewer run build && npm -w @visioncortex/xsvg-compile run build",
     "start": "vite preview",
     "typecheck": "tsc --noEmit",
-    "check:params": "node --experimental-strip-types scripts/params-check.mjs",
+    "check:params": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs scripts/params-check.mjs",
     "check:hosts": "node scripts/host-hooks-check.mjs",
     "check:incremental": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/incremental-check.mjs",
     "check:dom": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/dom-patch-check.mjs",

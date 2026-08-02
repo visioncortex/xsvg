@@ -111,19 +111,37 @@ export function createInspector({
     rect.style.display = "";
   };
 
-  // The element the panel is currently describing. A patch replaces the node, so it
-  // is tracked by the compiler's identity attribute — stable across an edit when the
+  // What the panel is describing. A **source range** first and a rendered element
+  // second: the element is what gets outlined on the canvas and listed in the
+  // attribute table, but the range is what every edit is written against. They come
+  // apart whenever an element compiles to nothing — a `<clip:arrow thickness="0">`
+  // has no area, so it degrades to a marker comment — and when they do, the source is
+  // still there and still editable. Losing the pin then would strand the author in
+  // the one state they most need the panel for: the edit that made it vanish is the
+  // edit they want to undo, and the canvas no longer offers anything to click.
+  //
+  // The element is tracked by its identity attribute, stable across a patch when the
   // host supplies keys, which is how the pin survives without re-deriving offsets.
-  let pinned: { el: SVGGraphicsElement; range: SourceRange; id: string | null } | null = null;
+  let pinned: { el: SVGGraphicsElement | null; range: SourceRange; id: string | null } | null =
+    null;
   const identity = (el: Element) =>
     el.getAttribute("data-xsvg-node") ?? el.getAttribute("data-xsvg-pos");
 
-  // Pin an element (both directions funnel through here): outline it on the canvas,
-  // fill the panel, and highlight its source range in the editor.
-  const selectElement = (el: SVGGraphicsElement, range: SourceRange) => {
-    pinned = { el, range, id: identity(el) };
-    place(pinRect, el);
-    fillPanel(info, el);
+  // Pin a source range (every direction funnels through here): outline its element on
+  // the canvas if it has one, fill the panel, and highlight the range in the editor.
+  const selectElement = (
+    el: SVGGraphicsElement | null,
+    range: SourceRange,
+    id = el ? identity(el) : null,
+  ) => {
+    pinned = { el, range, id };
+    if (el) {
+      place(pinRect, el);
+      fillPanel(info, el);
+    } else {
+      pinRect.style.display = "none";
+      info.innerHTML = nothingRendered();
+    }
     addParams(range);
     editor.highlight(bytes.toStr(range.start), bytes.toStr(range.end));
   };
@@ -162,7 +180,9 @@ export function createInspector({
         tag.attrs,
         (name, value) => {
           // Resolved at edit time, not capture time: a live control outlives several
-          // patches, and both the text and the element's offset move under it.
+          // patches, and both the text and the element's offset move under it. Only
+          // the range is consulted — a control must keep working when the element it
+          // edits currently renders nothing, since that is exactly when it is needed.
           if (!pinned) return;
           const at = bytes.toStr(pinned.range.start);
           const next = setAttribute(source, at, name, value);
@@ -198,11 +218,19 @@ export function createInspector({
     const id = pinned.id;
     const hit = id ? items.find((it) => identity(it.el) === id) : undefined;
     if (!hit) {
-      // The pinned element no longer has a span of its own — it degraded to a
-      // marker, or the edit dissolved it. Drop the pin rather than point at a stale
-      // node, but leave the controls so the user can undo what they just did.
-      pinned = null;
+      // The element stopped rendering — it degraded to a marker comment, or the edit
+      // dissolved it. The *source* is still there, so keep the pin and keep editing:
+      // dropping it here would leave the controls standing but inert, and the edit
+      // that emptied the element is the one the author needs to reverse.
+      //
+      // `index` resolves from source spans rather than the DOM, so it still answers
+      // for an element that drew nothing. Failing that the old range still serves —
+      // an edit inside an element cannot move that element's start.
+      const range = (id && index?.rangeOf(id)) || pinned.range;
+      pinned = { el: null, range, id };
       pinRect.style.display = "none";
+      info.innerHTML = nothingRendered();
+      editor.highlight(bytes.toStr(range.start), bytes.toStr(range.end), false);
       return;
     }
     pinned = { el: hit.el, range: hit.range, id };
@@ -236,7 +264,17 @@ export function createInspector({
         best = it;
       }
     }
-    if (best) selectElement(best.el, best.range);
+    if (best) {
+      selectElement(best.el, best.range);
+      return;
+    }
+    // Nothing rendered covers this offset. The source element is still real, though —
+    // `index` is built from source spans — so pin it anyway, elementless. This is the
+    // path a re-pin takes after an edit made the element vanish and forced a full
+    // recompile, and without it the panel would come back dead.
+    const key = index?.keyAt(bytes.toByte(offset));
+    const range = key ? index?.rangeOf(key) : null;
+    if (range) selectElement(null, range, key);
   };
 
   svgRoot.addEventListener("mousemove", onMove);
@@ -316,15 +354,42 @@ function emptyPanel(): string {
   return `<p class="hint">Click an element on the canvas — or click in the source — to link the two.</p>`;
 }
 
+/** Shown in place of the attribute table when the pinned element draws nothing —
+ *  a degenerate `<clip:arrow thickness="0">`, a declaration, a hidden layer. Says so
+ *  rather than blanking, because the controls below it are still live and are how the
+ *  author gets the element back. */
+function nothingRendered(): string {
+  return `<p class="hint">This element currently renders nothing — check the source pane for a
+    marker explaining why. Its attributes are still editable below.</p>`;
+}
+
+/** Longest attribute value shown whole. A compiled `d` is routinely thousands of
+ *  characters — baked glyph outlines, a warped path, a mesh silhouette — and one of
+ *  them turns the attribute table into a wall of digits that buries every other row. */
+const VALUE_LIMIT = 96;
+
+/** An attribute value cut to a readable length, plus its true size when cut. The head
+ *  is what identifies a value (`M0,0 C…`, `translate(…`), so the tail is what goes. */
+function elide(value: string): { text: string; full: string | null } {
+  if (value.length <= VALUE_LIMIT) return { text: value, full: null };
+  return {
+    text: `${value.slice(0, VALUE_LIMIT).trimEnd()}…`,
+    full: `${value.length.toLocaleString()} chars`,
+  };
+}
+
 function fillPanel(info: HTMLElement, el: SVGGraphicsElement): void {
   const rows = Array.from(el.attributes)
     // Neither identity spelling is an authored attribute — the byte span nor the
     // host-assigned key — so neither belongs in a table of the element's own attrs.
     .filter((a) => a.name !== "data-xsvg-pos" && a.name !== "data-xsvg-node")
-    .map(
-      (a) =>
-        `<tr><th scope="row">${escapeHtml(a.name)}</th><td>${escapeHtml(a.value)}</td></tr>`,
-    )
+    .map((a) => {
+      const { text, full } = elide(a.value);
+      const title = full ? ` title="${escapeHtml(a.value.slice(0, 4000))}"` : "";
+      return `<tr><th scope="row">${escapeHtml(a.name)}</th><td${title}>${escapeHtml(text)}${
+        full ? ` <span class="hint">(${full})</span>` : ""
+      }</td></tr>`;
+    })
     .join("");
 
   let bboxLine = "";
