@@ -342,7 +342,10 @@ centred text is optically centred, not biased low by the em box. With an explici
 
 **`<tbreak/>`** [implemented] — a forced line break, per SVG Tiny 1.2. Each `<tbreak/>` child ends the
 current line and starts a new one; wrapping resumes independently on each side. Consecutive breaks
-produce blank lines. This is the only child element `<textArea>` interprets in v0.
+produce blank lines. The same element works inside `<x:textbox>` — plain or within an `<x:p>` —
+where every line, wrapped or forced, steps by the same `font-size × line-height` advance. In a
+`<textArea>` the step is `line-increment`; when that is `auto`, an authored `line-height` drives it
+(`size × line-height`), else the SVG Tiny default (1.1 × size).
 
 **Not yet implemented:** `xml:space="preserve"`, full UAX #14 line-breaking (we break on
 whitespace), `editable`.
@@ -824,13 +827,19 @@ indent, style, and spacing.
 | `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
 | `font-*`, `fill` | `<x:p>` | per-paragraph style over the box defaults |
 
-The gap between two paragraphs is `space-after` of the first plus `space-before` of the second. The
+Paragraphs stack by **baseline advance** (the editor convention): a paragraph's first baseline sits
+one line advance — its own `font-size × line-height` — below the previous paragraph's last
+baseline, plus `space-after` of the first and `space-before` of the second. A paragraph break is
+therefore never tighter than a wrapped line, and an **empty `<x:p>` owns one blank row** (it emits
+no glyphs but takes its line advance — the blank line an editor's double-Enter produces). The
 whole stacked block is then placed by the box's `valign` (top/middle/bottom), and lines whose
 baseline leaves the box are clipped. Each `<x:p>` compiles to its own `<text>` carrying its source
-range (a click resolves to the paragraph). `fit="shrink"` applies to the whole block (§6.1: the
-scale is searched, so all paragraphs shrink together). **v0 limits:** paragraph mode is **live
-text** — no create-outlines (§6.12), no `<tspan>` runs inside a paragraph, and it applies to the
-**rectangular** box only (a curved `in="#shape"` region ignores `<x:p>` and flows as one block).
+range (a click resolves to the paragraph); `<tspan>` runs inside a paragraph keep their styling,
+and a `<tbreak/>` forces a line break **within** the paragraph at the same line advance.
+`fit="shrink"` applies to the whole block (§6.1: the scale is searched, so all paragraphs shrink
+together). **v0 limits:** paragraph mode is **live text** — no create-outlines (§6.12) — and it
+applies to the **rectangular** box only (a curved `in="#shape"` region ignores `<x:p>` and flows
+as one block).
 
 ### 6.17 Bordered text — `x:border-width` / `x:border-color` [implemented]
 

@@ -2,8 +2,8 @@
 //! producing absolutely-positioned lines ready to emit as `<tspan>`s.
 
 use super::{
-    fit::fit_size,
-    measure::{measure_words, Measured, Measurer, Piece},
+    fit::{fit_size, fit_size_flows},
+    measure::{measure_runs, measure_words, Measured, Measurer, Piece},
     style::TextStyle,
     truncate::{apply_ellipsis, TextOverflow},
     wrap::{fill_line, wrap_pieces},
@@ -168,6 +168,140 @@ pub struct AreaLayout {
 /// width, then align horizontally and vertically into positioned lines.
 pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measurer) -> AreaLayout {
     layout_area_measured(&measure_words(text, style, m), style, spec, m)
+}
+
+/// Split styled segments at `'\n'` (`<tbreak/>` in the source) into forced
+/// sub-flows. Each flow wraps independently; an EMPTY flow (consecutive
+/// breaks, or a break at an edge) is a forced blank line.
+fn split_flows(segments: &[(String, usize)]) -> Vec<Vec<(String, usize)>> {
+    let mut flows: Vec<Vec<(String, usize)>> = vec![Vec::new()];
+    for (text, sid) in segments {
+        for (k, part) in text.split('\n').enumerate() {
+            if k > 0 {
+                flows.push(Vec::new());
+            }
+            if !part.is_empty() {
+                flows.last_mut().unwrap().push((part.to_string(), *sid));
+            }
+        }
+    }
+    flows
+}
+
+/// Like [`layout_area_measured`], but takes raw styled segments and honors
+/// `'\n'` forced breaks (`<tbreak/>`): every line — wrapped or forced — steps
+/// by the SAME line advance (`size × line-height`), a blank flow occupies one
+/// line, shrink-fit counts every flow's lines, and justification leaves each
+/// flow's last line ragged. A break-free stream is exactly
+/// [`layout_area_measured`].
+pub fn layout_area_runs(
+    segments: &[(String, usize)],
+    styles: &[TextStyle],
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
+    let style = &styles[0];
+    let flows = split_flows(segments);
+    let measured: Vec<Measured> = flows.iter().map(|f| measure_runs(f, styles, m)).collect();
+    if measured.len() == 1 {
+        return layout_area_measured(&measured[0], style, spec, m);
+    }
+
+    let cx = spec.x + spec.padding;
+    let cy = spec.y + spec.padding;
+    let cw = spec.width - 2.0 * spec.padding;
+    let ch = spec.height - 2.0 * spec.padding;
+
+    let size = match spec.fit {
+        Fit::Shrink { min } => fit_size_flows(&measured, style.size, style.line_height, cw, ch, min),
+        Fit::None => style.size,
+    };
+    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
+
+    // Wrap each flow; the box-wide first-line indent applies to the very
+    // first line only (flow 0). `(pieces, words, flow_final)` per line; a
+    // blank flow contributes one empty line. Word ranges are GLOBAL — offset
+    // into the concatenation of every flow's words, which is exactly the
+    // word list `measure_runs` yields for the unsplit stream ('\n' is
+    // whitespace there), so seam callers keep one flat word list.
+    let indent = spec.text_indent;
+    let mut line_meta: Vec<(Vec<Piece>, (usize, usize), bool)> = Vec::new();
+    let mut word_base = 0usize;
+    for (fi, mw) in measured.iter().enumerate() {
+        let wrapped = if fi == 0 && indent != 0.0 && cw > 0.0 && !mw.words.is_empty() {
+            let (first, mut i) = fill_line(mw, 0, (cw - indent).max(0.0), scale);
+            let mut ls = vec![(first, (0, i))];
+            while i < mw.words.len() {
+                let (p, n) = fill_line(mw, i, cw, scale);
+                ls.push((p, (i, n)));
+                i = n;
+            }
+            ls
+        } else {
+            wrap_pieces(mw, cw, scale)
+        };
+        if wrapped.is_empty() {
+            line_meta.push((Vec::new(), (word_base, word_base), true)); // forced blank line
+            continue;
+        }
+        let n = wrapped.len();
+        for (j, (pieces, words)) in wrapped.into_iter().enumerate() {
+            line_meta.push((pieces, (words.0 + word_base, words.1 + word_base), j + 1 == n));
+        }
+        word_base += mw.words.len();
+    }
+    let advance = size * style.line_height;
+
+    let anchor = spec.align.anchor();
+    let ax = match spec.align {
+        Align::Center => cx + cw / 2.0,
+        Align::End => cx + cw,
+        Align::Start | Align::Justify => cx,
+    };
+
+    let fm = m.font_metrics(style, size);
+    let n = line_meta.len().max(1) as f64;
+    let band_h = fm.cap_height + fm.descent + (n - 1.0) * advance;
+    let band_top = match spec.valign {
+        VAlign::Top => cy,
+        VAlign::Middle => cy + (ch - band_h) / 2.0,
+        VAlign::Bottom => cy + (ch - band_h),
+    };
+    let first_baseline = band_top + fm.cap_height;
+
+    let justify = spec.align == Align::Justify && cw > 0.0;
+    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
+
+    let mut lines = Vec::new();
+    let mut dropped = false;
+    for (i, (pieces, words, flow_final)) in line_meta.into_iter().enumerate() {
+        let baseline = first_baseline + i as f64 * advance;
+        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
+            dropped = true;
+            continue;
+        }
+        let (text, runs) = merge_pieces(pieces);
+        let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
+        // each flow's LAST line stays ragged (the paragraph-final convention)
+        let justify_width = (justify && !flow_final && text.contains(' ')).then_some(line_w);
+        lines.push(PlacedLine {
+            text,
+            x: if i == 0 { ax + indent_x } else { ax },
+            baseline,
+            justify_width,
+            runs,
+            words,
+        });
+    }
+    if spec.text_overflow == TextOverflow::Ellipsis {
+        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
+    }
+
+    AreaLayout {
+        anchor,
+        font_size: size,
+        lines,
+    }
 }
 
 /// Like [`layout_area`], but takes pre-[`measure`]d input so the caller can supply

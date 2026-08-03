@@ -22,6 +22,27 @@ pub(crate) fn fit_size(
     max_h: f64,
     min_size: f64,
 ) -> f64 {
+    fit_size_flows(
+        std::slice::from_ref(measured),
+        base_size,
+        line_height,
+        max_w,
+        max_h,
+        min_size,
+    )
+}
+
+/// [`fit_size`] over several forced sub-flows (`<tbreak/>` splits): the block
+/// height sums every flow's wrapped lines — a blank flow is one forced blank
+/// line — and the widest unbreakable word across all flows must fit.
+pub(crate) fn fit_size_flows(
+    flows: &[Measured],
+    base_size: f64,
+    line_height: f64,
+    max_w: f64,
+    max_h: f64,
+    min_size: f64,
+) -> f64 {
     if !base_size.is_finite() || base_size <= 0.0 {
         return 0.0;
     }
@@ -30,11 +51,14 @@ pub(crate) fn fit_size(
 
     let fits = |size: f64| {
         let scale = size / base_size;
-        let lines = wrap(measured, max_w, scale).len().max(1) as f64;
-        let widest = measured
-            .words
+        let lines: f64 = flows
             .iter()
-            .map(|w| w.advance * scale + measured.letter_spacing * w.graphemes.saturating_sub(1) as f64)
+            .map(|f| wrap(f, max_w, scale).len().max(1) as f64)
+            .sum();
+        let widest = flows
+            .iter()
+            .flat_map(|f| f.words.iter().map(move |w| (w, f.letter_spacing)))
+            .map(|(w, ls)| w.advance * scale + ls * w.graphemes.saturating_sub(1) as f64)
             .fold(0.0f64, f64::max);
         lines * size * line_height <= max_h && widest <= max_w + 1e-6
     };

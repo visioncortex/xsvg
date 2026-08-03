@@ -5,7 +5,8 @@
 //! browser callbacks and `xsvg-cli` backs them with native font libraries. Both are thin
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
 pub(crate) use crate::{
-    boolean_svg_paths, filter_primitives, layout_area, layout_area_measured, layout_flow,
+    boolean_svg_paths, filter_primitives, layout_area, layout_area_measured, layout_area_runs,
+    layout_flow,
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
     parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
     Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
@@ -1058,12 +1059,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         if target.tag_name().name() == "rect" {
             let spec = textbox_area_spec(node, target);
             let (segments, styles, emits) = collect_runs(node, &style);
-            let layout = layout_area_measured(
-                &measure_runs(&segments, &styles, ctx.m),
-                &style,
-                &spec,
-                ctx.m,
-            );
+            let layout = layout_area_runs(&segments, &styles, &spec, ctx.m);
             write_area_text(
                 out,
                 &layout,
@@ -1122,12 +1118,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     let spec = textbox_area_spec(node, node);
     let (segments, styles, emits) = collect_runs(node, &style);
-    let layout = layout_area_measured(
-        &measure_runs(&segments, &styles, ctx.m),
-        &style,
-        &spec,
-        ctx.m,
-    );
+    let layout = layout_area_runs(&segments, &styles, &spec, ctx.m);
     write_area_text(
         out,
         &layout,
@@ -1165,7 +1156,6 @@ fn emit_paragraphs(
 
     // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
     // <text> per paragraph
-    let base = [EmitAttrs::default()];
     for para in &items {
         let visible: Vec<PlacedLine> = para
             .lines
@@ -1186,7 +1176,7 @@ fn emit_paragraphs(
         for line in &visible {
             let mut l = line.clone();
             l.baseline += block_top;
-            emit_line(out, &l, &para.style, para.style.size, gx, m, &base);
+            emit_line(out, &l, &para.style, para.style.size, gx, m, &para.emits);
         }
         out.push_str("</text>");
     }
@@ -1200,6 +1190,9 @@ struct ParaPlan<'a> {
     style: TextStyle,
     fill: &'a str,
     anchor: &'static str,
+    /// The paragraph's styled-run emit table (`collect_runs`) — `<tspan>`
+    /// overrides render styled in paragraph mode, same as a plain box.
+    emits: Vec<EmitAttrs>,
     src: roxmltree::Node<'a, 'a>,
 }
 
@@ -1255,24 +1248,38 @@ fn plan_paragraphs<'a>(
     // metric — the font sizes, the paragraph gaps, the first-line indent —
     // scales together, so the block shrinks like a zoom while the box
     // geometry stays put. Returns the plans and the stacked block height.
+    //
+    // Stacking is BASELINE-advance based (the Slides convention): a
+    // paragraph's first baseline sits one line advance (its own
+    // `size × line-height`) below the previous paragraph's last baseline,
+    // plus the explicit space-after/before gaps — so pressing Enter spaces
+    // exactly like a wrapped line, never tighter. An EMPTY paragraph still
+    // owns one row (a blank line the caret can sit on); it just emits no
+    // glyphs. Styled runs and `<tbreak/>` forced breaks flow through
+    // `collect_runs` → `layout_area_runs`, sharing the plain textbox's
+    // pipeline.
     let plan_at = |scale: f64| -> (Vec<ParaPlan<'a>>, f64) {
         let mut items: Vec<ParaPlan> = Vec::with_capacity(paras.len());
-        let mut cursor = 0.0f64; // cap-top of the current paragraph
+        let mut last_baseline: Option<f64> = None; // relative frame: para 0's cap-top at 0
+        let mut last_descent = 0.0f64;
         let mut prev_after = 0.0f64;
-        for (i, &p) in paras.iter().enumerate() {
-            let ptext = collect_text(p);
+        for &p in paras.iter() {
             let mut pstyle = para_style(p);
             pstyle.size *= scale;
             let sb = attr_num(p, "space-before", 0.0) * scale;
             let sa = attr_num(p, "space-after", default_spacing) * scale;
-            if i > 0 {
-                cursor += prev_after + sb;
-            }
+            let pfm = m.font_metrics(&pstyle, pstyle.size);
+            let advance = pstyle.size * pstyle.line_height;
+            let first_baseline = match last_baseline {
+                None => pfm.cap_height,
+                Some(lb) => lb + prev_after + sb + advance,
+            };
             let pspec = AreaSpec {
                 x: cx,
-                y: cursor,
+                // layout places the first baseline at y + cap-height
+                y: first_baseline - pfm.cap_height,
                 width: cw,
-                height: 1e5, // tall → no clip; valign=top places lines from `cursor`
+                height: 1e5, // tall → no clip; valign=top places lines from `y`
                 padding: 0.0,
                 align: Align::parse(p.attribute("align").unwrap_or(default_align)),
                 valign: VAlign::Top,
@@ -1280,22 +1287,22 @@ fn plan_paragraphs<'a>(
                 text_overflow: TextOverflow::Clip,
                 text_indent: attr_num(p, "text-indent", 0.0) * scale,
             };
-            let layout = layout_area(&ptext, &pstyle, &pspec, m);
-            let pfm = m.font_metrics(&pstyle, pstyle.size);
-            let n = layout.lines.len().max(1);
-            let ph =
-                pfm.cap_height + pfm.descent + (n - 1) as f64 * (pstyle.size * pstyle.line_height);
+            let (segments, pstyles, emits) = collect_runs(p, &pstyle);
+            let layout = layout_area_runs(&segments, &pstyles, &pspec, m);
+            let n = layout.lines.len().max(1); // an empty paragraph owns one row
+            last_baseline = Some(first_baseline + (n - 1) as f64 * advance);
+            last_descent = pfm.descent;
             items.push(ParaPlan {
                 lines: layout.lines,
                 style: pstyle,
                 fill: p.attribute("fill").unwrap_or(base_fill),
                 anchor: layout.anchor.svg(),
+                emits,
                 src: p,
             });
-            cursor += ph;
             prev_after = sa;
         }
-        let block_h = cursor;
+        let block_h = last_baseline.map(|lb| lb + last_descent).unwrap_or(0.0);
         (items, block_h)
     };
 
@@ -2332,7 +2339,7 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         height: dim_attr(node, "height"),
         text_align: TextAlign::parse(node.attribute("text-align").unwrap_or("start")),
         display_align: DisplayAlign::parse(node.attribute("display-align").unwrap_or("auto")),
-        line_increment: line_increment_attr(node),
+        line_increment: line_increment_attr(node, style.size),
         text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
     };
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
@@ -2601,9 +2608,19 @@ fn dim_attr(node: roxmltree::Node, name: &str) -> Option<f64> {
     }
 }
 
-fn line_increment_attr(node: roxmltree::Node) -> LineIncrement {
+/// `line-increment` resolution for `<textArea>`: an explicit value keeps SVG
+/// Tiny semantics; on `auto`, an authored `line-height` (xsvg's own spacing
+/// vocabulary, in em) drives the step at `size × line-height` — so a
+/// `<tbreak/>` respects the same line spacing every other text element uses —
+/// and only when NEITHER is authored does the spec default (1.1 × size) apply.
+fn line_increment_attr(node: roxmltree::Node, size: f64) -> LineIncrement {
     match node.attribute("line-increment") {
-        None | Some("auto") => LineIncrement::Auto,
+        None | Some("auto") => node
+            .attribute("line-height")
+            .and_then(parse_num)
+            .filter(|n| *n > 0.0)
+            .map(|lh| LineIncrement::Fixed(size * lh))
+            .unwrap_or(LineIncrement::Auto),
         Some(v) => parse_num(v)
             .map(LineIncrement::Fixed)
             .unwrap_or(LineIncrement::Auto),
@@ -3300,7 +3317,8 @@ fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
 }
 
 /// Rectangular flow (own box or `in="#rect"`): the same `collect_runs` →
-/// `measure_runs` → `layout_area_measured` pipeline emission runs.
+/// [`layout_area_runs`] pipeline emission runs. The flat word list matches
+/// the layout's global word ranges ('\n' is whitespace to `measure_runs`).
 fn area_layout_info(
     node: roxmltree::Node,
     style: &TextStyle,
@@ -3314,7 +3332,7 @@ fn area_layout_info(
         .iter()
         .map(|w| w.pieces.iter().map(|p| p.text.as_str()).collect())
         .collect();
-    let layout = layout_area_measured(&measured, style, spec, m);
+    let layout = layout_area_runs(&segments, &styles, spec, m);
     let p = spec.padding;
     TextLayout {
         content: (

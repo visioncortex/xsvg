@@ -386,8 +386,9 @@ fn textbox_first_line_indent() {
 #[test]
 fn textbox_paragraphs_stack_with_spacing() {
     // Mono size 10: cap 7, descent 2, advance 12. Two 1-line paragraphs with a
-    // 20-unit paragraph-spacing: p0 baseline at cap (7); p1 pushed down by
-    // p0 height (9) + gap (20) + cap (7) = 36.
+    // 20-unit paragraph-spacing: p0 baseline at cap (7); p1's baseline one
+    // LINE ADVANCE below it plus the gap (the Slides convention — Enter never
+    // spaces tighter than a wrapped line): 7 + 20 + 12 = 39.
     let svg = format!(
         r##"{XW}<x:textbox x="0" y="0" width="200" height="200" font-size="10" line-height="1.2" paragraph-spacing="20"><x:p>one</x:p><x:p align="center">two</x:p></x:textbox></svg>"##
     );
@@ -399,8 +400,8 @@ fn textbox_paragraphs_stack_with_spacing() {
     );
     assert!(out.contains("y=\"7\""), "first paragraph at the top: {out}");
     assert!(
-        out.contains("y=\"36\""),
-        "second paragraph pushed down by the gap: {out}"
+        out.contains("y=\"39\""),
+        "second paragraph one advance + gap down: {out}"
     );
     assert!(
         out.contains("text-anchor=\"middle\""),
@@ -418,6 +419,101 @@ fn textbox_paragraphs_stack_with_spacing() {
     assert!(
         sm.contains("<g data-xsvg-pos=") && sm.matches("data-xsvg-pos").count() == 4,
         "the wrapper carries the TEXTBOX's source map, the texts their <x:p>s': {sm}"
+    );
+}
+
+#[test]
+fn tbreak_in_a_textbox_breaks_at_the_line_advance() {
+    // Mono size 10, line-height 1.5 → advance 15: a wrapped line and a
+    // <tbreak/> line must step by the SAME advance (the break used to degrade
+    // to a word space in textboxes — no break at all)
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10" line-height="1.5">alpha<tbreak/>beta</x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"22\">beta</tspan>"),
+        "forced break, one line advance apart: {out}"
+    );
+    // consecutive breaks open a blank line: gamma lands two advances down
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10" line-height="1.5">alpha<tbreak/><tbreak/>gamma</x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"37\">gamma</tspan>"),
+        "blank forced line occupies its row: {out}"
+    );
+}
+
+#[test]
+fn tbreak_inside_a_paragraph_breaks_within_it() {
+    // paragraph mode used to DROP <tbreak/> entirely (collect_text skipped
+    // elements); now it forces a line within the paragraph, and the next
+    // paragraph still stacks one advance below the LAST line
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10" line-height="1.2"><x:p>alpha<tbreak/>beta</x:p><x:p>gamma</x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"19\">beta</tspan>"),
+        "forced line inside the paragraph: {out}"
+    );
+    assert!(
+        out.contains("y=\"31\">gamma</tspan>"),
+        "next paragraph one advance below the break line: {out}"
+    );
+}
+
+#[test]
+fn empty_paragraph_owns_a_blank_row() {
+    // Enter Enter: the empty <x:p> renders nothing but takes one line advance,
+    // so the following paragraph sits two advances down (a visible blank line)
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10" line-height="1.2"><x:p>alpha</x:p><x:p></x:p><x:p>beta</x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(out.matches("<text ").count(), 2, "empty para emits no <text>: {out}");
+    assert!(
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"31\">beta</tspan>"),
+        "the blank row spaces the neighbors two advances apart: {out}"
+    );
+}
+
+#[test]
+fn paragraph_styled_runs_render_styled() {
+    // <tspan> runs inside an <x:p> keep their overrides in the output (they
+    // used to be flattened to the base style in paragraph mode)
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10"><x:p>plain <tspan font-weight="800">bold</tspan></x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r#"<tspan font-weight="800">bold</tspan>"#),
+        "the run's override survives into the paragraph's <text>: {out}"
+    );
+}
+
+#[test]
+fn textarea_line_height_drives_auto_line_increment() {
+    // authored line-height (em) wins over the SVG Tiny 1.1×size default when
+    // line-increment is auto — <tbreak/> finally respects our line spacing
+    let svg = format!(
+        r##"{XW}<textArea x="0" y="0" width="200" height="100" font-size="10" line-height="1.5">alpha<tbreak/>beta</textArea></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"22\">beta</tspan>"),
+        "step = size × line-height: {out}"
+    );
+    // an explicit line-increment keeps SVG Tiny semantics (wins over both)
+    let svg = format!(
+        r##"{XW}<textArea x="0" y="0" width="200" height="100" font-size="10" line-height="1.5" line-increment="20">alpha<tbreak/>beta</textArea></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"27\">beta</tspan>"),
+        "explicit line-increment wins: {out}"
     );
 }
 

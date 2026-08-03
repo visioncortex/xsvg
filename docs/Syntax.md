@@ -154,7 +154,7 @@ Three shaping controls, usable on `<text inline-size>`, `<textArea>`, and `<x:te
 | `letter-spacing` | unprefixed (real SVG/CSS name) | uniform tracking between letters; an absolute length (doesn't scale with font-size) that **adds on top of kerning**. Widens lines, so text wraps sooner. |
 | `word-spacing` | unprefixed (real SVG/CSS name) | same, but added at each inter-word space — spreads words apart; also layout-aware. |
 | `glyph-x-scale` | `glyph-x-scale` inside `<x:textbox>`; `x:glyph-x-scale` on reused `<text>`/`<textArea>` | *visual* horizontal stretch/condense of glyphs via `textLength` — layout is unchanged, only the rendered glyphs are scaled. |
-| `<tbreak/>` | child of `<textArea>` | a forced line break (SVG Tiny 1.2); wrapping resumes on each side, consecutive breaks make blank lines. |
+| `<tbreak/>` | child of `<textArea>` / `<x:textbox>` / `<x:p>` | a forced line break (SVG Tiny 1.2); wrapping resumes on each side, consecutive breaks make blank lines, and the new line steps by the element's own line spacing. |
 | `<tspan>` runs | child of `<textArea>` / `<x:textbox>` | inline styled spans — a run overrides `fill` / `font-weight` / `font-style` / `font-family`, flows and wraps with the paragraph ([§6.11](Specification.md)). |
 
 ```svg
