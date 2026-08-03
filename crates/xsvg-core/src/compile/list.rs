@@ -73,7 +73,13 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     {
         let level = attr_num(li, "indent", 0.0).max(0.0) as usize;
         let kind = li.attribute("list").unwrap_or(list_kind);
-        let text = collect_text(li);
+        // collect through the run walker so a <tbreak/> becomes '\n' — items
+        // still lay out single-style, but forced breaks are honored below
+        let text: String = collect_runs(li, &style)
+            .0
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
         let text_x = x + (level as f64 + 1.0) * indent_step;
         let max_w = (x + width - text_x).max(1.0);
         let col = text_x - marker_gap; // markers' right-edge column
@@ -118,12 +124,26 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         } else {
             last_baseline + item_advance + item_spacing
         };
-        let lines = if text.trim().is_empty() {
-            Vec::new()
-        } else {
-            layout_flow(&text, &item_style, text_x, first_baseline, max_w, m)
-        };
-        last_baseline = lines.last().map(|l| l.baseline).unwrap_or(first_baseline);
+        // forced breaks ('\n' from <tbreak/>) split the item into chunks that
+        // wrap independently and step by the item's own advance — a blank
+        // chunk (consecutive breaks) occupies one row, like everywhere else
+        let mut lines: Vec<PlacedLine> = Vec::new();
+        let mut item_last_b = first_baseline;
+        if !text.trim().is_empty() {
+            let mut next_b = first_baseline;
+            for chunk in text.split('\n') {
+                if chunk.trim().is_empty() {
+                    item_last_b = next_b;
+                    next_b += item_advance;
+                    continue;
+                }
+                let ls = layout_flow(chunk, &item_style, text_x, next_b, max_w, m);
+                item_last_b = ls.last().map(|l| l.baseline).unwrap_or(next_b);
+                next_b = item_last_b + item_advance;
+                lines.extend(ls);
+            }
+        }
+        last_baseline = item_last_b;
         items.push(Item {
             col,
             marker,

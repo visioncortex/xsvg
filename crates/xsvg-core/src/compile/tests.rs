@@ -305,6 +305,26 @@ fn list_item_font_size_override() {
 }
 
 #[test]
+fn tbreak_in_a_list_item_breaks_within_the_bullet() {
+    // Mono size 10, line-height 1.2 → advance 12, item-spacing 3.5, offset 7:
+    // the forced line stays inside item 1 (one keyed <text>, rows 7 and 19),
+    // and item 2 stacks off item 1's LAST row (19 + 12 + 3.5 + 7−7 = 34.5)
+    let svg = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10" line-height="1.2"><x:li>alpha<tbreak/>beta</x:li><x:li>gamma</x:li></x:list></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"19\">beta</tspan>"),
+        "forced break inside the item, one advance apart: {out}"
+    );
+    assert!(
+        out.contains("y=\"34.5\">gamma</tspan>"),
+        "the next item stacks off the LAST forced row: {out}"
+    );
+    assert_eq!(out.matches("<circle").count(), 2, "one marker per ITEM: {out}");
+}
+
+#[test]
 fn empty_list_item_keeps_its_row_and_marker() {
     // an empty <x:li> is a real row: it advances the flow by its own line
     // height, and its marker sits on THAT row (an editor's Enter-at-end
