@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "eXtensible SVG — an XML graphics format that compiles to plain SVG, with the text layout, warps, and gradient meshes SVG never got.",
+  "description": "eXtensible SVG \u2014 an XML graphics format that compiles to plain SVG, with the text layout, warps, and gradient meshes SVG never got.",
   "workspaces": [
     "packages/*"
   ],
@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "check:params": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs scripts/params-check.mjs",
     "check:hosts": "node scripts/host-hooks-check.mjs",
+    "check:sandbox": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs scripts/sandbox-check.mjs",
     "check:incremental": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/incremental-check.mjs",
     "check:dom": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/dom-patch-check.mjs",
     "compare": "cargo build --release -p xsvg-cli && node scripts/compare.mjs"

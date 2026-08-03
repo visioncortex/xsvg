@@ -20,6 +20,17 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ### Security
 
+- **`npm run check:sandbox` covers the layers that decide whether hostile code runs at all.**
+  The output rules were well tested and the two layers underneath them were not: the browser's
+  loader — the only thing standing between a document and a silently swapped remote module — had
+  **no tests whatsoever**, and output hardening does nothing for a module that gets *loaded*. Now
+  pinned against a real module: a matching hash loads, a wrong one is refused, cross-origin
+  without a hash is refused, an unparseable location fails closed, and a host loader's own bytes
+  are verified like any other. Every guard is verified load-bearing by reverting it.
+- **A module `src` is refused by scheme, not by `://`.** Found by writing the test above:
+  `data:` and `blob:` carry no authority, so they slipped the native hosts' check and became a
+  file read reporting "no such file" for something that was never a file. Not exploitable — there
+  is nothing to fetch with — but the check was narrower than the rule it documented.
 - **Generator output can no longer reach the network.** The static subset stopped output from
   *executing* — `<script>`, `on*` handlers — but never from *fetching*: `<a href="javascript:…">`,
   `<image href="https://…">`, `<foreignObject><iframe>` and `fill="url(https://…)"` all passed

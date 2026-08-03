@@ -49,10 +49,15 @@ function instantiate(module: WebAssembly.Module): Exports {
 class PluginModule {
   private instance: Exports | null = null;
 
-  private constructor(
-    private readonly module: WebAssembly.Module,
-    readonly manifest: Manifest,
-  ) {}
+  // Explicit fields, not constructor parameter properties — those cannot be erased,
+  // which would put this loader out of reach of a type-stripping test runner.
+  private readonly module: WebAssembly.Module;
+  readonly manifest: Manifest;
+
+  private constructor(module: WebAssembly.Module, manifest: Manifest) {
+    this.module = module;
+    this.manifest = manifest;
+  }
 
   static load(bytes: Buffer, ns: string): PluginModule {
     const module = new WebAssembly.Module(bytes);
@@ -112,7 +117,10 @@ export class PluginRegistry {
         // A module is a local file like any other dependency; a URL is the
         // browser's business, and Node silently reaching the network would be a
         // surprise in a synchronous API.
-        if (decl.src.includes("://"))
+        // The scheme, not `://`: `data:`/`blob:` carry no authority and would
+        // otherwise fall through to a file read. Two characters minimum keeps a
+        // Windows drive letter a path.
+        if (/^[a-z][a-z0-9+.-]+:/i.test(decl.src))
           throw new Error(`cannot fetch ${decl.src} — give a local path`);
         const path = resolvePath(dir, decl.src);
         const bytes = readFileSync(path);

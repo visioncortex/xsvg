@@ -151,4 +151,12 @@ from becoming a channel.
 
 Pinned by `plugin_output_cannot_reach_the_network`,
 `plugin_ids_cannot_shadow_the_document`, and the static-subset tests in
-`crates/xsvg-core/src/compile/tests.rs`.
+`crates/xsvg-core/src/compile/tests.rs`; acquisition and execution by
+`npm run check:sandbox` (`scripts/sandbox-check.mjs`) and
+`a_module_is_never_fetched_over_the_network` in the CLI.
+
+Every rule above has been verified **load-bearing** by reverting it and watching a
+test fail — integrity verification, the cross-origin rule, the local-path rule, the
+empty import object, the URL allowlist, the `<foreignObject>` drop, and id scoping.
+A guarantee with no test that notices its removal is a guarantee that will rot, so
+`check:sandbox` also asserts each output rule still has a named test covering it.

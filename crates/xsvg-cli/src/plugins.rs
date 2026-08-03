@@ -70,11 +70,29 @@ impl DiskGenerators {
 
 }
 
+/// Whether `src` names a URI scheme rather than a path (docs/Sandbox.md §2).
+///
+/// Tests the scheme, not `://`: `data:` and `blob:` carry no authority and would
+/// otherwise fall through to a filesystem read — harmless here, since there is
+/// nothing to fetch with, but it reports "no such file" for something that was
+/// never a file. Two characters minimum, so a Windows drive letter stays a path.
+fn has_scheme(src: &str) -> bool {
+    let Some(colon) = src.find(':') else {
+        return false;
+    };
+    let scheme = &src[..colon];
+    colon >= 2
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 fn load_one(dir: &Path, im: &Import) -> Result<Loaded, String> {
     // A module is a local file like any other dependency; a URL is the browser's
     // business, and a CLI silently reaching the network would be a surprise.
     let path = dir.join(&im.src);
-    if im.src.contains("://") {
+    if has_scheme(&im.src) {
         return Err(format!("cannot fetch {} — give a local path", im.src));
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -339,5 +357,43 @@ mod tests {
         assert!(verify_integrity(b"other bytes", &good).is_err());
         assert!(verify_integrity(bytes, "sha256-AAAA").is_err());
         assert!(verify_integrity(bytes, "md5-whatever").is_err());
+    }
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+
+    fn import(src: &str) -> Import {
+        Import {
+            ns: "https://x.example/c".into(),
+            src: src.into(),
+            integrity: None,
+        }
+    }
+
+    #[test]
+    fn a_module_is_never_fetched_over_the_network() {
+        // docs/Sandbox.md §2: the native hosts take local paths only. A CLI or a
+        // build step reaching out on its own would be a surprise, and it is also
+        // the one host with no origin to reason about — so the rule is absolute
+        // rather than conditional on a hash.
+        let dir = Path::new(".");
+        for src in [
+            "https://cdn.example/m.wasm",
+            "http://cdn.example/m.wasm",
+            "file:///tmp/m.wasm",
+            "data:application/wasm;base64,AGFzbQ==",
+        ] {
+            let err = load_one(dir, &import(src)).err().expect("remote src must be refused");
+            assert!(
+                err.contains("give a local path"),
+                "`{src}` was not refused as remote: {err}"
+            );
+        }
+        // a plain relative path is not refused for *that* reason — it gets as far
+        // as the filesystem, which is the point
+        let err = load_one(dir, &import("nope.wasm")).err().expect("missing file must error");
+        assert!(!err.contains("give a local path"), "{err}");
     }
 }

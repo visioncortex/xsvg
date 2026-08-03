@@ -70,10 +70,17 @@ interface Exports {
 class PluginModule {
   private instance: Exports | null = null;
 
-  private constructor(
-    readonly module: WebAssembly.Module,
-    readonly manifest: Manifest,
-  ) {}
+  // Written out rather than as constructor parameter properties: those are one of
+  // the few TypeScript constructs that cannot be erased (they generate assignments),
+  // so they put this file out of reach of any type-stripping runner — including the
+  // sandbox checks, which need to drive exactly this loader.
+  readonly module: WebAssembly.Module;
+  readonly manifest: Manifest;
+
+  private constructor(module: WebAssembly.Module, manifest: Manifest) {
+    this.module = module;
+    this.manifest = manifest;
+  }
 
   /** Compile, instantiate once to read the manifest, and check it fits the ABI. */
   static async load(bytes: ArrayBuffer, ns: string): Promise<PluginModule> {
