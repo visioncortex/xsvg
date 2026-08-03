@@ -1213,7 +1213,11 @@ fn plan_paragraphs<'a>(
     let cw = spec.width - 2.0 * spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
     let default_align = node.attribute("align").unwrap_or("start");
-    let default_spacing = attr_num(node, "paragraph-spacing", 0.0);
+    // paragraphs default to a visible gap — 0.35em, the same default rhythm
+    // lists use for item-spacing — so Enter reads as a paragraph while a
+    // forced line break (<tbreak/>) stays at the bare line advance; an
+    // authored paragraph-spacing (zero included) wins
+    let default_spacing = attr_num(node, "paragraph-spacing", base_style.size * 0.35);
 
     // per-paragraph style: the box style, with any font-* on the `<x:p>` overriding
     let para_style = |p: roxmltree::Node| {

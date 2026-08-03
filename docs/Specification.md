@@ -821,7 +821,7 @@ indent, style, and spacing.
 
 | Attribute | On | Meaning |
 |---|---|---|
-| `paragraph-spacing` | `<x:textbox>` | default gap after each paragraph (its `space-after` default) |
+| `paragraph-spacing` | `<x:textbox>` | default gap after each paragraph (its `space-after` default). Unset, it is **0.35 × font-size** — the same default rhythm lists use for `item-spacing` — so paragraphs read as paragraphs while a `<tbreak/>` line stays at the bare advance; author `0` for line-tight stacking |
 | `space-before` / `space-after` | `<x:p>` | extra gap above / below this paragraph (`space-after` defaults to `paragraph-spacing`) |
 | `align` | `<x:p>` | per-paragraph alignment (else the box's) |
 | `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
@@ -829,7 +829,8 @@ indent, style, and spacing.
 
 Paragraphs stack by **baseline advance** (the editor convention): a paragraph's first baseline sits
 one line advance — its own `font-size × line-height` — below the previous paragraph's last
-baseline, plus `space-after` of the first and `space-before` of the second. A paragraph break is
+baseline, plus `space-after` of the first and `space-before` of the second (default gap 0.35em, so
+an Enter reads as a paragraph and a `<tbreak/>` as a plain line). A paragraph break is
 therefore never tighter than a wrapped line, and an **empty `<x:p>` owns one blank row** (it emits
 no glyphs but takes its line advance — the blank line an editor's double-Enter produces). The
 whole stacked block is then placed by the box's `valign` (top/middle/bottom), and lines whose

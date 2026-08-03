@@ -460,8 +460,8 @@ fn tbreak_inside_a_paragraph_breaks_within_it() {
         "forced line inside the paragraph: {out}"
     );
     assert!(
-        out.contains("y=\"31\">gamma</tspan>"),
-        "next paragraph one advance below the break line: {out}"
+        out.contains("y=\"34.5\">gamma</tspan>"),
+        "next paragraph one advance + default paragraph gap (0.35em) below: {out}"
     );
 }
 
@@ -475,8 +475,8 @@ fn empty_paragraph_owns_a_blank_row() {
     let out = compile_test(&svg);
     assert_eq!(out.matches("<text ").count(), 2, "empty para emits no <text>: {out}");
     assert!(
-        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"31\">beta</tspan>"),
-        "the blank row spaces the neighbors two advances apart: {out}"
+        out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"38\">beta</tspan>"),
+        "the blank row: two advances + two default gaps (7 + 2·12 + 2·3.5): {out}"
     );
 }
 
