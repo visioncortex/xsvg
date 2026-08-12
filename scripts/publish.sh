@@ -196,18 +196,44 @@ publish_release() {
     "$stage/SHA256SUMS.txt"
   )
 
-  # Create the release on first run, otherwise upload/replace the assets on it.
+  # Release notes: this version's CHANGELOG entry, with the asset explained under it.
+  #
+  # The explainer used to *be* the whole body, which described the attachment and said
+  # nothing about the release — so the page for a version told a reader nothing about
+  # what changed in it. The changelog entry already exists and is already written for
+  # exactly this audience; the only reason it wasn't here is that nothing carried it.
+  local notes="$stage/NOTES.md"
+  if (( ! DRY_RUN )); then
+    TAG="$TAG" node -e '
+      const fs = require("fs");
+      const tag = process.env.TAG, v = tag.replace(/^v/, "");
+      const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
+      const from = lines.findIndex(l => l.startsWith(`## [${v}]`));
+      const to = lines.findIndex((l, i) => i > from && l.startsWith("## ["));
+      const body = from < 0 ? "" : lines.slice(from + 1, to < 0 ? lines.length : to).join("\n").trim();
+      if (!body) console.error(`  ! no CHANGELOG entry for ${v} — notes will be the asset note alone`);
+      fs.writeFileSync(process.argv[1], (body ? body + "\n\n---\n\n" : "") +
+        "**Attached binary** — the raw WebAssembly compiler, for using xsvg outside npm " +
+        "(direct `<script>`/CDN, another language’s wasm runtime, archival). Most users " +
+        "don’t need it: the npm packages already bundle the same wasm — " +
+        "`@visioncortex/xsvg-viewer` (browser) inlines it, `@visioncortex/xsvg-compile` " +
+        "(Node) ships it.\n");
+    ' "$notes"
+  fi
+
+  # Create the release on first run, otherwise refresh its notes and assets.
   if (( DRY_RUN )); then
-    info "would ensure release $TAG exists, then upload:"
+    info "would ensure release $TAG exists with notes from the CHANGELOG, then upload:"
     printf '    %s\n' "${assets[@]}"
   elif gh release view "$TAG" >/dev/null 2>&1; then
-    info "release $TAG exists — uploading assets (--clobber)"
+    info "release $TAG exists — refreshing notes and assets"
+    run gh release edit "$TAG" --notes-file "$notes"
     run gh release upload "$TAG" "${assets[@]}" --clobber
   else
     info "creating release $TAG"
     run gh release create "$TAG" "${assets[@]}" \
       --title "xsvg $TAG" \
-      --notes "xsvg $TAG — the raw WebAssembly compiler binary, for using xsvg outside npm (direct <script>/CDN, another language's wasm runtime, archival). Most users don't need this: the npm packages already bundle the same wasm — \`@visioncortex/xsvg-viewer\` (browser) inlines it, \`@visioncortex/xsvg-compile\` (Node) ships it."
+      --notes-file "$notes"
   fi
 
   ok "GitHub release $TAG updated"
