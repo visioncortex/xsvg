@@ -4,9 +4,13 @@ All notable changes are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 per-package [Semantic Versioning](https://semver.org/).
 
-Versions below track the npm packages — **`@visioncortex/xsvg-viewer`** and
-**`@visioncortex/xsvg-compile`** release in version-paired lockstep. The Rust
-crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.0**.
+One version covers the whole project: the two npm packages
+(**`@visioncortex/xsvg-viewer`**, **`@visioncortex/xsvg-compile`**) and every
+published crate (`xsvg-gradient`, `xsvg-schema-derive`, `xsvg-schema`, `xsvg-core`,
+`xsvg-plugin`, `xsvg-cli`, `xsvg-wasm`) release together, via `scripts/publish.sh`.
+A release is all three of its phases — crates.io, npm, and the GitHub release
+carrying the raw wasm; shipping one without the others is a broken release, not a
+partial one.
 
 ## [Unreleased]
 
@@ -30,7 +34,12 @@ affected.
 Also fixes an inspector trap: an element edited into invisibility (`thickness="0"` on
 an arrow is legitimate — it has no area) left its controls standing but inert, so the
 one edit you needed to reverse was the one that removed every way of reversing it.
-Crates unchanged at 0.1.0.
+
+**The Rust crates rejoin the release here**, going 0.1.0 → 0.2.1 to match everything
+else. They were last published on 2026-07-19, before the schema and plugin work
+existed — so `xsvg-schema`, `xsvg-schema-derive` and `xsvg-plugin` reach crates.io
+for the first time, and `xsvg-core` on crates.io stops being a version that predates
+most of the compiler. 0.2.0 shipped to npm only; that was a mistake, not a policy.
 
 ### Added
 

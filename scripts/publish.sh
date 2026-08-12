@@ -8,9 +8,13 @@
 #               non-npm consumers; the npm packages already bundle the same wasm
 #
 # Which Rust crates ship is read from the Cargo manifests themselves: a crate with
-# `publish = false` is skipped. All four (xsvg-gradient, xsvg-core, xsvg-cli, xsvg-wasm)
-# are publishable and go to crates.io in dependency order; mark one `publish = false`
-# to hold it back.
+# `publish = false` is skipped, and the rest go to crates.io in dependency order —
+# so a crate added to the workspace is released without touching this script. Today
+# that is xsvg-gradient, xsvg-schema-derive, xsvg-schema, xsvg-core, xsvg-plugin,
+# xsvg-cli and xsvg-wasm; xsvg-ext-clipart is held back (see its manifest).
+#
+# All three phases are the release. Publishing npm alone leaves the crates behind at
+# whatever version they last shipped, silently — it has happened.
 #
 # Usage:
 #   scripts/publish.sh                 # all three phases

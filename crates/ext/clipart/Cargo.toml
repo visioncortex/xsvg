@@ -1,13 +1,19 @@
 [package]
 name = "xsvg-ext-clipart"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
+repository = "https://github.com/visioncortex/xsvg"
 description = "Official xsvg extension: procedural diagram clipart (arrows, callouts)"
+# Held back from crates.io: what this crate *is* to a consumer is the compiled
+# `clipart.wasm` a document imports, shipped in the npm package and beside the
+# dataset. Nothing useful comes of `cargo add xsvg-ext-clipart` — it targets
+# wasm32 and exports a C ABI. Flip this to publish it as a template to build on.
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 xsvg-plugin = { path = "../../xsvg-plugin" }
-xsvg-schema = { version = "0.1.0", path = "../../xsvg-schema" }
+xsvg-schema = { version = "0.2.1", path = "../../xsvg-schema" }
