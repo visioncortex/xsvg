@@ -10,6 +10,28 @@ crates (`xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`) are all at **0.1.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-12
+
+A security patch, so it reaches `^0.2.0` without anyone opting in. **Generator output
+could reach the network** — the static subset stopped it executing and never stopped
+it fetching, so a module could emit `<image href="https://…">`, a `javascript:` link,
+a `<foreignObject>`, or a remote `url(…)` paint. That matters more than each vector
+alone suggests: a container generator is handed its children *already compiled*, which
+was safe only because a module has no way to transmit, and any outbound request
+composes with it into exfiltration of document content with no script involved.
+
+**A plugin that emitted a remote URL will now draw without it**, and say so in a
+marker. Authored markup is deliberately untouched — an author writing a remote
+`<image href>` chose it. Nothing else moves: all 51 dataset samples compile
+**byte-identically** to 0.2.0, the generator-using one included, since only output
+that actually reaches for a remote URL, a `<foreignObject>`, or an unscoped id is
+affected.
+
+Also fixes an inspector trap: an element edited into invisibility (`thickness="0"` on
+an arrow is legitimate — it has no area) left its controls standing but inert, so the
+one edit you needed to reverse was the one that removed every way of reversing it.
+Crates unchanged at 0.1.0.
+
 ### Added
 
 - **[docs/Sandbox.md](docs/Sandbox.md) — the plugin sandbox model written down**: who is trusted
@@ -374,7 +396,8 @@ Deprecated on npm — published with debug WebAssembly. Use 0.1.2 or later.
   - **`@visioncortex/xsvg-compile`** (Node): browser-free `compile()`.
   - Rust crates on crates.io: `xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`.
 
-[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.1
 [0.2.0]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.0
 [0.1.6]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.6
 [0.1.5]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.5
