@@ -219,4 +219,11 @@ publish_release() {
 (( DO_RELEASE )) && publish_release
 
 step "done"
-ok "publish complete${DRY_RUN:+ (dry-run)}"
+# `${DRY_RUN:+…}` expands whenever DRY_RUN is set and non-empty — and it is always
+# set, to 0 or 1 — so this claimed "(dry-run)" after a real publish, inviting someone
+# to run it again. Test the value, not whether the name exists.
+if (( DRY_RUN )); then
+  ok "publish complete (dry-run — nothing was published)"
+else
+  ok "publish complete — crates.io, npm and the GitHub release are live"
+fi
