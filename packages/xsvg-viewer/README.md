@@ -17,9 +17,9 @@
     <a href="https://github.com/visioncortex/xsvg/releases">Release</a>
   </h3>
 
-[![xsvg-viewer on npm](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-viewer.svg)](https://www.npmjs.com/package/@visioncortex/xsvg-viewer)
-[![xsvg-compile on npm](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-compile.svg)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
-[![MIT license](https://raw.githubusercontent.com/visioncortex/xsvg/main/assets/readme/badge-license.svg)](LICENSE)
+[![xsvg-core on crates.io](https://img.shields.io/crates/v/xsvg-core.svg?label=crates.io&color=blue)](https://crates.io/crates/xsvg-core)
+[![xsvg-compile on npm](https://img.shields.io/npm/v/@visioncortex/xsvg-compile.svg?label=npm&color=blue)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
