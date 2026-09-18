@@ -1329,6 +1329,32 @@ fn styled_tspan_runs_emit_nested_tspans() {
 }
 
 #[test]
+fn text_decoration_runs_ride_to_the_output_without_moving_layout() {
+    // underline / line-through are paint-only: the run emits the attribute
+    // verbatim (space lists included) and the line geometry is byte-identical
+    // to the undecorated compile — decoration never touches advances.
+    let plain = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship fast today</textArea></svg>"##;
+    let deco = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline line-through">fast</tspan> today</textArea></svg>"##;
+    let a = compile_test(plain);
+    let b = compile_test(deco);
+    // the run ends at its last glyph: the following inter-word space is
+    // base-styled (a decorated space would draw the underline past the word)
+    assert!(
+        b.contains(r#"<tspan text-decoration="underline line-through">fast</tspan> today"#),
+        "{b}"
+    );
+    let strip = |s: &str| s.replace(r#"<tspan text-decoration="underline line-through">fast</tspan>"#, "fast");
+    assert_eq!(strip(&b), a, "decoration must not move a single glyph");
+    // between two words of ONE run the space stays in the run (continuous underline)
+    let two = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline">fast today</tspan></textArea></svg>"##;
+    assert!(
+        compile_test(two).contains(r#"<tspan text-decoration="underline">fast today</tspan>"#),
+        "{}",
+        compile_test(two)
+    );
+}
+
+#[test]
 fn plain_textarea_has_no_inner_tspans() {
     // no runs → one outer <tspan> per line, nothing nested
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;

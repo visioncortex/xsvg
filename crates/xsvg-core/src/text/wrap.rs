@@ -39,8 +39,11 @@ pub(crate) fn wrap_pieces(
 /// Fill one line greedily starting at word `start`: always take that word (even if
 /// it alone overflows `max_width`), then append following words while the line — with
 /// `letter-spacing`/`word-spacing` folded in and *not* scaled — still fits. Returns
-/// the line's styled pieces (inter-word spaces inherit the preceding piece's style so
-/// same-style runs merge) and the index of the next unconsumed word (`> start`).
+/// the line's styled pieces and the index of the next unconsumed word (`> start`).
+/// An inter-word space takes a run's style only when the words on BOTH sides
+/// share it (so same-style runs merge across it); at a style boundary it is
+/// base-styled — an underline ends at its run's last glyph and continues between
+/// two underlined words, the word-processor convention.
 ///
 /// The shared inner loop of rectangular wrapping ([`wrap`]) and region flow, where
 /// each line has its own available width.
@@ -65,7 +68,9 @@ pub(crate) fn fill_line(
         if cand_nat + gaps(cand_graph) * ls > max_width {
             break;
         }
-        let sp_style = pieces.last().map(|p| p.style).unwrap_or(0);
+        let prev_style = pieces.last().map(|p| p.style).unwrap_or(0);
+        let next_style = w.pieces.first().map(|p| p.style).unwrap_or(0);
+        let sp_style = if prev_style == next_style { prev_style } else { 0 };
         pieces.push(Piece {
             text: " ".to_string(),
             style: sp_style,

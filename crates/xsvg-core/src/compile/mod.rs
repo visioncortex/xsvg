@@ -2575,6 +2575,7 @@ fn emit_line(
                 emit_attr(out, "font-weight", &a.weight);
                 emit_attr(out, "font-style", &a.style);
                 emit_attr(out, "font-family", &a.family);
+                emit_attr(out, "text-decoration", &a.decoration);
                 out.push('>');
                 push_escaped(out, &run.text, false);
                 out.push_str("</tspan>");
@@ -2737,6 +2738,9 @@ struct EmitAttrs {
     weight: Option<String>,
     style: Option<String>,
     family: Option<String>,
+    /// `text-decoration` (underline / line-through / a space list): paint-only,
+    /// no effect on advances, so layout never sees it — it rides to the output.
+    decoration: Option<String>,
 }
 
 impl EmitAttrs {
@@ -2745,6 +2749,7 @@ impl EmitAttrs {
             && self.weight.is_none()
             && self.style.is_none()
             && self.family.is_none()
+            && self.decoration.is_none()
     }
 }
 
@@ -2800,6 +2805,7 @@ fn walk_runs(
                     set(&mut c.weight, child.attribute("font-weight"));
                     set(&mut c.style, child.attribute("font-style"));
                     set(&mut c.family, child.attribute("font-family"));
+                    set(&mut c.decoration, child.attribute("text-decoration"));
                     walk_runs(child, &c, base, segments, styles, emits);
                 }
                 _ => walk_runs(child, ctx, base, segments, styles, emits),
@@ -2822,6 +2828,7 @@ fn intern_run(
         weight: ctx.weight.clone().filter(|w| *w != base.weight),
         style: ctx.style.clone().filter(|s| *s != base.style),
         family: ctx.family.clone().filter(|f| *f != base.family),
+        decoration: ctx.decoration.clone(),
     };
     if norm.is_empty() {
         return 0;

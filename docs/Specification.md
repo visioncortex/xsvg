@@ -548,10 +548,14 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `fill` | per-run colour |
 | `font-weight`, `font-style` | e.g. bold / italic words |
 | `font-family` | per-run typeface |
+| `text-decoration` | `underline` / `line-through` / `overline`, or a space list of them — paint-only, emitted verbatim |
 
 **Model (normative).** Runs affect a word's **advance** (weight/style/family change glyph widths), so
 each word is measured in its own run style and wrapping stays correct; a run boundary may fall
-mid-word (two pieces, no break between them). **`font-size` is not overridable in v0** — mixed sizes
+mid-word (two pieces, no break between them). An inter-word space belongs to a run only when the
+words on **both** sides share that run's style; at a style boundary it is base-styled — so an
+underline ends at its run's last glyph and continues between two underlined words (the
+word-processor convention). **`font-size` is not overridable in v0** — mixed sizes
 would perturb line-height and baseline; runs share the paragraph size, `letter-spacing`, and
 `word-spacing`. Nested `<tspan>`s compose (inner wins). `<tbreak/>` still breaks across runs.
 
