@@ -551,6 +551,7 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `text-decoration` | `underline` / `line-through` / `overline`, or a space list of them — paint-only, emitted verbatim |
 | `font-size` | per-run size: a length in user units, or `%` / `em` **of the paragraph's size** (nested runs resolve against the paragraph, not the enclosing run) |
 | `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
+| `href` | a hyperlink: the run lowers to an SVG `<a href>` around its text (paint overrides nest a `<tspan>` inside it); an authored `<a>` child of the box reads the same way. Authored, so it passes verbatim like every authored URL ([Sandbox.md](Sandbox.md) §1) |
 
 **Model (normative).** Runs affect a word's **advance** (weight/style/family/size change glyph
 widths), so each word is measured in its own run style and wrapping stays correct; a run boundary

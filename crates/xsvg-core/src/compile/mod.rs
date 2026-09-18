@@ -2579,21 +2579,35 @@ fn emit_line(
     for run in &line.runs {
         match emits.get(run.style) {
             Some(a) if !a.is_empty() => {
-                out.push_str("<tspan");
-                emit_attr(out, "fill", &a.fill);
-                emit_attr(out, "font-weight", &a.weight);
-                emit_attr(out, "font-style", &a.style);
-                emit_attr(out, "font-family", &a.family);
-                if let Some(s) = a.size {
-                    // the run's size rides the same fit scale as the base size
-                    let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
-                    out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
+                // a linked run wraps in <a href>; its paint overrides (if any)
+                // ride a nested <tspan> inside the link
+                if let Some(h) = &a.href {
+                    out.push_str("<a");
+                    emit_attr(out, "href", &Some(h.clone()));
+                    out.push('>');
                 }
-                emit_attr(out, "text-decoration", &a.decoration);
-                emit_attr(out, "baseline-shift", &a.shift);
-                out.push('>');
-                push_escaped(out, &run.text, false);
-                out.push_str("</tspan>");
+                if a.paint_empty() {
+                    push_escaped(out, &run.text, false);
+                } else {
+                    out.push_str("<tspan");
+                    emit_attr(out, "fill", &a.fill);
+                    emit_attr(out, "font-weight", &a.weight);
+                    emit_attr(out, "font-style", &a.style);
+                    emit_attr(out, "font-family", &a.family);
+                    if let Some(s) = a.size {
+                        // the run's size rides the same fit scale as the base size
+                        let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
+                        out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
+                    }
+                    emit_attr(out, "text-decoration", &a.decoration);
+                    emit_attr(out, "baseline-shift", &a.shift);
+                    out.push('>');
+                    push_escaped(out, &run.text, false);
+                    out.push_str("</tspan>");
+                }
+                if a.href.is_some() {
+                    out.push_str("</a>");
+                }
             }
             _ => push_escaped(out, &run.text, false),
         }
@@ -2763,10 +2777,18 @@ struct EmitAttrs {
     /// `baseline-shift` (`super` / `sub` / a length or percentage): a raised or
     /// lowered run, verbatim to the output; layout keeps the line's metrics.
     shift: Option<String>,
+    /// A hyperlink: the run lowers to an SVG `<a href>` around its text (read
+    /// from `<tspan href>` — xsvg's run form — or an authored `<a>` child).
+    /// Authored, so it passes verbatim like every authored URL (Sandbox.md).
+    href: Option<String>,
 }
 
 impl EmitAttrs {
     fn is_empty(&self) -> bool {
+        self.paint_empty() && self.href.is_none()
+    }
+    /// No paint/style override — only (perhaps) a link.
+    fn paint_empty(&self) -> bool {
         self.fill.is_none()
             && self.weight.is_none()
             && self.style.is_none()
@@ -2845,8 +2867,20 @@ fn walk_runs(
                     set(&mut c.family, child.attribute("font-family"));
                     set(&mut c.decoration, child.attribute("text-decoration"));
                     set(&mut c.shift, child.attribute("baseline-shift"));
+                    set(&mut c.href, child.attribute("href"));
                     if let Some(s) = child.attribute("font-size").and_then(|v| run_size(v, base.size)) {
                         c.size = Some(s);
+                    }
+                    walk_runs(child, &c, base, segments, styles, emits);
+                }
+                // an authored SVG <a> around text: its href becomes the runs' link
+                "a" => {
+                    let mut c = ctx.clone();
+                    if let Some(h) = child
+                        .attribute("href")
+                        .or_else(|| child.attribute((XLINK_NS, "href")))
+                    {
+                        c.href = Some(h.to_string());
                     }
                     walk_runs(child, &c, base, segments, styles, emits);
                 }
@@ -2873,6 +2907,7 @@ fn intern_run(
         size: ctx.size.filter(|s| (*s - base.size).abs() > 1e-9),
         decoration: ctx.decoration.clone(),
         shift: ctx.shift.clone(),
+        href: ctx.href.clone(),
     };
     if norm.is_empty() {
         return 0;

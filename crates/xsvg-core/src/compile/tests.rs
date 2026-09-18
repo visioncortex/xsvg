@@ -1435,6 +1435,15 @@ fn paragraphs_stack_by_the_incoming_lines_own_size() {
 }
 
 #[test]
+fn linked_runs_lower_to_svg_anchors() {
+    // xsvg's run form: <tspan href> → <a href>text</a>; with paint overrides
+    // the tspan nests inside the link. An authored <a> child reads the same.
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="100" font-size="10">see <tspan href="https://xsvg.org/">here</tspan> or <a href="#s"><tspan font-weight="700">there</tspan></a> now</x:textbox></svg>"##;
+    let out = compile_test(svg);
+    assert!(out.contains(r##">see <a href="https://xsvg.org/">here</a> or <a href="#s"><tspan font-weight="700">there</tspan></a> now</tspan>"##), "{out}");
+}
+
+#[test]
 fn plain_textarea_has_no_inner_tspans() {
     // no runs → one outer <tspan> per line, nothing nested
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;
