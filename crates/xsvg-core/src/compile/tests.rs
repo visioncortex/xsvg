@@ -1463,6 +1463,27 @@ fn highlighted_runs_bake_a_rect_behind_the_text() {
 }
 
 #[test]
+fn rtl_paragraphs_anchor_at_the_right_edge_and_emit_direction() {
+    // direction="rtl": text-anchor stays "start" (the RIGHT side of rtl text
+    // in SVG) but the anchor x moves to the right edge; align="end" mirrors
+    // to the left edge; the <text> carries direction="rtl" so the browser
+    // orders the glyphs. A highlight lays leftward from the start edge.
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" direction="rtl">ab <tspan x:highlight="#ff0">cd</tspan></x:textbox></svg>"##;
+    let out = compile_test(svg);
+    assert!(out.contains(r#"<text text-anchor="start""#) && out.contains(r#" direction="rtl""#), "{out}");
+    assert!(out.contains(r#"<tspan x="100" y="7">ab cd</tspan>"#), "start = right edge: {out}");
+    // "ab " = 15 wide from the right (100 → 85), then "cd" = 10 → 75..85
+    assert!(out.contains(r##"<rect x="75" y="-1" width="10" height="10" fill="#ff0"/>"##), "{out}");
+    let end = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" direction="rtl" align="end"><x:p>ab</x:p><x:p direction="ltr">cd</x:p></x:textbox></svg>"##;
+    let out2 = compile_test(end);
+    assert!(out2.contains(r##"<text text-anchor="end" font-family="sans-serif" font-size="10" font-weight="normal" font-style="normal" fill="#000" direction="rtl""##), "{out2}");
+    assert!(out2.contains(r#"<tspan x="0" y="7">ab</tspan>"#), "end = left edge under rtl: {out2}");
+    // the second paragraph opts back into ltr: end = right edge, no direction attr on it
+    assert!(out2.contains(r#"<tspan x="100" y="22.5">cd</tspan>"#), "{out2}");
+    assert_eq!(out2.matches("direction=\"rtl\"").count(), 1, "{out2}");
+}
+
+#[test]
 fn plain_textarea_has_no_inner_tspans() {
     // no runs → one outer <tspan> per line, nothing nested
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;

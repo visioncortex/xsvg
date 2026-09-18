@@ -102,7 +102,7 @@ its box (with `fit`/`valign`), while a **curved shape** (path/circle/ellipse/pol
 Region flow honors `align` and `valign` (so text centers in a badge/seal) but has no `fit` in v0.
 Without `in`, give inline `x`/`y`/`width`/`height`.
 Attributes here are unprefixed (we own the element): `padding`, `align` (start|center|end|justify),
-`valign` (top|middle|bottom), `fit`, `line-height`, etc.
+`valign` (top|middle|bottom), `fit`, `line-height`, `direction` (ltr|rtl — start/end mirror and the `<text>` emits `direction="rtl"`), etc.
 
 ---
 

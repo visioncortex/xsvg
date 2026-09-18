@@ -1176,9 +1176,12 @@ fn emit_paragraphs(
                 ..l.clone()
             })
             .collect();
-        emit_highlights(out, &shifted, para.anchor, &para.style, para.style.size, &para.emits, m);
+        emit_highlights(out, &shifted, para.anchor, para.rtl, &para.style, para.style.size, &para.emits, m);
         out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
         push_font_attrs(out, &para.style, para.style.size, para.fill);
+        if para.rtl {
+            out.push_str(" direction=\"rtl\"");
+        }
         out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
         out.push('>');
         for l in &shifted {
@@ -1199,6 +1202,8 @@ struct ParaPlan<'a> {
     /// The paragraph's styled-run emit table (`collect_runs`) — `<tspan>`
     /// overrides render styled in paragraph mode, same as a plain box.
     emits: Vec<EmitAttrs>,
+    /// Right-to-left paragraph (§6.4 `direction`): emits `direction="rtl"`.
+    rtl: bool,
     src: roxmltree::Node<'a, 'a>,
 }
 
@@ -1291,6 +1296,8 @@ fn plan_paragraphs<'a>(
                 fit: Fit::None,
                 text_overflow: TextOverflow::Clip,
                 text_indent: attr_num(p, "text-indent", 0.0) * scale,
+                // a paragraph's own direction, else the box's
+                rtl: p.attribute("direction").or_else(|| node.attribute("direction")) == Some("rtl"),
             };
             let (segments, pstyles, emits) = collect_runs(p, &pstyle);
             let mut layout = layout_area_runs(&segments, &pstyles, &pspec, m);
@@ -1317,6 +1324,7 @@ fn plan_paragraphs<'a>(
                 fill: p.attribute("fill").unwrap_or(base_fill),
                 anchor: layout.anchor.svg(),
                 emits,
+                rtl: layout.rtl,
                 src: p,
             });
             prev_after = sa;
@@ -1584,6 +1592,7 @@ fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) -> AreaSpec {
         },
         text_overflow: TextOverflow::parse(opts.text_overflow.as_str()),
         text_indent: opts.text_indent,
+        rtl: node.attribute("direction") == Some("rtl"),
     }
 }
 
@@ -2528,9 +2537,12 @@ fn write_area_text(
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    emit_highlights(out, &layout.lines, layout.anchor.svg(), style, layout.font_size, emits, m);
+    emit_highlights(out, &layout.lines, layout.anchor.svg(), layout.rtl, style, layout.font_size, emits, m);
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
     push_font_attrs(out, style, layout.font_size, fill);
+    if layout.rtl {
+        out.push_str(" direction=\"rtl\"");
+    }
     out.push_str(pos);
     out.push_str(&resolve_var(stroke)); // border/stroke (§6.17) — behind the fill via paint-order
     if style.letter_spacing != 0.0 {
@@ -2553,13 +2565,16 @@ fn write_area_text(
 /// highlighted run per line, emitted BEFORE the `<text>` so it sits behind
 /// the glyphs. A run's box spans its advance (measured in the run's own
 /// style, stretched like the line when justified) from the line's start
-/// edge (`anchor` = the `<text>`'s text-anchor), and the em box of its size
+/// edge (`anchor` = the `<text>`'s text-anchor; under `rtl` the start edge
+/// is the right one and runs lay leftward), and the em box of its size
 /// (ascent above, descent below the baseline). Nothing is emitted for lines
 /// without a highlighted run, so plain output is byte-identical.
+#[allow(clippy::too_many_arguments)]
 fn emit_highlights(
     out: &mut String,
     lines: &[PlacedLine],
     anchor: &str,
+    rtl: bool,
     style: &TextStyle,
     size: f64,
     emits: &[EmitAttrs],
@@ -2599,15 +2614,21 @@ fn emit_highlights(
             _ => 1.0,
         };
         let width = natural * stretch;
-        let mut x = match anchor {
-            "middle" => line.x - width / 2.0,
-            "end" => line.x - width,
+        // the line's LEFT edge, whichever edge the anchor names
+        let left = match (anchor, rtl) {
+            ("middle", _) => line.x - width / 2.0,
+            ("end", false) | ("start", true) => line.x - width,
             _ => line.x,
         };
+        // runs lay out from the start edge: rightward in ltr, leftward in rtl
+        let mut x = if rtl { left + width } else { left };
         for r in &line.runs {
             let a = emits.get(r.style);
             let (st, rs) = a.map(&run_style).unwrap_or((style.clone(), size));
             let w = line_advance(&r.text, &st, rs, m) * stretch;
+            if rtl {
+                x -= w;
+            }
             if let Some(color) = a.and_then(|a| a.highlight.as_deref()) {
                 let fm = m.font_metrics(&st, rs);
                 out.push_str(&format!(
@@ -2619,7 +2640,9 @@ fn emit_highlights(
                     resolve_var(color)
                 ));
             }
-            x += w;
+            if !rtl {
+                x += w;
+            }
         }
     }
 }
@@ -3376,6 +3399,9 @@ pub struct TextLayoutPara {
     /// itself outside paragraph mode) — hosts resolve it to a node via their
     /// span table, exactly like `data-xsvg-pos`.
     pub span: (usize, usize),
+    /// Right-to-left paragraph (§6.4 `direction`): `anchor` "start" is the
+    /// RIGHT edge and the glyphs lay leftward; hosts read glyph cells there.
+    pub rtl: bool,
     /// Resolved paragraph style. `size` is the RENDERED size — after
     /// `fit="shrink"` — so measuring prefixes of a line's text in this style
     /// (plus `letter_spacing` per gap / `word_spacing` per space, exactly the
@@ -3559,6 +3585,7 @@ fn paragraphs_layout_info(
             let r = para.src.range();
             TextLayoutPara {
                 span: (r.start, r.end),
+                rtl: para.rtl,
                 style: para.style.clone(),
                 anchor: para.anchor.to_string(),
                 metrics: m.font_metrics(&para.style, para.style.size),
@@ -3592,6 +3619,7 @@ fn para_info(
     let r = node.range();
     TextLayoutPara {
         span: (r.start, r.end),
+        rtl: layout.rtl,
         anchor: layout.anchor.svg().to_string(),
         metrics: m.font_metrics(style, layout.font_size),
         words,

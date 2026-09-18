@@ -237,6 +237,7 @@ pub fn layout_region(
     AreaLayout {
         anchor,
         font_size: size,
+        rtl: false,
         lines,
     }
 }

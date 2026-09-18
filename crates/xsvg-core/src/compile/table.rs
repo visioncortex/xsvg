@@ -154,6 +154,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         fit: Fit::None,
         text_overflow: TextOverflow::Clip,
         text_indent: 0.0,
+        rtl: false,
     };
 
     // pass 1: row heights = tallest wrapped cell + padding, floored. Each cell
@@ -265,9 +266,10 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     fit: Fit::None,
                     text_overflow: TextOverflow::Clip,
                     text_indent: 0.0,
+                    rtl: false,
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
-                emit_highlights(out, &layout.lines, layout.anchor.svg(), &st, layout.font_size, &emits, m);
+                emit_highlights(out, &layout.lines, layout.anchor.svg(), false, &st, layout.font_size, &emits, m);
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill);
                 out.push('>');

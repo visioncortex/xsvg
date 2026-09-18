@@ -217,6 +217,7 @@ pub fn layout_text_area_runs(
     AreaLayout {
         anchor: spec.text_align.anchor(),
         font_size: size,
+        rtl: false,
         lines,
     }
 }

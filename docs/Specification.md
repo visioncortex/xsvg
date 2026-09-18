@@ -366,6 +366,7 @@ spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-al
 | `fit-min` | length | 6 | font-size floor for `shrink` |
 | `line-height` | number | 1.2 | line advance multiplier |
 | `text-indent` | length | 0 | first-line indent — the first line wraps to `width − indent` and is placed that far in from the start edge; **negative outdents** (a hanging first line). Applies to `start`/`justify` alignment |
+| `direction` | `ltr` \| `rtl` | `ltr` | paragraph direction. Under `rtl` the `start` edge is the RIGHT edge (so `align="start"` right-aligns, `end` left-aligns, the indent insets from the right) and the emitted `<text>` carries `direction="rtl"`, leaving the glyph order of each line's logical string to the renderer's bidi algorithm (wrapping is on logical words either way). An `<x:p>` may set its own (§6.16). **v0:** lists and tables stay left-to-right; inline bidi is the renderer's (deterministic bidi is the Typography roadmap's) |
 
 ### 6.5 Vertical alignment model (normative) [implemented]
 
@@ -845,6 +846,7 @@ indent, style, and spacing.
 |---|---|---|
 | `paragraph-spacing` | `<x:textbox>` | default gap after each paragraph (its `space-after` default). Unset, it is **0.35 × font-size** — the same default rhythm lists use for `item-spacing` — so paragraphs read as paragraphs while a `<tbreak/>` line stays at the bare advance; author `0` for line-tight stacking |
 | `space-before` / `space-after` | `<x:p>` | extra gap above / below this paragraph (`space-after` defaults to `paragraph-spacing`) |
+| `direction` | `<x:p>` | this paragraph's direction (`ltr` / `rtl`), overriding the box's (§6.4) |
 | `align` | `<x:p>` | per-paragraph alignment (else the box's) |
 | `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
 | `font-*`, `fill` | `<x:p>` | per-paragraph style over the box defaults |

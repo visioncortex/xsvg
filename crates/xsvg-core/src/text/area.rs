@@ -101,6 +101,12 @@ pub struct AreaSpec {
     /// placed that far in from the start edge. Positive indents; negative outdents
     /// (a hanging first line). Applies to start/justify alignment; 0 = none.
     pub text_indent: f64,
+    /// Paragraph direction (§6.4 `direction="rtl"`): `start`/`end` alignment
+    /// (and the first-line indent) mirror to the right/left edge, and the
+    /// emitted `<text>` carries `direction="rtl"` so the browser lays each
+    /// line's logical string right-to-left (its bidi algorithm orders the
+    /// glyphs; wrapping is on logical words either way).
+    pub rtl: bool,
 }
 
 /// A styled span within a placed line: contiguous text sharing one style, given as
@@ -167,6 +173,8 @@ pub struct AreaLayout {
     pub anchor: Anchor,
     pub font_size: f64,
     pub lines: Vec<PlacedLine>,
+    /// The flow ran right-to-left (`AreaSpec::rtl`): emit `direction="rtl"`.
+    pub rtl: bool,
 }
 
 /// Lay `text` into `spec`'s box: shrink-to-fit (if requested), wrap to the content
@@ -241,11 +249,14 @@ fn place_lines(
     let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
     let indent = spec.text_indent;
 
+    // the anchor edge: start/end mirror under rtl (SVG's text-anchor "start"
+    // is the RIGHT side of right-to-left text, so the keyword stays put)
     let anchor = spec.align.anchor();
+    let (start_edge, end_edge) = if spec.rtl { (cx + cw, cx) } else { (cx, cx + cw) };
     let ax = match spec.align {
         Align::Center => cx + cw / 2.0,
-        Align::End => cx + cw,
-        Align::Start | Align::Justify => cx,
+        Align::End => end_edge,
+        Align::Start | Align::Justify => start_edge,
     };
 
     // per-line sizes at the final scale; the block band spans the first
@@ -270,7 +281,8 @@ fn place_lines(
     let uniform = sizes.iter().all(|s| (s - first_size).abs() < 1e-9);
 
     let justify = spec.align == Align::Justify && cw > 0.0;
-    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
+    // the indent insets from the start edge — inward, whichever side that is
+    let indent_x = if anchor == Anchor::Start { if spec.rtl { -indent } else { indent } } else { 0.0 };
 
     let mut lines = Vec::new();
     let mut dropped = false;
@@ -308,6 +320,7 @@ fn place_lines(
         anchor,
         font_size: size,
         lines,
+        rtl: spec.rtl,
     }
 }
 
@@ -496,6 +509,7 @@ mod tests {
             fit,
             text_overflow: TextOverflow::Clip,
             text_indent: 0.0,
+            rtl: false,
         }
     }
 
@@ -585,6 +599,7 @@ mod tests {
         };
         let s = AreaSpec {
             text_indent: 4.0,
+            rtl: false,
             ..spec(8.0, 200.0, Align::Start, VAlign::Top, Fit::None)
         };
         let out = layout_area("aa bb cc", &st, &s, &Mono(0.1));
@@ -768,6 +783,7 @@ mod tests {
             fit: Fit::Shrink { min: 5.0 },
             text_overflow: TextOverflow::Ellipsis,
             text_indent: -8.0,
+            rtl: false,
         };
         let out = layout_area("alpha beta gamma", &st, &neg, &Mono(0.2));
         for l in &out.lines {

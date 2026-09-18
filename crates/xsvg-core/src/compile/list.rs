@@ -225,7 +225,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     ..l.clone()
                 })
                 .collect();
-            emit_highlights(&mut body, &shifted, "start", &it.style, it.size, &it.emits, m);
+            emit_highlights(&mut body, &shifted, "start", false, &it.style, it.size, &it.emits, m);
             body.push_str("<text text-anchor=\"start\"");
             push_font_attrs(&mut body, &it.style, it.size, fill);
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
