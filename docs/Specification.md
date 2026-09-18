@@ -552,6 +552,7 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `font-size` | per-run size: a length in user units, or `%` / `em` **of the paragraph's size** (nested runs resolve against the paragraph, not the enclosing run) |
 | `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
 | `href` | a hyperlink: the run lowers to an SVG `<a href>` around its text (paint overrides nest a `<tspan>` inside it); an authored `<a>` child of the box reads the same way. Authored, so it passes verbatim like every authored URL ([Sandbox.md](Sandbox.md) §1) |
+| `x:highlight` | a background colour behind the run (the highlighter). SVG text has no background, so it **bakes to a `<rect>` per run per line before the `<text>`**: the run's advance (in its own style, stretched with a justified line) by the em box of its size (ascent above, descent below the baseline). Plain output is untouched |
 
 **Model (normative).** Runs affect a word's **advance** (weight/style/family/size change glyph
 widths), so each word is measured in its own run style and wrapping stays correct; a run boundary

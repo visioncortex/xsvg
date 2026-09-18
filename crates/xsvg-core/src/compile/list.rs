@@ -217,14 +217,21 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // its styled runs, in the item's OWN keyed <text> at the item's size
         // (empty items emit none)
         if !it.lines.is_empty() {
+            let shifted: Vec<PlacedLine> = it
+                .lines
+                .iter()
+                .map(|l| PlacedLine {
+                    baseline: l.baseline + offset,
+                    ..l.clone()
+                })
+                .collect();
+            emit_highlights(&mut body, &shifted, "start", &it.style, it.size, &it.emits, m);
             body.push_str("<text text-anchor=\"start\"");
             push_font_attrs(&mut body, &it.style, it.size, fill);
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
             body.push('>');
-            for line in &it.lines {
-                let mut l = line.clone();
-                l.baseline += offset;
-                emit_line(&mut body, &l, &it.style, it.size, 1.0, m, &it.emits);
+            for l in &shifted {
+                emit_line(&mut body, l, &it.style, it.size, 1.0, m, &it.emits);
             }
             body.push_str("</text>");
         }

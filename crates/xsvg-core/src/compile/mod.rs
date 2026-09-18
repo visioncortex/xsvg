@@ -1169,14 +1169,20 @@ fn emit_paragraphs(
         if visible.is_empty() {
             continue;
         }
+        let shifted: Vec<PlacedLine> = visible
+            .iter()
+            .map(|l| PlacedLine {
+                baseline: l.baseline + block_top,
+                ..l.clone()
+            })
+            .collect();
+        emit_highlights(out, &shifted, para.anchor, &para.style, para.style.size, &para.emits, m);
         out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
         push_font_attrs(out, &para.style, para.style.size, para.fill);
         out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
         out.push('>');
-        for line in &visible {
-            let mut l = line.clone();
-            l.baseline += block_top;
-            emit_line(out, &l, &para.style, para.style.size, gx, m, &para.emits);
+        for l in &shifted {
+            emit_line(out, l, &para.style, para.style.size, gx, m, &para.emits);
         }
         out.push_str("</text>");
     }
@@ -2522,6 +2528,7 @@ fn write_area_text(
         // else: outliner unavailable → fall through to live <text> below
     }
 
+    emit_highlights(out, &layout.lines, layout.anchor.svg(), style, layout.font_size, emits, m);
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
     push_font_attrs(out, style, layout.font_size, fill);
     out.push_str(pos);
@@ -2540,6 +2547,81 @@ fn write_area_text(
         emit_line(out, line, style, layout.font_size, glyph_x_scale, m, emits);
     }
     out.push_str("</text>");
+}
+
+/// The `x:highlight` backgrounds of `lines` (§6.11): one `<rect>` per
+/// highlighted run per line, emitted BEFORE the `<text>` so it sits behind
+/// the glyphs. A run's box spans its advance (measured in the run's own
+/// style, stretched like the line when justified) from the line's start
+/// edge (`anchor` = the `<text>`'s text-anchor), and the em box of its size
+/// (ascent above, descent below the baseline). Nothing is emitted for lines
+/// without a highlighted run, so plain output is byte-identical.
+fn emit_highlights(
+    out: &mut String,
+    lines: &[PlacedLine],
+    anchor: &str,
+    style: &TextStyle,
+    size: f64,
+    emits: &[EmitAttrs],
+    m: &dyn Measurer,
+) {
+    let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
+    // the run's measuring style: the base with the run's overrides folded in
+    let run_style = |a: &EmitAttrs| -> (TextStyle, f64) {
+        let mut st = style.clone();
+        if let Some(w) = &a.weight {
+            st.weight = w.clone();
+        }
+        if let Some(s) = &a.style {
+            st.style = s.clone();
+        }
+        if let Some(f) = &a.family {
+            st.family = f.clone();
+        }
+        let rs = a.size.map(|s| s * scale).unwrap_or(size);
+        st.size = rs;
+        (st, rs)
+    };
+    for line in lines {
+        if !line.runs.iter().any(|r| emits.get(r.style).is_some_and(|a| a.highlight.is_some())) {
+            continue;
+        }
+        let natural: f64 = line
+            .runs
+            .iter()
+            .map(|r| {
+                let (st, rs) = emits.get(r.style).map(&run_style).unwrap_or((style.clone(), size));
+                line_advance(&r.text, &st, rs, m)
+            })
+            .sum();
+        let stretch = match line.justify_width {
+            Some(w) if natural > 0.0 => w / natural,
+            _ => 1.0,
+        };
+        let width = natural * stretch;
+        let mut x = match anchor {
+            "middle" => line.x - width / 2.0,
+            "end" => line.x - width,
+            _ => line.x,
+        };
+        for r in &line.runs {
+            let a = emits.get(r.style);
+            let (st, rs) = a.map(&run_style).unwrap_or((style.clone(), size));
+            let w = line_advance(&r.text, &st, rs, m) * stretch;
+            if let Some(color) = a.and_then(|a| a.highlight.as_deref()) {
+                let fm = m.font_metrics(&st, rs);
+                out.push_str(&format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+                    fmt(x),
+                    fmt(line.baseline - fm.ascent),
+                    fmt(w),
+                    fmt(fm.ascent + fm.descent),
+                    resolve_var(color)
+                ));
+            }
+            x += w;
+        }
+    }
 }
 
 /// Emit one line as an outer positioning `<tspan x y>` (carrying justify/glyph-scale
@@ -2773,11 +2855,15 @@ struct EmitAttrs {
     /// from `<tspan href>` — xsvg's run form — or an authored `<a>` child).
     /// Authored, so it passes verbatim like every authored URL (Sandbox.md).
     href: Option<String>,
+    /// `x:highlight` — a background colour behind the run's glyphs (the
+    /// word-processor highlighter). SVG text has no background, so it bakes
+    /// to a `<rect>` per run per line BEHIND the `<text>`; never a tspan attr.
+    highlight: Option<String>,
 }
 
 impl EmitAttrs {
     fn is_empty(&self) -> bool {
-        self.paint_empty() && self.href.is_none()
+        self.paint_empty() && self.href.is_none() && self.highlight.is_none()
     }
     /// No paint/style override — only (perhaps) a link.
     fn paint_empty(&self) -> bool {
@@ -2860,6 +2946,7 @@ fn walk_runs(
                     set(&mut c.decoration, child.attribute("text-decoration"));
                     set(&mut c.shift, child.attribute("baseline-shift"));
                     set(&mut c.href, child.attribute("href"));
+                    set(&mut c.highlight, child.attribute((XSVG_NS, "highlight")));
                     if let Some(s) = child.attribute("font-size").and_then(|v| run_size(v, base.size)) {
                         c.size = Some(s);
                     }
@@ -2900,6 +2987,7 @@ fn intern_run(
         decoration: ctx.decoration.clone(),
         shift: ctx.shift.clone(),
         href: ctx.href.clone(),
+        highlight: ctx.highlight.clone(),
     };
     if norm.is_empty() {
         return 0;

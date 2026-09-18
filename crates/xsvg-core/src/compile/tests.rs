@@ -1444,6 +1444,25 @@ fn linked_runs_lower_to_svg_anchors() {
 }
 
 #[test]
+fn highlighted_runs_bake_a_rect_behind_the_text() {
+    // Mono (5 per char at size 10): "see " = 20, "mark" = 20; the em box at
+    // size 10 is ascent 8 above / descent 2 below the baseline 7 → y −1,
+    // h 10. The rect precedes the <text>; the run itself stays bare (no
+    // tspan attribute carries the highlight).
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="100" font-size="10">see <tspan x:highlight="#ff0">mark</tspan> it</x:textbox></svg>"##;
+    let out = compile_test(svg);
+    let rect = r##"<rect x="20" y="-1" width="20" height="10" fill="#ff0"/>"##;
+    assert!(out.contains(rect), "{out}");
+    assert!(out.find(rect).unwrap() < out.find("<text").unwrap(), "behind the text: {out}");
+    assert!(out.contains(">see mark it</tspan>"), "the run itself is bare: {out}");
+    // a highlight behind a centred line starts from the line's start edge:
+    // "ab" = 10 wide, centred in 100 → 45..55
+    let centred = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" align="center"><tspan x:highlight="#ff0">ab</tspan></x:textbox></svg>"##;
+    let out2 = compile_test(centred);
+    assert!(out2.contains(r##"<rect x="45" y="-1" width="10" height="10" fill="#ff0"/>"##), "{out2}");
+}
+
+#[test]
 fn plain_textarea_has_no_inner_tspans() {
     // no runs → one outer <tspan> per line, nothing nested
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;

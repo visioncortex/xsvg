@@ -267,6 +267,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     text_indent: 0.0,
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
+                emit_highlights(out, &layout.lines, layout.anchor.svg(), &st, layout.font_size, &emits, m);
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill);
                 out.push('>');

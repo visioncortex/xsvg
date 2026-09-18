@@ -155,7 +155,7 @@ Three shaping controls, usable on `<text inline-size>`, `<textArea>`, and `<x:te
 | `word-spacing` | unprefixed (real SVG/CSS name) | same, but added at each inter-word space — spreads words apart; also layout-aware. |
 | `glyph-x-scale` | `glyph-x-scale` inside `<x:textbox>`; `x:glyph-x-scale` on reused `<text>`/`<textArea>` | *visual* horizontal stretch/condense of glyphs via `textLength` — layout is unchanged, only the rendered glyphs are scaled. |
 | `<tbreak/>` | child of `<textArea>` / `<x:textbox>` / `<x:p>` | a forced line break (SVG Tiny 1.2); wrapping resumes on each side, consecutive breaks make blank lines, and the new line steps by the element's own line spacing. |
-| `<tspan>` runs | child of `<textArea>` / `<x:textbox>` | inline styled spans — a run overrides `fill` / `font-weight` / `font-style` / `font-family` / `font-size` (a length, or `%`/`em` of the paragraph size; a line steps by its largest run) / `text-decoration` / `baseline-shift` / `href` (a link — lowers to `<a>`), flows and wraps with the paragraph ([§6.11](Specification.md)). |
+| `<tspan>` runs | child of `<textArea>` / `<x:textbox>` | inline styled spans — a run overrides `fill` / `font-weight` / `font-style` / `font-family` / `font-size` (a length, or `%`/`em` of the paragraph size; a line steps by its largest run) / `text-decoration` / `baseline-shift` / `href` (a link — lowers to `<a>`) / `x:highlight` (a background — bakes to a `<rect>` behind the run), flows and wraps with the paragraph ([§6.11](Specification.md)). |
 
 ```svg
 <textArea x="10" y="10" width="240" letter-spacing="1.5" x:glyph-x-scale="1.1">
