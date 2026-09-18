@@ -549,15 +549,23 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `font-weight`, `font-style` | e.g. bold / italic words |
 | `font-family` | per-run typeface |
 | `text-decoration` | `underline` / `line-through` / `overline`, or a space list of them — paint-only, emitted verbatim |
+| `font-size` | per-run size: a length in user units, or `%` / `em` **of the paragraph's size** (nested runs resolve against the paragraph, not the enclosing run) |
+| `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
 
-**Model (normative).** Runs affect a word's **advance** (weight/style/family change glyph widths), so
-each word is measured in its own run style and wrapping stays correct; a run boundary may fall
-mid-word (two pieces, no break between them). An inter-word space belongs to a run only when the
-words on **both** sides share that run's style; at a style boundary it is base-styled — so an
+**Model (normative).** Runs affect a word's **advance** (weight/style/family/size change glyph
+widths), so each word is measured in its own run style and wrapping stays correct; a run boundary
+may fall mid-word (two pieces, no break between them). An inter-word space belongs to a run only when
+the words on **both** sides share that run's style; at a style boundary it is base-styled — so an
 underline ends at its run's last glyph and continues between two underlined words (the
-word-processor convention). **`font-size` is not overridable in v0** — mixed sizes
-would perturb line-height and baseline; runs share the paragraph size, `letter-spacing`, and
-`word-spacing`. Nested `<tspan>`s compose (inner wins). `<tbreak/>` still breaks across runs.
+word-processor convention). **Mixed sizes step each line by its own tallest run**: a line's size is
+the largest run size on it (the paragraph size for a blank line), its advance is that size ×
+`line-height`, and the block's cap band runs from the first line's cap-top (at *its* size) through
+every following line's own advance to the last line's descent (at *its* size) — so a line holding a
+larger word stands taller and its neighbours keep their spacing, exactly as a word processor lays
+mixed type. Uniform sizes reduce to the classic constant step. `fit="shrink"` scales run sizes with
+the base and sums the per-line heights. Runs share the paragraph's `letter-spacing` and
+`word-spacing`; `baseline-shift` never changes a line's metrics. Nested `<tspan>`s compose (inner
+wins). `<tbreak/>` still breaks across runs.
 
 **Lowering.** Each output line is one positioning `<tspan x y>` (which also carries any justify /
 `glyph-x-scale` `textLength`); within it, base-styled text is emitted bare and each run becomes a
@@ -566,7 +574,9 @@ emits exactly as before (no nested spans). Ellipsis truncates from the last run 
 
 **v0 limits.** Styled runs apply to the rectangular box front-ends (`<textArea>`, `<x:textbox>` — incl.
 `in="#rect"`); curved-shape region flow (§6.10) and `<text inline-size>` flatten runs to the base
-style. Per-run `stroke` and `font-size` are future work.
+style. A `<textArea>` measures runs at their sizes but steps by `line-increment` regardless (SVG Tiny
+semantics); only `<x:textbox>` (and its paragraphs) steps mixed sizes per line. Per-run `stroke` is
+future work.
 
 ### 6.12 Create outlines — `outline="true"` [implemented]
 

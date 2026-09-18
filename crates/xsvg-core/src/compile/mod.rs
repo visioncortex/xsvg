@@ -5,8 +5,7 @@
 //! browser callbacks and `xsvg-cli` backs them with native font libraries. Both are thin
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
 pub(crate) use crate::{
-    boolean_svg_paths, filter_primitives, layout_area, layout_area_measured, layout_area_runs,
-    layout_flow,
+    boolean_svg_paths, filter_primitives, layout_area, layout_area_runs, layout_flow,
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
     parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
     Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
@@ -1272,16 +1271,11 @@ fn plan_paragraphs<'a>(
             pstyle.size *= scale;
             let sb = attr_num(p, "space-before", 0.0) * scale;
             let sa = attr_num(p, "space-after", default_spacing) * scale;
-            let pfm = m.font_metrics(&pstyle, pstyle.size);
-            let advance = pstyle.size * pstyle.line_height;
-            let first_baseline = match last_baseline {
-                None => pfm.cap_height,
-                Some(lb) => lb + prev_after + sb + advance,
-            };
             let pspec = AreaSpec {
                 x: cx,
-                // layout places the first baseline at y + cap-height
-                y: first_baseline - pfm.cap_height,
+                // lay out in the paragraph's OWN frame (its cap-top at 0); it
+                // moves onto the stack once its first line's size is known
+                y: 0.0,
                 width: cw,
                 height: 1e5, // tall → no clip; valign=top places lines from `y`
                 padding: 0.0,
@@ -1292,10 +1286,24 @@ fn plan_paragraphs<'a>(
                 text_indent: attr_num(p, "text-indent", 0.0) * scale,
             };
             let (segments, pstyles, emits) = collect_runs(p, &pstyle);
-            let layout = layout_area_runs(&segments, &pstyles, &pspec, m);
-            let n = layout.lines.len().max(1); // an empty paragraph owns one row
-            last_baseline = Some(first_baseline + (n - 1) as f64 * advance);
-            last_descent = pfm.descent;
+            let mut layout = layout_area_runs(&segments, &pstyles, &pspec, m);
+            // the advance INTO this paragraph is its first line's own (that
+            // line's largest run size × line-height); an empty paragraph owns
+            // one base-size row. Layout put the first baseline at that line's
+            // cap-height, so the whole paragraph shifts by the difference.
+            let first_size = layout.lines.first().map(|l| l.size).unwrap_or(pstyle.size);
+            let last_size = layout.lines.last().map(|l| l.size).unwrap_or(pstyle.size);
+            let cap0 = m.font_metrics(&pstyle, first_size).cap_height;
+            let first_baseline = match last_baseline {
+                None => cap0,
+                Some(lb) => lb + prev_after + sb + first_size * pstyle.line_height,
+            };
+            let shift = first_baseline - cap0;
+            for l in &mut layout.lines {
+                l.baseline += shift;
+            }
+            last_baseline = Some(layout.lines.last().map(|l| l.baseline).unwrap_or(first_baseline));
+            last_descent = m.font_metrics(&pstyle, last_size).descent;
             items.push(ParaPlan {
                 lines: layout.lines,
                 style: pstyle,
@@ -2575,7 +2583,13 @@ fn emit_line(
                 emit_attr(out, "font-weight", &a.weight);
                 emit_attr(out, "font-style", &a.style);
                 emit_attr(out, "font-family", &a.family);
+                if let Some(s) = a.size {
+                    // the run's size rides the same fit scale as the base size
+                    let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
+                    out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
+                }
                 emit_attr(out, "text-decoration", &a.decoration);
+                emit_attr(out, "baseline-shift", &a.shift);
                 out.push('>');
                 push_escaped(out, &run.text, false);
                 out.push_str("</tspan>");
@@ -2730,17 +2744,24 @@ fn collect_text(node: roxmltree::Node) -> String {
 }
 
 /// Paint/style overrides a `<tspan>` run carries relative to the base `<text>`; only
-/// attributes present are emitted. `font-size` is intentionally not overridable in
-/// v0 (mixed sizes would perturb line-height/baseline).
+/// attributes present are emitted.
 #[derive(Clone, Default, PartialEq)]
 struct EmitAttrs {
     fill: Option<String>,
     weight: Option<String>,
     style: Option<String>,
     family: Option<String>,
+    /// Per-run `font-size`, RESOLVED to user units at the authored scale (a
+    /// `%`/`em` value is taken against the paragraph's base size). Layout
+    /// measures the run at it and steps its line by the largest size on the
+    /// line; emission scales it by the fitted/base ratio like the base size.
+    size: Option<f64>,
     /// `text-decoration` (underline / line-through / a space list): paint-only,
     /// no effect on advances, so layout never sees it — it rides to the output.
     decoration: Option<String>,
+    /// `baseline-shift` (`super` / `sub` / a length or percentage): a raised or
+    /// lowered run, verbatim to the output; layout keeps the line's metrics.
+    shift: Option<String>,
 }
 
 impl EmitAttrs {
@@ -2749,8 +2770,24 @@ impl EmitAttrs {
             && self.weight.is_none()
             && self.style.is_none()
             && self.family.is_none()
+            && self.size.is_none()
             && self.decoration.is_none()
+            && self.shift.is_none()
     }
+}
+
+/// A run's `font-size`: absolute (user units), or relative to the paragraph's
+/// base size when suffixed `%` or `em`. Non-positive or unparsable → none.
+fn run_size(v: &str, base: f64) -> Option<f64> {
+    let v = v.trim();
+    let n = if let Some(p) = v.strip_suffix('%') {
+        parse_num(p).map(|n| base * n / 100.0)
+    } else if let Some(e) = v.strip_suffix("em") {
+        parse_num(e).map(|n| base * n)
+    } else {
+        parse_num(v)
+    };
+    n.filter(|n| *n > 0.0)
 }
 
 /// Walk a text container into styled segments for run layout: the `(text, style_id)`
@@ -2806,6 +2843,10 @@ fn walk_runs(
                     set(&mut c.style, child.attribute("font-style"));
                     set(&mut c.family, child.attribute("font-family"));
                     set(&mut c.decoration, child.attribute("text-decoration"));
+                    set(&mut c.shift, child.attribute("baseline-shift"));
+                    if let Some(s) = child.attribute("font-size").and_then(|v| run_size(v, base.size)) {
+                        c.size = Some(s);
+                    }
                     walk_runs(child, &c, base, segments, styles, emits);
                 }
                 _ => walk_runs(child, ctx, base, segments, styles, emits),
@@ -2828,7 +2869,9 @@ fn intern_run(
         weight: ctx.weight.clone().filter(|w| *w != base.weight),
         style: ctx.style.clone().filter(|s| *s != base.style),
         family: ctx.family.clone().filter(|f| *f != base.family),
+        size: ctx.size.filter(|s| (*s - base.size).abs() > 1e-9),
         decoration: ctx.decoration.clone(),
+        shift: ctx.shift.clone(),
     };
     if norm.is_empty() {
         return 0;
@@ -2837,6 +2880,9 @@ fn intern_run(
         return i;
     }
     let mut ts = base.clone();
+    if let Some(s) = norm.size {
+        ts.size = s;
+    }
     if let Some(w) = &norm.weight {
         ts.weight = w.clone();
     }
@@ -3193,6 +3239,9 @@ pub struct TextLayoutLine {
     pub x: f64,
     /// Absolute baseline y.
     pub baseline: f64,
+    /// The line's rendered font size — its largest run's (§6.11 mixed sizes);
+    /// the paragraph `style.size` for a plain line. A caret on it is this tall.
+    pub size: f64,
     /// Justified lines render stretched to this width (SVG `textLength`).
     pub justify_width: Option<f64>,
     /// `[start, end)` into the paragraph's [`TextLayoutPara::words`]. Wrapping
@@ -3385,6 +3434,7 @@ fn paragraphs_layout_info(
                         text: l.text.clone(),
                         x: l.x,
                         baseline: b,
+                        size: l.size,
                         justify_width: l.justify_width,
                         words: l.words,
                     })
@@ -3436,6 +3486,7 @@ fn para_info(
                 text: l.text.clone(),
                 x: l.x,
                 baseline: l.baseline,
+                size: l.size,
                 justify_width: l.justify_width,
                 words: l.words,
             })

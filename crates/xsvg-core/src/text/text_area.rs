@@ -6,7 +6,7 @@
 //! width/height, and overflow clipping. Shares measurement and wrapping with the
 //! rest of the engine.
 
-use super::area::{merge_pieces, Anchor, AreaLayout, PlacedLine};
+use super::area::{line_size, merge_pieces, Anchor, AreaLayout, PlacedLine};
 use super::measure::{measure_runs, Measurer, Piece};
 use super::style::TextStyle;
 use super::truncate::{apply_ellipsis, TextOverflow};
@@ -194,6 +194,9 @@ pub fn layout_text_area_runs(
                 continue; // outside the region in the block direction → not rendered
             }
         }
+        // the line's size is informational here: a <textArea> steps by
+        // line-increment regardless of the run sizes it carries
+        let lsz = line_size(&pieces, styles);
         let (text, runs) = merge_pieces(pieces);
         // stretch full, non-paragraph-final, multi-word lines to the content width
         let justify_width = justify_w.filter(|_| !is_final && text.contains(' '));
@@ -201,6 +204,7 @@ pub fn layout_text_area_runs(
             text,
             x: ax,
             baseline,
+            size: lsz,
             justify_width,
             runs,
             words,

@@ -1355,6 +1355,56 @@ fn text_decoration_runs_ride_to_the_output_without_moving_layout() {
 }
 
 #[test]
+fn mixed_run_sizes_step_each_line_by_its_largest_run() {
+    // base 10, line-height 1.5 (advance 15), cap 0.7·size. Line 1 carries a
+    // 20px run: it stands 20 tall, so the FIRST baseline sits at cap(20) = 14
+    // and line 2 (plain, 10) steps by ITS OWN advance 15 → 29. The run emits
+    // its absolute size; "200%" resolves against the paragraph size.
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="200" font-size="10" line-height="1.5">tall <tspan font-size="200%">BIG</tspan><tbreak/>small</x:textbox></svg>"##;
+    let out = compile_test(svg);
+    assert!(out.contains(r#"<tspan font-size="20">BIG</tspan>"#), "{out}");
+    assert!(out.contains(r#"<tspan x="0" y="14">tall "#), "first baseline = cap(20): {out}");
+    assert!(out.contains(r#"<tspan x="0" y="29">small</tspan>"#), "10-line advance: {out}");
+    // the other way round: the big line steps by 30 when it FOLLOWS
+    let svg2 = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="200" font-size="10" line-height="1.5">small<tbreak/>tall <tspan font-size="20">BIG</tspan></x:textbox></svg>"##;
+    let out2 = compile_test(svg2);
+    assert!(out2.contains(r#"<tspan x="0" y="7">small</tspan>"#), "{out2}");
+    assert!(out2.contains(r#"<tspan x="0" y="37">tall "#), "7 + 20·1.5: {out2}");
+}
+
+#[test]
+fn run_sizes_scale_with_shrink_fit() {
+    // shrink-fit halves everything: a 20px run in a 10px box fitted to 5
+    // emits font-size 10 — the run rides the same scale as the base
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="1000" height="15" font-size="10" line-height="1" fit="shrink" fit-min="1">a<tbreak/><tspan font-size="20">b</tspan></x:textbox></svg>"##;
+    let out = compile_test(svg);
+    // the fit sums per-line advances: 10 (the a-line) + 20 (the b-line) = 30
+    // at scale 1 > 15 → scale ½: base 5, and the run rides the same scale → 10
+    assert!(out.contains(r#"font-size="5""#), "fitted base: {out}");
+    assert!(out.contains(r#"<tspan font-size="10">b</tspan>"#), "run at 2× the fitted base: {out}");
+}
+
+#[test]
+fn baseline_shift_rides_to_the_output() {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">E=mc<tspan baseline-shift="super" font-size="58%">2</tspan></textArea></svg>"##;
+    let out = compile_test(svg);
+    assert!(
+        out.contains(r#"<tspan font-size="5.8" baseline-shift="super">2</tspan>"#),
+        "{out}"
+    );
+}
+
+#[test]
+fn paragraphs_stack_by_the_incoming_lines_own_size() {
+    // para 1 plain 10 (cap 7); para 2 opens with a 20px run: its first
+    // baseline = 7 + 0.35·10 gap + 20·1.5 = 40.5, and its cap-top is 14 above
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="300" font-size="10" line-height="1.5"><x:p>one</x:p><x:p><tspan font-size="20">Two</tspan> two</x:p></x:textbox></svg>"##;
+    let out = compile_test(svg);
+    assert!(out.contains(r#"y="7">one"#), "{out}");
+    assert!(out.contains(r#"y="40.5"><tspan font-size="20">Two</tspan> two"#), "{out}");
+}
+
+#[test]
 fn plain_textarea_has_no_inner_tspans() {
     // no runs → one outer <tspan> per line, nothing nested
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="500" font-size="10">hello world</textArea></svg>"#;

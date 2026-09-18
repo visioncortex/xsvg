@@ -170,6 +170,7 @@ pub fn layout_region(
                 text,
                 x: ax,
                 baseline: y + fm.ascent,
+                size,
                 justify_width: None,
                 runs,
                 words: (i, next),

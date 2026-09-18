@@ -121,6 +121,11 @@ pub struct PlacedLine {
     pub text: String,
     pub x: f64,
     pub baseline: f64,
+    /// The line's font size at the final (fitted) scale — its LARGEST run
+    /// size (the base size for a blank line). The line's advance is
+    /// `size × line-height`: mixed sizes step a line by its tallest run, the
+    /// word-processor convention; a caret on it is this tall.
+    pub size: f64,
     /// If `Some(w)`, this line is justified: render it stretched to width `w`
     /// (via SVG `textLength`/`lengthAdjust="spacing"`). Only full, non-final,
     /// multi-word lines get this; the rest stay at natural width.
@@ -167,7 +172,143 @@ pub struct AreaLayout {
 /// Lay `text` into `spec`'s box: shrink-to-fit (if requested), wrap to the content
 /// width, then align horizontally and vertically into positioned lines.
 pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measurer) -> AreaLayout {
-    layout_area_measured(&measure_words(text, style, m), style, spec, m)
+    layout_area_measured(&measure_words(text, style, m), std::slice::from_ref(style), spec, m)
+}
+
+/// The font size a line of `pieces` renders at (at the BASE scale): its
+/// largest run size — mixed sizes step the line by its tallest run — or the
+/// base size for a blank line.
+pub(crate) fn line_size(pieces: &[Piece], styles: &[TextStyle]) -> f64 {
+    pieces
+        .iter()
+        .map(|p| styles.get(p.style).unwrap_or(&styles[0]).size)
+        .reduce(f64::max)
+        .unwrap_or(styles[0].size)
+}
+
+/// One wrapped line awaiting placement: styled pieces, global word range, and
+/// whether it ends its flow (flow-final lines stay ragged under justify).
+type LineMeta = (Vec<Piece>, (usize, usize), bool);
+
+/// Wrap one flow at `scale`, the first line narrowed by `indent` (0 = none).
+fn wrap_indented(
+    measured: &Measured,
+    cw: f64,
+    scale: f64,
+    indent: f64,
+) -> Vec<(Vec<Piece>, (usize, usize))> {
+    if indent != 0.0 && cw > 0.0 && !measured.words.is_empty() {
+        let (first, mut i) = fill_line(measured, 0, (cw - indent).max(0.0), scale);
+        let mut ls = vec![(first, (0, i))];
+        while i < measured.words.len() {
+            let (p, n) = fill_line(measured, i, cw, scale);
+            ls.push((p, (i, n)));
+            i = n;
+        }
+        ls
+    } else {
+        wrap_pieces(measured, cw, scale)
+    }
+}
+
+/// Place wrapped lines in the content box — the one placement pass every
+/// rectangular flow shares. Each line steps by ITS OWN advance (its size ×
+/// line-height, so a line holding a larger run stands taller, the
+/// word-processor convention; uniform sizes give the classic constant step).
+/// The cap-height band (first line's cap-top → last line's baseline + its
+/// descent) is valigned, not the em box, so letterforms read as centred and
+/// Top/Bottom sit flush; ascenders may peek above the cap, descenders hang
+/// into the reserved descent. A line is kept by its BASELINE (its block
+/// position), not its ink band: a lone line grazing an edge renders and
+/// overflows rather than vanishing; a baseline past the box drops the line
+/// (and triggers ellipsis). The indent inset applies to line 0 only, for
+/// start-anchored text; justify stretches full, non-flow-final, multi-word
+/// lines.
+fn place_lines(
+    line_meta: Vec<LineMeta>,
+    styles: &[TextStyle],
+    size: f64,
+    spec: &AreaSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
+    let style = &styles[0];
+    let cx = spec.x + spec.padding;
+    let cy = spec.y + spec.padding;
+    let cw = spec.width - 2.0 * spec.padding;
+    let ch = spec.height - 2.0 * spec.padding;
+    // Guard the base-size divide: a zero/degenerate `style.size` must not produce
+    // NaN coordinates (scale falls back to 0 → zero-width glyphs, no NaN).
+    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
+    let indent = spec.text_indent;
+
+    let anchor = spec.align.anchor();
+    let ax = match spec.align {
+        Align::Center => cx + cw / 2.0,
+        Align::End => cx + cw,
+        Align::Start | Align::Justify => cx,
+    };
+
+    // per-line sizes at the final scale; the block band spans the first
+    // line's cap, every FOLLOWING line's own advance, and the last descent
+    let sizes: Vec<f64> = line_meta
+        .iter()
+        .map(|(p, _, _)| line_size(p, styles) * scale)
+        .collect();
+    let first_size = sizes.first().copied().unwrap_or(size);
+    let last_size = sizes.last().copied().unwrap_or(size);
+    let fm_first = m.font_metrics(style, first_size);
+    let fm_last = m.font_metrics(style, last_size);
+    let advances: Vec<f64> = sizes.iter().map(|s| s * style.line_height).collect();
+    let band_h = fm_first.cap_height + advances.iter().skip(1).sum::<f64>() + fm_last.descent;
+    let band_top = match spec.valign {
+        VAlign::Top => cy,
+        VAlign::Middle => cy + (ch - band_h) / 2.0,
+        VAlign::Bottom => cy + (ch - band_h),
+    };
+    let first_baseline = band_top + fm_first.cap_height;
+    // uniform sizes keep the exact multiplicative step (no accumulated rounding)
+    let uniform = sizes.iter().all(|s| (s - first_size).abs() < 1e-9);
+
+    let justify = spec.align == Align::Justify && cw > 0.0;
+    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
+
+    let mut lines = Vec::new();
+    let mut dropped = false;
+    let mut baseline = first_baseline;
+    for (i, (pieces, words, flow_final)) in line_meta.into_iter().enumerate() {
+        if i > 0 {
+            baseline = if uniform {
+                first_baseline + i as f64 * advances[0]
+            } else {
+                baseline + advances[i]
+            };
+        }
+        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
+            dropped = true;
+            continue;
+        }
+        let (text, runs) = merge_pieces(pieces);
+        let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
+        let justify_width = (justify && !flow_final && text.contains(' ')).then_some(line_w);
+        lines.push(PlacedLine {
+            text,
+            x: if i == 0 { ax + indent_x } else { ax },
+            baseline,
+            size: sizes[i],
+            justify_width,
+            runs,
+            words,
+        });
+    }
+    if spec.text_overflow == TextOverflow::Ellipsis {
+        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
+    }
+
+    AreaLayout {
+        anchor,
+        font_size: size,
+        lines,
+    }
 }
 
 /// Split styled segments at `'\n'` (`<tbreak/>` in the source) into forced
@@ -190,10 +331,10 @@ fn split_flows(segments: &[(String, usize)]) -> Vec<Vec<(String, usize)>> {
 
 /// Like [`layout_area_measured`], but takes raw styled segments and honors
 /// `'\n'` forced breaks (`<tbreak/>`): every line — wrapped or forced — steps
-/// by the SAME line advance (`size × line-height`), a blank flow occupies one
-/// line, shrink-fit counts every flow's lines, and justification leaves each
-/// flow's last line ragged. A break-free stream is exactly
-/// [`layout_area_measured`].
+/// by its own advance (`size × line-height`, its largest run's size), a blank
+/// flow occupies one base-size line, shrink-fit sums every flow's lines, and
+/// justification leaves each flow's last line ragged. A break-free stream is
+/// exactly [`layout_area_measured`].
 pub fn layout_area_runs(
     segments: &[(String, usize)],
     styles: &[TextStyle],
@@ -204,210 +345,72 @@ pub fn layout_area_runs(
     let flows = split_flows(segments);
     let measured: Vec<Measured> = flows.iter().map(|f| measure_runs(f, styles, m)).collect();
     if measured.len() == 1 {
-        return layout_area_measured(&measured[0], style, spec, m);
+        return layout_area_measured(&measured[0], styles, spec, m);
     }
 
-    let cx = spec.x + spec.padding;
-    let cy = spec.y + spec.padding;
     let cw = spec.width - 2.0 * spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
-
     let size = match spec.fit {
-        Fit::Shrink { min } => fit_size_flows(&measured, style.size, style.line_height, cw, ch, min),
+        Fit::Shrink { min } => fit_size_flows(&measured, styles, cw, ch, min),
         Fit::None => style.size,
     };
     let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
 
     // Wrap each flow; the box-wide first-line indent applies to the very
-    // first line only (flow 0). `(pieces, words, flow_final)` per line; a
-    // blank flow contributes one empty line. Word ranges are GLOBAL — offset
-    // into the concatenation of every flow's words, which is exactly the
-    // word list `measure_runs` yields for the unsplit stream ('\n' is
-    // whitespace there), so seam callers keep one flat word list.
-    let indent = spec.text_indent;
-    let mut line_meta: Vec<(Vec<Piece>, (usize, usize), bool)> = Vec::new();
+    // first line only (flow 0). A blank flow contributes one empty line. Word
+    // ranges are GLOBAL — offset into the concatenation of every flow's
+    // words, which is exactly the word list `measure_runs` yields for the
+    // unsplit stream ('\n' is whitespace there), so seam callers keep one
+    // flat word list.
+    let mut line_meta: Vec<LineMeta> = Vec::new();
     let mut word_base = 0usize;
     for (fi, mw) in measured.iter().enumerate() {
-        let wrapped = if fi == 0 && indent != 0.0 && cw > 0.0 && !mw.words.is_empty() {
-            let (first, mut i) = fill_line(mw, 0, (cw - indent).max(0.0), scale);
-            let mut ls = vec![(first, (0, i))];
-            while i < mw.words.len() {
-                let (p, n) = fill_line(mw, i, cw, scale);
-                ls.push((p, (i, n)));
-                i = n;
-            }
-            ls
-        } else {
-            wrap_pieces(mw, cw, scale)
-        };
+        let indent = if fi == 0 { spec.text_indent } else { 0.0 };
+        let wrapped = wrap_indented(mw, cw, scale, indent);
         if wrapped.is_empty() {
             line_meta.push((Vec::new(), (word_base, word_base), true)); // forced blank line
             continue;
         }
         let n = wrapped.len();
         for (j, (pieces, words)) in wrapped.into_iter().enumerate() {
+            // each flow's LAST line stays ragged (the paragraph-final convention)
             line_meta.push((pieces, (words.0 + word_base, words.1 + word_base), j + 1 == n));
         }
         word_base += mw.words.len();
     }
-    let advance = size * style.line_height;
-
-    let anchor = spec.align.anchor();
-    let ax = match spec.align {
-        Align::Center => cx + cw / 2.0,
-        Align::End => cx + cw,
-        Align::Start | Align::Justify => cx,
-    };
-
-    let fm = m.font_metrics(style, size);
-    let n = line_meta.len().max(1) as f64;
-    let band_h = fm.cap_height + fm.descent + (n - 1.0) * advance;
-    let band_top = match spec.valign {
-        VAlign::Top => cy,
-        VAlign::Middle => cy + (ch - band_h) / 2.0,
-        VAlign::Bottom => cy + (ch - band_h),
-    };
-    let first_baseline = band_top + fm.cap_height;
-
-    let justify = spec.align == Align::Justify && cw > 0.0;
-    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
-
-    let mut lines = Vec::new();
-    let mut dropped = false;
-    for (i, (pieces, words, flow_final)) in line_meta.into_iter().enumerate() {
-        let baseline = first_baseline + i as f64 * advance;
-        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
-            dropped = true;
-            continue;
-        }
-        let (text, runs) = merge_pieces(pieces);
-        let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
-        // each flow's LAST line stays ragged (the paragraph-final convention)
-        let justify_width = (justify && !flow_final && text.contains(' ')).then_some(line_w);
-        lines.push(PlacedLine {
-            text,
-            x: if i == 0 { ax + indent_x } else { ax },
-            baseline,
-            justify_width,
-            runs,
-            words,
-        });
-    }
-    if spec.text_overflow == TextOverflow::Ellipsis {
-        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
-    }
-
-    AreaLayout {
-        anchor,
-        font_size: size,
-        lines,
-    }
+    place_lines(line_meta, styles, size, spec, m)
 }
 
 /// Like [`layout_area`], but takes pre-[`measure`]d input so the caller can supply
-/// styled runs (via [`super::measure::measure_runs`]). `style` is the base
-/// paragraph style (its size / line-height / vertical metrics drive fit and
-/// placement); per-run styling rides on the pieces' style indices.
+/// styled runs (via [`super::measure::measure_runs`]) and their style table:
+/// `styles[0]` is the base paragraph style (its size / line-height drive fit
+/// and the base scale), the pieces' style indices select per-run weight,
+/// family, and SIZE — a line steps by its largest run.
 pub fn layout_area_measured(
     measured: &Measured,
-    style: &TextStyle,
+    styles: &[TextStyle],
     spec: &AreaSpec,
     m: &dyn Measurer,
 ) -> AreaLayout {
-    let cx = spec.x + spec.padding;
-    let cy = spec.y + spec.padding;
+    let style = &styles[0];
     let cw = spec.width - 2.0 * spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
-
     let size = match spec.fit {
-        Fit::Shrink { min } => fit_size(measured, style.size, style.line_height, cw, ch, min),
+        Fit::Shrink { min } => fit_size(measured, styles, cw, ch, min),
         Fit::None => style.size,
     };
-    // Guard the base-size divide: a zero/degenerate `style.size` must not produce
-    // NaN coordinates (scale falls back to 0 → zero-width glyphs, no NaN).
-    let scale = if style.size > 0.0 {
-        size / style.size
-    } else {
-        0.0
-    };
+    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
     // First-line indent (§6.6): wrap the first line to the reduced width, the rest
     // to the full content width. Only when there is text and a real indent.
-    let indent = spec.text_indent;
-    let line_pieces = if indent != 0.0 && cw > 0.0 && !measured.words.is_empty() {
-        let (first, mut i) = fill_line(measured, 0, (cw - indent).max(0.0), scale);
-        let mut ls = vec![(first, (0, i))];
-        while i < measured.words.len() {
-            let (p, n) = fill_line(measured, i, cw, scale);
-            ls.push((p, (i, n)));
-            i = n;
-        }
-        ls
-    } else {
-        wrap_pieces(measured, cw, scale)
-    };
-    let advance = size * style.line_height;
-
-    let anchor = spec.align.anchor();
-    let ax = match spec.align {
-        Align::Center => cx + cw / 2.0,
-        Align::End => cx + cw,
-        Align::Start | Align::Justify => cx,
-    };
-
-    // Align the cap-height band (first cap-top → last descent), not the em box, so
-    // the letterforms read as centred and Top/Bottom sit flush. Ascenders/accents
-    // may peek above the cap; descenders hang into the reserved descent.
-    let fm = m.font_metrics(style, size);
-    let n = line_pieces.len().max(1) as f64;
-    let band_h = fm.cap_height + fm.descent + (n - 1.0) * advance;
-    let band_top = match spec.valign {
-        VAlign::Top => cy,
-        VAlign::Middle => cy + (ch - band_h) / 2.0,
-        VAlign::Bottom => cy + (ch - band_h),
-    };
-    let first_baseline = band_top + fm.cap_height;
-
-    // A line is justified iff align=justify, it isn't the paragraph's last line, it
-    // has something to stretch (>1 word), and the box has a positive content width.
-    let last = line_pieces.len().saturating_sub(1);
-    let justify = spec.align == Align::Justify && cw > 0.0;
-    // the indent shifts only the first line, and only for start/justify (left-edge
-    // anchored) text — it is a start-edge inset, meaningless for centre/end.
-    let indent_x = if anchor == Anchor::Start { indent } else { 0.0 };
-
-    let mut lines = Vec::new();
-    let mut dropped = false;
-    for (i, (pieces, words)) in line_pieces.into_iter().enumerate() {
-        let baseline = first_baseline + i as f64 * advance;
-        // Keep a line by its BASELINE (its block position), not its full ink band:
-        // a lone line whose cap or descent merely grazes the edge should render and
-        // visually overflow, not vanish. Genuine block overflow — a baseline past
-        // the content box — still drops the line (and triggers ellipsis).
-        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
-            dropped = true;
-            continue;
-        }
-        let (text, runs) = merge_pieces(pieces);
-        let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
-        let justify_width = (justify && i < last && text.contains(' ')).then_some(line_w);
-        lines.push(PlacedLine {
-            text,
-            x: if i == 0 { ax + indent_x } else { ax },
-            baseline,
-            justify_width,
-            runs,
-            words,
-        });
-    }
-    if spec.text_overflow == TextOverflow::Ellipsis {
-        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
-    }
-
-    AreaLayout {
-        anchor,
-        font_size: size,
-        lines,
-    }
+    let wrapped = wrap_indented(measured, cw, scale, spec.text_indent);
+    // a line is justified iff it isn't the paragraph's last (flow-final)
+    let last = wrapped.len().saturating_sub(1);
+    let line_meta: Vec<LineMeta> = wrapped
+        .into_iter()
+        .enumerate()
+        .map(|(i, (pieces, words))| (pieces, words, i == last))
+        .collect();
+    place_lines(line_meta, styles, size, spec, m)
 }
 
 /// Inline-size flow anchored at `(x, y)`: wrap to `max_width`, first baseline at
@@ -431,6 +434,7 @@ pub fn layout_flow(
                 text,
                 x,
                 baseline: y + i as f64 * advance,
+                size: style.size,
                 justify_width: None,
                 runs,
                 words,
