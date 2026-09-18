@@ -314,7 +314,7 @@ fn place_lines(
 /// Split styled segments at `'\n'` (`<tbreak/>` in the source) into forced
 /// sub-flows. Each flow wraps independently; an EMPTY flow (consecutive
 /// breaks, or a break at an edge) is a forced blank line.
-fn split_flows(segments: &[(String, usize)]) -> Vec<Vec<(String, usize)>> {
+pub fn split_flows(segments: &[(String, usize)]) -> Vec<Vec<(String, usize)>> {
     let mut flows: Vec<Vec<(String, usize)>> = vec![Vec::new()];
     for (text, sid) in segments {
         for (k, part) in text.split('\n').enumerate() {
@@ -435,6 +435,42 @@ pub fn layout_flow(
                 x,
                 baseline: y + i as f64 * advance,
                 size: style.size,
+                justify_width: None,
+                runs,
+                words,
+            }
+        })
+        .collect()
+}
+
+/// [`layout_flow`] over styled segments (one forced flow — split at `'\n'`
+/// first with [`split_flows`]): first baseline at `y`, every following line
+/// stepping by ITS OWN advance (its largest run size × the base line-height).
+pub fn layout_flow_runs(
+    segments: &[(String, usize)],
+    styles: &[TextStyle],
+    x: f64,
+    y: f64,
+    max_width: f64,
+    m: &dyn Measurer,
+) -> Vec<PlacedLine> {
+    let style = &styles[0];
+    let measured = measure_runs(segments, styles, m);
+    let mut baseline = y;
+    wrap_pieces(&measured, max_width, 1.0)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (pieces, words))| {
+            let size = line_size(&pieces, styles);
+            if i > 0 {
+                baseline += size * style.line_height;
+            }
+            let (text, runs) = merge_pieces(pieces);
+            PlacedLine {
+                text,
+                x,
+                baseline,
+                size,
                 justify_width: None,
                 runs,
                 words,

@@ -62,6 +62,8 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // nothing) still knows its row: it takes vertical space like any
         // item, and its marker must sit on that row, not at the block top
         size: f64, // per-item font size (defaults to the list's)
+        style: TextStyle, // the item's resolved base style (its own size)
+        emits: Vec<EmitAttrs>, // its styled-run emit table (`collect_runs`)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
     let mut items: Vec<Item> = Vec::new();
@@ -73,24 +75,21 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     {
         let level = attr_num(li, "indent", 0.0).max(0.0) as usize;
         let kind = li.attribute("list").unwrap_or(list_kind);
-        // collect through the run walker so a <tbreak/> becomes '\n' — items
-        // still lay out single-style, but forced breaks are honored below
-        let text: String = collect_runs(li, &style)
-            .0
-            .into_iter()
-            .map(|(t, _)| t)
-            .collect();
         let text_x = x + (level as f64 + 1.0) * indent_step;
         let max_w = (x + width - text_x).max(1.0);
         let col = text_x - marker_gap; // markers' right-edge column
-                                       // an <x:li> may override the font size (e.g. a smaller sub-point); it
-                                       // inherits the list's size otherwise, keeping the list's line-height
+        // an <x:li> may override the font size (e.g. a smaller sub-point); it
+        // inherits the list's size otherwise, keeping the list's line-height
         let item_size = attr_pos(li, "font-size", size);
         let item_style = TextStyle {
             size: item_size,
             ..style.clone()
         };
         let item_advance = item_size * style.line_height;
+        // an item is a real run leaf: <tspan> styling and <tbreak/> forced
+        // breaks ('\n' in the stream) flow through the walker every box uses
+        let (segments, styles, emits) = collect_runs(li, &item_style);
+        let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
 
         // outline counters: extend to this level, drop any deeper ones (a pop
         // restarts sublists), then advance this level's number
@@ -129,15 +128,16 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // chunk (consecutive breaks) occupies one row, like everywhere else
         let mut lines: Vec<PlacedLine> = Vec::new();
         let mut item_last_b = first_baseline;
-        if !text.trim().is_empty() {
+        if !plain.trim().is_empty() {
             let mut next_b = first_baseline;
-            for chunk in text.split('\n') {
-                if chunk.trim().is_empty() {
+            for flow in split_flows(&segments) {
+                if flow.iter().all(|(t, _)| t.trim().is_empty()) {
                     item_last_b = next_b;
                     next_b += item_advance;
                     continue;
                 }
-                let ls = layout_flow(chunk, &item_style, text_x, next_b, max_w, m);
+                // within a chunk, lines step by their own largest run (§6.11)
+                let ls = layout_flow_runs(&flow, &styles, text_x, next_b, max_w, m);
                 item_last_b = ls.last().map(|l| l.baseline).unwrap_or(next_b);
                 next_b = item_last_b + item_advance;
                 lines.extend(ls);
@@ -150,6 +150,8 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             lines,
             baseline: first_baseline,
             size: item_size,
+            style: item_style,
+            emits,
             src: li,
         });
         first = false;
@@ -211,22 +213,18 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 markers.push_str("</tspan>");
             }
         }
-        // list items are single-style plain text — one positioned <tspan> per
-        // line, wrapped in the item's OWN keyed <text> (empty items emit none)
+        // list items are run leaves — one positioned <tspan> per line carrying
+        // its styled runs, in the item's OWN keyed <text> at the item's size
+        // (empty items emit none)
         if !it.lines.is_empty() {
             body.push_str("<text text-anchor=\"start\"");
-            push_font_attrs(&mut body, &style, size, fill);
+            push_font_attrs(&mut body, &it.style, it.size, fill);
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
             body.push('>');
             for line in &it.lines {
-                body.push_str(&format!(
-                    "<tspan x=\"{}\" y=\"{}\"{}>",
-                    fmt(line.x),
-                    fmt(line.baseline + offset),
-                    fs
-                ));
-                push_escaped(&mut body, &line.text, false);
-                body.push_str("</tspan>");
+                let mut l = line.clone();
+                l.baseline += offset;
+                emit_line(&mut body, &l, &it.style, it.size, 1.0, m, &it.emits);
             }
             body.push_str("</text>");
         }

@@ -5,7 +5,8 @@
 //! browser callbacks and `xsvg-cli` backs them with native font libraries. Both are thin
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
 pub(crate) use crate::{
-    boolean_svg_paths, filter_primitives, layout_area, layout_area_runs, layout_flow,
+    boolean_svg_paths, filter_primitives, layout_area_runs, layout_flow, layout_flow_runs,
+    split_flows,
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
     parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
     Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,

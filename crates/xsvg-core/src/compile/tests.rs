@@ -297,11 +297,41 @@ fn list_item_font_size_override() {
         r##"{XW}<x:list x="0" y="0" width="200" font-size="20"><x:li>big</x:li><x:li font-size="10">small</x:li></x:list></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(out.contains("font-size=\"20\""), "base <text> size: {out}");
+    assert!(out.contains("font-size=\"20\""), "the list's size on the big item's <text>: {out}");
+    // each item is its own <text> at ITS size — the smaller item's lines are
+    // bare positioned tspans under a font-size="10" <text>
     assert!(
-        out.contains("font-size=\"10\">small</tspan>"),
-        "the smaller item's line overrides the size: {out}"
+        out.contains("font-size=\"10\"") && out.contains(">small</tspan>"),
+        "the smaller item's <text> carries the size: {out}"
     );
+    assert!(!out.contains("font-size=\"10\">small"), "no per-line size override: {out}");
+}
+
+#[test]
+fn list_items_render_their_runs() {
+    // a bold run inside a bullet renders styled — items are run leaves, not
+    // flattened text — and the plain neighbours stay bare
+    let svg = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10"><x:li>keep <tspan font-weight="700">bold</tspan> tail</x:li></x:list></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r#">keep <tspan font-weight="700">bold</tspan> tail</tspan>"#),
+        "{out}"
+    );
+}
+
+#[test]
+fn table_cells_render_runs_and_forced_breaks() {
+    // Mono size 10, line-height 1.2, padding 0: a cell with a <tbreak/> is two
+    // rows tall (cap 7 + advance 12 + descent 2 = 21) and its bold run renders
+    let svg = format!(
+        r##"{XW}<x:table x="0" y="0" width="200" cell-padding="0" font-size="10" line-height="1.2"><x:tr><x:td>one<tbreak/><tspan font-weight="700">two</tspan></x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("height=\"21\""), "forced break grows the row: {out}");
+    assert!(out.contains(r#"<tspan font-weight="700">two</tspan>"#), "{out}");
+    assert!(out.contains("y=\"7\">one</tspan>") && out.contains("y=\"19\">"), "{out}");
 }
 
 #[test]

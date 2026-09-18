@@ -164,17 +164,24 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
             let cst = cell_style(cell);
             let cfm = m.font_metrics(&cst, cst.size);
-            let text = collect_text(cell);
-            let lines = if text.trim().is_empty() || content_w(ci) <= 0.0 {
-                1
+            // a cell is a run leaf: styled runs and <tbreak/> forced breaks
+            // lay out like a textbox, and the row takes the block's cap band
+            // (mixed sizes make a line stand as tall as its largest run)
+            let (segments, styles, _) = collect_runs(cell, &cst);
+            let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
+            let bh = if plain.trim().is_empty() || content_w(ci) <= 0.0 {
+                cfm.cap_height + cfm.descent
             } else {
-                layout_area(&text, &cst, &measure_spec(ci), m)
-                    .lines
-                    .len()
-                    .max(1)
+                let lines = layout_area_runs(&segments, &styles, &measure_spec(ci), m).lines;
+                match (lines.first(), lines.last()) {
+                    (Some(a), Some(z)) => {
+                        m.font_metrics(&cst, a.size).cap_height
+                            + (z.baseline - a.baseline)
+                            + m.font_metrics(&cst, z.size).descent
+                    }
+                    _ => cfm.cap_height + cfm.descent,
+                }
             };
-            let bh =
-                cfm.cap_height + cfm.descent + (lines - 1) as f64 * (cst.size * cst.line_height);
             h = h.max(bh + 2.0 * pad);
         }
         row_h.push(h.max(row_min));
@@ -195,7 +202,6 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("<g");
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
-    let base = [EmitAttrs::default()];
     let mut body_row = 0usize;
     for (ri, row) in rows.iter().enumerate() {
         let header_row = row
@@ -240,9 +246,10 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             }
             out.push_str("/>");
 
-            let text = collect_text(cell);
-            if !text.trim().is_empty() {
-                let st = cell_style(cell);
+            let st = cell_style(cell);
+            let (segments, styles, emits) = collect_runs(cell, &st);
+            let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
+            if !plain.trim().is_empty() {
                 let fill = cell
                     .attribute("fill")
                     .map(|v| resolve_var(v).into_owned())
@@ -259,12 +266,12 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     text_overflow: TextOverflow::Clip,
                     text_indent: 0.0,
                 };
-                let layout = layout_area(&text, &st, &spec, m);
+                let layout = layout_area_runs(&segments, &styles, &spec, m);
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill);
                 out.push('>');
                 for line in &layout.lines {
-                    emit_line(out, line, &st, layout.font_size, 1.0, m, &base);
+                    emit_line(out, line, &st, layout.font_size, 1.0, m, &emits);
                 }
                 out.push_str("</text>");
             }

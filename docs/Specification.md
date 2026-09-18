@@ -738,7 +738,9 @@ align to the text column, not back under the marker. It is the ordered/unordered
 got, and lowers to a `<g>` of drawn bullet shapes, one plain `<text>` of generated
 number/character markers, and **one `<text>` of positioned `<tspan>`s per item** — live and
 selectable, with each item's `<text>` source-mapped to its `<x:li>` (like table cells and
-paragraphs) so editors can address every item's rendered glyphs individually.
+paragraphs) so editors can address every item's rendered glyphs individually. An item is a **run
+leaf** like a textbox: inline `<tspan>` runs (§6.11, mixed sizes included — a line steps by its
+largest run) render styled, and `<tbreak/>` forces a line within the bullet.
 
 ```xml
 <x:list x="40" y="80" width="300" list="bullet" font-size="14" item-spacing="5">
@@ -814,9 +816,13 @@ line-height — a per-cell font-size also grows its row) per cell. Background pr
 Each cell compiles to its own `<g>` carrying the source range of its `<x:td>`/`<x:th>` — so a viewer's
 inspector resolves a click to the individual **cell**, not the whole table.
 
+A cell is a **run leaf** like a textbox: inline `<tspan>` runs (§6.11, mixed sizes included) render
+styled and `<tbreak/>` forces a line — the row grows to the cell's cap band (first line's cap-top to
+last line's descent, each at its own size).
+
 **v0 limits.** No `colspan`/`rowspan` (merged cells) and no **content-driven column widths** — columns
 are author-set, exactly as the presentation tools do; both are deliberate scope choices, not
-oversights. One flattened paragraph per cell (no inline `<tspan>` runs inside a cell yet).
+oversights.
 
 ### 6.16 Paragraphs — `<x:p>` [implemented]
 
