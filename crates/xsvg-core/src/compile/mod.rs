@@ -2626,14 +2626,6 @@ fn emit_attr(out: &mut String, name: &str, value: &Option<String>) {
     }
 }
 
-fn fit_from(fit: Option<&str>, min: impl FnOnce() -> f64) -> Fit {
-    if fit == Some("shrink") {
-        Fit::Shrink { min: min() }
-    } else {
-        Fit::None
-    }
-}
-
 /// A textArea dimension: absent or `"auto"` → `None` (auto), else a parsed length.
 fn dim_attr(node: roxmltree::Node, name: &str) -> Option<f64> {
     match node.attribute(name) {
