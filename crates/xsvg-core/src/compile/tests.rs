@@ -3024,6 +3024,12 @@ fn use_links_external_files() {
     assert!(out.contains("#f00"), "dep content inlined (rect lowers to a path): {out}");
     assert!(!out.contains("<use"), "the <use> is baked, not a live ref: {out}");
 
+    // the referrer's preserveAspectRatio reaches the viewport it becomes: a
+    // free resize in an editor stretches the drawing instead of letterboxing
+    let main = format!(r##"{XW}<use href="logo.svg" x="0" y="0" width="40" height="10" preserveAspectRatio="none"/></svg>"##);
+    let out = compile_linked(&main, &[("logo.svg", &logo)]);
+    assert!(out.contains(r#"height="10" preserveAspectRatio="none">"#), "forwarded: {out}");
+
     // by-id link → just that element, placed with a translate
     let main = format!(r##"{XW}<use href="logo.svg#mark" x="5" y="5"/></svg>"##);
     let out = compile_linked(&main, &[("logo.svg", &logo)]);

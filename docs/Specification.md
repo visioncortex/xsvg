@@ -152,7 +152,9 @@ self-contained (no dependence on the browser's spotty external-`<use>` support).
 
 - **Whole file** → the dependency is inlined as a nested `<svg x y width height viewBox>…</svg>`, so
   its `viewBox` and SVG's own viewport fit place and scale it. `width`/`height` default to the
-  dependency's intrinsic size.
+  dependency's intrinsic size. A `preserveAspectRatio` on the `<use>` is forwarded to that
+  viewport: the default (`xMidYMid meet`) letterboxes the drawing inside the frame; `none`
+  stretches it to the frame — what an editor's free resize of a linked drawing means.
 - **By id** (`#icon`) → just that compiled element, placed by `x`/`y` and (if `width`/`height` given)
   uniformly scaled to that size against the **element's own extent** — a declared one (a nested
   `<svg>`'s viewBox, or explicit `width`/`height`), else its drawn geometry's bounding box. So

@@ -2015,8 +2015,16 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
                 .attribute("viewBox")
                 .map(|v| format!(" viewBox=\"{v}\""))
                 .unwrap_or_default();
+            // The referrer decides how its frame fits the dependency's viewBox:
+            // `preserveAspectRatio` on the <use> is forwarded to the viewport it
+            // becomes (default `xMidYMid meet` letterboxes; `none` stretches —
+            // what an editor's free resize of a linked drawing wants).
+            let par = node
+                .attribute("preserveAspectRatio")
+                .map(|v| format!(" preserveAspectRatio=\"{v}\""))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "<svg{pos} x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{vb}>{inner}</svg>",
+                "<svg{pos} x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{vb}{par}>{inner}</svg>",
                 fmt(x),
                 fmt(y),
                 fmt(w.unwrap_or(iw)),
