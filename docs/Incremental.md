@@ -68,6 +68,9 @@ nothing about them changed. The `NodeKeys` seam removes that: a host supplies
 `key(byte_start) → stable key` and calls the `*_keyed_impl` variants
 (`compile_keyed_impl`, `compile_fragment_keyed_impl`, plus `_linked_` forms). With
 keys, identity emits as `data-xsvg-node="<key>"`, def ids become `x-flt-<key>` etc.,
+a keyed `<x:textbox>` also stamps its authored frame as `data-xsvg-frame="x y w h"`
+(what an editor selects, hits and resizes is the frame the text flows in, not the
+ink it shows; position-mapped and viewer output are unchanged),
 and an unchanged fragment's output is **byte-stable under text shifts** (pinned by
 `keyed_fragment_output_is_byte_stable_under_text_shifts`). Hosts MUST key every
 element — emitters tag nested elements too (warp children, paragraphs); an unkeyed

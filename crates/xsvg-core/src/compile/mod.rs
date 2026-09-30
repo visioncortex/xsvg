@@ -263,6 +263,32 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
     }
     format!(" data-xsvg-pos=\"{}-{}\"", r.start, r.end)
 }
+/// The authored frame of a framed element, for keyed (editor) output only:
+/// ` data-xsvg-frame="x y w h"` in the element's own user space. A textbox
+/// compiles to the glyphs it shows, so its rendered bbox is the ink — but
+/// what an editor selects, hits and resizes is the frame the text flows in
+/// (Slides: a click anywhere in the box). Omitted for `in="#rect"` geometry
+/// (the target rect is the frame there) and outside keyed mode, so viewer
+/// output is untouched.
+fn frame_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
+    if !ctx.sourcemap.get() || ctx.key_for(node.range().start).is_none() || node.has_attribute("in") {
+        return String::new();
+    }
+    let (Some(w), Some(h)) = (
+        node.attribute("width").and_then(parse_num),
+        node.attribute("height").and_then(parse_num),
+    ) else {
+        return String::new();
+    };
+    format!(
+        " data-xsvg-frame=\"{} {} {} {}\"",
+        fmt(attr_num(node, "x", 0.0)),
+        fmt(attr_num(node, "y", 0.0)),
+        fmt(w),
+        fmt(h)
+    )
+}
+
 /// Pure compile entry: no wasm/JS types, so it is unit-testable on native targets.
 /// Cross-file `<use>` links degrade (no resolver) — use [`compile_linked_impl`] to link.
 pub fn compile_impl(
@@ -1020,7 +1046,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let tb: elements::Textbox = params_of(node);
     let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node);
-    let pos = pos_attr(node, ctx);
+    let pos = format!("{}{}", pos_attr(node, ctx), frame_attr(node, ctx));
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
     // space-before/after. Rectangular geometry only (own box or `in="#rect"`);

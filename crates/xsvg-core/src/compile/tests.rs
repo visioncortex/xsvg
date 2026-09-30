@@ -3014,6 +3014,26 @@ fn compile_linked(main: &str, files: &[(&str, &str)]) -> String {
 }
 
 #[test]
+fn keyed_textboxes_carry_their_frame() {
+    // an editor selects and resizes the FRAME a textbox flows in, not the
+    // ink it shows: keyed output says where that frame is; viewer output
+    // (unkeyed, or sourcemapped by position) does not change
+    struct Keys;
+    impl NodeKeys for Keys {
+        fn key(&self, _: usize) -> Option<String> {
+            Some("n1".into())
+        }
+    }
+    let main = format!(r##"{XW}<x:textbox x="10" y="20" width="200" height="80" font-size="18">Hi</x:textbox></svg>"##);
+    let keyed = compile_keyed_impl(&main, "balanced", true, &Keys, &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert!(keyed.contains(r#"data-xsvg-frame="10 20 200 80""#), "keyed: {keyed}");
+    let mapped = compile_impl(&main, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert!(!mapped.contains("data-xsvg-frame"), "position-mapped output is unchanged: {mapped}");
+    let plain = compile_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert!(!plain.contains("data-xsvg-frame"), "viewer output is unchanged: {plain}");
+}
+
+#[test]
 fn use_links_external_files() {
     let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
 
