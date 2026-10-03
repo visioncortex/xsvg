@@ -43,14 +43,14 @@ pub(super) fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     ) {
         Some(od) if !od.is_empty() => {
             out.push_str("<path");
-            copy_attrs(node, out, skip, ctx);
+            copy_attrs(node, out, skip);
             out.push_str(&pos_attr(node, ctx));
             out.push_str(&format!(" d=\"{od}\"/>"));
         }
         Some(_) => {
             // legitimately empty (e.g. an inset larger than the region)
             out.push_str("<g");
-            copy_attrs(node, out, skip, ctx);
+            copy_attrs(node, out, skip);
             out.push_str(&pos_attr(node, ctx));
             out.push_str("/>");
         }
@@ -144,9 +144,7 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             "detail",
             "align",
             "start",
-        ],
-        ctx,
-    );
+        ]);
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     match field {
@@ -211,9 +209,7 @@ pub(super) fn warp_child_markup(child: roxmltree::Node, ctx: &Ctx) -> Result<Str
             &mut s,
             &[
                 "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
-            ],
-            ctx,
-        );
+            ]);
         s.push_str(&pos_attr(child, ctx));
         s.push_str(&format!(" d=\"{d}\"/>"));
         return Ok(s);
@@ -343,7 +339,7 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         ));
         out.push_str(&markers);
         out.push_str("<g");
-        copy_attrs(node, out, &["op"], ctx);
+        copy_attrs(node, out, &["op"]);
         out.push_str(&pos_attr(node, ctx));
         out.push('>');
         for (m, _) in &markups {
@@ -369,14 +365,14 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     match boolean_svg_paths(&operands, op, ctx.quality.tolerance()) {
         Some(d) if !d.is_empty() => {
             out.push_str("<path");
-            copy_attrs(node, out, &["op"], ctx);
+            copy_attrs(node, out, &["op"]);
             out.push_str(&pos_attr(node, ctx));
             out.push_str(&format!(" d=\"{d}\"/>"));
         }
         Some(_) => {
             // a legitimately empty result (e.g. disjoint intersect)
             out.push_str("<g");
-            copy_attrs(node, out, &["op"], ctx);
+            copy_attrs(node, out, &["op"]);
             out.push_str(&pos_attr(node, ctx));
             out.push_str("/>");
         }

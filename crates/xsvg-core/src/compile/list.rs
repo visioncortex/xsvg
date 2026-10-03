@@ -44,7 +44,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let item_spacing = lp.item_spacing.unwrap_or(size * 0.35);
     let list_kind = lp.list.as_str();
     let marker_scale = lp.marker_size.max(0.0);
-    let marker_fill = resolve_var(lp.marker_fill.as_deref().unwrap_or(fill)).into_owned();
+    let marker_fill = paint(lp.marker_fill.as_deref().unwrap_or(fill));
     let valign = VAlign::parse(lp.valign.as_str());
 
     let fm = m.font_metrics(&style, size);

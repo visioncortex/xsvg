@@ -367,34 +367,160 @@ fn sanitize(svg: &str, node: roxmltree::Node, ctx: &Ctx) -> Option<String> {
 
     let prev_sourcemap = ctx.sourcemap.replace(false);
     let prev_in_plugin = ctx.in_plugin.replace(true);
+    let mut lowered = String::new();
+    for child in doc.root_element().children() {
+        serialize(child, &mut lowered, false, ctx);
+    }
+    ctx.sourcemap.set(prev_sourcemap);
+    ctx.in_plugin.set(prev_in_plugin);
+
     // Ids this module emits are namespaced to *this* element, so two instances of the
     // same generator cannot collide with each other either (docs/Sandbox.md §4).
-    let prev_ids = ctx
-        .plugin_ids
-        .replace(format!("x-plg-{}-", super::gen_id_seed(node, ctx)));
-    let before = ctx.plugin_drops.get();
-
-    let mut buf = String::new();
-    for child in doc.root_element().children() {
-        serialize(child, &mut buf, false, ctx);
-    }
+    let scope = format!("x-plg-{}-", super::gen_id_seed(node, ctx));
+    let (mut out, dropped) = confine(&lowered, &scope)?;
 
     // Say what was taken away. A generator whose output reached for the network is
     // either compromised or confused, and either way the drawing is now missing
     // something the module meant to draw — that is worth surfacing, not swallowing.
-    let dropped = ctx.plugin_drops.get() - before;
     if dropped > 0 {
-        buf.insert_str(
+        out.insert_str(
             0,
             &format!(
                 "<!-- xsvg: {dropped} URL(s) in generator output pointed outside the document — dropped (docs/Sandbox.md) -->"
             ),
         );
     }
-    ctx.sourcemap.set(prev_sourcemap);
-    ctx.in_plugin.set(prev_in_plugin);
-    *ctx.plugin_ids.borrow_mut() = prev_ids;
-    Some(buf)
+    Some(out)
+}
+
+/// The sandbox's output rules (docs/Sandbox.md §4), applied to generator markup
+/// **after** the core has lowered it — the one place every emitter's output passes.
+///
+/// They used to live in `copy_attrs`, and that was the mistake: a generator may emit
+/// xsvg, and xsvg text lowers through emitters that never call `copy_attrs`. A module
+/// emitting `<x:textbox>` got a linked run's `javascript:` href, a highlight's remote
+/// `url()` and a run's remote paint straight through. Enforcing the policy on the
+/// finished markup makes it independent of which emitter produced it, including
+/// emitters that do not exist yet.
+///
+/// Returns the rewritten markup and how many URLs were dropped.
+fn confine(lowered: &str, scope: &str) -> Option<(String, u32)> {
+    const XLINK: &str = "http://www.w3.org/1999/xlink";
+    const XML: &str = "http://www.w3.org/XML/1998/namespace";
+    let wrapped = format!("<svg xmlns=\"{SVG_NS}\" xmlns:xlink=\"{XLINK}\">{lowered}</svg>");
+    let doc = roxmltree::Document::parse(&wrapped).ok()?;
+    let mut out = String::with_capacity(lowered.len());
+    let mut dropped = 0u32;
+
+    fn write(n: roxmltree::Node, out: &mut String, scope: &str, dropped: &mut u32) {
+        if n.is_text() {
+            push_escaped(out, n.text().unwrap_or(""), false);
+            return;
+        }
+        if n.is_comment() {
+            out.push_str("<!--");
+            out.push_str(n.text().unwrap_or(""));
+            out.push_str("-->");
+            return;
+        }
+        if !n.is_element() {
+            return; // processing instructions have no place in the output
+        }
+        let name = n.tag_name().name();
+        if n.tag_name().namespace() != Some(SVG_NS) {
+            return; // the serializer already drops these; never re-admit one
+        }
+        // `<foreignObject>` is an escape hatch into HTML parsing; a stylesheet would
+        // restyle the *document*, not just this element, and can `@import`. Neither
+        // has any business coming out of a geometry generator.
+        if matches!(name, "foreignObject" | "style" | "script") {
+            out.push_str(&format!("<!-- xsvg: <{name}> from a generator — dropped -->"));
+            return;
+        }
+        out.push('<');
+        out.push_str(name);
+        for a in n.attributes() {
+            let attr = match a.namespace() {
+                None => a.name().to_string(),
+                Some(XLINK) if a.name() == "href" => "href".to_string(),
+                Some(XML) => format!("xml:{}", a.name()),
+                Some(_) => continue,
+            };
+            if attr.starts_with("on") {
+                continue; // handlers are outside the static subset for everyone
+            }
+            let mut value = a.value().to_string();
+            if matches!(attr.as_str(), "href" | "src") {
+                if !plugin_url_ok(&value) {
+                    *dropped += 1;
+                    continue; // drop the URL; the element stays, inert
+                }
+                if let Some(id) = value.trim().strip_prefix('#') {
+                    value = format!("#{scope}{id}");
+                }
+            } else if attr == "id" {
+                value = format!("{scope}{value}");
+            }
+            if value.contains("url(") {
+                value = scope_urls(&value, scope, dropped);
+            }
+            out.push(' ');
+            out.push_str(&attr);
+            out.push_str("=\"");
+            push_escaped(out, &value, true);
+            out.push('"');
+        }
+        if n.has_children() {
+            out.push('>');
+            for c in n.children() {
+                write(c, out, scope, dropped);
+            }
+            out.push_str("</");
+            out.push_str(name);
+            out.push('>');
+        } else {
+            out.push_str("/>");
+        }
+    }
+
+    for c in doc.root_element().children() {
+        write(c, &mut out, scope, &mut dropped);
+    }
+    Some((out, dropped))
+}
+
+/// Whether a URL is one generator output may name: a same-document fragment, or an
+/// inline image. Everything else — a remote origin, `javascript:`, any other scheme —
+/// would let untrusted output *act* instead of draw.
+fn plugin_url_ok(url: &str) -> bool {
+    let u = url.trim();
+    u.starts_with('#') || u.to_ascii_lowercase().starts_with("data:image/")
+}
+
+/// Namespace every `url(#id)` in a value to `scope`, and neutralize any `url(…)` that
+/// points out of the document. Applies to every attribute, not just `style`: `fill`,
+/// `stroke` and `filter` all take a `url(…)`, so a paint server is the same egress
+/// channel wearing a different attribute name.
+fn scope_urls(value: &str, scope: &str, dropped: &mut u32) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(at) = rest.find("url(") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 4..];
+        let Some(close) = after.find(')') else {
+            break; // malformed; leave the remainder to the copy below
+        };
+        let target = after[..close].trim().trim_matches(['"', '\''].as_slice());
+        if let Some(id) = target.strip_prefix('#') {
+            out.push_str(&format!("url(#{scope}{id})"));
+        } else {
+            *dropped += 1;
+            out.push_str("none");
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The visible extent of a compiled fragment, for a container to lay out against.

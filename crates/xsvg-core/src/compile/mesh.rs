@@ -134,9 +134,7 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out,
         &[
             "cols", "rows", "x", "y", "width", "height", "fill", "points",
-        ],
-        ctx,
-    );
+        ]);
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     if !lower_mesh(&mesh, &gen_id_seed(node, ctx), out, ctx) {
@@ -396,9 +394,7 @@ pub(super) fn emit_meshgradient_fill(
             &[
                 "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
                 "x1", "y1", "x2", "y2",
-            ],
-            ctx,
-        );
+            ]);
         out.push_str(&format!(" fill=\"none\" d=\"{shape_d}\"/>"));
     }
     true

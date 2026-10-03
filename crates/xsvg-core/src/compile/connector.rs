@@ -117,7 +117,8 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     };
     let p = |pt: Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
 
-    let stroke = resolve_var(&cn.stroke).into_owned();
+    // only reaches the arrowhead's raw `fill=`; the path's own stroke goes via copy_attrs
+    let stroke = paint(&cn.stroke);
     let sw = cn.stroke_width;
     let size = cn.arrow_size.unwrap_or((sw * 3.5).max(7.0)).max(0.0);
     // How far a `route="curve"` bows out, in px — a FIXED amount (not scaled by the
@@ -597,9 +598,7 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     copy_attrs(
         node,
         out,
-        &["from", "to", "from-point", "to-point", "route", "arrow", "arrow-size", "bulge", "fill"],
-        ctx,
-    );
+        &["from", "to", "from-point", "to-point", "route", "arrow", "arrow-size", "bulge", "fill"]);
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));
     out.push_str(&heads); // arrowheads paint on top of the line

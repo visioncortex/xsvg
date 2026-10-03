@@ -84,16 +84,33 @@ on the host implementing anything.
 
 Applied to everyone, author and plugin alike:
 
+- **Every value stays inside its attribute.** Whatever an author, a theme token or a
+  generator supplies is escaped where it is written, so a value containing `"` cannot
+  close its attribute and open one of its own. That sounds like a given and was not:
+  three dozen emitters formatted values in raw, and `fill='#000" onload="…'` came out
+  as a live handler. `tests/attribute_injection.rs` probes every attribute of every
+  dataset sample for it; `preserveAspectRatio`, which has a closed grammar, is forwarded
+  only when it is a value SVG defines.
 - `<script>`, `<animate>`, `<animateMotion>`, `<animateTransform>`, `<set>` and
   `<discard>` are dropped with a marker — they cannot exist in the static output
   contract.
 - `on*` event handlers are stripped.
 - Foreign-namespace elements are dropped.
 
-Applied **only to plugin output**, because only plugin output is untrusted:
+Applied **only to plugin output**, because only plugin output is untrusted. These run
+as **one pass over the markup after the core has lowered it** (`confine` in
+`plugin.rs`), not inside any emitter. A generator may emit xsvg, and xsvg lowers
+through many emitters; when the rules lived in one of them (`copy_attrs`), a module
+emitting an `<x:textbox>` got a linked run's `javascript:` href and a remote paint
+straight through the text emitters, which never called it. Applied to the finished
+markup, the rules do not depend on which emitter wrote it, including ones not yet
+written.
 
-- **`<foreignObject>` is dropped.** It is an escape hatch into HTML parsing, and a
-  geometry generator has no business emitting one.
+- **`<foreignObject>` and `<style>` are dropped.** The first is an escape hatch into
+  HTML parsing; the second would restyle the whole *document*, not just this element,
+  and can `@import`. A geometry generator has no business emitting either.
+- **No cross-file links.** A `<use href="other.xsvg">` in generator output is not
+  followed: following it would make the host read another file on the module's say.
 - **URL-valued attributes are allowlisted.** `href`, `xlink:href` and `src` may name
   a same-document `#fragment` or a `data:image/…` payload. Everything else — a remote
   URL, `javascript:`, any other scheme — is dropped.
@@ -147,10 +164,13 @@ from becoming a channel.
 | `integrity` verification | all three hosts |
 | Empty import object | all three hosts |
 | Fuel metering | native hosts (wasmi) |
-| Output filtering | `crates/xsvg-core/src/compile/plugin.rs` + `mod.rs`, host-independent |
+| Values escaped into their attribute | every emitter (`esc`/`paint` in `compile/mod.rs`), probed by `tests/attribute_injection.rs` |
+| Plugin output rules | `confine` in `compile/plugin.rs`, one pass after lowering, host-independent |
 
 Pinned by `plugin_output_cannot_reach_the_network`,
-`plugin_ids_cannot_shadow_the_document`, and the static-subset tests in
+`plugin_ids_cannot_shadow_the_document`,
+`plugin_output_is_confined_however_it_was_lowered` (a generator emitting xsvg text —
+the case the first two missed), `tests/attribute_injection.rs`, and the static-subset tests in
 `crates/xsvg-core/src/compile/tests.rs`; acquisition and execution by
 `npm run check:sandbox` (`scripts/sandbox-check.mjs`) and
 `a_module_is_never_fetched_over_the_network` in the CLI.

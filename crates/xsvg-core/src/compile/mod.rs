@@ -124,14 +124,6 @@ struct Ctx<'a> {
     /// Set while generator output is being sanitized, so a module emitting an
     /// element in its own namespace degrades instead of recursing forever.
     in_plugin: std::cell::Cell<bool>,
-    /// Prefix for ids a generator emits, unique to the element that produced them —
-    /// empty outside plugin output (docs/Sandbox.md §4). Without it a module could
-    /// emit `id="logo"` and capture the document's own `url(#logo)`.
-    plugin_ids: std::cell::RefCell<String>,
-    /// URL-valued attributes dropped from generator output because they pointed
-    /// somewhere the sandbox does not allow. Counted rather than silently swallowed,
-    /// so the wrapper can say the drawing is missing something and why.
-    plugin_drops: std::cell::Cell<u32>,
 }
 
 /// The platform seams a compile runs against, bundled so entry points don't grow
@@ -197,8 +189,6 @@ impl<'a> Ctx<'a> {
             generators: seams.generators,
             imports,
             in_plugin: std::cell::Cell::new(false),
-            plugin_ids: std::cell::RefCell::new(String::new()),
-            plugin_drops: std::cell::Cell::new(0),
         }
     }
 
@@ -876,7 +866,10 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             .attribute("href")
             .or_else(|| node.attribute((XLINK_NS, "href")))
         {
-            if is_external_href(href) {
+            // Not from inside generator output: a link makes the HOST fetch and bake
+            // another file, and a module gets no say in what the host reads. The <use>
+            // falls through and `confine` drops its non-fragment href.
+            if is_external_href(href) && !ctx.in_plugin.get() {
                 emit_link(node, href, out, ctx);
                 return;
             }
@@ -902,13 +895,6 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
-    // `<foreignObject>` is an escape hatch out of SVG and into HTML parsing rules. An
-    // author may have a reason for one; a geometry generator does not, and its output
-    // is untrusted (docs/Sandbox.md §4), so it does not get to open that door.
-    if name == "foreignObject" && ctx.in_plugin.get() {
-        out.push_str("<!-- xsvg: <foreignObject> from a generator — dropped -->");
-        return;
-    }
 
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);
@@ -945,10 +931,10 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     }
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["filter"], ctx);
+            copy_attrs(node, out, &["filter"]);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &[], ctx),
+        None => copy_attrs(node, out, &[]),
     }
     out.push_str(&pos_attr(node, ctx));
     if !is_root {
@@ -1006,10 +992,10 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("<path");
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["x", "y", "width", "height", "filter"], ctx);
+            copy_attrs(node, out, &["x", "y", "width", "height", "filter"]);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &["x", "y", "width", "height"], ctx),
+        None => copy_attrs(node, out, &["x", "y", "width", "height"]),
     }
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" d=\"M{x},{y} h{w} v{h} h{} Z\"/>", -w));
@@ -1026,7 +1012,7 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
 
     out.push_str("<text");
-    copy_attrs(node, out, &["inline-size", "line-height"], ctx);
+    copy_attrs(node, out, &["inline-size", "line-height"]);
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let base = [EmitAttrs::default()];
@@ -2037,17 +2023,22 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
                 .map(|c| &compiled[c.range()])
                 .collect::<Vec<_>>()
                 .concat();
+            // Read back out of the compiled dependency, so the parse has already
+            // undone the escaping its own emission applied — re-escape on the way in.
             let vb = root
                 .attribute("viewBox")
-                .map(|v| format!(" viewBox=\"{v}\""))
+                .map(|v| format!(" viewBox=\"{}\"", esc(v)))
                 .unwrap_or_default();
             // The referrer decides how its frame fits the dependency's viewBox:
             // `preserveAspectRatio` on the <use> is forwarded to the viewport it
             // becomes (default `xMidYMid meet` letterboxes; `none` stretches —
-            // what an editor's free resize of a linked drawing wants).
+            // what an editor's free resize of a linked drawing wants). Forwarded only
+            // when it is a value SVG defines: the attribute has a closed grammar, so
+            // anything else is either a typo or an attempt to smuggle markup.
             let par = node
                 .attribute("preserveAspectRatio")
-                .map(|v| format!(" preserveAspectRatio=\"{v}\""))
+                .filter(|v| valid_preserve_aspect_ratio(v))
+                .map(|v| format!(" preserveAspectRatio=\"{}\"", v.trim()))
                 .unwrap_or_default();
             out.push_str(&format!(
                 "<svg{pos} x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{vb}{par}>{inner}</svg>",
@@ -2468,13 +2459,13 @@ fn text_border_attrs(node: roxmltree::Node) -> String {
     let bc = node.attribute((XSVG_NS, "border-color"));
     if bw.is_some() || bc.is_some() {
         let w = bw.unwrap_or(3.0).max(0.0);
-        let color = resolve_var(bc.unwrap_or("#000000"));
+        let color = paint(bc.unwrap_or("#000000"));
         let mut s = format!(
             " stroke=\"{color}\" stroke-width=\"{}\" paint-order=\"stroke\" stroke-linejoin=\"round\"",
             fmt(w * 2.0)
         );
         if let Some(op) = node.attribute((XSVG_NS, "border-opacity")) {
-            s.push_str(&format!(" stroke-opacity=\"{op}\""));
+            s.push_str(&format!(" stroke-opacity=\"{}\"", esc(op)));
         }
         return s;
     }
@@ -2490,7 +2481,7 @@ fn text_border_attrs(node: roxmltree::Node) -> String {
         "paint-order",
     ] {
         if let Some(v) = node.attribute(name) {
-            s.push_str(&format!(" {name}=\"{v}\""));
+            s.push_str(&format!(" {name}=\"{}\"", paint(v)));
         }
     }
     s
@@ -2500,8 +2491,9 @@ fn text_border_attrs(node: roxmltree::Node) -> String {
 /// output of create-outlines (§6.12) and text-on-path (§6.13). `paths` are the glyph
 /// path `d` strings (one per line for a box, one for a warped run).
 fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, paths: &[String]) {
-    let (fill, stroke) = (resolve_var(fill), resolve_var(stroke));
-    out.push_str(&format!("<g fill=\"{fill}\"{stroke}{pos}>"));
+    // `stroke` is the attribute string text_border_attrs built, values already
+    // resolved and escaped; `fill` is a bare value.
+    out.push_str(&format!("<g fill=\"{}\"{stroke}{pos}>", paint(fill)));
     for d in paths {
         out.push_str("<path d=\"");
         push_escaped(out, d, true);
@@ -2516,11 +2508,11 @@ fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, pat
 fn push_font_attrs(out: &mut String, style: &TextStyle, size: f64, fill: &str) {
     out.push_str(&format!(
         " font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
-        style.family,
+        esc(&style.family),
         fmt(size),
-        style.weight,
-        style.style,
-        resolve_var(fill)
+        esc(&style.weight),
+        esc(&style.style),
+        paint(fill)
     ));
 }
 
@@ -2578,7 +2570,7 @@ fn write_area_text(
         out.push_str(" direction=\"rtl\"");
     }
     out.push_str(pos);
-    out.push_str(&resolve_var(stroke)); // border/stroke (§6.17) — behind the fill via paint-order
+    out.push_str(stroke); // border/stroke (§6.17), values resolved + escaped where built
     if style.letter_spacing != 0.0 {
         out.push_str(&format!(
             " letter-spacing=\"{}\"",
@@ -2671,7 +2663,7 @@ fn emit_highlights(
                     fmt(line.baseline - fm.ascent),
                     fmt(w),
                     fmt(fm.ascent + fm.descent),
-                    resolve_var(color)
+                    paint(color)
                 ));
             }
             if !rtl {
@@ -3143,6 +3135,40 @@ fn load_theme(doc: &roxmltree::Document) {
 /// Resolve every `var(name)` / `var(name, fallback)` in an attribute value against
 /// the theme's color tokens. An unknown token with no fallback is left verbatim
 /// (renders as the property's initial value, like a dangling CSS variable).
+/// An authored string made safe to place between the quotes of an output attribute.
+///
+/// Every value an author (or a theme token, or a generator) supplies is untrusted *as
+/// markup*: formatted in raw, a value containing `"` closes the attribute and can open
+/// a new one — `fill='#000" onload="…'` came out as a live handler, which is exactly
+/// what the static subset exists to rule out. `tests/attribute_injection.rs` probes
+/// every attribute of every dataset sample for this.
+/// `none`, or an alignment keyword optionally followed by `meet`/`slice` — the
+/// whole grammar of `preserveAspectRatio` (SVG 2 §8.2).
+fn valid_preserve_aspect_ratio(v: &str) -> bool {
+    const ALIGN: [&str; 10] = [
+        "none", "xMinYMin", "xMidYMin", "xMaxYMin", "xMinYMid", "xMidYMid", "xMaxYMid",
+        "xMinYMax", "xMidYMax", "xMaxYMax",
+    ];
+    let mut it = v.split_ascii_whitespace();
+    match (it.next(), it.next(), it.next()) {
+        (Some(a), None, None) => ALIGN.contains(&a),
+        (Some(a), Some(m), None) => ALIGN.contains(&a) && matches!(m, "meet" | "slice"),
+        _ => false,
+    }
+}
+
+pub(super) fn esc(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    push_escaped(&mut out, v, true);
+    out
+}
+
+/// A paint value for output: theme tokens resolved, *then* escaped — a token's value
+/// is authored too, so resolving after escaping would let it carry the quote.
+pub(super) fn paint(v: &str) -> String {
+    esc(&resolve_var(v))
+}
+
 fn resolve_var(v: &str) -> std::borrow::Cow<'_, str> {
     if !v.contains("var(") {
         return std::borrow::Cow::Borrowed(v);
@@ -3184,50 +3210,7 @@ fn font_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
     THEME.with(|t| t.borrow().fonts.get(name).cloned())
 }
 
-/// Attributes whose value is a URL, and so a way for markup to reach the network
-/// rather than merely draw (docs/Sandbox.md §4).
-const URL_ATTRS: [&str; 3] = ["href", "src", "xlink:href"];
-
-/// Whether a URL is one generator output may name: a same-document fragment, or an
-/// inline image. Everything else — a remote origin, `javascript:`, any other scheme —
-/// would let untrusted output *act* instead of draw.
-fn plugin_url_ok(url: &str) -> bool {
-    let u = url.trim();
-    u.starts_with('#') || u.to_ascii_lowercase().starts_with("data:image/")
-}
-
-/// Rewrite a generator's attribute value for the sandbox: namespace the ids it
-/// mentions, and neutralize any `url(…)` that points out of the document.
-///
-/// Applies to **every** value, not just `style`: `fill`, `stroke` and `filter` all
-/// take a `url(…)`, so a paint server is the same egress channel wearing a different
-/// attribute name.
-fn scope_plugin_value(value: &str, prefix: &str, drops: &std::cell::Cell<u32>) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut rest = value;
-    while let Some(at) = rest.find("url(") {
-        out.push_str(&rest[..at]);
-        let after = &rest[at + 4..];
-        let Some(close) = after.find(')') else {
-            break; // malformed; leave the remainder to the copy below
-        };
-        let target = after[..close].trim().trim_matches(['"', '\''].as_slice());
-        if let Some(id) = target.strip_prefix('#') {
-            out.push_str(&format!("url(#{prefix}{id})"));
-        } else {
-            drops.set(drops.get() + 1);
-            out.push_str("none");
-        }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx) {
-    // Generator output is untrusted in ways authored markup is not (docs/Sandbox.md).
-    let scope = ctx.plugin_ids.borrow();
-    let plugin = !scope.is_empty();
+fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     for attr in node.attributes() {
         if skip.contains(&attr.name()) {
             continue;
@@ -3242,23 +3225,9 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx)
             Some(XML_NS) => "xml:",
             Some(_) => continue, // x: (consumed) and foreign metadata
         };
-        let mut value = resolve_var(attr.value()).into_owned();
-        if plugin {
-            if URL_ATTRS.contains(&attr.name()) {
-                if !plugin_url_ok(&value) {
-                    ctx.plugin_drops.set(ctx.plugin_drops.get() + 1);
-                    continue; // drop the attribute; the element stays, inert
-                }
-                if let Some(id) = value.trim().strip_prefix('#') {
-                    value = format!("#{}{}", *scope, id);
-                }
-            } else if attr.name() == "id" {
-                value = format!("{}{}", *scope, value);
-            }
-            if value.contains("url(") {
-                value = scope_plugin_value(&value, &scope, &ctx.plugin_drops);
-            }
-        }
+        // Generator output is confined after lowering (plugin.rs `confine`), so this
+        // stays the plain rule set every document gets.
+        let value = resolve_var(attr.value());
         out.push(' ');
         out.push_str(prefix);
         out.push_str(attr.name());

@@ -14,6 +14,31 @@ partial one.
 
 ## [Unreleased]
 
+### Security
+
+- **Authored values could break out of their attribute and add event handlers.** About
+  three dozen emitters formatted values straight into their output, so a `"` in a
+  value closed the attribute and opened another: `fill='#000" onload="…'` compiled to
+  a live `onload` on text, connectors, charts, tables, lists, textpaths, highlights,
+  theme tokens, and the viewport a cross-file link bakes (`preserveAspectRatio`). That
+  breaks the static-subset promise for *authored* documents. Opening an untrusted
+  `.xsvg` in the viewer or the VS Code extension could run script. Every value is now
+  escaped where it is written (theme tokens after they resolve, since a token's value
+  is authored too), and `preserveAspectRatio` is forwarded only when it is a value SVG
+  defines. Legitimate documents compile byte-identically: all 51 samples are unchanged.
+- **Generator output could bypass the sandbox by emitting xsvg text.** The output rules
+  lived in one emitter (`copy_attrs`), and text runs lower through others. A module
+  emitting an `<x:textbox>` could carry a linked run's `javascript:` href, a highlight's
+  remote `url()`, or a run's remote paint straight through. The rules now run as one
+  pass over the generator's markup *after* lowering, so the emitter doesn't matter.
+  The pass also drops `<style>` (it restyles the whole document and can `@import`) and
+  stops a generator's `<use href="file">` from making the host read another file.
+- `tests/attribute_injection.rs` appends a quote-breaking payload to every attribute of
+  every dataset sample, one at a time, and requires well-formed output with nothing
+  smuggled in. It found 36 distinct leaking paths when first run. It probes once per
+  element, attribute and keyword context, which finds all 36 at a sixth of the cost of
+  probing every occurrence.
+
 ### Fixed
 
 - **Mesh gradients render exactly in resvg.** A mesh lowers to tiny texel-aligned PNGs

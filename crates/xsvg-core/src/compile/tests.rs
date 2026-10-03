@@ -4000,7 +4000,7 @@ impl GeneratorHost for MockHost {
             return ElementInfo::Unbound;
         }
         match tag {
-            "bar" | "evil" | "nested" | "warped" | "exfil" | "shadow" => ElementInfo::Ready {
+            "bar" | "evil" | "nested" | "warped" | "exfil" | "shadow" | "prose" => ElementInfo::Ready {
                 input: InputMode::None,
                 children: ChildMode::None,
             },
@@ -4063,6 +4063,11 @@ impl GeneratorHost for MockHost {
             "exfil" => GenResult::Svg(
                 r##"<a href="javascript:alert(1)"><rect x="0" y="0" width="1" height="1"/></a><image href="https://attacker.example/p.png" x="0" y="0" width="1" height="1"/><foreignObject x="0" y="0" width="1" height="1"><iframe src="https://attacker.example/"/></foreignObject><rect x="0" y="0" width="2" height="2" fill="url(https://attacker.example/p.svg#g)" style="stroke: url('https://attacker.example/s.svg#h')"/><use href="#authored"/>"##
                     .into(),
+            ),
+            // a module that emits xsvg TEXT — whose runs lower through emitters that
+            // never touched copy_attrs, where the sandbox's rules used to live
+            "prose" => GenResult::Svg(
+                r##"<x:textbox xmlns:x="https://xsvg.visioncortex.org" x="0" y="0" width="200" height="40" font-size="12">see <tspan href="javascript:alert(1)">here</tspan>, <tspan fill="url(https://attacker.example/p.svg#g)" x:highlight="url(https://attacker.example/h.svg#h)">there</tspan> and <tspan href="#own">mine</tspan></x:textbox><use href="secrets.xsvg" x="0" y="0"/><style>@import url(https://attacker.example/s.css);</style>"##.into(),
             ),
             // a module naming ids the document also uses, and referring to its own
             "shadow" => GenResult::Svg(
@@ -4650,4 +4655,62 @@ fn an_author_may_still_write_what_a_generator_may_not() {
     ));
     assert!(out.contains("https://example.com/p.png"), "{out}");
     assert!(out.contains(r##"id="brand""##), "{out}");
+}
+
+
+#[test]
+fn plugin_output_is_confined_however_it_was_lowered() {
+    // The sandbox's output rules used to live in copy_attrs, and a generator may emit
+    // xsvg — whose text runs lower through emitters that never call it. So a module
+    // emitting an <x:textbox> got a linked run's javascript: href, a highlight's
+    // remote url() and a run's remote paint straight through. The rules now run over
+    // the finished markup, so how it was lowered no longer matters.
+    let out = compile_plug(&plug_doc(r##"<c:prose/>"##));
+    assert!(!out.contains("javascript:"), "a linked run carried script: {out}");
+    assert!(!out.contains("attacker.example"), "lowered text reached the network: {out}");
+    // a fragment link inside the module's own output still works, scoped like its ids
+    assert!(out.contains(r##"href="#x-plg-"##), "own fragment link lost or unscoped: {out}");
+    // a cross-file link would make the HOST read another file on the module's say-so
+    assert!(!out.contains("secrets"), "generator output triggered a cross-file link: {out}");
+    // and a stylesheet would restyle the whole document, not just this element
+    assert!(out.contains("<style> from a generator"), "{out}");
+    assert!(out.contains("pointed outside the document"), "{out}");
+}
+
+#[test]
+fn a_forwarded_preserve_aspect_ratio_cannot_carry_markup() {
+    // Forwarded to the viewport a link bakes, and once formatted in raw: a quote in
+    // the value closed the attribute and opened a live onload. The attribute has a
+    // closed grammar, so only values SVG defines are forwarded at all.
+    struct Dep;
+    impl Resolver for Dep {
+        fn resolve(&self, _: &str, _: &str) -> Option<(String, String)> {
+            Some(("dep.xsvg".into(), format!(r##"{XW}<rect width="4" height="4"/></svg>"##)))
+        }
+    }
+    let doc = |par: &str| {
+        let svg = format!(r##"{XW}<use href="dep.xsvg" width="40" height="20" preserveAspectRatio="{par}"/></svg>"##);
+        compile_linked_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner, &Dep, "doc.xsvg").unwrap()
+    };
+    let hostile = doc(r##"none&quot; onload=&quot;alert(1)"##);
+    assert!(!hostile.contains("onload"), "{hostile}");
+    assert!(!hostile.contains("preserveAspectRatio"), "an invalid value is not forwarded: {hostile}");
+    for ok in ["none", "xMaxYMin", "xMidYMid slice"] {
+        assert!(doc(ok).contains(&format!(r##"preserveAspectRatio="{ok}""##)), "{ok} should forward");
+    }
+}
+
+#[test]
+fn a_highlight_colour_cannot_carry_markup() {
+    // x:highlight bakes a <rect>, and its colour was formatted in raw.
+    let out = compile_test(&format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="40" font-size="12">see <tspan x:highlight="#ff0&quot; onload=&quot;alert(1)">this</tspan></x:textbox></svg>"##
+    ));
+    // the escaped value still *contains* the text `onload=`, harmlessly — what must
+    // not exist is an onload ATTRIBUTE, so ask the parser rather than the string
+    let doc = roxmltree::Document::parse(&out).expect("output is well-formed");
+    let smuggled = doc.descendants().any(|n| n.attributes().any(|a| a.name() == "onload"));
+    assert!(!smuggled, "the colour opened an attribute of its own: {out}");
+    let rect = doc.descendants().find(|n| n.has_tag_name("rect")).unwrap();
+    assert_eq!(rect.attribute("fill"), Some(r##"#ff0" onload="alert(1)"##), "kept whole, as one value");
 }

@@ -53,17 +53,17 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node);
     let tp: super::elements::Table = params_of(node);
     let text_fill = resolve_var(&tp.fill).into_owned();
-    let grid = resolve_var(&tp.stroke).into_owned();
+    let grid = paint(&tp.stroke);
     let grid_w = tp.stroke_width.max(0.0);
     let body_bg = node
         .attribute("cell-fill")
-        .map(|v| resolve_var(v).into_owned());
-    let header_bg = resolve_var(&tp.header_fill).into_owned();
+        .map(paint);
+    let header_bg = paint(&tp.header_fill);
     // zebra striping: an alternate background for every other BODY row (rows with
     // no header cell); the first data row is unstriped.
     let stripe = node
         .attribute("stripe")
-        .map(|v| resolve_var(v).into_owned());
+        .map(paint);
     let pad = tp.cell_padding.max(0.0);
     let default_align = tp.align.as_str();
     let default_valign = tp.valign.as_str();
@@ -218,7 +218,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
             let bg = cell
                 .attribute("bg")
-                .map(|v| resolve_var(v).into_owned())
+                .map(paint)
                 .or_else(|| {
                     if header {
                         Some(header_bg.clone())
