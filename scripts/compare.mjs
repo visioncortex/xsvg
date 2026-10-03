@@ -12,6 +12,8 @@
 //
 // Usage:  node scripts/compare.mjs [sample ...]      (default: every dataset sample
 //         except the multi-artboard deck). Requires `npm run dev` running + Edge.
+//         XSVG_SERVER=http://localhost:5174 points it at a dev server on another port
+//         (5173 is Vite's default, so another project may well be holding it).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +23,7 @@ import pixelmatch from "pixelmatch";
 
 const EDGE = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
 const CLI = "./target/release/xsvg";
-const SERVER = "http://localhost:5173";
+const SERVER = process.env.XSVG_SERVER ?? "http://localhost:5173";
 const RENDER_MAX = 800; // longest rendered edge, px
 const PIXEL_WARN = 1.0; // % differing pixels: below = good
 const PIXEL_FAIL = 5.0; // above = investigate
@@ -58,6 +60,14 @@ function edge(extra, wantBuffer = false) {
 // Browser-compiled SVG: dump the preview DOM and slice out the <svg> under #app.
 function browserSvg(sample) {
   const dom = edge(["--virtual-time-budget=6000", "--dump-dom", `${SERVER}/preview/?file=${sample}.xsvg`]);
+  // Refuse to compare against a page that isn't xsvg's. Port 5173 is Vite's default,
+  // so with another project's dev server on it this used to slice out the first <svg>
+  // it found — a 24×24 UI icon — and report every sample as a structural mismatch.
+  // A harness that diffs against the wrong thing is worse than one that stops.
+  if (!/<title>xsvg\b/.test(dom)) {
+    const title = dom.match(/<title>([^<]*)/)?.[1] ?? "no title";
+    throw new Error(`${SERVER} is not xsvg's dev server (page title: "${title}") — set XSVG_SERVER`);
+  }
   const anchor = dom.indexOf('id="app"');
   const start = dom.indexOf("<svg", anchor);
   const end = dom.indexOf("</svg>", start);
