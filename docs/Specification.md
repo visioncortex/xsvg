@@ -555,7 +555,7 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `font-size` | per-run size: a length in user units, or `%` / `em` **of the paragraph's size** (nested runs resolve against the paragraph, not the enclosing run) |
 | `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
 | `href` | a hyperlink: the run lowers to an SVG `<a href>` around its text (paint overrides nest a `<tspan>` inside it); an authored `<a>` child of the box reads the same way. Authored, so it passes verbatim like every authored URL ([Sandbox.md](Sandbox.md) §1) |
-| `x:highlight` | a background colour behind the run (the highlighter). SVG text has no background, so it **bakes to a `<rect>` per run per line before the `<text>`**: the run's advance (in its own style, stretched with a justified line) by the em box of its size (ascent above, descent below the baseline). Plain output is untouched |
+| `x:highlight` | a background colour behind the run (the highlighter). SVG text has no background, so it **bakes to a `<rect>` per run per line before the `<text>`**: the run's advance (in its own style, stretched with a justified line) by the em box of its size (ascent above, descent below the baseline), moved with the run's `baseline-shift` (a length exactly; `super`/`sub`/`%` by Chromium's measured model, ± half the em box and % of the run's size, so another renderer may set a sub/superscript slightly apart from its box). Under `direction="rtl"` highlights lay leftward from the start edge in logical order, which is right for right-to-left text; **mixed bidi is not handled in v0**: an embedded left-to-right word or number is reordered by the renderer and its highlight lands on the wrong glyphs. Plain output is untouched |
 
 **Model (normative).** Runs affect a word's **advance** (weight/style/family/size change glyph
 widths), so each word is measured in its own run style and wrapping stays correct; a run boundary
@@ -567,7 +567,7 @@ the largest run size on it (the paragraph size for a blank line), its advance is
 `line-height`, and the block's cap band runs from the first line's cap-top (at *its* size) through
 every following line's own advance to the last line's descent (at *its* size) — so a line holding a
 larger word stands taller and its neighbours keep their spacing, exactly as a word processor lays
-mixed type. Uniform sizes reduce to the classic constant step. `fit="shrink"` scales run sizes with
+mixed type. Inter-word spaces are measured at the size of the run they sit in, as the renderer draws them, so a line of large type wraps where it would actually overflow. Uniform sizes reduce to the classic constant step. `fit="shrink"` scales run sizes with
 the base and sums the per-line heights. Runs share the paragraph's `letter-spacing` and
 `word-spacing`; `baseline-shift` never changes a line's metrics. Nested `<tspan>`s compose (inner
 wins). `<tbreak/>` still breaks across runs.
@@ -744,8 +744,10 @@ got, and lowers to a `<g>` of drawn bullet shapes, one plain `<text>` of generat
 number/character markers, and **one `<text>` of positioned `<tspan>`s per item** — live and
 selectable, with each item's `<text>` source-mapped to its `<x:li>` (like table cells and
 paragraphs) so editors can address every item's rendered glyphs individually. An item is a **run
-leaf** like a textbox: inline `<tspan>` runs (§6.11, mixed sizes included — a line steps by its
-largest run) render styled, and `<tbreak/>` forces a line within the bullet.
+leaf** like a textbox: inline `<tspan>` runs (§6.11, mixed sizes included — every line steps by its
+own largest run, the first line of an item included, so a large run opening an item pushes the
+item down instead of rising into the one above; the list's top and bottom edges follow its first
+and last lines' sizes) render styled, and `<tbreak/>` forces a line within the bullet.
 
 ```xml
 <x:list x="40" y="80" width="300" list="bullet" font-size="14" item-spacing="5">

@@ -47,7 +47,6 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let marker_fill = paint(lp.marker_fill.as_deref().unwrap_or(fill));
     let valign = VAlign::parse(lp.valign.as_str());
 
-    let fm = m.font_metrics(&style, size);
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
 
     // Pass 1: resolve each item's marker and wrap its text, with baselines laid
@@ -68,6 +67,10 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
     let mut items: Vec<Item> = Vec::new();
     let mut last_baseline = 0.0; // baseline of the last line placed (relative frame)
+    // Sizes of the block's first and last lines: its top edge is the first line's cap
+    // and its bottom edge the last line's descent, each at that line's OWN size, as for
+    // every other text block (§6.11). Uniform lists keep the list size for both.
+    let (mut first_size, mut last_size) = (size, size);
     let mut first = true;
     for li in node
         .children()
@@ -115,34 +118,47 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             },
         };
 
-        // the gap INTO this item uses THIS item's leading (item_advance), so a
-        // smaller item tucks up under its parent instead of inheriting the
-        // previous — larger — item's line height
-        let first_baseline = if first {
-            0.0
-        } else {
-            last_baseline + item_advance + item_spacing
-        };
-        // forced breaks ('\n' from <tbreak/>) split the item into chunks that
-        // wrap independently and step by the item's own advance — a blank
-        // chunk (consecutive breaks) occupies one row, like everywhere else
+        // Every line advances by its OWN size (its largest run) × line-height — the
+        // first line of an item and of each forced chunk included. Stepping into an
+        // item by the item's base size put a 3×-size run's ascent up inside the item
+        // above. The gap is also *this* line's, not the previous item's, so a smaller
+        // sub-point still tucks up under a larger parent.
+        //
+        // `layout_flow_runs` pins its first line at the `y` it is given, so each chunk
+        // is laid out at 0, its first line's size read, and the chunk shifted into
+        // place. A blank chunk (consecutive breaks) occupies one row, like everywhere.
         let mut lines: Vec<PlacedLine> = Vec::new();
-        let mut item_last_b = first_baseline;
+        let mut item_last_b = last_baseline;
+        let mut item_first_b = None;
         if !plain.trim().is_empty() {
-            let mut next_b = first_baseline;
+            // the advance onto the next row: the gap between items, or within one
+            let mut gap = if first { None } else { Some(item_spacing) };
             for flow in split_flows(&segments) {
                 if flow.iter().all(|(t, _)| t.trim().is_empty()) {
-                    item_last_b = next_b;
-                    next_b += item_advance;
+                    item_last_b += gap.map_or(0.0, |g| g + item_advance);
+                    item_first_b.get_or_insert(item_last_b);
+                    gap = Some(0.0);
                     continue;
                 }
-                // within a chunk, lines step by their own largest run (§6.11)
-                let ls = layout_flow_runs(&flow, &styles, text_x, next_b, max_w, m);
-                item_last_b = ls.last().map(|l| l.baseline).unwrap_or(next_b);
-                next_b = item_last_b + item_advance;
+                let mut ls = layout_flow_runs(&flow, &styles, text_x, 0.0, max_w, m);
+                let lead = ls.first().map_or(item_size, |l| l.size) * style.line_height;
+                let at = gap.map_or(0.0, |g| item_last_b + g + lead);
+                for l in &mut ls {
+                    l.baseline += at;
+                }
+                if lines.is_empty() && first {
+                    first_size = ls.first().map_or(item_size, |l| l.size);
+                }
+                item_first_b.get_or_insert(at);
+                item_last_b = ls.last().map_or(at, |l| l.baseline);
+                last_size = ls.last().map_or(item_size, |l| l.size);
                 lines.extend(ls);
+                gap = Some(0.0);
             }
+        } else if !first {
+            item_last_b += item_advance + item_spacing; // an empty item keeps its row
         }
+        let first_baseline = item_first_b.unwrap_or(item_last_b);
         last_baseline = item_last_b;
         items.push(Item {
             col,
@@ -163,14 +179,17 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let block_h = if items.is_empty() {
         0.0
     } else {
-        last_baseline + fm.cap_height + fm.descent
+        let at = |sz: f64| m.font_metrics(&TextStyle { size: sz, ..style.clone() }, sz);
+        last_baseline + at(first_size).cap_height + at(last_size).descent
     };
     let block_top = match (valign, avail_h) {
         (VAlign::Middle, Some(h)) => y + (h - block_h) / 2.0,
         (VAlign::Bottom, Some(h)) => y + (h - block_h),
         _ => y, // top, or no height to align within
     };
-    let offset = block_top + fm.cap_height; // relative baseline 0 → this y
+    // relative baseline 0 → this y, the first line's cap at its own size
+    let first_fm = m.font_metrics(&TextStyle { size: first_size, ..style.clone() }, first_size);
+    let offset = block_top + first_fm.cap_height;
 
     // Pass 2: emit, shifting every relative baseline by `offset`. Markers and text
     // scale with the item's own size; a per-line `font-size` overrides the <text>

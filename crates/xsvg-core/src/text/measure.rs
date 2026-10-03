@@ -60,6 +60,10 @@ pub struct Word {
 pub struct Measured {
     pub words: Vec<Word>,
     pub space: f64,
+    /// Each run style's size as a multiple of the base size, indexed like the
+    /// styles — empty for a single-style flow. A space drawn inside a larger run is
+    /// that much wider on screen, so wrapping scales it (see `wrap::fill_line`).
+    pub space_scale: Vec<f64>,
     pub letter_spacing: f64,
     pub word_spacing: f64,
 }
@@ -80,6 +84,7 @@ pub fn measure_words(text: &str, style: &TextStyle, m: &dyn Measurer) -> Measure
         .collect();
     Measured {
         words,
+        space_scale: Vec::new(),
         space: m.measure(" ", style, style.size),
         letter_spacing: style.letter_spacing,
         word_spacing: style.word_spacing,
@@ -137,6 +142,10 @@ pub fn measure_runs(
     Measured {
         words,
         space: m.measure(" ", base, base.size),
+        space_scale: styles
+            .iter()
+            .map(|st| if base.size > 0.0 { st.size / base.size } else { 1.0 })
+            .collect(),
         letter_spacing: base.letter_spacing,
         word_spacing: base.word_spacing,
     }

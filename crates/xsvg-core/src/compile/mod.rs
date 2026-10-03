@@ -2587,6 +2587,32 @@ fn write_area_text(
     out.push_str("</text>");
 }
 
+/// How far a `baseline-shift` value raises a run, in user units (positive = up).
+///
+/// `baseline-shift` is emitted verbatim and the renderer moves the glyphs, so a
+/// highlight baked beside them has to land where the renderer will put them. Lengths
+/// are exact. `super`/`sub` and percentages are renderer-defined; this is Chromium's
+/// model, measured: `super`/`sub` = ± half the em box (ascent + descent), and a
+/// percentage is of the run's own font size. Another renderer may place a
+/// super/subscript slightly differently from its highlight.
+fn baseline_shift_px(v: &str, em_box: f64, size: f64) -> f64 {
+    let v = v.trim();
+    match v {
+        "super" => em_box / 2.0,
+        "sub" => -em_box / 2.0,
+        "baseline" => 0.0,
+        _ => {
+            if let Some(p) = v.strip_suffix('%') {
+                p.trim().parse::<f64>().map_or(0.0, |p| p / 100.0 * size)
+            } else if let Some(e) = v.strip_suffix("em") {
+                e.trim().parse::<f64>().map_or(0.0, |e| e * size)
+            } else {
+                v.strip_suffix("px").unwrap_or(v).trim().parse::<f64>().unwrap_or(0.0)
+            }
+        }
+    }
+}
+
 /// The `x:highlight` backgrounds of `lines` (§6.11): one `<rect>` per
 /// highlighted run per line, emitted BEFORE the `<text>` so it sits behind
 /// the glyphs. A run's box spans its advance (measured in the run's own
@@ -2657,10 +2683,14 @@ fn emit_highlights(
             }
             if let Some(color) = a.and_then(|a| a.highlight.as_deref()) {
                 let fm = m.font_metrics(&st, rs);
+                // a raised or lowered run carries its highlight with it
+                let shift = a
+                    .and_then(|a| a.shift.as_deref())
+                    .map_or(0.0, |v| baseline_shift_px(v, fm.ascent + fm.descent, rs));
                 out.push_str(&format!(
                     "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
                     fmt(x),
-                    fmt(line.baseline - fm.ascent),
+                    fmt(line.baseline - shift - fm.ascent),
                     fmt(w),
                     fmt(fm.ascent + fm.descent),
                     paint(color)

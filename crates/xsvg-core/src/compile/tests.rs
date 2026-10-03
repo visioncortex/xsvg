@@ -4714,3 +4714,68 @@ fn a_highlight_colour_cannot_carry_markup() {
     let rect = doc.descendants().find(|n| n.has_tag_name("rect")).unwrap();
     assert_eq!(rect.attribute("fill"), Some(r##"#ff0" onload="alert(1)"##), "kept whole, as one value");
 }
+
+#[test]
+fn a_list_item_steps_by_the_size_of_its_own_first_line() {
+    // Within an item, lines already stepped by their largest run; the step INTO an
+    // item used the item's base size, so a 3x-size run on an item's first line put
+    // its ascent up inside the item above. Every line now advances by its own size.
+    let base = |second: &str| {
+        let out = compile_test(&format!(
+            r##"{XW}<x:list x="0" y="0" width="300" font-size="16"><x:li>one</x:li><x:li>{second}</x:li><x:li>three</x:li></x:list></svg>"##
+        ));
+        let ys: Vec<f64> = out
+            .match_indices(r#" y=""#)
+            .map(|(i, _)| {
+                let v = &out[i + 4..];
+                v[..v.find('"').unwrap()].parse().unwrap()
+            })
+            .collect();
+        ys
+    };
+    let plain = base("two");
+    let big = base(r#"<tspan font-size="300%">two</tspan>"#);
+    let (lh, gap) = (1.2, 16.0 * 0.35);
+    // the plain list steps by the base size throughout
+    assert!((plain[1] - plain[0] - (16.0 * lh + gap)).abs() < 1e-6, "{plain:?}");
+    // the item holding the 48px run is pushed down by ITS size...
+    assert!((big[1] - big[0] - (48.0 * lh + gap)).abs() < 1e-6, "{big:?}");
+    // ...and the next item steps by its own, back at the base size
+    assert!((big[2] - big[1] - (16.0 * lh + gap)).abs() < 1e-6, "{big:?}");
+}
+
+#[test]
+fn a_highlight_follows_a_raised_or_lowered_run() {
+    // baseline-shift moves the glyphs at render time; the highlight is a <rect> baked
+    // beside them, so it has to be moved by the same amount or a highlighted
+    // superscript keeps its box on the baseline below the text it marks.
+    let rect_y = |shift: &str| -> f64 {
+        let out = compile_test(&format!(
+            r##"{XW}<x:textbox x="0" y="0" width="300" height="60" font-size="20">a <tspan x:highlight="#ff0" baseline-shift="{shift}">b</tspan></x:textbox></svg>"##
+        ));
+        let r = &out[out.find("<rect").unwrap()..];
+        let y = &r[r.find(r#" y=""#).unwrap() + 4..];
+        y[..y.find('"').unwrap()].parse().unwrap()
+    };
+    let level = rect_y("baseline");
+    assert!((level - rect_y("10") - 10.0).abs() < 1e-6, "a length lifts it by that length");
+    assert!((level - rect_y("50%") - 10.0).abs() < 1e-6, "a percentage is of the run's size");
+    assert!(rect_y("super") < level && rect_y("sub") > level, "super raises, sub lowers");
+    assert!(((level - rect_y("super")) - (rect_y("sub") - level)).abs() < 1e-6, "symmetrically");
+}
+
+#[test]
+fn a_space_inside_a_larger_run_wraps_at_the_runs_size() {
+    // The renderer draws a space inside a 2x run at 2x, but wrapping counted every
+    // space at the paragraph's base size, so a line could pass the width check and
+    // render wider than its box. Mono at base 10: "aa"/"bb" at 20px are 20 wide each,
+    // a space is 5 at the base size and 10 at the run's — 45 fits in 47, 50 does not.
+    let lines = |w: f64| {
+        let out = compile_test(&format!(
+            r##"{XW}<x:textbox x="0" y="0" width="{w}" height="200" font-size="10"><tspan font-size="200%">aa bb</tspan></x:textbox></svg>"##
+        ));
+        out.matches(r#" y=""#).count()
+    };
+    assert_eq!(lines(47.0), 2, "the 2x space is 10 wide, so aa bb (50) cannot fit in 47");
+    assert_eq!(lines(51.0), 1, "and does fit once the box allows it");
+}

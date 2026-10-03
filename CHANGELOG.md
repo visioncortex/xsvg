@@ -41,6 +41,21 @@ partial one.
 
 ### Fixed
 
+- **A list item opening with a large run overlapped the item above.** Lines inside an item
+  already stepped by their largest run, but the step *into* an item used the item's base size,
+  so a 300% word put its ascent up inside the previous bullet. Every line now advances by its
+  own size, and the list's top and bottom edges follow its first and last lines, as areas do.
+- **A highlight now follows its run's `baseline-shift`.** A highlighted superscript kept its
+  rect on the baseline below the text it marked. Lengths move it exactly; `super`, `sub` and
+  percentages use Chromium's measured model (± half the em box, % of the run's size), since
+  renderers define those distances themselves.
+- **A space inside a larger run is measured at that run's size when wrapping.** The renderer
+  draws it at the run's size, so counting it at the paragraph's let a line of large type pass
+  the width check and render wider than its box. Only size is scaled; a bold space differs from
+  a regular one by a hair.
+- Mixed-bidi highlights are documented as not handled in v0: under `direction="rtl"` an embedded
+  left-to-right word is reordered by the renderer and its highlight lands on the wrong glyphs.
+
 - **Mesh gradients render exactly in resvg.** A mesh lowers to tiny texel-aligned PNGs
   placed so that *bilinear* upsampling reproduces each region's fitted colour field, but
   the images left `image-rendering` at `auto`, and resvg's `auto` is bicubic. Measured,

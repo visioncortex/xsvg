@@ -53,7 +53,6 @@ pub(crate) fn fill_line(
     max_width: f64,
     scale: f64,
 ) -> (Vec<Piece>, usize) {
-    let space = measured.space * scale + measured.word_spacing;
     let ls = measured.letter_spacing;
     let gaps = |graphemes: usize| graphemes.saturating_sub(1) as f64;
 
@@ -64,13 +63,20 @@ pub(crate) fn fill_line(
     let mut i = start + 1;
 
     while let Some(w) = measured.words.get(i) {
+        let prev_style = pieces.last().map(|p| p.style).unwrap_or(0);
+        let next_style = w.pieces.first().map(|p| p.style).unwrap_or(0);
+        let sp_style = if prev_style == next_style { prev_style } else { 0 };
+        // The space is drawn in its run's size, so it is measured in it too: a space
+        // inside a 2x run is twice as wide on screen, and counting it at the base
+        // width let a line through that renders wider than its box. Size only — a
+        // bold space differs from a regular one by a hair, not by a multiple.
+        // `word-spacing` is an absolute length, so only the glyph part scales.
+        let ratio = measured.space_scale.get(sp_style).copied().unwrap_or(1.0);
+        let space = measured.space * scale * ratio + measured.word_spacing;
         let (cand_nat, cand_graph) = (nat + space + w.advance * scale, graph + 1 + w.graphemes);
         if cand_nat + gaps(cand_graph) * ls > max_width {
             break;
         }
-        let prev_style = pieces.last().map(|p| p.style).unwrap_or(0);
-        let next_style = w.pieces.first().map(|p| p.style).unwrap_or(0);
-        let sp_style = if prev_style == next_style { prev_style } else { 0 };
         pieces.push(Piece {
             text: " ".to_string(),
             style: sp_style,
