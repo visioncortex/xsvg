@@ -304,8 +304,19 @@ pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: &str, out: &mut Str
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
         let (uw, uh) = (iw * scale as f64, ih * scale as f64);
         let cid = format!("x-mesh-{seed}-{r}");
+        // The texel grid is placed so that *bilinear* reconstruction reproduces the
+        // fitted field exactly, so the image must ask for bilinear by name. `auto` is
+        // the renderer's choice, and resvg chooses bicubic: measured, that drifts up to
+        // ~9/255 off the field, while bilinear lands within 0.5/255 (8-bit rounding).
+        //
+        // Both spellings, because they reach different consumers. resvg honours only
+        // the CSS form (the attribute is parsed and dropped); the attribute survives
+        // tools that strip or flatten `style`, and SVG 2 reads it as a CSS value. Where
+        // both apply, CSS wins and they agree. A renderer that does not know `smooth`
+        // treats it as invalid and keeps `auto` — Chromium renders identically with or
+        // without it.
         out.push_str(&format!(
-            "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{}\"/>",
+            "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" image-rendering=\"smooth\" style=\"image-rendering:smooth\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{}\"/>",
             fmt(ux),
             fmt(uy),
             fmt(uw),

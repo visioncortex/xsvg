@@ -2356,6 +2356,12 @@ fn mesh_lowers_to_a_texel_aligned_image() {
     assert_eq!(out.matches("<image").count(), 1, "{out}");
     assert!(out.contains("data:image/png;base64,"), "{out}");
     assert!(out.contains("preserveAspectRatio=\"none\""), "{out}");
+    // The placement is only exact under *bilinear* reconstruction, so the image asks
+    // for it by name — `auto` lets resvg pick bicubic, which drifts up to ~9/255 off
+    // the fitted field. Both spellings: resvg reads only the CSS, and the attribute
+    // survives tools that strip `style` (scripts/mesh-raster-check.mjs measures it).
+    assert!(out.contains(r#"image-rendering="smooth""#), "{out}");
+    assert!(out.contains(r#"style="image-rendering:smooth""#), "{out}");
     assert!(out.contains("<clipPath id=\"x-mesh-"), "{out}");
     let attr = |name: &str| -> f64 {
         let k = out.find(&format!(" {name}=\"")).unwrap() + name.len() + 3;

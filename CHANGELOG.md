@@ -14,6 +14,27 @@ partial one.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mesh gradients render exactly in resvg.** A mesh lowers to tiny texel-aligned PNGs
+  placed so that *bilinear* upsampling reproduces each region's fitted colour field, but
+  the images left `image-rendering` at `auto`, and resvg's `auto` is bicubic. Measured,
+  that drifted up to ~9/255 off the field. Too little to see, but no longer the field. The
+  images now ask for bilinear by name and land within 0.5/255 (8-bit rounding) at 1× and
+  3×, curved Coons patches included. Both spellings are emitted: resvg honours only
+  `style="image-rendering:smooth"` and silently drops the attribute, while the attribute
+  survives tools that strip `style`. Chromium renders the new output pixel-identically
+  to the old, and Safari, which doesn't know `smooth`, keeps `auto` and looks unchanged.
+- `scripts/compare.mjs` reads its dev server from `XSVG_SERVER`, and refuses a page that
+  isn't xsvg's. With another project's Vite server on the default port 5173 it had been
+  slicing out a 24×24 UI icon and reporting every sample as a structural mismatch.
+
+### Added
+
+- `npm run check:mesh` renders every region of `dataset/mesh.xsvg` through resvg and
+  requires each pixel inside its clip to match the bilinear field within 1/255. Removing
+  the bilinear request fails all 14 measurements. Skips cleanly without `resvg` on PATH.
+
 ## [0.2.1] — 2026-08-12
 
 A security patch, so it reaches `^0.2.0` without anyone opting in. **Generator output

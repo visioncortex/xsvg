@@ -23,6 +23,7 @@
     "check:params": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs scripts/params-check.mjs",
     "check:hosts": "node scripts/host-hooks-check.mjs",
     "check:sandbox": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs scripts/sandbox-check.mjs",
+    "check:mesh": "cargo build --release -p xsvg-cli && node scripts/mesh-raster-check.mjs",
     "check:incremental": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/incremental-check.mjs",
     "check:dom": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/dom-patch-check.mjs",
     "compare": "cargo build --release -p xsvg-cli && node scripts/compare.mjs"
