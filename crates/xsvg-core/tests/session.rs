@@ -8,14 +8,14 @@
 //! compared byte for byte with the pure entry's — the whole compile, each fragment,
 //! the dependents of each fragment and of all of them together, the caret geometry
 //! of every textbox, and the span tables — in plain, source-mapped and keyed modes,
-//! with and without the cache.
+//! with and without the cache. The auto traits are deliberately not pinned (§8).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use xsvg_core::test_doubles::{BoxOutliner, BoxShaper, Mono};
 use xsvg_core::{
     compile_fragment_platform_impl, compile_platform_impl, dependents_multi_impl,
-    fragment_range_impl, node_spans_impl, text_layout_impl, CompileSession, FontMetrics,
+    fragment_range_impl, node_spans_impl, text_layout_impl, FontMetrics,
     MeasureCache, Measurer, NodeKeys, Platform, Resolver, TextStyle,
 };
 
@@ -233,16 +233,4 @@ fn a_session_fails_where_the_pure_entries_fail() {
         session.compile_fragment(2),
         compile_fragment_platform_impl(src, "balanced", false, 2, "", &platform)
     );
-}
-
-/// A session may be built on one thread and used on another (an app that parses
-/// off the UI thread); it holds no thread-bound state. Nothing is asserted for it:
-/// a platform of thread-safe adapters is `Sync`, so a session borrowing it is `Send`
-/// by the auto traits alone — the measurement cache included.
-#[test]
-fn a_session_over_thread_safe_adapters_is_send() {
-    fn assert_send<T: Send>() {}
-    type Native = Platform<Mono, BoxShaper, BoxOutliner, Dataset, SpanKeys>;
-    assert_send::<CompileSession<'static, Native>>();
-    assert_send::<CompileSession<'static, Platform<MeasureCache<Mono>, BoxShaper, BoxOutliner>>>();
 }

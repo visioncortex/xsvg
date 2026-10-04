@@ -49,8 +49,8 @@ partial one.
   state.
 - **`Seams` is now `Platform`, owned and long-lived** (Rust API; the wasm and npm
   entry points are unchanged). `Platform::new(m, shaper, outliner)` takes its adapters
-  by value and keeps their types, so `Send`/`Sync` follow from them with nothing
-  asserted; `with_resolver` / `with_keys` / `with_generators` as before, and
+  by value and keeps their types, so the auto traits fall where the adapters put
+  them; `with_resolver` / `with_keys` / `with_generators` as before, and
   `platform.session(text, …)` opens a `CompileSession` that borrows it. The pure
   entries `compile_seams_impl` / `compile_fragment_seams_impl` are renamed
   `compile_platform_impl` / `compile_fragment_platform_impl` and take `&Platform`.

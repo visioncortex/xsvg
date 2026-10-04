@@ -91,16 +91,13 @@ impl<'a, P: Host> CompileSession<'a, P> {
   flush's: it borrows the text and the platform, is created at the top of a
   flush and dropped at the end, and cannot outlive the text it parsed, so
   there is no way to hold a stale parse. Nothing is passed per call.
-- **`Send` falls out; nothing is asserted.** The platform keeps its adapters'
-  concrete types instead of erasing them to `Box<dyn …>`, so `Send` and
-  `Sync` follow from the adapters by the auto traits: a native platform over
-  thread-safe adapters is `Sync`, and a session borrowing it is `Send`
-  (pinned by `tests/session.rs`), so a document may be parsed off the thread
-  that compiles it. The browser platform over `js_sys::Function` handles is
-  neither, which on a single-threaded target costs nothing and needs no
-  `unsafe` to paper over. A session is not `Sync`, and need not be. `Host`
-  is the sealed trait every `Platform` implements; it exists so the session
-  and the `*_platform_impl` entries can take any platform.
+- **Concrete types, so the auto traits can fall where the adapters put
+  them.** The platform keeps its adapters' types instead of erasing them to
+  `Box<dyn …>`; the session holds a `&P`. Neither promises `Send` or `Sync`
+  (§8), and neither needs `unsafe` or bounds on the seam traits to be
+  whatever its adapters make it. `Host` is the sealed trait every `Platform`
+  implements; it exists so the session and the `*_platform_impl` entries can
+  take any platform.
 - **The pure entries become wrappers.** `compile_impl`,
   `compile_fragment_*_impl`, `dependents_multi_impl` and `text_layout_impl`
   each do the parse-once work on a stack-local platform view and call the
@@ -224,18 +221,19 @@ A session is created and dropped inside one flush on one thread — wasm is
 single-threaded, the native app compiles on the thread that owns the
 document, and a CLI compiling many files in parallel wants one session per
 file per thread (that needs the *inputs* to be `Send`, not the session). So
-the session promises neither `Send` nor `Sync`, and it could not cheaply:
-it holds `&dyn Measurer` and the other seam objects, whose traits carry no
-`Send`/`Sync` bounds (the wasm adapters wrap `js_sys::Function`, which can
-never be `Send`), and `&T: Send` requires `T: Sync`.
+the session promises neither `Send` nor `Sync`. Nor does it rule them out:
+it holds a `&P` to a `Platform` of concrete adapter types, so by the auto
+traits a session over thread-safe adapters is `Send` and one over the wasm
+adapters (which wrap `js_sys::Function`) is not — without bounds on the seam
+traits, and without a `Box<dyn …>` erasure that would make it never `Send`.
 
 The one case that would want `Session: Sync` — compiling the fragments of
 one session in parallel — buys nothing on the editor's hot path (a
 keystroke dirties one to three fragments; the cost the session removes is
-the parse). If a batch export ever wants it, a `Sync` variant with
-`Sync`-bounded seams is additive: the per-fragment `Ctx` is already
-per-call (`Cell`/`RefCell` memo and budget), and the shared parts —
-`roxmltree::Document`, the theme, the imports, the id table — are plain
+the parse). If a batch export ever wants it, nothing structural stands in
+the way: the per-fragment `Ctx` is already per-call (`Cell`/`RefCell` memo
+and budget), and the shared parts — `roxmltree::Document`, the theme, the
+imports, the id table, the `Mutex`-guarded measurement cache — are plain
 data. Do not pin the auto traits either way (`impl !Send`, or a test): let
 them fall where the fields put them. What matters, and what §6 pins, is
 that after `THEME` is gone a session's correctness does not depend on
