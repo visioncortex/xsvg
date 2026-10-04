@@ -71,6 +71,13 @@ partial one.
 
 ### Added
 
+- Text runs (`<tspan>`) take `font-size`, `baseline-shift` and `text-decoration`; a line steps by its largest run.
+- `href` on a run (or an authored `<a>`) becomes an SVG link.
+- `x:highlight` on a run draws a background behind it.
+- `direction="rtl"` on a textbox or paragraph.
+- List items and table cells render their runs and honour `<tbreak/>`.
+- `preserveAspectRatio` on a cross-file `<use>` is forwarded to the viewport it bakes.
+- Keyed (editor) output stamps a textbox's frame as `data-xsvg-frame`.
 - `npm run check:mesh` renders every region of `dataset/mesh.xsvg` through resvg and
   requires each pixel inside its clip to match the bilinear field within 1/255. Removing
   the bilinear request fails all 14 measurements. Skips cleanly without `resvg` on PATH.
