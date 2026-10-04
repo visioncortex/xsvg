@@ -1,7 +1,7 @@
 # Compile Session — one parse per flush
 
-**Status: normative; §2–4 and §6's first three tests built (2026-10-04),
-§5 open.** The in-process API that lets an editor compile many fragments of
+**Status: normative; §2–4, §5's measurement cache and §6 built
+(2026-10-04); §5's batch seam and layout cache open.** The in-process API that lets an editor compile many fragments of
 one document without re-parsing it for each. Not a server, not a protocol,
 not a daemon: a struct with a lifetime, created and dropped inside one render
 flush by whoever already links `xsvg-core` as a library (the kit's wasm module
@@ -38,25 +38,36 @@ that outlive a flush are defined by the core and **owned by the caller**
 ## 2. The API
 
 ```rust
-pub struct CompileSession<'a> { /* private */ }
+/// Everything the compiler needs from the world it runs in, owned and
+/// long-lived. The adapters keep their concrete types; the optional three
+/// default to inert values.
+pub struct Platform<M, S, O, R = NoResolver, K = NoKeys, G = NoGenerators> { /* private */ }
 
-impl<'a> CompileSession<'a> {
+impl<M: Measurer, S: Shaper, O: GlyphOutliner> Platform<M, S, O> {
+    pub fn new(m: M, shaper: S, outliner: O) -> Self;
+}
+impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
+    pub fn with_resolver<R2: Resolver>(self, r: R2) -> Platform<M, S, O, R2, K, G>;
+    pub fn with_keys<K2: NodeKeys>(self, k: K2) -> Platform<M, S, O, R, K2, G>;
+    pub fn with_generators<G2: GeneratorHost>(self, g: G2) -> Platform<M, S, O, R, K, G2>;
+    /// §5: a `MeasureCache` in front of the measurer.
+    pub fn with_measure_cache(self) -> Platform<MeasureCache<M>, S, O, R, K, G>;
     /// Parse once, pre-scan once (theme tokens, <x:import> bindings, the id
     /// table). Fails exactly where the pure entries fail (nesting depth, XML
     /// parse error), with the same message.
-    pub fn new(
-        input: &'a str,
-        quality: &str,
-        sourcemap: bool,
-        base: &str,
-    ) -> Result<Self, String>;
+    pub fn session<'s>(&'s self, input: &'s str, quality: &str, sourcemap: bool, base: &str)
+        -> Result<CompileSession<'s, Self>, String>;
+}
 
+pub struct CompileSession<'a, P: Host> { /* private */ }
+
+impl<'a, P: Host> CompileSession<'a, P> {
     /// The fragment whose element starts at `offset` — byte-identical to
-    /// `compile_fragment_seams_impl(input, quality, sourcemap, offset, base, seams)`.
-    pub fn compile_fragment(&self, offset: usize, seams: &Seams) -> Result<String, String>;
+    /// `compile_fragment_platform_impl(input, quality, sourcemap, offset, base, &platform)`.
+    pub fn compile_fragment(&self, offset: usize) -> Result<String, String>;
 
-    /// The whole document — byte-identical to `compile_seams_impl(input, …)`.
-    pub fn compile(&self, seams: &Seams) -> Result<String, String>;
+    /// The whole document — byte-identical to `compile_platform_impl(input, …)`.
+    pub fn compile(&self) -> Result<String, String>;
 
     /// Baked-ref dependents of the fragments at `seeds`, from the retained
     /// parse — the same answer as `dependents_multi_impl(input, seeds)`.
@@ -64,7 +75,7 @@ impl<'a> CompileSession<'a> {
 
     /// Caret geometry for the textbox at `offset` — the same answer as
     /// `text_layout_impl(input, offset, quality, …)`.
-    pub fn text_layout(&self, offset: usize, seams: &Seams) -> Option<TextLayout>;
+    pub fn text_layout(&self, offset: usize) -> Option<TextLayout>;
 
     /// The parse-only tables, from the retained parse — the same answers as
     /// `node_spans_impl` and `fragment_range_impl`.
@@ -73,27 +84,33 @@ impl<'a> CompileSession<'a> {
 }
 ```
 
-- **Lifetime.** `'a` is the input text's. The session borrows the text. It is
-  created at the top of a flush and dropped at the end; it cannot outlive the
-  text it parsed, so there is no way to hold a stale parse.
-- **Seams are per call, and the session is `Send`.** The measurer, shaper,
-  outliner, resolver, keys and generator host are passed to each compiling
-  method rather than held, because a session that borrowed `&dyn Measurer`
-  could be `Send` only if that trait object were `Sync`, and a host whose
-  seams wrap single-threaded handles (the browser's `measureText` callback)
-  can never provide one. The seams are the same for every call of a flush
-  and cost nothing to pass. The session holds no thread-bound state and is
-  `Send` (pinned by `tests/session.rs`); it is not `Sync`, and need not be.
-  The parse-only methods take no seams.
+- **Two lifetimes, two objects.** The platform is the embedder's for as long
+  as it runs: the measurer, shaper, outliner, resolver, keys and generator
+  host, and with them everything that should survive a compile (a font
+  database, a loaded module, the §5 measurement cache). The session is one
+  flush's: it borrows the text and the platform, is created at the top of a
+  flush and dropped at the end, and cannot outlive the text it parsed, so
+  there is no way to hold a stale parse. Nothing is passed per call.
+- **`Send` falls out; nothing is asserted.** The platform keeps its adapters'
+  concrete types instead of erasing them to `Box<dyn …>`, so `Send` and
+  `Sync` follow from the adapters by the auto traits: a native platform over
+  thread-safe adapters is `Sync`, and a session borrowing it is `Send`
+  (pinned by `tests/session.rs`), so a document may be parsed off the thread
+  that compiles it. The browser platform over `js_sys::Function` handles is
+  neither, which on a single-threaded target costs nothing and needs no
+  `unsafe` to paper over. A session is not `Sync`, and need not be. `Host`
+  is the sealed trait every `Platform` implements; it exists so the session
+  and the `*_platform_impl` entries can take any platform.
 - **The pure entries become wrappers.** `compile_impl`,
   `compile_fragment_*_impl`, `dependents_multi_impl` and `text_layout_impl`
-  each construct a one-shot session and call the method. Their signatures,
-  outputs and error texts do not change; the CLI, the Node host, the viewer
-  and every existing test are untouched. The session is additive.
+  each do the parse-once work on a stack-local platform view and call the
+  method. Their signatures, outputs and error texts do not change; the CLI,
+  the Node host, the viewer and every existing test are untouched. The
+  session is additive.
 - **Output equality is the contract.** For every `(input, offset)`,
-  `CompileSession::new(input, …)?.compile_fragment(offset)` equals
-  `compile_fragment_seams_impl(input, …, offset, …)` byte for byte, and
-  likewise for `compile`, `dependents` and `text_layout`. §6 pins it.
+  `platform.session(input, …)?.compile_fragment(offset)` equals
+  `compile_fragment_platform_impl(input, …, offset, …, &platform)` byte for
+  byte, and likewise for `compile`, `dependents` and `text_layout`. §6 pins it.
 
 ## 3. What the session retains
 
@@ -139,20 +156,26 @@ and both caches belong to the **caller**, who knows when the document
 changed. The core defines the types and the invalidation key; the caller
 passes `&mut` storage and keeps it as long as it likes.
 
-- **Measurement.** Every word measured is a `Measurer::measure(text, style,
-  size)` call; across the wasm boundary that is a JS hop into canvas
-  `measureText`. Two additive seams: a `measure_batch(&[(text, style, size)])
-  -> Vec<f64>` default method on `Measurer` (the core calls it with a
-  fragment's words at once; the default loops over `measure`, so existing
-  adapters need nothing), and an `AdvanceCache` the core consults before
-  the seam, keyed by `(family, weight, style, size, text)`. Embedders may
-  also memoize on their side of the seam; the two compose.
-- **Paragraph layout.** A keystroke relays out every paragraph of its
+- **Measurement** (built: `MeasureCache`). Every word measured is a
+  `Measurer::measure(text, style, size)` call; across the wasm boundary that
+  is a JS hop into canvas `measureText`, natively a `ttf-parser` face walk.
+  `MeasureCache<M>` is a `Measurer` that remembers advances per `(family,
+  weight, style, size, text)` and vertical metrics per font, bounded, for as
+  long as it lives; `Platform::with_measure_cache()` puts one in front of
+  the platform's measurer, so the cache lives exactly as long as the
+  platform. A second flush over unchanged text reaches the adapter zero
+  times (pinned). The key is the whole dependency of `measure` by contract:
+  it returns the raw glyph advance, and `line_advance` layers the spacing on.
+  Still open: a `measure_batch(&[(text, style, size)]) -> Vec<f64>` default
+  method on `Measurer`, so the misses of one fragment cross the wasm
+  boundary in one hop instead of one per word. Embedders may also memoize
+  on their side of the seam; the two compose.
+- **Paragraph layout** (open). A keystroke relays out every paragraph of its
   textbox. A `LayoutCache` keyed by `(paragraph text, resolved style, area
   spec)` lets the core skip paragraphs whose inputs did not change; the
   caller invalidates nothing (the key is the content) and bounds the size.
 
-Both are optional parameters with `None` meaning today's behaviour.
+Both are opt-in; a platform without them is today's behaviour.
 
 ## 6. Tests
 
@@ -171,8 +194,11 @@ Both are optional parameters with `None` meaning today's behaviour.
   with different `<x:theme>` colour and font tokens, compiled interleaved on
   one thread, each see their own tokens — the former stale-theme hazard, now
   structurally impossible.
-- **Caches are transparent** (§5, unbuilt). With and without `AdvanceCache` /
-  `LayoutCache`, outputs are byte-identical.
+- **Caches are transparent** (`tests/session.rs`). One `MeasureCache`
+  carried across the whole corpus and a platform without one emit
+  byte-identical output for every fragment and every layout; a counting
+  measurer shows a second flush over unchanged text reaches the adapter
+  zero times, and an edit costs only its new word.
 
 ## 7. What the embedder does with it (informative)
 
@@ -182,7 +208,10 @@ per dirty fragment, drop the session. Across the wasm boundary a struct with
 a lifetime cannot be handed to JS, so the session lives inside one exported
 call: a flush entry that takes the text and the dirty offsets, builds the
 session, and returns every fragment at once — the unit §8 says a protocol
-would wrap, if one were ever needed. The verifier builds its own session
+would wrap, if one were ever needed. The platform can cross: a
+`#[wasm_bindgen]` compiler object owning its callbacks (and so its
+measurement cache) is a `Platform` over owned `js_sys::Function`s, built
+once by the kit instead of six functions handed to every call. The verifier builds its own session
 for the from-scratch compile. The caret geometry call uses a session over
 the same text when one is live. Measured on the kit's sample deck, this
 removes every whole-document parse but one from a keystroke; the remaining

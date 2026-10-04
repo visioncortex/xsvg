@@ -54,6 +54,12 @@ pub trait Resolver {
     fn resolve(&self, base: &str, href: &str) -> Option<(String, String)>;
 }
 
+impl<T: Resolver + ?Sized> Resolver for &T {
+    fn resolve(&self, base: &str, href: &str) -> Option<(String, String)> {
+        (**self).resolve(base, href)
+    }
+}
+
 /// A resolver that links nothing — every external `<use>` degrades with a marker.
 /// Backs the non-linking entry point ([`compile_impl`]) and callers without deps.
 pub struct NoResolver;
@@ -135,10 +141,11 @@ struct Ctx<'a> {
     in_plugin: std::cell::Cell<bool>,
 }
 
-/// The platform seams a compile runs against, bundled so entry points don't grow
-/// an argument per seam. [`Seams::new`] supplies the inert defaults (no linking,
-/// no host keys, no generators) that the older entry points have always used.
-pub struct Seams<'a> {
+/// The borrowed view of a platform a compile runs against — what [`Ctx`] is built
+/// from. [`Platform::backend`] produces one; the `&dyn` entry points build one on
+/// the stack with inert defaults (no linking, no host keys, no generators).
+#[doc(hidden)]
+pub struct Backend<'a> {
     pub m: &'a dyn Measurer,
     pub shaper: &'a dyn Shaper,
     pub outliner: &'a dyn GlyphOutliner,
@@ -147,9 +154,9 @@ pub struct Seams<'a> {
     pub generators: &'a dyn GeneratorHost,
 }
 
-impl<'a> Seams<'a> {
+impl<'a> Backend<'a> {
     /// The three font seams every compile needs; everything else inert.
-    pub fn new(m: &'a dyn Measurer, shaper: &'a dyn Shaper, outliner: &'a dyn GlyphOutliner) -> Self {
+    pub(super) fn new(m: &'a dyn Measurer, shaper: &'a dyn Shaper, outliner: &'a dyn GlyphOutliner) -> Self {
         Self {
             m,
             shaper,
@@ -160,26 +167,162 @@ impl<'a> Seams<'a> {
         }
     }
 
-    pub fn with_resolver(mut self, resolver: &'a dyn Resolver) -> Self {
+    pub(super) fn with_resolver(mut self, resolver: &'a dyn Resolver) -> Self {
         self.resolver = resolver;
         self
     }
 
-    pub fn with_keys(mut self, keys: &'a dyn NodeKeys) -> Self {
+    pub(super) fn with_keys(mut self, keys: &'a dyn NodeKeys) -> Self {
         self.keys = keys;
-        self
-    }
-
-    pub fn with_generators(mut self, generators: &'a dyn GeneratorHost) -> Self {
-        self.generators = generators;
         self
     }
 }
 
+/// Everything the compiler needs from the world it runs in, owned and long-lived:
+/// font metrics ([`Measurer`]), shape rasterization ([`Shaper`]), glyph outlines
+/// ([`GlyphOutliner`]), cross-file linking ([`Resolver`]), editor node identity
+/// ([`NodeKeys`]) and loadable generators ([`GeneratorHost`]). An embedder builds
+/// one when it starts and keeps it: the adapters behind it are where the work that
+/// survives a compile lives — a font database, a loaded module, and the measurement
+/// cache [`Platform::with_measure_cache`] puts in front of the measurer.
+///
+/// A [`CompileSession`] borrows a platform for one flush (`platform.session(text,
+/// …)`), so nothing is passed per call. The adapters keep their concrete types
+/// rather than being erased, so `Send` and `Sync` follow from them: a platform of
+/// thread-safe adapters gives `Send` sessions with nothing asserted, and a browser
+/// platform over JS handles simply is not, which on a single thread costs nothing.
+pub struct Platform<M, S, O, R = NoResolver, K = NoKeys, G = NoGenerators> {
+    m: M,
+    shaper: S,
+    outliner: O,
+    resolver: R,
+    keys: K,
+    generators: G,
+}
+
+impl<M: Measurer, S: Shaper, O: GlyphOutliner> Platform<M, S, O> {
+    /// The three font seams every compile needs; everything else inert (no linking,
+    /// byte-span identity, no generators) until a `with_*` supplies it.
+    pub fn new(m: M, shaper: S, outliner: O) -> Self {
+        Self {
+            m,
+            shaper,
+            outliner,
+            resolver: NoResolver,
+            keys: NoKeys,
+            generators: NoGenerators,
+        }
+    }
+}
+
+impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
+    pub fn with_resolver<R2: Resolver>(self, resolver: R2) -> Platform<M, S, O, R2, K, G> {
+        Platform {
+            m: self.m,
+            shaper: self.shaper,
+            outliner: self.outliner,
+            resolver,
+            keys: self.keys,
+            generators: self.generators,
+        }
+    }
+
+    pub fn with_keys<K2: NodeKeys>(self, keys: K2) -> Platform<M, S, O, R, K2, G> {
+        Platform {
+            m: self.m,
+            shaper: self.shaper,
+            outliner: self.outliner,
+            resolver: self.resolver,
+            keys,
+            generators: self.generators,
+        }
+    }
+
+    pub fn with_generators<G2: GeneratorHost>(self, generators: G2) -> Platform<M, S, O, R, K, G2> {
+        Platform {
+            m: self.m,
+            shaper: self.shaper,
+            outliner: self.outliner,
+            resolver: self.resolver,
+            keys: self.keys,
+            generators,
+        }
+    }
+
+    /// Put a [`MeasureCache`] in front of the measurer, so a word measured once in a
+    /// font is never measured again while this platform lives (docs/Compile
+    /// Session.md §5). Output is unchanged; only the calls that reach the adapter are.
+    pub fn with_measure_cache(self) -> Platform<MeasureCache<M>, S, O, R, K, G>
+    where
+        M: Measurer,
+    {
+        Platform {
+            m: MeasureCache::new(self.m),
+            shaper: self.shaper,
+            outliner: self.outliner,
+            resolver: self.resolver,
+            keys: self.keys,
+            generators: self.generators,
+        }
+    }
+}
+
+impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost>
+    Platform<M, S, O, R, K, G>
+{
+    /// One document, parsed once, ready to compile any number of its fragments on
+    /// this platform (docs/Compile Session.md).
+    pub fn session<'s>(
+        &'s self,
+        input: &'s str,
+        quality: &str,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<CompileSession<'s, Self>, String> {
+        CompileSession::new(self, input, quality, sourcemap, base)
+    }
+
+    pub(super) fn backend(&self) -> Backend<'_> {
+        Backend {
+            m: &self.m,
+            shaper: &self.shaper,
+            outliner: &self.outliner,
+            resolver: &self.resolver,
+            keys: &self.keys,
+            generators: &self.generators,
+        }
+    }
+}
+
+/// What a [`CompileSession`] needs of its platform: the borrowed view a [`Ctx`] is
+/// built from. Implemented by every [`Platform`]; sealed, since [`Backend`] is the
+/// crate's own.
+pub trait Host: sealed::Sealed {
+    #[doc(hidden)]
+    fn backend(&self) -> Backend<'_>;
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost>
+    sealed::Sealed for Platform<M, S, O, R, K, G>
+{
+}
+
+impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost> Host
+    for Platform<M, S, O, R, K, G>
+{
+    fn backend(&self) -> Backend<'_> {
+        Platform::backend(self)
+    }
+}
+
 impl<'a> Ctx<'a> {
-    /// Build the per-compile context from the seams plus the parsed document.
+    /// Build the per-compile context from the platform's seams plus the parsed document.
     fn new(
-        seams: &Seams<'a>,
+        seams: &Backend<'a>,
         quality: QualityProfile,
         sourcemap: bool,
         base: &str,
@@ -244,7 +387,7 @@ impl<'a> Ctx<'a> {
 
     /// The host's key for the node starting at `start`, recording a miss when an
     /// **active** provider fails to name it. Every key lookup goes through here, so
-    /// the unkeyed marker in [`compile_seams_impl`] sees every violation.
+    /// the unkeyed marker in [`CompileSession::compile`] sees every violation.
     fn key_for(&self, start: usize) -> Option<String> {
         let k = self.keys.key(start);
         if k.is_none() && self.keys.active() {
@@ -276,6 +419,15 @@ pub trait NodeKeys {
     /// need not change; only [`NoKeys`] answers `false`.
     fn active(&self) -> bool {
         true
+    }
+}
+
+impl<T: NodeKeys + ?Sized> NodeKeys for &T {
+    fn key(&self, byte_start: usize) -> Option<String> {
+        (**self).key(byte_start)
+    }
+    fn active(&self) -> bool {
+        (**self).active()
     }
 }
 
@@ -385,28 +537,23 @@ pub fn compile_linked_keyed_impl(
     base: &str,
     keys: &dyn NodeKeys,
 ) -> Result<String, String> {
-    compile_seams_impl(
-        input,
-        quality,
-        sourcemap,
-        base,
-        &Seams::new(m, shaper, outliner)
-            .with_resolver(resolver)
-            .with_keys(keys),
-    )
+    let backend = Backend::new(m, shaper, outliner)
+        .with_resolver(resolver)
+        .with_keys(keys);
+    session::Parsed::new(input)?.compile(&backend, QualityProfile::parse(quality), sourcemap, base)
 }
 
-/// The full compile entry: every platform seam at once, including loadable
-/// geometry generators (docs/Extensibility.md). The older entry points are this
-/// one with inert defaults.
-pub fn compile_seams_impl(
+/// The full compile entry: a whole [`Platform`], generators included
+/// (docs/Extensibility.md). The older entry points are this one with inert
+/// defaults; it is itself a one-shot [`CompileSession`].
+pub fn compile_platform_impl(
     input: &str,
     quality: &str,
     sourcemap: bool,
     base: &str,
-    seams: &Seams,
+    platform: &impl Host,
 ) -> Result<String, String> {
-    CompileSession::new(input, quality, sourcemap, base)?.compile(seams)
+    CompileSession::new(platform, input, quality, sourcemap, base)?.compile()
 }
 
 /// The direct element child of the document root whose source byte range contains
@@ -496,30 +643,30 @@ pub fn compile_fragment_linked_keyed_impl(
     base: &str,
     keys: &dyn NodeKeys,
 ) -> Result<String, String> {
-    compile_fragment_seams_impl(
-        input,
-        quality,
-        sourcemap,
+    let backend = Backend::new(m, shaper, outliner)
+        .with_resolver(resolver)
+        .with_keys(keys);
+    session::Parsed::new(input)?.compile_fragment(
         offset,
+        &backend,
+        QualityProfile::parse(quality),
+        sourcemap,
         base,
-        &Seams::new(m, shaper, outliner)
-            .with_resolver(resolver)
-            .with_keys(keys),
     )
 }
 
-/// The full incremental entry — [`compile_seams_impl`]'s counterpart. A fragment
+/// The full incremental entry — [`compile_platform_impl`]'s counterpart. A fragment
 /// containing a plugin element re-emits byte-identically to its span in the full
 /// compile, which is what makes generator purity a hard requirement (§6).
-pub fn compile_fragment_seams_impl(
+pub fn compile_fragment_platform_impl(
     input: &str,
     quality: &str,
     sourcemap: bool,
     offset: usize,
     base: &str,
-    seams: &Seams,
+    platform: &impl Host,
 ) -> Result<String, String> {
-    CompileSession::new(input, quality, sourcemap, base)?.compile_fragment(offset, seams)
+    CompileSession::new(platform, input, quality, sourcemap, base)?.compile_fragment(offset)
 }
 
 /// Source byte range of **every** element in the document, in document order
@@ -3292,6 +3439,7 @@ mod tests;
 /// One parse per flush: the editor's compile session (docs/Compile Session.md).
 mod session;
 pub use session::CompileSession;
+use crate::MeasureCache;
 
 // ---- feature modules (split out of this file) ----
 mod connector;
@@ -3400,9 +3548,11 @@ pub fn text_layout_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Option<TextLayout> {
-    CompileSession::new(input, quality, false, "")
-        .ok()?
-        .text_layout(offset, &Seams::new(m, shaper, outliner))
+    session::Parsed::new(input).ok()?.text_layout(
+        offset,
+        &Backend::new(m, shaper, outliner),
+        QualityProfile::parse(quality),
+    )
 }
 
 /// The layout half of `emit_textbox`'s dispatch — same branches, same order.

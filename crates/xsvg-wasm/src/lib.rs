@@ -6,9 +6,9 @@
 
 use wasm_bindgen::prelude::*;
 use xsvg_core::{
-    compile_fragment_linked_impl, compile_fragment_seams_impl, compile_linked_impl,
-    compile_seams_impl, dependents_impl, fragment_range_impl, imports_impl, node_spans_impl,
-    NodeKeys, Seams,
+    compile_fragment_linked_impl, compile_fragment_platform_impl, compile_linked_impl,
+    compile_platform_impl, dependents_impl, fragment_range_impl, imports_impl, node_spans_impl,
+    NodeKeys, Platform,
 };
 use xsvg_core::{ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, InputMode};
 use xsvg_core::{
@@ -437,17 +437,21 @@ pub fn describe() -> String {
     xsvg_core::describe_impl()
 }
 
-/// Host-supplied node keys ([`NodeKeys`]): `key(byteStart) => string | null`.
+/// Host-supplied node keys ([`NodeKeys`]): `key(byteStart) => string | null`. With
+/// no callback it is the byte-span default, inactive like [`xsvg_core::NoKeys`].
 struct JsKeys<'a> {
-    key: &'a js_sys::Function,
+    key: Option<&'a js_sys::Function>,
 }
 
 impl NodeKeys for JsKeys<'_> {
     fn key(&self, byte_start: usize) -> Option<String> {
-        self.key
+        self.key?
             .call1(&JsValue::NULL, &JsValue::from_f64(byte_start as f64))
             .ok()?
             .as_string()
+    }
+    fn active(&self) -> bool {
+        self.key.is_some()
     }
 }
 
@@ -495,18 +499,11 @@ pub fn compile_ext(
         element: plugin_element,
         generate: plugin_generate,
     };
-    let seams = Seams::new(&m, &shaper, &outliner)
-        .with_resolver(&resolver)
-        .with_generators(&generators);
-    let keys;
-    let seams = match &key {
-        Some(key) => {
-            keys = JsKeys { key };
-            seams.with_keys(&keys)
-        }
-        None => seams,
-    };
-    compile_seams_impl(input, quality, sourcemap, base, &seams).map_err(|e| JsError::new(&e))
+    let platform = Platform::new(m, shaper, outliner)
+        .with_resolver(resolver)
+        .with_generators(generators);
+    let platform = platform.with_keys(JsKeys { key: key.as_ref() });
+    compile_platform_impl(input, quality, sourcemap, base, &platform).map_err(|e| JsError::new(&e))
 }
 
 /// Byte ranges `[start, end, start, end, …]` of **every** element in the document,
@@ -550,17 +547,10 @@ pub fn compile_fragment_ext(
         element: plugin_element,
         generate: plugin_generate,
     };
-    let seams = Seams::new(&m, &shaper, &outliner)
-        .with_resolver(&resolver)
-        .with_generators(&generators);
-    let keys;
-    let seams = match &key {
-        Some(key) => {
-            keys = JsKeys { key };
-            seams.with_keys(&keys)
-        }
-        None => seams,
-    };
-    compile_fragment_seams_impl(input, quality, sourcemap, offset as usize, base, &seams)
+    let platform = Platform::new(m, shaper, outliner)
+        .with_resolver(resolver)
+        .with_generators(generators);
+    let platform = platform.with_keys(JsKeys { key: key.as_ref() });
+    compile_fragment_platform_impl(input, quality, sourcemap, offset as usize, base, &platform)
         .map_err(|e| JsError::new(&e))
 }

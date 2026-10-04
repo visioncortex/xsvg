@@ -56,15 +56,10 @@ pub fn compile(
     } else {
         plugins::DiskGenerators::default()
     };
-    xsvg_core::compile_seams_impl(
-        source,
-        quality,
-        sourcemap,
-        base,
-        &xsvg_core::Seams::new(&p, &p, &p)
-            .with_resolver(&DiskResolver)
-            .with_generators(&generators),
-    )
+    let platform = xsvg_core::Platform::new(&p, &p, &p)
+        .with_resolver(DiskResolver)
+        .with_generators(generators);
+    xsvg_core::compile_platform_impl(source, quality, sourcemap, base, &platform)
 }
 
 fn main() -> ExitCode {

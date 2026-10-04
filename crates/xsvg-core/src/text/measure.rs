@@ -34,6 +34,113 @@ pub trait Measurer {
     }
 }
 
+impl<T: Measurer + ?Sized> Measurer for &T {
+    fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
+        (**self).measure(text, style, size)
+    }
+    fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
+        (**self).font_metrics(style, size)
+    }
+}
+
+impl<T: Measurer + ?Sized> Measurer for Box<T> {
+    fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
+        (**self).measure(text, style, size)
+    }
+    fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
+        (**self).font_metrics(style, size)
+    }
+}
+
+/// The font a measurement depends on. [`Measurer::measure`] returns the raw glyph
+/// advance — `letter-spacing` and `word-spacing` are layered on by [`line_advance`]
+/// — so family, weight, style and size are the whole key.
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct FontKey {
+    family: String,
+    weight: String,
+    style: String,
+    size: u64,
+}
+
+impl FontKey {
+    fn of(style: &TextStyle, size: f64) -> Self {
+        Self {
+            family: style.family.clone(),
+            weight: style.weight.clone(),
+            style: style.style.clone(),
+            size: size.to_bits(),
+        }
+    }
+}
+
+/// A [`Measurer`] that remembers: advance widths per `(font, text)` and vertical
+/// metrics per font, for as long as it lives. An editor relays out a textbox on
+/// every keystroke, and nearly every word in it was measured last keystroke in the
+/// same font; behind a `canvas.measureText` hop or a `ttf-parser` face walk, that
+/// repeat is most of the cost of a flush (docs/Compile Session.md §5).
+///
+/// Transparent by construction — a hit returns what the adapter returned — so output
+/// is byte-identical with or without it (pinned by `tests/session.rs`). Bounded:
+/// past [`MeasureCache::CAPACITY`] entries it starts over rather than grow without
+/// limit. Owned by the embedder, typically via `Platform::with_measure_cache`.
+pub struct MeasureCache<M> {
+    inner: M,
+    advances: std::sync::Mutex<std::collections::HashMap<(FontKey, String), f64>>,
+    metrics: std::sync::Mutex<std::collections::HashMap<FontKey, FontMetrics>>,
+}
+
+impl<M: Measurer> MeasureCache<M> {
+    /// Advance entries kept before the cache is cleared and refilled — tens of
+    /// thousands of distinct words, a few megabytes at most.
+    pub const CAPACITY: usize = 1 << 16;
+
+    pub fn new(inner: M) -> Self {
+        Self {
+            inner,
+            advances: std::sync::Mutex::new(std::collections::HashMap::new()),
+            metrics: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// The adapter behind the cache.
+    pub fn inner(&self) -> &M {
+        &self.inner
+    }
+}
+
+impl<M: Measurer> Measurer for MeasureCache<M> {
+    fn measure(&self, text: &str, style: &TextStyle, size: f64) -> f64 {
+        let key = (FontKey::of(style, size), text.to_string());
+        // A poisoned lock means a panic mid-insert elsewhere; the map is still a
+        // valid cache, so take it rather than fail every later measurement.
+        let mut map = self.advances.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(&w) = map.get(&key) {
+            return w;
+        }
+        let w = self.inner.measure(text, style, size);
+        if map.len() >= Self::CAPACITY {
+            map.clear();
+        }
+        map.insert(key, w);
+        w
+    }
+
+    fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
+        let key = FontKey::of(style, size);
+        let mut map = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(&fm) = map.get(&key) {
+            return fm;
+        }
+        let fm = self.inner.font_metrics(style, size);
+        if map.len() >= Self::CAPACITY {
+            map.clear();
+        }
+        map.insert(key, fm);
+        fm
+    }
+}
+
 /// A styled slice of a word: its text and an index into the layout's style table
 /// (0 = the paragraph's base style). A plain word is a single piece with style 0; a
 /// word split by a `<tspan>` boundary (even mid-word) is several pieces.

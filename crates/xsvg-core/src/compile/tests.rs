@@ -4102,12 +4102,12 @@ fn frame_box(out: &str) -> Option<[f64; 4]> {
 }
 
 fn compile_plug(svg: &str) -> String {
-    compile_seams_impl(
+    compile_platform_impl(
         svg,
         "balanced",
         false,
         "",
-        &Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost),
+        &Platform::new(Mono, NoShaper, NoOutliner).with_generators(MockHost),
     )
     .unwrap()
 }
@@ -4353,12 +4353,12 @@ fn the_wrapper_carries_identity_and_placement() {
 #[test]
 fn a_plugin_element_carries_a_source_range() {
     let src = plug_doc(r##"<c:bar width="2"/>"##);
-    let out = compile_seams_impl(
+    let out = compile_platform_impl(
         &src,
         "balanced",
         true,
         "",
-        &Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost),
+        &Platform::new(Mono, NoShaper, NoOutliner).with_generators(MockHost),
     )
     .unwrap();
     let start = src.find("<c:bar").unwrap();
@@ -4398,10 +4398,10 @@ fn a_plugin_fragment_matches_its_span_in_the_full_compile() {
     // the incremental canary (docs/Incremental.md) extended to generators —
     // this is what makes host-side purity a hard requirement
     let src = plug_doc(r##"<rect x="0" y="0" width="4" height="4"/><c:bar width="9"/>"##);
-    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner).with_generators(&MockHost);
-    let full = compile_seams_impl(&src, "balanced", true, "", &seams).unwrap();
+    let platform = Platform::new(Mono, NoShaper, NoOutliner).with_generators(MockHost);
+    let full = compile_platform_impl(&src, "balanced", true, "", &platform).unwrap();
     let at = src.find("<c:bar").unwrap();
-    let frag = compile_fragment_seams_impl(&src, "balanced", true, at, "", &seams).unwrap();
+    let frag = compile_fragment_platform_impl(&src, "balanced", true, at, "", &platform).unwrap();
     assert!(
         full.contains(&frag),
         "fragment is a verbatim slice:\n{frag}\n{full}"
@@ -4794,28 +4794,28 @@ fn a_session_parses_its_document_once() {
         .iter()
         .map(|t| svg.find(t).unwrap())
         .collect();
-    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner);
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
 
     // The pure entries: one parse per call — what the session replaces.
     super::session::PARSE_COUNT.with(|c| c.set(0));
     for &off in &tops {
-        compile_fragment_seams_impl(&svg, "balanced", true, off, "", &seams).unwrap();
+        compile_fragment_platform_impl(&svg, "balanced", true, off, "", &platform).unwrap();
     }
     dependents_multi_impl(&svg, &tops);
     assert_eq!(super::session::PARSE_COUNT.with(|c| c.get()), tops.len() + 1);
 
     // The session: a whole flush's worth of calls on one parse.
     super::session::PARSE_COUNT.with(|c| c.set(0));
-    let session = CompileSession::new(&svg, "balanced", true, "").unwrap();
+    let session = platform.session(&svg, "balanced", true, "").unwrap();
     for &off in &tops {
-        session.compile_fragment(off, &seams).unwrap();
+        session.compile_fragment(off).unwrap();
         session.dependents(&[off]);
-        session.text_layout(off, &seams);
+        session.text_layout(off);
         session.fragment_range(off);
     }
     session.dependents(&tops);
     session.node_spans();
-    session.compile(&seams).unwrap();
+    session.compile().unwrap();
     assert_eq!(
         super::session::PARSE_COUNT.with(|c| c.get()),
         1,
@@ -4835,16 +4835,16 @@ fn two_sessions_on_one_thread_keep_their_own_themes() {
     };
     let red = doc("#ff0000");
     let blue = doc("#0000ff");
-    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner);
-    let rs = CompileSession::new(&red, "balanced", false, "").unwrap();
-    let bs = CompileSession::new(&blue, "balanced", false, "").unwrap();
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let rs = platform.session(&red, "balanced", false, "").unwrap();
+    let bs = platform.session(&blue, "balanced", false, "").unwrap();
     for (src, s, own, other) in [
         (&red, &rs, "#ff0000", "#0000ff"),
         (&blue, &bs, "#0000ff", "#ff0000"),
         (&red, &rs, "#ff0000", "#0000ff"),
     ] {
         for tag in ["<rect", "<text"] {
-            let frag = s.compile_fragment(src.find(tag).unwrap(), &seams).unwrap();
+            let frag = s.compile_fragment(src.find(tag).unwrap()).unwrap();
             assert!(frag.contains(own), "{tag}: own theme: {frag}");
             assert!(!frag.contains(other), "{tag}: the other session's theme leaked: {frag}");
         }

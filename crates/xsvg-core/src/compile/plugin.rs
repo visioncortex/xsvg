@@ -102,6 +102,15 @@ pub trait GeneratorHost {
     fn generate(&self, ns: &str, tag: &str, req: &GenRequest) -> GenResult;
 }
 
+impl<T: GeneratorHost + ?Sized> GeneratorHost for &T {
+    fn element(&self, ns: &str, tag: &str) -> ElementInfo {
+        (**self).element(ns, tag)
+    }
+    fn generate(&self, ns: &str, tag: &str, req: &GenRequest) -> GenResult {
+        (**self).generate(ns, tag, req)
+    }
+}
+
 /// The default host: nothing is bound, so every plugin element degrades with a
 /// marker. Backs every pre-existing entry point.
 pub struct NoGenerators;

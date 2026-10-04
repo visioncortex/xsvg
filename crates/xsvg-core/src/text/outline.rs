@@ -41,3 +41,12 @@ pub trait GlyphOutliner {
         None
     }
 }
+
+impl<T: GlyphOutliner + ?Sized> GlyphOutliner for &T {
+    fn outline(&self, text: &str, style: &TextStyle, size: f64, x: f64, baseline: f64) -> Option<String> {
+        (**self).outline(text, style, size, x, baseline)
+    }
+    fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
+        (**self).advance_width(text, style, size)
+    }
+}

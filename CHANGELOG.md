@@ -44,9 +44,21 @@ partial one.
 - **One parse per flush.** `CompileSession` (docs/Compile Session.md) parses and
   pre-scans a document once and compiles any number of its fragments, dependents,
   caret layouts and span tables from the retained parse, byte-identical to the pure
-  entries, which are now one-shot sessions. It borrows its input, takes the platform
-  seams per call, and is `Send`. The `<x:theme>` tokens moved from a thread-local into
-  the compile context, so no compile path touches process-wide state.
+  entries, which are now one-shot sessions. The `<x:theme>` tokens moved from a
+  thread-local into the compile context, so no compile path touches process-wide
+  state.
+- **`Seams` is now `Platform`, owned and long-lived** (Rust API; the wasm and npm
+  entry points are unchanged). `Platform::new(m, shaper, outliner)` takes its adapters
+  by value and keeps their types, so `Send`/`Sync` follow from them with nothing
+  asserted; `with_resolver` / `with_keys` / `with_generators` as before, and
+  `platform.session(text, …)` opens a `CompileSession` that borrows it. The pure
+  entries `compile_seams_impl` / `compile_fragment_seams_impl` are renamed
+  `compile_platform_impl` / `compile_fragment_platform_impl` and take `&Platform`.
+  The seam traits are implemented for `&T`, so a value serving several seams can be
+  lent to each.
+- **`MeasureCache`**: a `Measurer` that remembers advance widths and font metrics for
+  as long as it lives, bounded; `Platform::with_measure_cache()` puts one in front of
+  the measurer, so an editor's second flush over unchanged text measures nothing.
 
 ### Fixed
 

@@ -3,14 +3,14 @@
 //! An editor compiles a few fragments of one document per keystroke, and every
 //! pure `compile_fragment_*_impl` call redoes the whole-document work first: the
 //! nesting check, the XML parse, the theme and import pre-scans. [`CompileSession`]
-//! does that work once, over text it borrows for the length of one flush, and the
-//! pure entries become one-shot sessions. Nothing here outlives its input and the
-//! core keeps no state between calls.
+//! does that work once, over text it borrows for the length of one flush, on a
+//! [`Platform`] that outlives it. The pure entries are one-shot sessions. Nothing
+//! here outlives its input and the core keeps no state between calls.
 
 use super::plugin::{load_imports, ImportTable};
 use super::{
-    check_nesting_depth, serialize, top_level_at, Ctx, Seams, TextLayout, Theme,
-    MAX_NESTING_DEPTH,
+    check_nesting_depth, serialize, top_level_at, Backend, Ctx, Host, TextLayout,
+    Theme, MAX_NESTING_DEPTH,
 };
 use crate::QualityProfile;
 use std::collections::HashMap;
@@ -32,7 +32,8 @@ pub(super) fn parse_document(input: &str) -> Result<roxmltree::Document<'_>, rox
 
 /// The whole-document work, done once: the parse and the pre-scans every
 /// compile over this text needs. Owned by a [`CompileSession`]; borrowed by
-/// each per-call [`Ctx`].
+/// each per-call [`Ctx`]. The `&dyn` entry points use it directly with a
+/// stack-local [`Backend`].
 pub(super) struct Parsed<'a> {
     pub(super) doc: roxmltree::Document<'a>,
     pub(super) theme: Theme,
@@ -60,6 +61,68 @@ impl<'a> Parsed<'a> {
             imports,
             ids,
         })
+    }
+
+    /// The whole document: the header, the serialized root, and the unkeyed marker.
+    pub(super) fn compile(
+        &self,
+        backend: &Backend,
+        quality: QualityProfile,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<String, String> {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "<!-- compiled by xsvg v0 (quality={}) -->\n",
+            quality.as_str()
+        ));
+        let ctx = Ctx::new(backend, quality, sourcemap, base, self);
+        serialize(self.doc.root_element(), &mut out, true, &ctx);
+        // "Key every element" is a host contract this crate cannot enforce, so a
+        // violation gets reported where the sloppy host will actually see it: in its own
+        // output. Nothing for correct hosts (and the byte-span default is not a keyed
+        // compile at all); trailing, so every fragment is still a verbatim slice.
+        let missed = ctx.key_misses.borrow().len();
+        if missed > 0 {
+            out.push_str(&format!(
+                "\n<!-- xsvg: {missed} element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"
+            ));
+        }
+        Ok(out)
+    }
+
+    /// The top-level element containing byte `offset`.
+    pub(super) fn compile_fragment(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<String, String> {
+        let node = top_level_at(&self.doc, offset)
+            .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
+        let mut out = String::new();
+        serialize(node, &mut out, false, &Ctx::new(backend, quality, sourcemap, base, self));
+        Ok(out)
+    }
+
+    /// Caret geometry for the `<x:textbox>` starting at byte `offset`. Layout does
+    /// not read the source map or the base, so neither is a parameter.
+    pub(super) fn text_layout(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Option<TextLayout> {
+        let node = self
+            .doc
+            .descendants()
+            .find(|n| n.is_element() && n.range().start == offset)?;
+        if node.tag_name().namespace() != Some(super::XSVG_NS) || node.tag_name().name() != "textbox" {
+            return None;
+        }
+        super::layout_textbox(node, &Ctx::new(backend, quality, false, "", self))
     }
 
     /// Source byte range of every element in document order, the root included.
@@ -173,79 +236,69 @@ impl<'a> Parsed<'a> {
 }
 
 /// One document, parsed and pre-scanned once, ready to compile any number of its
-/// fragments (docs/Compile Session.md).
+/// fragments on a [`Platform`] (docs/Compile Session.md).
 ///
-/// Created at the top of a render flush over the text the embedder just
-/// serialized, used for every compile that flush needs, and dropped with it: the
-/// session borrows the input, so a stale parse cannot be held. It retains exactly
-/// what the pure entries recompute per call — the parse, the `<x:theme>` tokens,
-/// the `<x:import>` bindings, the id table and the quality profile — and nothing
-/// per compile: each call builds a fresh [`Ctx`] with its own memo, cycle guard and
-/// fuel, so degradation behaviour is unchanged.
+/// Created by [`Platform::session`] at the top of a render flush over the text the
+/// embedder just serialized, used for every compile that flush needs, and dropped
+/// with it: the session borrows the input, so a stale parse cannot be held. It
+/// retains exactly what the pure entries recompute per call — the parse, the
+/// `<x:theme>` tokens, the `<x:import>` bindings, the id table and the quality
+/// profile — and nothing per compile: each call builds a fresh [`Ctx`] with its own
+/// memo, cycle guard and fuel, so degradation behaviour is unchanged.
 ///
-/// The platform seams are passed per call rather than held, which is what keeps a
-/// session `Send`: a `&dyn Measurer` is `Send` only when the trait object is `Sync`,
-/// and hosts whose seams wrap single-threaded handles (the browser's) could never
-/// provide one. The seams are cheap to pass and the same for every call of a flush.
+/// `P` is the platform's concrete type, so a session is `Send` exactly when the
+/// platform is `Sync` — true of any platform over thread-safe adapters, with
+/// nothing asserted — and a document may then be parsed off the thread that
+/// compiles it. A session is not `Sync`, and need not be.
 ///
 /// Every byte a session emits is a byte the pure entry emits for the same input:
-/// `compile_fragment(offset, seams)` equals `compile_fragment_seams_impl(input, …,
-/// offset, base, seams)`, and likewise for the other methods. The pure entries are
-/// one-shot sessions.
-pub struct CompileSession<'a> {
+/// `compile_fragment(offset)` equals `compile_fragment_platform_impl(input, …,
+/// offset, base, platform)`, and likewise for the other methods.
+pub struct CompileSession<'a, P: Host> {
     parsed: Parsed<'a>,
+    platform: &'a P,
     quality: QualityProfile,
     sourcemap: bool,
     base: String,
 }
 
-impl<'a> CompileSession<'a> {
+impl<'a, P: Host> CompileSession<'a, P> {
     /// Parse once, pre-scan once. Fails exactly where the pure entries fail
-    /// (nesting depth, XML parse error), with the same message.
-    pub fn new(input: &'a str, quality: &str, sourcemap: bool, base: &str) -> Result<Self, String> {
+    /// (nesting depth, XML parse error), with the same message. Usually reached
+    /// as [`Platform::session`].
+    pub fn new(
+        platform: &'a P,
+        input: &'a str,
+        quality: &str,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<Self, String> {
         Ok(Self {
             parsed: Parsed::new(input)?,
+            platform,
             quality: QualityProfile::parse(quality),
             sourcemap,
             base: base.to_string(),
         })
     }
 
-    fn ctx<'s>(&'s self, seams: &Seams<'s>) -> Ctx<'s> {
-        Ctx::new(seams, self.quality, self.sourcemap, &self.base, &self.parsed)
-    }
-
-    /// The whole document — byte-identical to [`super::compile_seams_impl`].
-    pub fn compile(&self, seams: &Seams) -> Result<String, String> {
-        let mut out = String::new();
-        out.push_str(&format!(
-            "<!-- compiled by xsvg v0 (quality={}) -->\n",
-            self.quality.as_str()
-        ));
-        let ctx = self.ctx(seams);
-        serialize(self.parsed.doc.root_element(), &mut out, true, &ctx);
-        // "Key every element" is a host contract this crate cannot enforce, so a
-        // violation gets reported where the sloppy host will actually see it: in its own
-        // output. Nothing for correct hosts (and the byte-span default is not a keyed
-        // compile at all); trailing, so every fragment is still a verbatim slice.
-        let missed = ctx.key_misses.borrow().len();
-        if missed > 0 {
-            out.push_str(&format!(
-                "\n<!-- xsvg: {missed} element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"
-            ));
-        }
-        Ok(out)
+    /// The whole document — byte-identical to [`super::compile_platform_impl`].
+    pub fn compile(&self) -> Result<String, String> {
+        self.parsed
+            .compile(&self.platform.backend(), self.quality, self.sourcemap, &self.base)
     }
 
     /// The top-level element containing byte `offset` — byte-identical to
-    /// [`super::compile_fragment_seams_impl`], and so to that element's span in
+    /// [`super::compile_fragment_platform_impl`], and so to that element's span in
     /// [`Self::compile`] (the fragment invariant, docs/Incremental.md).
-    pub fn compile_fragment(&self, offset: usize, seams: &Seams) -> Result<String, String> {
-        let node = top_level_at(&self.parsed.doc, offset)
-            .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
-        let mut out = String::new();
-        serialize(node, &mut out, false, &self.ctx(seams));
-        Ok(out)
+    pub fn compile_fragment(&self, offset: usize) -> Result<String, String> {
+        self.parsed.compile_fragment(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
     }
 
     /// Baked-reference dependents of the fragments at `seeds` — the same answer as
@@ -257,16 +310,9 @@ impl<'a> CompileSession<'a> {
     /// Caret geometry for the `<x:textbox>` starting at byte `offset` — the same
     /// answer as [`super::text_layout_impl`]. `None` when the offset is not a
     /// textbox or the box resolves to nothing renderable.
-    pub fn text_layout(&self, offset: usize, seams: &Seams) -> Option<TextLayout> {
-        let node = self
-            .parsed
-            .doc
-            .descendants()
-            .find(|n| n.is_element() && n.range().start == offset)?;
-        if node.tag_name().namespace() != Some(super::XSVG_NS) || node.tag_name().name() != "textbox" {
-            return None;
-        }
-        super::layout_textbox(node, &self.ctx(seams))
+    pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
+        self.parsed
+            .text_layout(offset, &self.platform.backend(), self.quality)
     }
 
     /// Source byte range of every element, in document order — the same answer as

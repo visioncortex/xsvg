@@ -98,6 +98,12 @@ pub trait Shaper {
     fn rasterize(&self, path_d: &str, row_h: f64) -> Option<RasterRegion>;
 }
 
+impl<T: Shaper + ?Sized> Shaper for &T {
+    fn rasterize(&self, path_d: &str, row_h: f64) -> Option<RasterRegion> {
+        (**self).rasterize(path_d, row_h)
+    }
+}
+
 /// Flow options for [`layout_region`]. `padding` insets the region on all sides;
 /// `align` positions each line within its own span (`justify` behaves as `start`);
 /// `valign` positions the flowed block within the region's vertical extent.
