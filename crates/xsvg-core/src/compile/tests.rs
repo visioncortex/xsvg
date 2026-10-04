@@ -3780,9 +3780,10 @@ fn dependents_multi_is_the_union_closure() {
 
 #[test]
 fn fragment_compile_reloads_theme_from_its_own_document() {
-    // Regression (stale-THEME hazard): compile_fragment_impl used to skip
-    // load_theme and silently reuse whatever the last full compile left in the
-    // thread-local.
+    // Regression (the stale-theme hazard): compile_fragment_impl once skipped the
+    // theme load and reused whatever the last full compile left in a thread-local.
+    // The theme is a per-document field now (docs/Compile Session.md §4), so this
+    // is pinned as a property rather than a guarded case.
     let doc = |accent: &str| {
         format!(
             r##"{XW}<x:theme><x:color name="accent" value="{accent}"/></x:theme><rect x="0" y="0" width="10" height="10" fill="var(accent)"/></svg>"##
@@ -4778,4 +4779,74 @@ fn a_space_inside_a_larger_run_wraps_at_the_runs_size() {
     };
     assert_eq!(lines(47.0), 2, "the 2x space is 10 wide, so aa bb (50) cannot fit in 47");
     assert_eq!(lines(51.0), 1, "and does fit once the box allows it");
+}
+
+// ---------------------------------------------------------------- compile session
+// docs/Compile Session.md §6: the one-parse property and theme isolation. Output
+// equality over the corpus is tests/session.rs.
+
+#[test]
+fn a_session_parses_its_document_once() {
+    let svg = format!(
+        r##"{XW}<x:theme><x:color name="ink" value="#123"/></x:theme><rect id="a" x="0" y="0" width="10" height="10" fill="var(ink)"/><x:textbox in="#a" font-size="4">one two</x:textbox><x:textbox x="0" y="20" width="40" height="20">three four</x:textbox><circle cx="5" cy="5" r="2"/></svg>"##
+    );
+    let tops: Vec<usize> = ["<rect", "<x:textbox in", "<x:textbox x", "<circle"]
+        .iter()
+        .map(|t| svg.find(t).unwrap())
+        .collect();
+    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner);
+
+    // The pure entries: one parse per call — what the session replaces.
+    super::session::PARSE_COUNT.with(|c| c.set(0));
+    for &off in &tops {
+        compile_fragment_seams_impl(&svg, "balanced", true, off, "", &seams).unwrap();
+    }
+    dependents_multi_impl(&svg, &tops);
+    assert_eq!(super::session::PARSE_COUNT.with(|c| c.get()), tops.len() + 1);
+
+    // The session: a whole flush's worth of calls on one parse.
+    super::session::PARSE_COUNT.with(|c| c.set(0));
+    let session = CompileSession::new(&svg, "balanced", true, "").unwrap();
+    for &off in &tops {
+        session.compile_fragment(off, &seams).unwrap();
+        session.dependents(&[off]);
+        session.text_layout(off, &seams);
+        session.fragment_range(off);
+    }
+    session.dependents(&tops);
+    session.node_spans();
+    session.compile(&seams).unwrap();
+    assert_eq!(
+        super::session::PARSE_COUNT.with(|c| c.get()),
+        1,
+        "a session parses once, however many fragments it compiles"
+    );
+}
+
+#[test]
+fn two_sessions_on_one_thread_keep_their_own_themes() {
+    // The theme used to be a thread-local reloaded per compile; a fragment compiled
+    // after another document's compile could see the wrong tokens. It is now a
+    // field of the session's context, so interleaving two sessions cannot mix them.
+    let doc = |accent: &str| {
+        format!(
+            r##"{XW}<x:theme><x:color name="accent" value="{accent}"/></x:theme><rect x="0" y="0" width="10" height="10" fill="var(accent)"/><text x="0" y="30" x:font="h">T</text><x:theme><x:font name="h" font-family="{accent}"/></x:theme></svg>"##
+        )
+    };
+    let red = doc("#ff0000");
+    let blue = doc("#0000ff");
+    let seams = Seams::new(&Mono, &NoShaper, &NoOutliner);
+    let rs = CompileSession::new(&red, "balanced", false, "").unwrap();
+    let bs = CompileSession::new(&blue, "balanced", false, "").unwrap();
+    for (src, s, own, other) in [
+        (&red, &rs, "#ff0000", "#0000ff"),
+        (&blue, &bs, "#0000ff", "#ff0000"),
+        (&red, &rs, "#ff0000", "#0000ff"),
+    ] {
+        for tag in ["<rect", "<text"] {
+            let frag = s.compile_fragment(src.find(tag).unwrap(), &seams).unwrap();
+            assert!(frag.contains(own), "{tag}: own theme: {frag}");
+            assert!(!frag.contains(other), "{tag}: the other session's theme leaked: {frag}");
+        }
+    }
 }

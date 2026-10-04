@@ -50,20 +50,20 @@ pub(super) fn resolve_cols(spec: Option<&str>, ncols: usize, total: f64) -> Vec<
 /// presentation-table model (Slides/Canva), baked to plain `<rect>`s + `<text>`.
 pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let tp: super::elements::Table = params_of(node);
-    let text_fill = resolve_var(&tp.fill).into_owned();
-    let grid = paint(&tp.stroke);
+    let text_fill = ctx.resolve_var(&tp.fill).into_owned();
+    let grid = ctx.paint(&tp.stroke);
     let grid_w = tp.stroke_width.max(0.0);
     let body_bg = node
         .attribute("cell-fill")
-        .map(paint);
-    let header_bg = paint(&tp.header_fill);
+        .map(|v| ctx.paint(v));
+    let header_bg = ctx.paint(&tp.header_fill);
     // zebra striping: an alternate background for every other BODY row (rows with
     // no header cell); the first data row is unstriped.
     let stripe = node
         .attribute("stripe")
-        .map(paint);
+        .map(|v| ctx.paint(v));
     let pad = tp.cell_padding.max(0.0);
     let default_align = tp.align.as_str();
     let default_valign = tp.valign.as_str();
@@ -218,7 +218,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
             let bg = cell
                 .attribute("bg")
-                .map(paint)
+                .map(|v| ctx.paint(v))
                 .or_else(|| {
                     if header {
                         Some(header_bg.clone())
@@ -253,7 +253,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             if !plain.trim().is_empty() {
                 let fill = cell
                     .attribute("fill")
-                    .map(|v| resolve_var(v).into_owned())
+                    .map(|v| ctx.resolve_var(v).into_owned())
                     .unwrap_or_else(|| text_fill.clone());
                 let spec = AreaSpec {
                     x: cx,
@@ -269,9 +269,9 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     rtl: false,
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
-                emit_highlights(out, &layout.lines, layout.anchor.svg(), false, &st, layout.font_size, &emits, m);
+                emit_highlights(out, &layout.lines, layout.anchor.svg(), false, &st, layout.font_size, &emits, m, ctx);
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
-                push_font_attrs(out, &st, layout.font_size, &fill);
+                push_font_attrs(out, &st, layout.font_size, &fill, ctx);
                 out.push('>');
                 for line in &layout.lines {
                     emit_line(out, line, &st, layout.font_size, 1.0, m, &emits);

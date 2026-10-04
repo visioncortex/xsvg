@@ -120,7 +120,16 @@ struct Ctx<'a> {
     generators: &'a dyn GeneratorHost,
     /// `<x:import>` namespace bindings from the entry document — the set of
     /// namespaces that dispatch to `generators` rather than dropping as foreign.
-    imports: ImportTable,
+    imports: &'a ImportTable,
+    /// `<x:theme>` tokens of the entry document (§4.1), resolved during
+    /// serialization. A field, not a thread-local: two documents compiled
+    /// interleaved on one thread each see their own tokens.
+    theme: &'a Theme,
+    /// The entry document and its id table, so `#id` resolution inside it is a
+    /// lookup rather than a scan. Nodes of a linked dependency belong to another
+    /// document and fall back to scanning theirs.
+    doc: &'a roxmltree::Document<'a>,
+    ids: &'a std::collections::HashMap<String, roxmltree::NodeId>,
     /// Set while generator output is being sanitized, so a module emitting an
     /// element in its own namespace degrades instead of recursing forever.
     in_plugin: std::cell::Cell<bool>,
@@ -168,8 +177,14 @@ impl<'a> Seams<'a> {
 }
 
 impl<'a> Ctx<'a> {
-    /// Build the per-compile context from the seams plus this document's imports.
-    fn new(seams: &Seams<'a>, quality: QualityProfile, sourcemap: bool, base: &str, imports: ImportTable) -> Self {
+    /// Build the per-compile context from the seams plus the parsed document.
+    fn new(
+        seams: &Seams<'a>,
+        quality: QualityProfile,
+        sourcemap: bool,
+        base: &str,
+        parsed: &'a session::Parsed<'a>,
+    ) -> Self {
         Self {
             m: seams.m,
             shaper: seams.shaper,
@@ -187,9 +202,44 @@ impl<'a> Ctx<'a> {
             keys: seams.keys,
             key_misses: std::cell::RefCell::new(std::collections::HashSet::new()),
             generators: seams.generators,
-            imports,
+            imports: &parsed.imports,
+            theme: &parsed.theme,
+            doc: &parsed.doc,
+            ids: &parsed.ids,
             in_plugin: std::cell::Cell::new(false),
         }
+    }
+
+    /// The element `r` (`#id` or bare id) names, in `node`'s document. A table
+    /// lookup for the entry document; a scan for a linked dependency's.
+    fn resolve_ref<'n>(&self, node: roxmltree::Node<'n, 'n>, r: &str) -> Option<roxmltree::Node<'n, 'n>> {
+        let doc = node.document();
+        if std::ptr::eq(doc as *const _ as *const (), self.doc as *const _ as *const ()) {
+            let id = r.strip_prefix('#').unwrap_or(r);
+            return self.ids.get(id).and_then(|&nid| doc.get_node(nid));
+        }
+        resolve_ref(node, r)
+    }
+
+    /// Resolve every `var(name)` / `var(name, fallback)` in an attribute value
+    /// against the theme's color tokens. An unknown token with no fallback is left
+    /// verbatim (renders as the property's initial value, like a dangling CSS
+    /// variable).
+    fn resolve_var<'v>(&self, v: &'v str) -> std::borrow::Cow<'v, str> {
+        self.theme.resolve_var(v)
+    }
+
+    /// A paint value for output: theme tokens resolved, *then* escaped — a token's
+    /// value is authored too, so resolving after escaping would let it carry the
+    /// quote.
+    fn paint(&self, v: &str) -> String {
+        esc(&self.resolve_var(v))
+    }
+
+    /// The `<x:font>` token's properties named by an element's `x:font`, if any.
+    fn font_props(&self, node: roxmltree::Node) -> Option<Vec<(String, String)>> {
+        let name = node.attribute((XSVG_NS, "font"))?;
+        self.theme.fonts.get(name).cloned()
     }
 
     /// The host's key for the node starting at `start`, recording a miss when an
@@ -356,30 +406,7 @@ pub fn compile_seams_impl(
     base: &str,
     seams: &Seams,
 ) -> Result<String, String> {
-    let q = crate::QualityProfile::parse(quality);
-    check_nesting_depth(input, MAX_NESTING_DEPTH)?;
-    let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
-    load_theme(&doc); // §4.1 color/type tokens, resolved during serialization
-    let imports = load_imports(&doc); // §Extensibility — generator namespace bindings
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "<!-- compiled by xsvg v0 (quality={}) -->\n",
-        q.as_str()
-    ));
-    let ctx = Ctx::new(seams, q, sourcemap, base, imports);
-    serialize(doc.root_element(), &mut out, true, &ctx);
-    // "Key every element" is a host contract this crate cannot enforce, so a
-    // violation gets reported where the sloppy host will actually see it: in its own
-    // output. Nothing for correct hosts (and the byte-span default is not a keyed
-    // compile at all); trailing, so every fragment is still a verbatim slice.
-    let missed = ctx.key_misses.borrow().len();
-    if missed > 0 {
-        out.push_str(&format!(
-            "\n<!-- xsvg: {missed} element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"
-        ));
-    }
-    Ok(out)
+    CompileSession::new(input, quality, sourcemap, base)?.compile(seams)
 }
 
 /// The direct element child of the document root whose source byte range contains
@@ -492,22 +519,7 @@ pub fn compile_fragment_seams_impl(
     base: &str,
     seams: &Seams,
 ) -> Result<String, String> {
-    let q = crate::QualityProfile::parse(quality);
-    check_nesting_depth(input, MAX_NESTING_DEPTH)?;
-    let doc = roxmltree::Document::parse(input).map_err(|e| format!("xsvg parse error: {e}"))?;
-    load_theme(&doc); // tokens must come from THIS document, not the last full
-                      // compile on this thread (stale-THEME hazard, kit M5)
-    let imports = load_imports(&doc);
-    let node = top_level_at(&doc, offset)
-        .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
-    let mut out = String::new();
-    serialize(
-        node,
-        &mut out,
-        false,
-        &Ctx::new(seams, q, sourcemap, base, imports),
-    );
-    Ok(out)
+    CompileSession::new(input, quality, sourcemap, base)?.compile_fragment(offset, seams)
 }
 
 /// Source byte range of **every** element in the document, in document order
@@ -519,27 +531,15 @@ pub fn compile_fragment_seams_impl(
 /// to keep projecting rendered elements back to source once identity stops being a
 /// byte range.
 pub fn node_spans_impl(input: &str) -> Vec<(usize, usize)> {
-    let Ok(doc) = roxmltree::Document::parse(input) else {
-        return Vec::new();
-    };
-    doc.root_element()
-        .descendants()
-        .filter(|n| n.is_element())
-        .map(|n| {
-            let r = n.range();
-            (r.start, r.end)
-        })
-        .collect()
+    session::Parsed::new(input)
+        .map(|p| p.node_spans())
+        .unwrap_or_default()
 }
 
 /// Source byte range of the fragment unit containing `offset` (for the caller's
 /// identity bookkeeping — ranges shift by the edit delta between compiles).
 pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)> {
-    let doc = roxmltree::Document::parse(input).ok()?;
-    top_level_at(&doc, offset).map(|n| {
-        let r = n.range();
-        (r.start, r.end)
-    })
+    session::Parsed::new(input).ok()?.fragment_range(offset)
 }
 
 /// Source byte ranges of every *other* top-level element that must be re-emitted
@@ -556,7 +556,10 @@ pub fn fragment_range_impl(input: &str, offset: usize) -> Option<(usize, usize)>
 /// is a direct child of `<x:boolean>` (an operand by reference — §7.4). A
 /// passthrough `<use>` anywhere else is a live reference the browser resolves,
 /// so it is deliberately not reported.
-fn baked_refs<'a>(n: roxmltree::Node<'a, 'a>) -> Vec<&'a str> {
+fn baked_refs<'a>(
+    n: roxmltree::Node<'a, 'a>,
+    ids: &std::collections::HashMap<String, roxmltree::NodeId>,
+) -> Vec<&'a str> {
     let mut out = Vec::new();
     if let Some(r) = n.attribute("in") {
         out.push(r);
@@ -592,7 +595,8 @@ fn baked_refs<'a>(n: roxmltree::Node<'a, 'a>) -> Vec<&'a str> {
         .and_then(|f| f.strip_prefix("url(#"))
         .and_then(|f| f.strip_suffix(')'))
     {
-        if resolve_ref(n, id).is_some_and(|t| t.tag_name().name() == "meshgradient") {
+        let target = ids.get(id).and_then(|&nid| n.document().get_node(nid));
+        if target.is_some_and(|t| t.tag_name().name() == "meshgradient") {
             out.push(id);
         }
     }
@@ -608,86 +612,9 @@ pub fn dependents_impl(input: &str, offset: usize) -> Vec<(usize, usize)> {
 /// their dependents overlap. Seed ranges themselves are excluded from the
 /// result. Results are in document order.
 pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)> {
-    let Ok(doc) = roxmltree::Document::parse(input) else {
-        return Vec::new();
-    };
-    let targets: Vec<roxmltree::Node> = {
-        let mut v: Vec<roxmltree::Node> = Vec::new();
-        for &off in seeds {
-            if let Some(t) = top_level_at(&doc, off) {
-                if !v.iter().any(|u| u.range() == t.range()) {
-                    v.push(t);
-                }
-            }
-        }
-        v
-    };
-    if targets.is_empty() {
-        return Vec::new();
-    }
-    // ids whose (compiled) geometry has changed; grows as dependents join
-    let mut live: Vec<&str> = targets
-        .iter()
-        .flat_map(|t| t.descendants().filter_map(|n| n.attribute("id")))
-        .collect();
-    // Editing an <x:import> rebinds a whole namespace — every element in it lowers
-    // through a different module, so all of them are dependents (§Extensibility §3).
-    // This edge is by namespace rather than by id, so it can't live in `baked_refs`.
-    let dirty_ns: Vec<&str> = targets
-        .iter()
-        .flat_map(|t| t.descendants())
-        .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "import")
-        .filter_map(|n| n.attribute("ns"))
-        .collect();
-    if live.is_empty() && dirty_ns.is_empty() {
-        return Vec::new();
-    }
-    let tops: Vec<roxmltree::Node> = doc
-        .root_element()
-        .children()
-        .filter(|c| c.is_element() && !targets.iter().any(|t| t.range() == c.range()))
-        .collect();
-    let mut included = vec![false; tops.len()];
-    loop {
-        let mut changed = false;
-        for (i, tl) in tops.iter().enumerate() {
-            if included[i] {
-                continue;
-            }
-            let refs_live = tl.descendants().any(|n| {
-                baked_refs(n)
-                    .iter()
-                    .any(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
-                    || n.tag_name()
-                        .namespace()
-                        .is_some_and(|ns| dirty_ns.contains(&ns))
-            });
-            if refs_live {
-                included[i] = true;
-                changed = true;
-                // its output changed, so ids it defines go live too
-                for id in tl.descendants().filter_map(|n| n.attribute("id")) {
-                    if !live.contains(&id) {
-                        live.push(id);
-                    }
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    let mut out: Vec<(usize, usize)> = tops
-        .iter()
-        .zip(&included)
-        .filter(|(_, inc)| **inc)
-        .map(|(tl, _)| {
-            let r = tl.range();
-            (r.start, r.end)
-        })
-        .collect();
-    out.sort_unstable();
-    out
+    session::Parsed::new(input)
+        .map(|p| p.dependents(seeds))
+        .unwrap_or_default()
 }
 
 /// Recursively emit a node as SVG.
@@ -831,7 +758,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             // §Extensibility definitions — collected up front like <x:theme>, so
             // only a binding we could not honor has anything to say here.
             "import" => {
-                if let Some(why) = check_import(node, &ctx.imports) {
+                if let Some(why) = check_import(node, ctx.imports) {
                     out.push_str(&format!("<!-- xsvg: <x:import> {why} -->"));
                 }
             }
@@ -907,7 +834,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 
     // A fill referencing an SVG 2 <meshgradient> (the Inkscape dialect no
     // browser renders) compiles to the mesh pipeline, clipped by the shape.
-    if let Some(mg) = mesh_fill_target(node) {
+    if let Some(mg) = mesh_fill_target(node, ctx) {
         if emit_meshgradient_fill(node, mg, out, ctx) {
             return;
         }
@@ -931,10 +858,10 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     }
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["filter"]);
+            copy_attrs(node, out, &["filter"], ctx);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &[]),
+        None => copy_attrs(node, out, &[], ctx),
     }
     out.push_str(&pos_attr(node, ctx));
     if !is_root {
@@ -992,10 +919,10 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str("<path");
     match &filter_sub {
         Some(sub) => {
-            copy_attrs(node, out, &["x", "y", "width", "height", "filter"]);
+            copy_attrs(node, out, &["x", "y", "width", "height", "filter"], ctx);
             out.push_str(sub);
         }
-        None => copy_attrs(node, out, &["x", "y", "width", "height"]),
+        None => copy_attrs(node, out, &["x", "y", "width", "height"], ctx),
     }
     out.push_str(&pos_attr(node, ctx));
     out.push_str(&format!(" d=\"M{x},{y} h{w} v{h} h{} Z\"/>", -w));
@@ -1004,7 +931,7 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
 fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let x = attr_num(node, "x", 0.0);
     let y = attr_num(node, "y", 0.0);
     let max_w = attr_num(node, "inline-size", 0.0);
@@ -1012,7 +939,7 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
 
     out.push_str("<text");
-    copy_attrs(node, out, &["inline-size", "line-height"]);
+    copy_attrs(node, out, &["inline-size", "line-height"], ctx);
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let base = [EmitAttrs::default()];
@@ -1026,12 +953,12 @@ fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// `in="#id"` — bound to a referenced shape (rect → rectangular; any other shape →
 /// flowed inside its outline, §6.10).
 fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let fill = node.attribute("fill").unwrap_or("#000");
     let gx = attr_num(node, "glyph-x-scale", 1.0);
     let tb: elements::Textbox = params_of(node);
     let outline = tb.outline || ctx.force_outline.get();
-    let stroke = text_border_attrs(node);
+    let stroke = text_border_attrs(node, ctx);
     let pos = format!("{}{}", pos_attr(node, ctx), frame_attr(node, ctx));
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
@@ -1043,7 +970,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .collect();
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
-            Some(r) => resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            Some(r) => ctx.resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
             None => Some(node),
         };
         if let Some(geom) = geom {
@@ -1063,7 +990,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
 
     if let Some(reference) = node.attribute("in") {
-        let Some(target) = resolve_ref(node, reference) else {
+        let Some(target) = ctx.resolve_ref(node, reference) else {
             out.push_str("<!-- xsvg: <x:textbox in> target not found -->");
             return;
         };
@@ -1084,6 +1011,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 &pos,
                 outline,
                 ctx.outliner,
+                ctx,
             );
             return;
         }
@@ -1124,6 +1052,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             &pos,
             outline,
             ctx.outliner,
+            ctx,
         );
         return;
     }
@@ -1143,6 +1072,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &pos,
         outline,
         ctx.outliner,
+        ctx,
     );
 }
 
@@ -1188,9 +1118,9 @@ fn emit_paragraphs(
                 ..l.clone()
             })
             .collect();
-        emit_highlights(out, &shifted, para.anchor, para.rtl, &para.style, para.style.size, &para.emits, m);
+        emit_highlights(out, &shifted, para.anchor, para.rtl, &para.style, para.style.size, &para.emits, m, ctx);
         out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
-        push_font_attrs(out, &para.style, para.style.size, para.fill);
+        push_font_attrs(out, &para.style, para.style.size, para.fill, ctx);
         if para.rtl {
             out.push_str(" direction=\"rtl\"");
         }
@@ -1406,9 +1336,9 @@ fn plan_paragraphs<'a>(
 /// available; the last resort is a straight live `<text>` at the element's x/y, so
 /// the document never breaks.
 fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let fill = node.attribute("fill").unwrap_or("#000");
-    let stroke = text_border_attrs(node);
+    let stroke = text_border_attrs(node, ctx);
     let pos = pos_attr(node, ctx);
     let tp: elements::Textpath = params_of(node);
     let fx = PathEffect {
@@ -1442,7 +1372,7 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let advance = line_advance(&text, &style, style.size, ctx.m);
             let offset = run_offset(frame.len(), advance, fx.align, fx.start);
             out.push_str("<text");
-            push_font_attrs(out, &style, style.size, fill);
+            push_font_attrs(out, &style, style.size, fill, ctx);
             out.push_str(&pos);
             out.push_str("><textPath href=\"#");
             push_escaped(out, reference.strip_prefix('#').unwrap_or(reference), true);
@@ -1478,7 +1408,7 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 ctx.quality.text_tolerance(),
                 false,
             ) {
-                push_outline_group(out, fill, &stroke, &pos, &[d]);
+                push_outline_group(out, fill, &stroke, &pos, &[d], ctx);
                 return;
             }
         }
@@ -1494,7 +1424,7 @@ fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
     let (x, y) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
     out.push_str("<text");
-    push_font_attrs(out, &style, style.size, fill);
+    push_font_attrs(out, &style, style.size, fill, ctx);
     out.push_str(&format!(" x=\"{}\" y=\"{}\"", fmt(x), fmt(y)));
     out.push_str(&pos);
     out.push('>');
@@ -1550,7 +1480,7 @@ fn stepped_text(
     }
 
     out.push_str("<text");
-    push_font_attrs(out, style, style.size, fill);
+    push_font_attrs(out, style, style.size, fill, ctx);
     out.push_str(pos);
     // absolute per-glyph positions — spacing is baked in, so no spacing attrs
     let xs: Vec<String> = advances.iter().map(|a| fmt(x0 + a)).collect();
@@ -1609,6 +1539,8 @@ fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) -> AreaSpec {
 }
 
 /// Resolve a `#id` (or bare `id`) reference to its element anywhere in the document.
+/// Document-order scan for the element `r` names — the fallback for nodes of a
+/// linked dependency; the entry document goes through [`Ctx::resolve_ref`]'s table.
 fn resolve_ref<'a>(node: roxmltree::Node<'a, 'a>, r: &str) -> Option<roxmltree::Node<'a, 'a>> {
     let id = r.strip_prefix('#').unwrap_or(r);
     node.document()
@@ -1985,7 +1917,7 @@ fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
     // shared on purpose — they are a whole-compile work budget.)
     let prev_resolved = ctx.resolved.replace(std::collections::HashMap::new());
     let prev_resolving = ctx.resolving.replace(Vec::new());
-    let compiled = match roxmltree::Document::parse(&source) {
+    let compiled = match session::parse_document(&source) {
         Ok(d) => {
             let mut s = String::new();
             serialize(d.root_element(), &mut s, true, ctx);
@@ -2137,7 +2069,7 @@ impl RefFail {
 /// geometry). Cycles, chains deeper than [`MAX_REF_DEPTH`], and an exhausted
 /// [`REF_FUEL`] budget degrade with a distinguishable [`RefFail`] (§4 totality).
 fn ref_geometry(node: roxmltree::Node, r: &str, ctx: &Ctx) -> Result<String, RefFail> {
-    let target = resolve_ref(node, r).ok_or(RefFail::NotFound)?;
+    let target = ctx.resolve_ref(node, r).ok_or(RefFail::NotFound)?;
     target_geometry(target, ctx)
 }
 
@@ -2384,7 +2316,7 @@ fn points_to_path_d(points: &str) -> Option<String> {
 /// `auto` width/height, and `<tbreak/>` forced breaks.
 fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let spec = TextAreaSpec {
         x: attr_num(node, "x", 0.0),
         y: attr_num(node, "y", 0.0),
@@ -2404,13 +2336,14 @@ fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &layout,
         &style,
         node.attribute("fill").unwrap_or("#000"),
-        &text_border_attrs(node),
+        &text_border_attrs(node, ctx),
         gx,
         m,
         &emits,
         &pos_attr(node, ctx),
         outline,
         ctx.outliner,
+        ctx,
     );
 }
 
@@ -2454,12 +2387,12 @@ pub(super) const TEXT_BORDER_PARAMS: &[xsvg_schema::ParamSpec] = &[
 /// round joins) so the border never eats into the letters, and `border-width` is the width
 /// visible outside each glyph (the emitted `stroke-width` is doubled, since the fill covers
 /// the inner half). Otherwise raw SVG stroke attributes pass through unchanged.
-fn text_border_attrs(node: roxmltree::Node) -> String {
+fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
     let bw = node.attribute((XSVG_NS, "border-width")).and_then(parse_num);
     let bc = node.attribute((XSVG_NS, "border-color"));
     if bw.is_some() || bc.is_some() {
         let w = bw.unwrap_or(3.0).max(0.0);
-        let color = paint(bc.unwrap_or("#000000"));
+        let color = ctx.paint(bc.unwrap_or("#000000"));
         let mut s = format!(
             " stroke=\"{color}\" stroke-width=\"{}\" paint-order=\"stroke\" stroke-linejoin=\"round\"",
             fmt(w * 2.0)
@@ -2481,7 +2414,7 @@ fn text_border_attrs(node: roxmltree::Node) -> String {
         "paint-order",
     ] {
         if let Some(v) = node.attribute(name) {
-            s.push_str(&format!(" {name}=\"{}\"", paint(v)));
+            s.push_str(&format!(" {name}=\"{}\"", ctx.paint(v)));
         }
     }
     s
@@ -2490,10 +2423,17 @@ fn text_border_attrs(node: roxmltree::Node) -> String {
 /// Emit an outlined text group: `<g fill=… stroke=…><path d="…"/>…</g>` — the shared
 /// output of create-outlines (§6.12) and text-on-path (§6.13). `paths` are the glyph
 /// path `d` strings (one per line for a box, one for a warped run).
-fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, paths: &[String]) {
+fn push_outline_group(
+    out: &mut String,
+    fill: &str,
+    stroke: &str,
+    pos: &str,
+    paths: &[String],
+    ctx: &Ctx,
+) {
     // `stroke` is the attribute string text_border_attrs built, values already
     // resolved and escaped; `fill` is a bare value.
-    out.push_str(&format!("<g fill=\"{}\"{stroke}{pos}>", paint(fill)));
+    out.push_str(&format!("<g fill=\"{}\"{stroke}{pos}>", ctx.paint(fill)));
     for d in paths {
         out.push_str("<path d=\"");
         push_escaped(out, d, true);
@@ -2505,14 +2445,14 @@ fn push_outline_group(out: &mut String, fill: &str, stroke: &str, pos: &str, pat
 /// Push the shared live-`<text>` paint/style attributes: ` font-family="…" font-size="…"
 /// font-weight="…" font-style="…" fill="…"` (leads with a space). Callers add their own
 /// prefix (e.g. `text-anchor`) and any suffix (`x`/`y`, `letter-spacing`).
-fn push_font_attrs(out: &mut String, style: &TextStyle, size: f64, fill: &str) {
+fn push_font_attrs(out: &mut String, style: &TextStyle, size: f64, fill: &str, ctx: &Ctx) {
     out.push_str(&format!(
         " font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\"",
         esc(&style.family),
         fmt(size),
         esc(&style.weight),
         esc(&style.style),
-        paint(fill)
+        ctx.paint(fill)
     ));
 }
 
@@ -2529,6 +2469,7 @@ fn write_area_text(
     pos: &str,
     outline: bool,
     outliner: &dyn GlyphOutliner,
+    ctx: &Ctx,
 ) {
     // Create-outlines (§6.12): emit each line as a <path> tracing its glyphs instead
     // of live <text>. All-or-nothing — if the outliner can't do any line (font bytes
@@ -2557,15 +2498,15 @@ fn write_area_text(
             }
         }
         if ok {
-            push_outline_group(out, fill, stroke, pos, &paths);
+            push_outline_group(out, fill, stroke, pos, &paths, ctx);
             return;
         }
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    emit_highlights(out, &layout.lines, layout.anchor.svg(), layout.rtl, style, layout.font_size, emits, m);
+    emit_highlights(out, &layout.lines, layout.anchor.svg(), layout.rtl, style, layout.font_size, emits, m, ctx);
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
-    push_font_attrs(out, style, layout.font_size, fill);
+    push_font_attrs(out, style, layout.font_size, fill, ctx);
     if layout.rtl {
         out.push_str(" direction=\"rtl\"");
     }
@@ -2631,6 +2572,7 @@ fn emit_highlights(
     size: f64,
     emits: &[EmitAttrs],
     m: &dyn Measurer,
+    ctx: &Ctx,
 ) {
     let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
     // the run's measuring style: the base with the run's overrides folded in
@@ -2693,7 +2635,7 @@ fn emit_highlights(
                     fmt(line.baseline - shift - fm.ascent),
                     fmt(w),
                     fmt(fm.ascent + fm.descent),
-                    paint(color)
+                    ctx.paint(color)
                 ));
             }
             if !rtl {
@@ -2869,10 +2811,10 @@ pub(super) const FONT_PARAMS: &[xsvg_schema::ParamSpec] = &[
     },
 ];
 
-fn style_from(node: roxmltree::Node) -> TextStyle {
+fn style_from(node: roxmltree::Node, ctx: &Ctx) -> TextStyle {
     // A `<x:font>` token (via `x:font="name"`) supplies OVERRIDABLE defaults —
     // the element's own `font-*` attributes win over the token (§4.1).
-    let tok = font_props(node).unwrap_or_default();
+    let tok = ctx.font_props(node).unwrap_or_default();
     let t = |k: &str| tok.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
     let s = |k: &str, d: &str| node.attribute(k).or_else(|| t(k)).unwrap_or(d).to_string();
     let num = |k: &str, d: f64| {
@@ -3095,29 +3037,17 @@ fn intern_run(
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 
-/// Copy a node's attributes, normalizing namespaces: `x:` attrs are consumed (not
-/// copied), `xlink:*` modernizes to the unprefixed SVG 2 form (`xlink:href` →
-/// `href` — supported by every current renderer, and we declare no xlink xmlns),
-/// `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`), and other foreign
-/// namespaces drop (editor metadata we can't re-emit faithfully). `skip` filters
-/// by local name.
 // ---- Theming (§4.1): compile-time color & type tokens ---------------------
 
-/// A `<x:theme>`'s tokens, loaded once per compile. `colors` map a name to any
-/// paint value (referenced as `var(name)`); `fonts` map a name to an ordered set
-/// of font-ish properties (a CSS-`font`-shorthand-like bundle) applied as an
-/// OVERRIDABLE base on text carrying `x:font="name"` (the element's own `font-*`
-/// wins).
+/// A `<x:theme>`'s tokens, loaded once per parsed document and carried by the
+/// [`Ctx`] of every compile over it. `colors` map a name to any paint value
+/// (referenced as `var(name)`); `fonts` map a name to an ordered set of font-ish
+/// properties (a CSS-`font`-shorthand-like bundle) applied as an OVERRIDABLE base
+/// on text carrying `x:font="name"` (the element's own `font-*` wins).
 #[derive(Default)]
-struct Theme {
+pub(super) struct Theme {
     colors: std::collections::HashMap<String, String>,
     fonts: std::collections::HashMap<String, Vec<(String, String)>>,
-}
-
-thread_local! {
-    // Per-compile theme. wasm is single-threaded and `compile_impl` reloads it at
-    // the top of every compile, so tokens never leak between documents or tests.
-    static THEME: std::cell::RefCell<Theme> = std::cell::RefCell::new(Theme::default());
 }
 
 /// The font-ish properties an `<x:font>` token may carry.
@@ -3131,9 +3061,9 @@ const FONT_PROPS: [&str; 7] = [
     "word-spacing",
 ];
 
-/// Load `<x:theme>`'s `<x:color>` / `<x:font>` tokens into [`THEME`] (clearing any
-/// prior compile's). Called once before serialization.
-fn load_theme(doc: &roxmltree::Document) {
+impl Theme {
+    /// Collect `<x:theme>`'s `<x:color>` / `<x:font>` tokens.
+    pub(super) fn load(doc: &roxmltree::Document) -> Theme {
     let mut theme = Theme::default();
     for th in doc
         .descendants()
@@ -3159,12 +3089,39 @@ fn load_theme(doc: &roxmltree::Document) {
             }
         }
     }
-    THEME.with(|t| *t.borrow_mut() = theme);
+    theme
+    }
+
+    /// See [`Ctx::resolve_var`].
+    fn resolve_var<'v>(&self, v: &'v str) -> std::borrow::Cow<'v, str> {
+        if !v.contains("var(") {
+            return std::borrow::Cow::Borrowed(v);
+        }
+        let mut out = String::with_capacity(v.len());
+        let mut rest = v;
+        while let Some(i) = rest.find("var(") {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 4..];
+            let Some(close) = after.find(')') else {
+                out.push_str(&rest[i..]);
+                rest = "";
+                break;
+            };
+            let inner = &after[..close];
+            let mut parts = inner.splitn(2, ',');
+            let name = parts.next().unwrap_or("").trim().trim_start_matches("--");
+            let fallback = parts.next().map(str::trim);
+            match self.colors.get(name).map(String::as_str).or(fallback) {
+                Some(val) => out.push_str(val),
+                None => out.push_str(&rest[i..i + 4 + close + 1]), // leave var(...) verbatim
+            }
+            rest = &after[close + 1..];
+        }
+        out.push_str(rest);
+        std::borrow::Cow::Owned(out)
+    }
 }
 
-/// Resolve every `var(name)` / `var(name, fallback)` in an attribute value against
-/// the theme's color tokens. An unknown token with no fallback is left verbatim
-/// (renders as the property's initial value, like a dangling CSS variable).
 /// An authored string made safe to place between the quotes of an output attribute.
 ///
 /// Every value an author (or a theme token, or a generator) supplies is untrusted *as
@@ -3193,54 +3150,13 @@ pub(super) fn esc(v: &str) -> String {
     out
 }
 
-/// A paint value for output: theme tokens resolved, *then* escaped — a token's value
-/// is authored too, so resolving after escaping would let it carry the quote.
-pub(super) fn paint(v: &str) -> String {
-    esc(&resolve_var(v))
-}
-
-fn resolve_var(v: &str) -> std::borrow::Cow<'_, str> {
-    if !v.contains("var(") {
-        return std::borrow::Cow::Borrowed(v);
-    }
-    let mut out = String::with_capacity(v.len());
-    let mut rest = v;
-    while let Some(i) = rest.find("var(") {
-        out.push_str(&rest[..i]);
-        let after = &rest[i + 4..];
-        let Some(close) = after.find(')') else {
-            out.push_str(&rest[i..]);
-            rest = "";
-            break;
-        };
-        let inner = &after[..close];
-        let mut parts = inner.splitn(2, ',');
-        let name = parts.next().unwrap_or("").trim().trim_start_matches("--");
-        let fallback = parts.next().map(str::trim);
-        let hit = THEME.with(|t| {
-            t.borrow()
-                .colors
-                .get(name)
-                .cloned()
-                .or_else(|| fallback.map(str::to_string))
-        });
-        match hit {
-            Some(val) => out.push_str(&val),
-            None => out.push_str(&rest[i..i + 4 + close + 1]), // leave var(...) verbatim
-        }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    std::borrow::Cow::Owned(out)
-}
-
-/// The `<x:font>` token's properties named by an element's `x:font`, if any.
-fn font_props(node: roxmltree::Node) -> Option<Vec<(String, String)>> {
-    let name = node.attribute((XSVG_NS, "font"))?;
-    THEME.with(|t| t.borrow().fonts.get(name).cloned())
-}
-
-fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
+/// Copy a node's attributes, normalizing namespaces: `x:` attrs are consumed (not
+/// copied), `xlink:*` modernizes to the unprefixed SVG 2 form (`xlink:href` →
+/// `href` — supported by every current renderer, and we declare no xlink xmlns),
+/// `xml:*` keeps its reserved prefix (`xml:space`, `xml:lang`), and other foreign
+/// namespaces drop (editor metadata we can't re-emit faithfully). `skip` filters
+/// by local name.
+fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx) {
     for attr in node.attributes() {
         if skip.contains(&attr.name()) {
             continue;
@@ -3257,7 +3173,7 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
         };
         // Generator output is confined after lowering (plugin.rs `confine`), so this
         // stays the plain rule set every document gets.
-        let value = resolve_var(attr.value());
+        let value = ctx.resolve_var(attr.value());
         out.push(' ');
         out.push_str(prefix);
         out.push_str(attr.name());
@@ -3268,13 +3184,13 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str]) {
     // Font token (§4.1): apply the named `<x:font>`'s props the element did not
     // set itself — an overridable base. (Only fires when `x:font` is present;
     // harmless on non-text elements, which ignore font-*.)
-    if let Some(props) = font_props(node) {
+    if let Some(props) = ctx.font_props(node) {
         for (k, v) in props {
             if node.attribute(k.as_str()).is_none() && !skip.contains(&k.as_str()) {
                 out.push(' ');
                 out.push_str(&k);
                 out.push_str("=\"");
-                push_escaped(out, &resolve_var(&v), true);
+                push_escaped(out, &ctx.resolve_var(&v), true);
                 out.push('"');
             }
         }
@@ -3373,6 +3289,10 @@ fn push_escaped(out: &mut String, s: &str, in_attr: bool) {
 #[cfg(test)]
 mod tests;
 
+/// One parse per flush: the editor's compile session (docs/Compile Session.md).
+mod session;
+pub use session::CompileSession;
+
 // ---- feature modules (split out of this file) ----
 mod connector;
 use connector::*;
@@ -3392,7 +3312,7 @@ use elements::params_of;
 pub(crate) use xsvg_schema::{ParamEnum, ParamSpec};
 pub mod plugin;
 use plugin::{
-    check_import, emit_plugin, load_imports, GeneratorHost, ImportTable, NoGenerators,
+    check_import, emit_plugin, GeneratorHost, ImportTable, NoGenerators,
 };
 
 // ============================================================================
@@ -3480,29 +3400,14 @@ pub fn text_layout_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Option<TextLayout> {
-    check_nesting_depth(input, MAX_NESTING_DEPTH).ok()?;
-    let doc = roxmltree::Document::parse(input).ok()?;
-    load_theme(&doc);
-    let node = doc
-        .descendants()
-        .find(|n| n.is_element() && n.range().start == offset)?;
-    if node.tag_name().namespace() != Some(XSVG_NS) || node.tag_name().name() != "textbox" {
-        return None;
-    }
-    let imports = load_imports(&doc);
-    let ctx = Ctx::new(
-        &Seams::new(m, shaper, outliner),
-        QualityProfile::parse(quality),
-        false,
-        "",
-        imports,
-    );
-    layout_textbox(node, &ctx)
+    CompileSession::new(input, quality, false, "")
+        .ok()?
+        .text_layout(offset, &Seams::new(m, shaper, outliner))
 }
 
 /// The layout half of `emit_textbox`'s dispatch — same branches, same order.
 fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
-    let style = style_from(node);
+    let style = style_from(node, ctx);
 
     let paras: Vec<roxmltree::Node> = node
         .children()
@@ -3510,7 +3415,7 @@ fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
         .collect();
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
-            Some(r) => resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            Some(r) => ctx.resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
             None => Some(node),
         };
         if let Some(geom) = geom {
@@ -3521,7 +3426,7 @@ fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
     }
 
     if let Some(reference) = node.attribute("in") {
-        let target = resolve_ref(node, reference)?;
+        let target = ctx.resolve_ref(node, reference)?;
         if target.tag_name().name() == "rect" {
             let spec = textbox_area_spec(node, target);
             return Some(area_layout_info(node, &style, &spec, ctx.m));

@@ -212,7 +212,7 @@ pub fn imports_impl(input: &str) -> Vec<Import> {
 
 use super::{
     attr_num, check_nesting_depth, parse_transform, pos_attr, push_escaped, ref_geometry,
-    resolve_var, serialize, shape_to_path_d, svg_path_bbox, Ctx, MAX_NESTING_DEPTH, SVG_NS,
+    serialize, shape_to_path_d, svg_path_bbox, Ctx, MAX_NESTING_DEPTH, SVG_NS,
 };
 use crate::kurbo::{Affine, Rect};
 
@@ -307,7 +307,7 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
         .filter(|a| a.namespace().is_none())
         .filter(|a| !RESERVED_ATTRS.contains(&a.name()))
         .filter(|a| !a.name().starts_with("on"))
-        .map(|a| (a.name().to_string(), resolve_var(a.value()).into_owned()))
+        .map(|a| (a.name().to_string(), ctx.resolve_var(a.value()).into_owned()))
         .collect();
 
     let req = GenRequest {
@@ -339,7 +339,7 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
             out.push(' ');
             out.push_str(name);
             out.push_str("=\"");
-            push_escaped(out, &resolve_var(v), true);
+            push_escaped(out, &ctx.resolve_var(v), true);
             out.push('"');
         }
     }

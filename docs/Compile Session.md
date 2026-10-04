@@ -1,11 +1,11 @@
 # Compile Session — one parse per flush
 
-**Status: normative design (2026-10-04), unbuilt.** The in-process API that
-lets an editor compile many fragments of one document without re-parsing it
-for each. Not a server, not a protocol, not a daemon: a struct with a
-lifetime, created and dropped inside one render flush by whoever already
-links `xsvg-core` as a library (the kit's wasm module today, the native app
-tomorrow). Builds on [Incremental.md](Incremental.md) (fragments, keys, the
+**Status: normative; §2–4 and §6's first three tests built (2026-10-04),
+§5 open.** The in-process API that lets an editor compile many fragments of
+one document without re-parsing it for each. Not a server, not a protocol,
+not a daemon: a struct with a lifetime, created and dropped inside one render
+flush by whoever already links `xsvg-core` as a library (the kit's wasm module
+today, the native app tomorrow). Implementation: `compile/session.rs`. Builds on [Incremental.md](Incremental.md) (fragments, keys, the
 verbatim-slice invariant) and [Extensibility.md](Extensibility.md) (seams).
 
 ## 1. The problem, measured in parses
@@ -42,22 +42,21 @@ pub struct CompileSession<'a> { /* private */ }
 
 impl<'a> CompileSession<'a> {
     /// Parse once, pre-scan once (theme tokens, <x:import> bindings, the id
-    /// table and baked-ref graph). Fails exactly where the pure entries fail
-    /// today (nesting depth, XML parse error).
+    /// table). Fails exactly where the pure entries fail (nesting depth, XML
+    /// parse error), with the same message.
     pub fn new(
         input: &'a str,
         quality: &str,
         sourcemap: bool,
         base: &str,
-        seams: &'a Seams<'a>,
     ) -> Result<Self, String>;
 
     /// The fragment whose element starts at `offset` — byte-identical to
     /// `compile_fragment_seams_impl(input, quality, sourcemap, offset, base, seams)`.
-    pub fn compile_fragment(&self, offset: usize) -> Result<String, String>;
+    pub fn compile_fragment(&self, offset: usize, seams: &Seams) -> Result<String, String>;
 
     /// The whole document — byte-identical to `compile_seams_impl(input, …)`.
-    pub fn compile(&self) -> Result<String, String>;
+    pub fn compile(&self, seams: &Seams) -> Result<String, String>;
 
     /// Baked-ref dependents of the fragments at `seeds`, from the retained
     /// parse — the same answer as `dependents_multi_impl(input, seeds)`.
@@ -65,15 +64,27 @@ impl<'a> CompileSession<'a> {
 
     /// Caret geometry for the textbox at `offset` — the same answer as
     /// `text_layout_impl(input, offset, quality, …)`.
-    pub fn text_layout(&self, offset: usize) -> Option<TextLayout>;
+    pub fn text_layout(&self, offset: usize, seams: &Seams) -> Option<TextLayout>;
+
+    /// The parse-only tables, from the retained parse — the same answers as
+    /// `node_spans_impl` and `fragment_range_impl`.
+    pub fn node_spans(&self) -> Vec<(usize, usize)>;
+    pub fn fragment_range(&self, offset: usize) -> Option<(usize, usize)>;
 }
 ```
 
-- **Lifetime.** `'a` is the input text's. The session borrows the text, the
-  seams and (through them) the measurer, shaper, outliner, resolver, keys
-  and generator host. It is created at the top of a flush and dropped at the
-  end; it cannot outlive the text it parsed, so there is no way to hold a
-  stale parse.
+- **Lifetime.** `'a` is the input text's. The session borrows the text. It is
+  created at the top of a flush and dropped at the end; it cannot outlive the
+  text it parsed, so there is no way to hold a stale parse.
+- **Seams are per call, and the session is `Send`.** The measurer, shaper,
+  outliner, resolver, keys and generator host are passed to each compiling
+  method rather than held, because a session that borrowed `&dyn Measurer`
+  could be `Send` only if that trait object were `Sync`, and a host whose
+  seams wrap single-threaded handles (the browser's `measureText` callback)
+  can never provide one. The seams are the same for every call of a flush
+  and cost nothing to pass. The session holds no thread-bound state and is
+  `Send` (pinned by `tests/session.rs`); it is not `Sync`, and need not be.
+  The parse-only methods take no seams.
 - **The pure entries become wrappers.** `compile_impl`,
   `compile_fragment_*_impl`, `dependents_multi_impl` and `text_layout_impl`
   each construct a one-shot session and call the method. Their signatures,
@@ -94,7 +105,7 @@ Everything the pure entries recompute per call and nothing more:
 | `roxmltree::Document` | per call | once; fragment compiles take `doc.get_node(...)` by byte offset exactly as `compile_fragment_seams_impl` does after its own parse |
 | Theme tokens (`<x:theme>` colours and fonts) | loaded into the thread-local `THEME` per call | a `Theme` value owned by the session, threaded through `Ctx` (§4) |
 | `<x:import>` bindings | `load_imports` per call | once, already a `Ctx` field |
-| Id table and baked-ref graph (what `dependents_multi_impl` and `resolve_ref` walk) | rebuilt per call by DOM traversal | built once; `dependents` and in-fragment `#id` resolution read it |
+| Id table (what `resolve_ref` scanned for, first declaration winning) | a document-order scan per reference | built once; `dependents` and `#id` resolution in the entry document read it (a linked dependency's nodes still scan their own document) |
 | `QualityProfile` | parsed per call | once |
 
 Per-fragment state — the `resolved` memo, the `resolving` cycle stack, the
@@ -115,9 +126,10 @@ a different document's full compile on the same thread saw the wrong tokens).
 
 The session makes the theme a `Ctx` field like `imports`: emitters that
 resolve tokens receive the `Ctx` they already take for seams and keys, and
-`theme_color` / `font_token` become methods on it. `THEME` is deleted. This
-is a mechanical change with one test-visible consequence: the stale-theme
-test becomes impossible to fail rather than a guarded case.
+`resolve_var` / `paint` / `font_props` are methods on it. `THEME` is deleted;
+no compile path touches process-wide state. This is a mechanical change with
+one test-visible consequence: the stale-theme test becomes impossible to fail
+rather than a guarded case.
 
 ## 5. Caller-owned caches (companion seams, not session state)
 
@@ -144,25 +156,33 @@ Both are optional parameters with `None` meaning today's behaviour.
 
 ## 6. Tests
 
-- **Equality.** For every document in the corpus and every fragment offset:
-  session `compile_fragment` equals the pure entry byte for byte; session
-  `compile` equals `compile_impl`; `dependents` and `text_layout` agree.
-  One test, parameterised over the corpus.
-- **One parse.** A counting `roxmltree` wrapper (or a parse-count hook
-  behind `cfg(test)`) asserts a session with N fragment compiles parsed
-  once. This is the property the session exists for; without the test it
-  erodes.
-- **Theme isolation.** Two sessions over two documents with different
-  `<x:theme>` tokens, compiled interleaved on one thread, each see their
-  own tokens — the former stale-theme hazard, now structurally impossible.
-- **Caches are transparent.** With and without `AdvanceCache` /
+- **Equality** (`tests/session.rs`). For every document in the dataset and
+  every fragment offset, in plain, source-mapped and keyed modes: session
+  `compile_fragment` equals the pure entry byte for byte; session `compile`
+  equals `compile_seams_impl`; `dependents` (per seed and all seeds),
+  `text_layout` (every textbox), `node_spans` and `fragment_range` agree.
+  Errors match too: parse, nesting-depth and bad-offset messages.
+- **One parse** (`compile/tests.rs`). Every whole-document parse goes
+  through one `parse_document` helper with a parse counter behind
+  `cfg(test)`; a session with N fragment compiles, dependents, layouts and a
+  whole compile parsed once, where the pure entries parse N + 1 times. This
+  is the property the session exists for; without the test it erodes.
+- **Theme isolation** (`compile/tests.rs`). Two sessions over two documents
+  with different `<x:theme>` colour and font tokens, compiled interleaved on
+  one thread, each see their own tokens — the former stale-theme hazard, now
+  structurally impossible.
+- **Caches are transparent** (§5, unbuilt). With and without `AdvanceCache` /
   `LayoutCache`, outputs are byte-identical.
 
 ## 7. What the embedder does with it (informative)
 
 The kit's render state, per flush: serialize the tree once, build one
 session, run the dirty classifier, `dependents(seeds)`, `compile_fragment`
-per dirty fragment, drop the session. The verifier builds its own session
+per dirty fragment, drop the session. Across the wasm boundary a struct with
+a lifetime cannot be handed to JS, so the session lives inside one exported
+call: a flush entry that takes the text and the dirty offsets, builds the
+session, and returns every fragment at once — the unit §8 says a protocol
+would wrap, if one were ever needed. The verifier builds its own session
 for the from-scratch compile. The caret geometry call uses a session over
 the same text when one is live. Measured on the kit's sample deck, this
 removes every whole-document parse but one from a keystroke; the remaining

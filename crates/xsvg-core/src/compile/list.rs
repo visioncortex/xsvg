@@ -18,7 +18,7 @@ use super::*;
 /// in a separate untagged `<text>` so they never pollute an item's char stream.
 pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
-    let style = style_from(node);
+    let style = style_from(node, ctx);
     let lp: super::elements::List = params_of(node);
     let fill = lp.fill.as_str();
     let pos = pos_attr(node, ctx);
@@ -44,7 +44,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let item_spacing = lp.item_spacing.unwrap_or(size * 0.35);
     let list_kind = lp.list.as_str();
     let marker_scale = lp.marker_size.max(0.0);
-    let marker_fill = paint(lp.marker_fill.as_deref().unwrap_or(fill));
+    let marker_fill = ctx.paint(lp.marker_fill.as_deref().unwrap_or(fill));
     let valign = VAlign::parse(lp.valign.as_str());
 
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
@@ -244,9 +244,9 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     ..l.clone()
                 })
                 .collect();
-            emit_highlights(&mut body, &shifted, "start", false, &it.style, it.size, &it.emits, m);
+            emit_highlights(&mut body, &shifted, "start", false, &it.style, it.size, &it.emits, m, ctx);
             body.push_str("<text text-anchor=\"start\"");
-            push_font_attrs(&mut body, &it.style, it.size, fill);
+            push_font_attrs(&mut body, &it.style, it.size, fill, ctx);
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
             body.push('>');
             for l in &shifted {
@@ -264,7 +264,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str(&shapes);
     if !markers.is_empty() {
         out.push_str("<text text-anchor=\"start\"");
-        push_font_attrs(out, &style, size, fill);
+        push_font_attrs(out, &style, size, fill, ctx);
         out.push('>');
         out.push_str(&markers);
         out.push_str("</text>");

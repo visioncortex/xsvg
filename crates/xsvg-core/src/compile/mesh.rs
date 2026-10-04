@@ -134,7 +134,9 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out,
         &[
             "cols", "rows", "x", "y", "width", "height", "fill", "points",
-        ]);
+        ],
+        ctx,
+    );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     if !lower_mesh(&mesh, &gen_id_seed(node, ctx), out, ctx) {
@@ -329,10 +331,11 @@ pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: &str, out: &mut Str
 /// Inkscape mesh dialect no browser renders; xsvg compiles it (§8.2).
 pub(super) fn mesh_fill_target<'a>(
     node: roxmltree::Node<'a, 'a>,
+    ctx: &Ctx,
 ) -> Option<roxmltree::Node<'a, 'a>> {
     let fill = node.attribute("fill")?;
     let id = fill.strip_prefix("url(#")?.strip_suffix(')')?;
-    let target = resolve_ref(node, id)?;
+    let target = ctx.resolve_ref(node, id)?;
     (target.tag_name().name() == "meshgradient").then_some(target)
 }
 
@@ -366,7 +369,7 @@ pub(super) fn emit_meshgradient_fill(
     } else {
         crate::kurbo::Affine::IDENTITY
     };
-    let Some(mesh) = parse_meshgradient(mg, tess, unit_map) else {
+    let Some(mesh) = parse_meshgradient(mg, tess, unit_map, ctx) else {
         out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
         return false;
     };
@@ -394,7 +397,9 @@ pub(super) fn emit_meshgradient_fill(
             &[
                 "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
                 "x1", "y1", "x2", "y2",
-            ]);
+            ],
+            ctx,
+        );
         out.push_str(&format!(" fill=\"none\" d=\"{shape_d}\"/>"));
     }
     true
@@ -414,6 +419,7 @@ pub(super) fn parse_meshgradient(
     mg: roxmltree::Node,
     tess: usize,
     unit_map: crate::kurbo::Affine,
+    ctx: &Ctx,
 ) -> Option<crate::gradient::Mesh> {
     use crate::gradient::{reverse_edge, CoonsPatch, LinRgb, Mesh};
     let eased = mg.attribute("type") == Some("bicubic");
@@ -477,7 +483,7 @@ pub(super) fn parse_meshgradient(
                 // the very first patch, where it is the START corner
                 let corner = if r == 0 && i == 0 { k } else { (k + 1) % 4 };
                 if colors[corner].is_none() {
-                    colors[corner] = Some(stop_color(*stop)?);
+                    colors[corner] = Some(stop_color(*stop, ctx)?);
                 }
             }
             // first patch: the 4th stop's color lands on BL via the ends rule
@@ -485,7 +491,7 @@ pub(super) fn parse_meshgradient(
             if r == 0 && i == 0 {
                 for (stop, &k) in stops.iter().zip(missing.iter()) {
                     if colors[k].is_none() {
-                        colors[k] = Some(stop_color(*stop)?);
+                        colors[k] = Some(stop_color(*stop, ctx)?);
                     }
                 }
             }
@@ -562,7 +568,10 @@ pub(super) fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 
 
 /// A mesh `<stop>`'s color + alpha: `stop-color` (attribute or `style`
 /// declaration — Inkscape's habit), with `stop-opacity` multiplied in.
-pub(super) fn stop_color(stop: roxmltree::Node) -> Option<(crate::gradient::LinRgb, f32)> {
+pub(super) fn stop_color(
+    stop: roxmltree::Node,
+    ctx: &Ctx,
+) -> Option<(crate::gradient::LinRgb, f32)> {
     let style_prop = |name: &str| {
         stop.attribute("style")?.split(';').find_map(|kv| {
             let (k, v) = kv.split_once(':')?;
@@ -573,7 +582,7 @@ pub(super) fn stop_color(stop: roxmltree::Node) -> Option<(crate::gradient::LinR
         .attribute("stop-color")
         .map(str::to_string)
         .or_else(|| style_prop("stop-color"))?;
-    let color = resolve_var(color.trim()); // §4.1 color token
+    let color = ctx.resolve_var(color.trim()); // §4.1 color token
     let (rgb, mut a) = parse_hex_color(color.trim())?;
     if let Some(op) = stop
         .attribute("stop-opacity")

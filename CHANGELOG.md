@@ -39,6 +39,15 @@ partial one.
   element, attribute and keyword context, which finds all 36 at a sixth of the cost of
   probing every occurrence.
 
+### Changed
+
+- **One parse per flush.** `CompileSession` (docs/Compile Session.md) parses and
+  pre-scans a document once and compiles any number of its fragments, dependents,
+  caret layouts and span tables from the retained parse, byte-identical to the pure
+  entries, which are now one-shot sessions. It borrows its input, takes the platform
+  seams per call, and is `Send`. The `<x:theme>` tokens moved from a thread-local into
+  the compile context, so no compile path touches process-wide state.
+
 ### Fixed
 
 - **A list item opening with a large run overlapped the item above.** Lines inside an item

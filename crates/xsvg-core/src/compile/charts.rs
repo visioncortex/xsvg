@@ -163,7 +163,7 @@ pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let (ccx, ccy) = (cx + ex * mid.cos(), cy + ex * mid.sin());
         let fill = s
             .attribute("fill")
-            .map(paint)
+            .map(|v| ctx.paint(v))
             .unwrap_or_else(|| PALETTE[i % PALETTE.len()].to_string());
         let d = sector_path(ccx, ccy, rr, inner.min(rr), a0, a1, gap);
         if d.is_empty() {
@@ -181,7 +181,7 @@ pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         if let (Some(stroke), true) = (stroke, sw > 0.0) {
             out.push_str(&format!(
                 " stroke=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\"",
-                paint(stroke),
+                ctx.paint(stroke),
                 fmt(sw)
             ));
         }
@@ -278,9 +278,9 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let mapy = |dy: f64| py + ph - (dy - yd0) / (yd1 - yd0) * ph;
     let clamp_y = |y: f64| y.clamp(py, py + ph);
 
-    let grid = paint(&pl.grid_color);
+    let grid = ctx.paint(&pl.grid_color);
     let grid_w = pl.grid_width.max(0.0);
-    let label_fill = paint(&pl.label_fill);
+    let label_fill = ctx.paint(&pl.label_fill);
     let label_size = pl.label_size;
 
     out.push_str("<g");
@@ -328,8 +328,8 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let bot = py + ph;
             let fill = bar
                 .attribute("fill")
-                .map(paint)
-                .unwrap_or_else(|| paint(default_fill));
+                .map(|v| ctx.paint(v))
+                .unwrap_or_else(|| ctx.paint(default_fill));
             out.push_str("<g");
             out.push_str(&pos_attr(bar, ctx));
             out.push('>');
@@ -362,7 +362,7 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             continue;
         }
         let mapped: Vec<(f64, f64)> = pts.iter().map(|&(x, y)| (mapx(x), mapy(y))).collect();
-        let stroke = paint(ls.attribute("stroke").unwrap_or("#0ea5e9"));
+        let stroke = ctx.paint(ls.attribute("stroke").unwrap_or("#0ea5e9"));
         let sw = attr_num(ls, "stroke-width", 2.0);
         let poly = mapped
             .iter()
@@ -373,7 +373,7 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         out.push_str(&pos_attr(ls, ctx));
         out.push('>');
         if let Some(area) = ls.attribute("area") {
-            let fill = paint(area);
+            let fill = ctx.paint(area);
             let base = py + ph;
             out.push_str(&format!(
                 "<path fill=\"{fill}\" d=\"M{},{} L{poly} L{},{} Z\" fill-opacity=\"0.15\"/>",
@@ -391,7 +391,7 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let mr = attr_num(ls, "marker-size", sw * 1.8);
             let dot = ls
                 .attribute("marker-fill")
-                .map(paint)
+                .map(|v| ctx.paint(v))
                 .unwrap_or_else(|| stroke.clone());
             for &(x, y) in &mapped {
                 out.push_str(&format!(
