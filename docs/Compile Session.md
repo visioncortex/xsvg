@@ -189,7 +189,30 @@ removes every whole-document parse but one from a keystroke; the remaining
 per-flush O(document) costs (the kit's own serialization and scene re-index)
 are the kit's to make incremental, and are tracked there.
 
-## 8. Non-goals
+## 8. Threading: neither `Send` nor `Sync`, by design
+
+A session is created and dropped inside one flush on one thread — wasm is
+single-threaded, the native app compiles on the thread that owns the
+document, and a CLI compiling many files in parallel wants one session per
+file per thread (that needs the *inputs* to be `Send`, not the session). So
+the session promises neither `Send` nor `Sync`, and it could not cheaply:
+it holds `&dyn Measurer` and the other seam objects, whose traits carry no
+`Send`/`Sync` bounds (the wasm adapters wrap `js_sys::Function`, which can
+never be `Send`), and `&T: Send` requires `T: Sync`.
+
+The one case that would want `Session: Sync` — compiling the fragments of
+one session in parallel — buys nothing on the editor's hot path (a
+keystroke dirties one to three fragments; the cost the session removes is
+the parse). If a batch export ever wants it, a `Sync` variant with
+`Sync`-bounded seams is additive: the per-fragment `Ctx` is already
+per-call (`Cell`/`RefCell` memo and budget), and the shared parts —
+`roxmltree::Document`, the theme, the imports, the id table — are plain
+data. Do not pin the auto traits either way (`impl !Send`, or a test): let
+them fall where the fields put them. What matters, and what §6 pins, is
+that after `THEME` is gone a session's correctness does not depend on
+which thread runs it.
+
+## 9. Non-goals
 
 - **No retained document in the core** across flushes, and no mutation API.
   The embedder owns the tree; the core compiles text.
