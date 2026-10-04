@@ -4,7 +4,9 @@
 JS side replace the corresponding DOM node surgically — no full recompile, no full re-render.
 
 This note records the engine audit (2026-07), the invariant that makes incrementality safe, the
-wasm API that ships now, and the JS-side protocol for the next slice.
+wasm API that ships now, and the JS-side protocol for the next slice. The per-flush
+cost of the pure entries (every fragment compile re-parses the whole document) and the
+in-process API that removes it are specified in [Compile Session.md](Compile%20Session.md).
 
 ## 1. Audit findings
 
