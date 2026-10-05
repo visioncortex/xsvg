@@ -81,3 +81,30 @@ jobs:
         run: npm run check:dom
       - name: Mesh raster parity
         run: npm run check:mesh
+
+  fuzz:
+    name: Fuzz — parse then compile never panics (60s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/xsvg-core/fuzz
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz the compiler, seeded with the dataset
+        working-directory: crates/xsvg-core
+        run: |
+          mkdir -p fuzz/corpus/compile
+          cargo fuzz run compile fuzz/corpus/compile ../../dataset -- \
+            -dict=fuzz/xsvg.dict -max_len=16384 -timeout=10 -max_total_time=60
+      - name: Keep any crashing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: crates/xsvg-core/fuzz/artifacts
+          if-no-files-found: ignore

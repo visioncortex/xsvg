@@ -513,7 +513,7 @@ impl PathFrame {
 
     /// Total arc length — the run-placement extent under rainbow.
     pub fn len(&self) -> f64 {
-        *self.cum.last().unwrap()
+        self.cum.last().copied().unwrap_or(0.0)
     }
 
     /// The path's start / end x — its extent for run placement under skew.
@@ -530,10 +530,14 @@ impl PathFrame {
     /// the frame instead of jumping at polyline vertices.
     pub fn at(&self, s: f64, off: f64) -> Point {
         let len = self.len();
+        // A NaN arc length (an authored coordinate large enough to overflow the
+        // cumulative sum, or a NaN placement) must not reach the search below:
+        // `partial_cmp` has no answer for it. Treat it as the path's start.
+        let s = if s.is_nan() { 0.0 } else { s };
         let sc = s.clamp(0.0, len);
         let over = s - sc; // straight-line overshoot past the path's ends
                            // binary search for the segment containing sc
-        let i = match self.cum.binary_search_by(|c| c.partial_cmp(&sc).unwrap()) {
+        let i = match self.cum.binary_search_by(|c| c.total_cmp(&sc)) {
             Ok(i) => i.min(self.pts.len() - 2),
             Err(i) => i.saturating_sub(1).min(self.pts.len() - 2),
         };
@@ -1131,6 +1135,17 @@ mod tests {
                 "{name}: V must differ from H"
             );
         }
+    }
+
+    #[test]
+    fn a_nan_arc_length_lands_at_the_frames_start() {
+        // A coordinate large enough to overflow the cumulative length, or a NaN
+        // placement, used to reach `binary_search_by` with a comparison that has
+        // no answer, and panic — on a document the compiler had accepted.
+        let frame = PathFrame::new("M0,0 L10,0", 0.1).unwrap();
+        let p = frame.at(f64::NAN, 0.0);
+        assert!(p.x.abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
+        assert!(frame.at(f64::INFINITY, 0.0).x.is_infinite());
     }
 
     #[test]

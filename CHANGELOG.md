@@ -108,6 +108,12 @@ partial one.
   `npm run check:*` script, with resvg installed so the mesh raster check gates rather
   than skips. The workspace is rustfmt-formatted and clippy-clean to make those gates
   real.
+- **A fuzz target.** `crates/xsvg-core/fuzz` drives every entry an embedder can reach
+  — the whole compile, each fragment, dependents, caret geometry, span tables — over
+  arbitrary input and requires an answer or an `Err`, never a panic or a hang. Seeded
+  with the dataset and an xsvg token dictionary; CI runs it for a minute per push. The
+  one unwrap it could reach is fixed: a NaN arc length on a text path (a coordinate
+  large enough to overflow the cumulative length) panicked the frame's segment search.
 - `npm run check:mesh` renders every region of `dataset/mesh.xsvg` through resvg and
   requires each pixel inside its clip to match the bilinear field within 1/255. Removing
   the bilinear request fails all 14 measurements. Skips cleanly without `resvg` on PATH.

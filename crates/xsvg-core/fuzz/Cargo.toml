@@ -1,0 +1,30 @@
+# The compiler's fuzz targets (docs/Sandbox.md makes promises about hostile
+# input; this is what checks them). Its own workspace, excluded from the root
+# one, so the regular build never links libFuzzer. Run from crates/xsvg-core:
+#
+#   cargo +nightly fuzz run compile fuzz/corpus/compile ../../dataset -- \
+#       -dict=fuzz/xsvg.dict -max_len=16384 -timeout=10
+[package]
+name = "xsvg-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.xsvg-core]
+path = ".."
+features = ["compile", "test-doubles"]
+
+[[bin]]
+name = "compile"
+path = "fuzz_targets/compile.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -12,6 +12,9 @@ members = [
     "crates/xsvg-schema-derive",
     "crates/ext/clipart",
 ]
+# The fuzz targets are their own workspace (they link libFuzzer and need nightly);
+# see crates/xsvg-core/fuzz/Cargo.toml.
+exclude = ["crates/xsvg-core/fuzz"]
 
 [profile.release]
 opt-level = "s"   # optimize wasm for size (v0 wants a tiny bundle)

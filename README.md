@@ -256,10 +256,11 @@ source-mapped element inspector), and a bare **preview**. Open any sample by nam
 | `npm run compare` | browser-vs-native parity suite over every sample (needs a browser) |
 | `npm run check:*` | the headless gates: inspector params, host hooks, plugin sandbox, incremental parity, DOM patching, mesh raster |
 | `cargo test --workspace` | the Rust test suite |
+| `cargo +nightly fuzz run compile` | fuzz the compiler (run from `crates/xsvg-core`; see `fuzz/Cargo.toml`) |
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `cargo fmt --check`,
 `cargo clippy -D warnings`, the Rust tests, both wasm targets, the web build, the
-typecheck and every `check:*` script on each push and pull request. `npm run compare`
+typecheck, every `check:*` script and a minute of fuzzing on each push and pull request. `npm run compare`
 is the one gate that still needs a browser, so it stays manual.
 
 ## Documentation

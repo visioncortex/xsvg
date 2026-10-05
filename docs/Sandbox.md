@@ -166,6 +166,7 @@ from becoming a channel.
 | Fuel metering | native hosts (wasmi) |
 | Values escaped into their attribute | every emitter (`esc`/`paint` in `compile/mod.rs`), probed by `tests/attribute_injection.rs` |
 | Plugin output rules | `confine` in `compile/plugin.rs`, one pass after lowering, host-independent |
+| The compiler survives its input — an answer or an `Err`, never a panic or a hang | `crates/xsvg-core/fuzz` (parse, then every compile entry, over arbitrary input; seeded with the dataset), a minute per push in CI |
 
 Pinned by `plugin_output_cannot_reach_the_network`,
 `plugin_ids_cannot_shadow_the_document`,
