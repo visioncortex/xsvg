@@ -102,6 +102,12 @@ partial one.
 - List items and table cells render their runs and honour `<tbreak/>`.
 - `preserveAspectRatio` on a cross-file `<use>` is forwarded to the viewport it bakes.
 - Keyed (editor) output stamps a textbox's frame as `data-xsvg-frame`.
+- **CI.** `.github/workflows/ci.yml` runs every gate the repo has on each push and pull
+  request: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`, the
+  feature-less core, both wasm targets, the web build and typecheck, and every
+  `npm run check:*` script, with resvg installed so the mesh raster check gates rather
+  than skips. The workspace is rustfmt-formatted and clippy-clean to make those gates
+  real.
 - `npm run check:mesh` renders every region of `dataset/mesh.xsvg` through resvg and
   requires each pixel inside its clip to match the bilinear field within 1/255. Removing
   the bilinear request fails all 14 measurements. Skips cleanly without `resvg` on PATH.

@@ -1,0 +1,83 @@
+# Every gate the repo has, run on every push and pull request, so none of them
+# depends on someone remembering. Two jobs: the Rust workspace (format, lints,
+# tests, both wasm targets) and the web side (the wasm-pack builds, the
+# packages, and the `npm run check:*` scripts, which drive the published Node
+# compiler and the viewer's TypeScript against the dataset).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust — fmt, clippy, tests, wasm targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Core without the compile feature (the primitives alone must build)
+        run: cargo check -p xsvg-core
+      - name: wasm32 targets
+        run: cargo build --target wasm32-unknown-unknown -p xsvg-wasm -p xsvg-ext-clipart
+
+  web:
+    name: Web — wasm-pack, packages, checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      # check:mesh renders through resvg and skips itself when resvg is absent;
+      # installing it here turns the skip into a gate. The build is cached.
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: resvg
+
+      - run: npm ci
+      - name: Build (wasm, extension module, viewer, embed bundle)
+        run: npm run build
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Inspector parameters
+        run: npm run check:params
+      - name: Host hooks
+        run: npm run check:hosts
+      - name: Plugin sandbox
+        run: npm run check:sandbox
+      - name: Incremental compile parity
+        run: npm run check:incremental
+      - name: DOM patching
+        run: npm run check:dom
+      - name: Mesh raster parity
+        run: npm run check:mesh
