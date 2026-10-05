@@ -10,7 +10,15 @@ use super::*;
 /// channel that points at the centre — instead of a wedge that flares outward. A
 /// near-full span emits a circle/ring (avoiding SVG's degenerate 360° arc); a
 /// slice the gap fully consumes returns "".
-pub(super) fn sector_path(cx: f64, cy: f64, ro: f64, ri: f64, a0deg: f64, a1deg: f64, gap: f64) -> String {
+pub(super) fn sector_path(
+    cx: f64,
+    cy: f64,
+    ro: f64,
+    ri: f64,
+    a0deg: f64,
+    a1deg: f64,
+    gap: f64,
+) -> String {
     use std::f64::consts::{PI, TAU};
     let d2r = PI / 180.0;
     if a1deg - a0deg >= 359.999 {
@@ -232,10 +240,7 @@ pub(super) fn parse_points(s: &str) -> Vec<(f64, f64)> {
 pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let pl: super::elements::Plot = params_of(node);
     let (mut px, mut py) = (pl.x, pl.y);
-    let (mut pw, mut ph) = (
-        pl.width,
-        pl.height,
-    );
+    let (mut pw, mut ph) = (pl.width, pl.height);
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
             .ok()

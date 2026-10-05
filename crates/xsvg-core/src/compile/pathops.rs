@@ -114,9 +114,7 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let anchor = crate::kurbo::Point::new(b.min_x(), b.center().y);
             Some(Box::new(BendField { frame, s0, anchor }) as Box<dyn Field>)
         }
-        "roughen" => Some(
-            Box::new(RoughenField::new(bend, w.detail, b)) as Box<dyn Field>,
-        ),
+        "roughen" => Some(Box::new(RoughenField::new(bend, w.detail, b)) as Box<dyn Field>),
         name => EnvelopePreset::new(name, bend, axis, b).map(|p| Box::new(p) as Box<dyn Field>),
     });
     // the Warp-Options distortion sliders compose a projective taper after the field

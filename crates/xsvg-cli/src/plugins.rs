@@ -14,9 +14,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use xsvg_core::{
-    ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, Import, InputMode,
-};
+use xsvg_core::{ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost, Import, InputMode};
 use xsvg_plugin::{host, json, Json};
 
 /// The ABI this host speaks (docs/Extensibility.md §4).
@@ -67,7 +65,6 @@ impl DiskGenerators {
         }
         out
     }
-
 }
 
 /// Whether `src` names a URI scheme rather than a path (docs/Sandbox.md §2).
@@ -101,7 +98,8 @@ fn load_one(dir: &Path, im: &Import) -> Result<Loaded, String> {
     }
 
     let engine = engine();
-    let module = wasmi::Module::new(&engine, &bytes[..]).map_err(|e| format!("invalid wasm: {e}"))?;
+    let module =
+        wasmi::Module::new(&engine, &bytes[..]).map_err(|e| format!("invalid wasm: {e}"))?;
 
     // One throwaway instantiation to read the manifest and check the ABI.
     let mut store = new_store(&engine);
@@ -122,7 +120,11 @@ fn load_one(dir: &Path, im: &Import) -> Result<Loaded, String> {
     if declared != im.ns {
         return Err(format!(
             "module declares namespace {}, bound as {}",
-            if declared.is_empty() { "(none)" } else { declared },
+            if declared.is_empty() {
+                "(none)"
+            } else {
+                declared
+            },
             im.ns
         ));
     }
@@ -385,7 +387,9 @@ mod sandbox_tests {
             "file:///tmp/m.wasm",
             "data:application/wasm;base64,AGFzbQ==",
         ] {
-            let err = load_one(dir, &import(src)).err().expect("remote src must be refused");
+            let err = load_one(dir, &import(src))
+                .err()
+                .expect("remote src must be refused");
             assert!(
                 err.contains("give a local path"),
                 "`{src}` was not refused as remote: {err}"
@@ -393,7 +397,9 @@ mod sandbox_tests {
         }
         // a plain relative path is not refused for *that* reason — it gets as far
         // as the filesystem, which is the point
-        let err = load_one(dir, &import("nope.wasm")).err().expect("missing file must error");
+        let err = load_one(dir, &import("nope.wasm"))
+            .err()
+            .expect("missing file must error");
         assert!(!err.contains("give a local path"), "{err}");
     }
 }

@@ -26,10 +26,10 @@ pub use boolean::*;
 pub use compile::{
     compile_fragment_impl, compile_fragment_keyed_impl, compile_fragment_linked_impl,
     compile_fragment_linked_keyed_impl, compile_fragment_platform_impl, compile_impl,
-    compile_keyed_impl, compile_linked_impl, compile_linked_keyed_impl,
-    compile_platform_impl, dependents_impl, dependents_multi_impl, fragment_range_impl,
-    node_spans_impl, text_layout_impl, CompileSession, Host, NoKeys, NodeKeys, NoResolver,
-    Platform, Resolver, TextLayout, TextLayoutLine, TextLayoutPara,
+    compile_keyed_impl, compile_linked_impl, compile_linked_keyed_impl, compile_platform_impl,
+    dependents_impl, dependents_multi_impl, fragment_range_impl, node_spans_impl, text_layout_impl,
+    CompileSession, Host, NoKeys, NoResolver, NodeKeys, Platform, Resolver, TextLayout,
+    TextLayoutLine, TextLayoutPara,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.
@@ -39,8 +39,6 @@ pub use compile::{
 #[cfg(feature = "compile")]
 pub use compile::elements::{built_in_elements, describe_impl};
 #[cfg(feature = "compile")]
-pub use xsvg_schema::{ElementSpec, ParamKind, ParamSpec};
-#[cfg(feature = "compile")]
 pub use compile::plugin::{
     imports_impl, ChildFragment, ChildMode, ElementInfo, GenRequest, GenResult, GeneratorHost,
     Import, ImportTable, InputMode, NoGenerators,
@@ -49,6 +47,8 @@ pub use filter::*;
 pub use offset::*;
 pub use text::*;
 pub use warp::*;
+#[cfg(feature = "compile")]
+pub use xsvg_schema::{ElementSpec, ParamKind, ParamSpec};
 
 // Geometry re-export: kurbo is the crate-wide geometry currency (Plan.md §1), so
 // downstream crates use the same types without a direct dependency.

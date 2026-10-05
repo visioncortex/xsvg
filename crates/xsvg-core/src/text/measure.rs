@@ -220,7 +220,10 @@ mod tests {
         }
         fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
             self.batches.fetch_add(1, Ordering::Relaxed);
-            items.iter().map(|(t, _, s)| t.chars().count() as f64 * s).collect()
+            items
+                .iter()
+                .map(|(t, _, s)| t.chars().count() as f64 * s)
+                .collect()
         }
     }
 
@@ -253,13 +256,21 @@ mod tests {
             ..TextStyle::default()
         };
         // a cold batch: one trip, every item a miss
-        let items = [("alpha", &st, 16.0), ("beta", &st, 16.0), ("alpha", &big, 32.0)];
+        let items = [
+            ("alpha", &st, 16.0),
+            ("beta", &st, 16.0),
+            ("alpha", &big, 32.0),
+        ];
         assert_eq!(cache.measure_batch(&items), vec![80.0, 64.0, 160.0]);
         assert_eq!(cache.inner().batches.load(Ordering::Relaxed), 1);
         assert_eq!(cache.inner().singles.load(Ordering::Relaxed), 0);
 
         // a warm batch with one new word: one trip carrying only that word
-        let items = [("alpha", &st, 16.0), ("gamma", &st, 16.0), ("beta", &st, 16.0)];
+        let items = [
+            ("alpha", &st, 16.0),
+            ("gamma", &st, 16.0),
+            ("beta", &st, 16.0),
+        ];
         assert_eq!(cache.measure_batch(&items), vec![80.0, 80.0, 64.0]);
         assert_eq!(cache.inner().batches.load(Ordering::Relaxed), 2);
         assert_eq!(cache.inner().singles.load(Ordering::Relaxed), 0);
@@ -284,7 +295,10 @@ mod tests {
         }
         let cache = MeasureCache::new(Short);
         let st = TextStyle::default();
-        assert_eq!(cache.measure_batch(&[("ab", &st, 3.0), ("abc", &st, 3.0)]), vec![6.0, 9.0]);
+        assert_eq!(
+            cache.measure_batch(&[("ab", &st, 3.0), ("abc", &st, 3.0)]),
+            vec![6.0, 9.0]
+        );
     }
 }
 
@@ -398,7 +412,13 @@ pub fn measure_runs(
         space: m.measure(" ", base, base.size),
         space_scale: styles
             .iter()
-            .map(|st| if base.size > 0.0 { st.size / base.size } else { 1.0 })
+            .map(|st| {
+                if base.size > 0.0 {
+                    st.size / base.size
+                } else {
+                    1.0
+                }
+            })
             .collect(),
         letter_spacing: base.letter_spacing,
         word_spacing: base.word_spacing,

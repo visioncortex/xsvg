@@ -24,7 +24,13 @@ pub(crate) fn fit_size(
     max_h: f64,
     min_size: f64,
 ) -> f64 {
-    fit_size_flows(std::slice::from_ref(measured), styles, max_w, max_h, min_size)
+    fit_size_flows(
+        std::slice::from_ref(measured),
+        styles,
+        max_w,
+        max_h,
+        min_size,
+    )
 }
 
 /// [`fit_size`] over several forced sub-flows (`<tbreak/>` splits): the block

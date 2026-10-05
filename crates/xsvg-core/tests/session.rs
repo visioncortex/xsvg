@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use xsvg_core::test_doubles::{BoxOutliner, BoxShaper, Mono};
 use xsvg_core::{
     compile_fragment_platform_impl, compile_platform_impl, dependents_multi_impl,
-    fragment_range_impl, node_spans_impl, text_layout_impl, FontMetrics,
-    MeasureCache, Measurer, NodeKeys, Platform, Resolver, TextStyle,
+    fragment_range_impl, node_spans_impl, text_layout_impl, FontMetrics, MeasureCache, Measurer,
+    NodeKeys, Platform, Resolver, TextStyle,
 };
 
 fn dataset() -> PathBuf {
@@ -52,7 +52,11 @@ fn samples() -> Vec<(String, String)> {
         .filter(|p| p.extension().is_some_and(|x| x == "xsvg"))
         .collect();
     files.sort();
-    assert!(files.len() > 40, "dataset not found at {}", dataset().display());
+    assert!(
+        files.len() > 40,
+        "dataset not found at {}",
+        dataset().display()
+    );
     files
         .into_iter()
         .map(|p| {
@@ -104,7 +108,9 @@ fn a_session_emits_what_the_pure_entries_emit() {
             let platform = platform(keyed, false);
             let mode = format!("{base} sourcemap={sourcemap} keyed={keyed}");
 
-            let session = platform.session(&src, "balanced", sourcemap, &base).unwrap();
+            let session = platform
+                .session(&src, "balanced", sourcemap, &base)
+                .unwrap();
             assert_eq!(
                 session.compile(),
                 compile_platform_impl(&src, "balanced", sourcemap, &base, &platform),
@@ -113,7 +119,9 @@ fn a_session_emits_what_the_pure_entries_emit() {
             for &off in &tops {
                 assert_eq!(
                     session.compile_fragment(off),
-                    compile_fragment_platform_impl(&src, "balanced", sourcemap, off, &base, &platform),
+                    compile_fragment_platform_impl(
+                        &src, "balanced", sourcemap, off, &base, &platform
+                    ),
                     "{mode}: fragment at {off}"
                 );
                 fragments += 1;
@@ -139,7 +147,11 @@ fn a_session_emits_what_the_pure_entries_emit() {
             dependents_multi_impl(&src, &tops),
             "{base}: dependents of every fragment"
         );
-        assert_eq!(session.node_spans(), node_spans_impl(&src), "{base}: node spans");
+        assert_eq!(
+            session.node_spans(),
+            node_spans_impl(&src),
+            "{base}: node spans"
+        );
         for &off in &boxes {
             assert_eq!(
                 session.text_layout(off),
@@ -148,7 +160,10 @@ fn a_session_emits_what_the_pure_entries_emit() {
             );
         }
     }
-    assert!(fragments > 300, "only {fragments} fragments compared — the corpus is not being reached");
+    assert!(
+        fragments > 300,
+        "only {fragments} fragments compared — the corpus is not being reached"
+    );
 }
 
 #[test]
@@ -163,10 +178,18 @@ fn the_measure_cache_changes_no_output() {
         let b = plain.session(&src, "balanced", true, &base).unwrap();
         assert_eq!(a.compile(), b.compile(), "{base}: whole compile");
         for &off in &tops {
-            assert_eq!(a.compile_fragment(off), b.compile_fragment(off), "{base}: fragment at {off}");
+            assert_eq!(
+                a.compile_fragment(off),
+                b.compile_fragment(off),
+                "{base}: fragment at {off}"
+            );
         }
         for &off in &boxes {
-            assert_eq!(a.text_layout(off), b.text_layout(off), "{base}: layout at {off}");
+            assert_eq!(
+                a.text_layout(off),
+                b.text_layout(off),
+                "{base}: layout at {off}"
+            );
         }
     }
 }
@@ -194,21 +217,40 @@ fn a_second_flush_measures_nothing_the_first_one_did() {
     let platform = Platform::new(&cache, BoxShaper, BoxOutliner);
 
     // flush 1: everything is measured once
-    let first = platform.session(src, "balanced", true, "").unwrap().compile().unwrap();
+    let first = platform
+        .session(src, "balanced", true, "")
+        .unwrap()
+        .compile()
+        .unwrap();
     let measured = cache.inner().0.load(Ordering::Relaxed);
     assert!(measured > 0, "the first flush reaches the adapter");
 
     // flush 2 over the same text, as a keystroke elsewhere in the document would
     // cause: the same output, and not one more call to the adapter
-    let second = platform.session(src, "balanced", true, "").unwrap().compile().unwrap();
+    let second = platform
+        .session(src, "balanced", true, "")
+        .unwrap()
+        .compile()
+        .unwrap();
     assert_eq!(first, second);
-    assert_eq!(cache.inner().0.load(Ordering::Relaxed), measured, "every measurement was a hit");
+    assert_eq!(
+        cache.inner().0.load(Ordering::Relaxed),
+        measured,
+        "every measurement was a hit"
+    );
 
     // a new word costs exactly what is new; its font's metrics are already known
     let edited = src.replace("epsilon zeta", "epsilon zeta eta");
-    platform.session(&edited, "balanced", true, "").unwrap().compile().unwrap();
+    platform
+        .session(&edited, "balanced", true, "")
+        .unwrap()
+        .compile()
+        .unwrap();
     let added = cache.inner().0.load(Ordering::Relaxed) - measured;
-    assert!(added >= 1 && added <= 4, "one new word, plus at most the lines it changed: {added}");
+    assert!(
+        added >= 1 && added <= 4,
+        "one new word, plus at most the lines it changed: {added}"
+    );
 }
 
 #[test]

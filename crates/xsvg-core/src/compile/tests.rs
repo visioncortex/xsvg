@@ -123,42 +123,66 @@ fn connectors_accept_points_and_side_anchors() {
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><x:connector from="#a" to-point="200,150" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(route_d(&out).ends_with("L200,150"), "ends at the given point: {}", route_d(&out));
+    assert!(
+        route_d(&out).ends_with("L200,150"),
+        "ends at the given point: {}",
+        route_d(&out)
+    );
 
     // side anchor: `#b:left` forces the left-edge midpoint of b (x=120..160, y=0..40 → 120,20)
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:left" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(route_d(&out).ends_with("L120,20"), "attaches at b's left-edge midpoint: {}", route_d(&out));
+    assert!(
+        route_d(&out).ends_with("L120,20"),
+        "attaches at b's left-edge midpoint: {}",
+        route_d(&out)
+    );
 
     // a forced side on `from` too: leaves a's bottom-edge midpoint (20,40)
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a:bottom" to="#b" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(route_d(&out).starts_with("M20,40"), "leaves a's bottom-edge midpoint: {}", route_d(&out));
+    assert!(
+        route_d(&out).starts_with("M20,40"),
+        "leaves a's bottom-edge midpoint: {}",
+        route_d(&out)
+    );
 
     // corner anchor: b's right-bottom corner is (x1,y1) = (160,40); order-independent
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:bottom-right" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(route_d(&out).ends_with("L160,40"), "corner anchor (either token order): {}", route_d(&out));
+    assert!(
+        route_d(&out).ends_with("L160,40"),
+        "corner anchor (either token order): {}",
+        route_d(&out)
+    );
 
     // center anchor: b's center (140,20)
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b:center" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(route_d(&out).ends_with("L140,20"), "center anchor: {}", route_d(&out));
+    assert!(
+        route_d(&out).ends_with("L140,20"),
+        "center anchor: {}",
+        route_d(&out)
+    );
 
     // the ref wins when both a ref and a point are given
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:connector from="#a" to="#b" to-point="500,500" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(!route_d(&out).contains("500"), "the `to` ref takes precedence over to-point: {}", route_d(&out));
+    assert!(
+        !route_d(&out).contains("500"),
+        "the `to` ref takes precedence over to-point: {}",
+        route_d(&out)
+    );
 }
 
 #[test]
@@ -170,7 +194,12 @@ fn x_major_rail_flips_to_a_4_turn_detour_when_the_target_sits_back() {
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="60" width="40" height="40"/><x:connector from="#a:right" to="#b:left" route="x-major" arrow="none"/></svg>"##
     );
     let out = compile_test(&svg);
-    assert_eq!(route_d(&out).matches('L').count(), 3, "2-turn Z when facing with room: {}", route_d(&out));
+    assert_eq!(
+        route_d(&out).matches('L').count(),
+        3,
+        "2-turn Z when facing with room: {}",
+        route_d(&out)
+    );
 
     // b's left edge NOT to the right of a's right edge (here: directly behind, overlapping
     // rows) → the rail must flip to a 4-turn detour (M + 5 L) and route AROUND the boxes,
@@ -180,14 +209,24 @@ fn x_major_rail_flips_to_a_4_turn_detour_when_the_target_sits_back() {
     );
     let out = compile_test(&svg);
     let d = route_d(&out);
-    assert_eq!(d.matches('L').count(), 5, "4-turn detour when the target sits back: {d}");
+    assert_eq!(
+        d.matches('L').count(),
+        5,
+        "4-turn detour when the target sits back: {d}"
+    );
     assert!(d.starts_with("M160,20"), "still exits a's right edge: {d}");
     assert!(d.ends_with("L0,20"), "still enters b's left edge: {d}");
     // routes around: the path clears the boxes' shared row (y 0..40) on one side
     let bb = crate::kurbo::BezPath::from_svg(d).unwrap().bounding_box();
-    assert!(bb.y0 < 0.0 || bb.y1 > 40.0, "detour clears the boxes vertically: {bb:?}");
+    assert!(
+        bb.y0 < 0.0 || bb.y1 > 40.0,
+        "detour clears the boxes vertically: {bb:?}"
+    );
     // and the first move out of a is rightward (the +stub), not back toward b
-    assert!(d.contains("M160,20 L178,20"), "stubs OUT of a before turning: {d}");
+    assert!(
+        d.contains("M160,20 L178,20"),
+        "stubs OUT of a before turning: {d}"
+    );
 }
 
 #[test]
@@ -297,14 +336,20 @@ fn list_item_font_size_override() {
         r##"{XW}<x:list x="0" y="0" width="200" font-size="20"><x:li>big</x:li><x:li font-size="10">small</x:li></x:list></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(out.contains("font-size=\"20\""), "the list's size on the big item's <text>: {out}");
+    assert!(
+        out.contains("font-size=\"20\""),
+        "the list's size on the big item's <text>: {out}"
+    );
     // each item is its own <text> at ITS size — the smaller item's lines are
     // bare positioned tspans under a font-size="10" <text>
     assert!(
         out.contains("font-size=\"10\"") && out.contains(">small</tspan>"),
         "the smaller item's <text> carries the size: {out}"
     );
-    assert!(!out.contains("font-size=\"10\">small"), "no per-line size override: {out}");
+    assert!(
+        !out.contains("font-size=\"10\">small"),
+        "no per-line size override: {out}"
+    );
 }
 
 #[test]
@@ -329,9 +374,18 @@ fn table_cells_render_runs_and_forced_breaks() {
         r##"{XW}<x:table x="0" y="0" width="200" cell-padding="0" font-size="10" line-height="1.2"><x:tr><x:td>one<tbreak/><tspan font-weight="700">two</tspan></x:td></x:tr></x:table></svg>"##
     );
     let out = compile_test(&svg);
-    assert!(out.contains("height=\"21\""), "forced break grows the row: {out}");
-    assert!(out.contains(r#"<tspan font-weight="700">two</tspan>"#), "{out}");
-    assert!(out.contains("y=\"7\">one</tspan>") && out.contains("y=\"19\">"), "{out}");
+    assert!(
+        out.contains("height=\"21\""),
+        "forced break grows the row: {out}"
+    );
+    assert!(
+        out.contains(r#"<tspan font-weight="700">two</tspan>"#),
+        "{out}"
+    );
+    assert!(
+        out.contains("y=\"7\">one</tspan>") && out.contains("y=\"19\">"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -351,7 +405,11 @@ fn tbreak_in_a_list_item_breaks_within_the_bullet() {
         out.contains("y=\"34.5\">gamma</tspan>"),
         "the next item stacks off the LAST forced row: {out}"
     );
-    assert_eq!(out.matches("<circle").count(), 2, "one marker per ITEM: {out}");
+    assert_eq!(
+        out.matches("<circle").count(),
+        2,
+        "one marker per ITEM: {out}"
+    );
 }
 
 #[test]
@@ -370,10 +428,16 @@ fn empty_list_item_keeps_its_row_and_marker() {
         out.contains("cy=\"20\""),
         "the EMPTY item's marker on its own row, between its neighbors: {out}"
     );
-    assert!(out.contains("cy=\"35.5\""), "third item's marker row: {out}");
+    assert!(
+        out.contains("cy=\"35.5\""),
+        "third item's marker row: {out}"
+    );
     // the empty item emits no <text>: two keyed texts, three markers
     assert_eq!(out.matches("<circle").count(), 3, "{out}");
-    assert!(out.contains("y=\"7\">a</tspan>") && out.contains("y=\"38\">b</tspan>"), "{out}");
+    assert!(
+        out.contains("y=\"7\">a</tspan>") && out.contains("y=\"38\">b</tspan>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -523,7 +587,11 @@ fn empty_paragraph_owns_a_blank_row() {
         r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="10" line-height="1.2"><x:p>alpha</x:p><x:p></x:p><x:p>beta</x:p></x:textbox></svg>"##
     );
     let out = compile_test(&svg);
-    assert_eq!(out.matches("<text ").count(), 2, "empty para emits no <text>: {out}");
+    assert_eq!(
+        out.matches("<text ").count(),
+        2,
+        "empty para emits no <text>: {out}"
+    );
     assert!(
         out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"38\">beta</tspan>"),
         "the blank row: two advances + two default gaps (7 + 2·12 + 2·3.5): {out}"
@@ -586,16 +654,25 @@ fn textbox_paragraphs_shrink_to_fit() {
         .collect();
     assert_eq!(sizes.len(), 2, "one <text> per paragraph: {out}");
     for s in &sizes {
-        assert!(*s < 20.0 && *s >= 10.0, "shrunk within [fit-min, base): {sizes:?} {out}");
+        assert!(
+            *s < 20.0 && *s >= 10.0,
+            "shrunk within [fit-min, base): {sizes:?} {out}"
+        );
     }
-    assert!((sizes[0] - sizes[1]).abs() < 1e-6, "the block scales as one: {sizes:?}");
+    assert!(
+        (sizes[0] - sizes[1]).abs() < 1e-6,
+        "the block scales as one: {sizes:?}"
+    );
 
     // a block that already fits stays at the base size
     let svg = format!(
         r##"{XW}<x:textbox x="0" y="0" width="200" height="100" font-size="20" line-height="1" fit="shrink" fit-min="10"><x:p>aa</x:p><x:p>bb</x:p></x:textbox></svg>"##
     );
     let fits = compile_test(&svg);
-    assert!(fits.contains("font-size=\"20\""), "no shrink when it fits: {fits}");
+    assert!(
+        fits.contains("font-size=\"20\""),
+        "no shrink when it fits: {fits}"
+    );
 
     // a lone unbreakable word wider than the box shrinks too (the §6.6
     // overflow is for non-fit boxes): Mono 20 → "wwwwwwwwww" = 100 wide in a
@@ -1373,7 +1450,12 @@ fn text_decoration_runs_ride_to_the_output_without_moving_layout() {
         b.contains(r#"<tspan text-decoration="underline line-through">fast</tspan> today"#),
         "{b}"
     );
-    let strip = |s: &str| s.replace(r#"<tspan text-decoration="underline line-through">fast</tspan>"#, "fast");
+    let strip = |s: &str| {
+        s.replace(
+            r#"<tspan text-decoration="underline line-through">fast</tspan>"#,
+            "fast",
+        )
+    };
     assert_eq!(strip(&b), a, "decoration must not move a single glyph");
     // between two words of ONE run the space stays in the run (continuous underline)
     let two = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline">fast today</tspan></textArea></svg>"##;
@@ -1392,14 +1474,29 @@ fn mixed_run_sizes_step_each_line_by_its_largest_run() {
     // its absolute size; "200%" resolves against the paragraph size.
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="200" font-size="10" line-height="1.5">tall <tspan font-size="200%">BIG</tspan><tbreak/>small</x:textbox></svg>"##;
     let out = compile_test(svg);
-    assert!(out.contains(r#"<tspan font-size="20">BIG</tspan>"#), "{out}");
-    assert!(out.contains(r#"<tspan x="0" y="14">tall "#), "first baseline = cap(20): {out}");
-    assert!(out.contains(r#"<tspan x="0" y="29">small</tspan>"#), "10-line advance: {out}");
+    assert!(
+        out.contains(r#"<tspan font-size="20">BIG</tspan>"#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"<tspan x="0" y="14">tall "#),
+        "first baseline = cap(20): {out}"
+    );
+    assert!(
+        out.contains(r#"<tspan x="0" y="29">small</tspan>"#),
+        "10-line advance: {out}"
+    );
     // the other way round: the big line steps by 30 when it FOLLOWS
     let svg2 = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="200" font-size="10" line-height="1.5">small<tbreak/>tall <tspan font-size="20">BIG</tspan></x:textbox></svg>"##;
     let out2 = compile_test(svg2);
-    assert!(out2.contains(r#"<tspan x="0" y="7">small</tspan>"#), "{out2}");
-    assert!(out2.contains(r#"<tspan x="0" y="37">tall "#), "7 + 20·1.5: {out2}");
+    assert!(
+        out2.contains(r#"<tspan x="0" y="7">small</tspan>"#),
+        "{out2}"
+    );
+    assert!(
+        out2.contains(r#"<tspan x="0" y="37">tall "#),
+        "7 + 20·1.5: {out2}"
+    );
 }
 
 #[test]
@@ -1411,7 +1508,10 @@ fn run_sizes_scale_with_shrink_fit() {
     // the fit sums per-line advances: 10 (the a-line) + 20 (the b-line) = 30
     // at scale 1 > 15 → scale ½: base 5, and the run rides the same scale → 10
     assert!(out.contains(r#"font-size="5""#), "fitted base: {out}");
-    assert!(out.contains(r#"<tspan font-size="10">b</tspan>"#), "run at 2× the fitted base: {out}");
+    assert!(
+        out.contains(r#"<tspan font-size="10">b</tspan>"#),
+        "run at 2× the fitted base: {out}"
+    );
 }
 
 #[test]
@@ -1431,7 +1531,10 @@ fn paragraphs_stack_by_the_incoming_lines_own_size() {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="500" height="300" font-size="10" line-height="1.5"><x:p>one</x:p><x:p><tspan font-size="20">Two</tspan> two</x:p></x:textbox></svg>"##;
     let out = compile_test(svg);
     assert!(out.contains(r#"y="7">one"#), "{out}");
-    assert!(out.contains(r#"y="40.5"><tspan font-size="20">Two</tspan> two"#), "{out}");
+    assert!(
+        out.contains(r#"y="40.5"><tspan font-size="20">Two</tspan> two"#),
+        "{out}"
+    );
 }
 
 #[test]
@@ -1453,13 +1556,22 @@ fn highlighted_runs_bake_a_rect_behind_the_text() {
     let out = compile_test(svg);
     let rect = r##"<rect x="20" y="-1" width="20" height="10" fill="#ff0"/>"##;
     assert!(out.contains(rect), "{out}");
-    assert!(out.find(rect).unwrap() < out.find("<text").unwrap(), "behind the text: {out}");
-    assert!(out.contains(">see mark it</tspan>"), "the run itself is bare: {out}");
+    assert!(
+        out.find(rect).unwrap() < out.find("<text").unwrap(),
+        "behind the text: {out}"
+    );
+    assert!(
+        out.contains(">see mark it</tspan>"),
+        "the run itself is bare: {out}"
+    );
     // a highlight behind a centred line starts from the line's start edge:
     // "ab" = 10 wide, centred in 100 → 45..55
     let centred = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" align="center"><tspan x:highlight="#ff0">ab</tspan></x:textbox></svg>"##;
     let out2 = compile_test(centred);
-    assert!(out2.contains(r##"<rect x="45" y="-1" width="10" height="10" fill="#ff0"/>"##), "{out2}");
+    assert!(
+        out2.contains(r##"<rect x="45" y="-1" width="10" height="10" fill="#ff0"/>"##),
+        "{out2}"
+    );
 }
 
 #[test]
@@ -1470,16 +1582,31 @@ fn rtl_paragraphs_anchor_at_the_right_edge_and_emit_direction() {
     // orders the glyphs. A highlight lays leftward from the start edge.
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" direction="rtl">ab <tspan x:highlight="#ff0">cd</tspan></x:textbox></svg>"##;
     let out = compile_test(svg);
-    assert!(out.contains(r#"<text text-anchor="start""#) && out.contains(r#" direction="rtl""#), "{out}");
-    assert!(out.contains(r#"<tspan x="100" y="7">ab cd</tspan>"#), "start = right edge: {out}");
+    assert!(
+        out.contains(r#"<text text-anchor="start""#) && out.contains(r#" direction="rtl""#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"<tspan x="100" y="7">ab cd</tspan>"#),
+        "start = right edge: {out}"
+    );
     // "ab " = 15 wide from the right (100 → 85), then "cd" = 10 → 75..85
-    assert!(out.contains(r##"<rect x="75" y="-1" width="10" height="10" fill="#ff0"/>"##), "{out}");
+    assert!(
+        out.contains(r##"<rect x="75" y="-1" width="10" height="10" fill="#ff0"/>"##),
+        "{out}"
+    );
     let end = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="100" height="100" font-size="10" direction="rtl" align="end"><x:p>ab</x:p><x:p direction="ltr">cd</x:p></x:textbox></svg>"##;
     let out2 = compile_test(end);
     assert!(out2.contains(r##"<text text-anchor="end" font-family="sans-serif" font-size="10" font-weight="normal" font-style="normal" fill="#000" direction="rtl""##), "{out2}");
-    assert!(out2.contains(r#"<tspan x="0" y="7">ab</tspan>"#), "end = left edge under rtl: {out2}");
+    assert!(
+        out2.contains(r#"<tspan x="0" y="7">ab</tspan>"#),
+        "end = left edge under rtl: {out2}"
+    );
     // the second paragraph opts back into ltr: end = right edge, no direction attr on it
-    assert!(out2.contains(r#"<tspan x="100" y="22.5">cd</tspan>"#), "{out2}");
+    assert!(
+        out2.contains(r#"<tspan x="100" y="22.5">cd</tspan>"#),
+        "{out2}"
+    );
     assert_eq!(out2.matches("direction=\"rtl\"").count(), 1, "{out2}");
 }
 
@@ -1809,9 +1936,16 @@ fn every_emitted_fragment_is_anchorable_by_its_own_range() {
     // layer is deliberately dropped) have no element to tag and are exempt.
     for input in [INC, INC_COMPOSITE] {
         for off in top_level_offsets(input) {
-            let frag =
-                compile_fragment_impl(input, "balanced", true, off, &Mono, &BoxShaper, &BoxOutliner)
-                    .unwrap();
+            let frag = compile_fragment_impl(
+                input,
+                "balanced",
+                true,
+                off,
+                &Mono,
+                &BoxShaper,
+                &BoxOutliner,
+            )
+            .unwrap();
             let (start, end) = fragment_range_impl(input, off).unwrap();
             if !has_element(&frag) {
                 continue; // nothing renderable emitted → nothing to key
@@ -1831,7 +1965,11 @@ fn every_emitted_fragment_is_anchorable_by_its_own_range() {
 fn has_element(markup: &str) -> bool {
     let mut rest = markup.trim_start();
     while let Some(r) = rest.strip_prefix("<!--") {
-        rest = r.split_once("-->").map(|(_, t)| t).unwrap_or("").trim_start();
+        rest = r
+            .split_once("-->")
+            .map(|(_, t)| t)
+            .unwrap_or("")
+            .trim_start();
     }
     !rest.is_empty()
 }
@@ -3014,9 +3152,23 @@ impl Resolver for MapResolver {
     }
 }
 fn compile_linked(main: &str, files: &[(&str, &str)]) -> String {
-    let map = MapResolver(files.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-    compile_linked_impl(main, "balanced", false, &Mono, &NoShaper, &NoOutliner, &map, "main")
-        .unwrap()
+    let map = MapResolver(
+        files
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+    );
+    compile_linked_impl(
+        main,
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+        &map,
+        "main",
+    )
+    .unwrap()
 }
 
 #[test]
@@ -3030,56 +3182,107 @@ fn keyed_textboxes_carry_their_frame() {
             Some("n1".into())
         }
     }
-    let main = format!(r##"{XW}<x:textbox x="10" y="20" width="200" height="80" font-size="18">Hi</x:textbox></svg>"##);
-    let keyed = compile_keyed_impl(&main, "balanced", true, &Keys, &Mono, &NoShaper, &NoOutliner).unwrap();
-    assert!(keyed.contains(r#"data-xsvg-frame="10 20 200 80""#), "keyed: {keyed}");
+    let main = format!(
+        r##"{XW}<x:textbox x="10" y="20" width="200" height="80" font-size="18">Hi</x:textbox></svg>"##
+    );
+    let keyed = compile_keyed_impl(
+        &main,
+        "balanced",
+        true,
+        &Keys,
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    assert!(
+        keyed.contains(r#"data-xsvg-frame="10 20 200 80""#),
+        "keyed: {keyed}"
+    );
     let mapped = compile_impl(&main, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
-    assert!(!mapped.contains("data-xsvg-frame"), "position-mapped output is unchanged: {mapped}");
+    assert!(
+        !mapped.contains("data-xsvg-frame"),
+        "position-mapped output is unchanged: {mapped}"
+    );
     let plain = compile_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap();
-    assert!(!plain.contains("data-xsvg-frame"), "viewer output is unchanged: {plain}");
+    assert!(
+        !plain.contains("data-xsvg-frame"),
+        "viewer output is unchanged: {plain}"
+    );
 }
 
 #[test]
 fn use_links_external_files() {
-    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+    let logo =
+        format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
 
     // whole-file link → the dependency inlined inside a nested <svg> viewport, baked
-    let main = format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
+    let main =
+        format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
-    assert!(out.contains(r#"<svg x="20" y="30" width="40" height="40""#), "nested svg viewport: {out}");
-    assert!(out.contains("#f00"), "dep content inlined (rect lowers to a path): {out}");
-    assert!(!out.contains("<use"), "the <use> is baked, not a live ref: {out}");
+    assert!(
+        out.contains(r#"<svg x="20" y="30" width="40" height="40""#),
+        "nested svg viewport: {out}"
+    );
+    assert!(
+        out.contains("#f00"),
+        "dep content inlined (rect lowers to a path): {out}"
+    );
+    assert!(
+        !out.contains("<use"),
+        "the <use> is baked, not a live ref: {out}"
+    );
 
     // the referrer's preserveAspectRatio reaches the viewport it becomes: a
     // free resize in an editor stretches the drawing instead of letterboxing
-    let main = format!(r##"{XW}<use href="logo.svg" x="0" y="0" width="40" height="10" preserveAspectRatio="none"/></svg>"##);
+    let main = format!(
+        r##"{XW}<use href="logo.svg" x="0" y="0" width="40" height="10" preserveAspectRatio="none"/></svg>"##
+    );
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
-    assert!(out.contains(r#"height="10" preserveAspectRatio="none">"#), "forwarded: {out}");
+    assert!(
+        out.contains(r#"height="10" preserveAspectRatio="none">"#),
+        "forwarded: {out}"
+    );
 
     // by-id link → just that element, placed with a translate
     let main = format!(r##"{XW}<use href="logo.svg#mark" x="5" y="5"/></svg>"##);
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
-    assert!(out.contains("translate(5,5)") && out.contains(r#"id="mark""#), "by-id placed: {out}");
+    assert!(
+        out.contains("translate(5,5)") && out.contains(r#"id="mark""#),
+        "by-id placed: {out}"
+    );
 
     // by-id with a width sizes to the *element's own* extent (10×10 rect → scale 2), not the file
     let main = format!(r##"{XW}<use href="logo.svg#mark" x="0" y="0" width="20"/></svg>"##);
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
-    assert!(out.contains("scale(2)"), "by-id sizes to the target's own extent: {out}");
+    assert!(
+        out.contains("scale(2)"),
+        "by-id sizes to the target's own extent: {out}"
+    );
 
     // a group target with no declared size measures its geometry (a 10×10 rect inside → scale 3)
-    let grp = format!(r##"{XW}<g id="mark"><rect x="0" y="0" width="10" height="10" fill="#f00"/></g></svg>"##);
+    let grp = format!(
+        r##"{XW}<g id="mark"><rect x="0" y="0" width="10" height="10" fill="#f00"/></g></svg>"##
+    );
     let main = format!(r##"{XW}<use href="g.svg#mark" x="0" y="0" width="30"/></svg>"##);
     let out = compile_linked(&main, &[("g.svg", &grp)]);
-    assert!(out.contains("scale(3)"), "group by-id sizes to its geometry bbox: {out}");
+    assert!(
+        out.contains("scale(3)"),
+        "group by-id sizes to its geometry bbox: {out}"
+    );
 
     // missing dependency degrades with a marker
     let out = compile_linked(&main, &[]);
     assert!(out.contains("not resolved"), "missing dep degrades: {out}");
 
     // a same-document <use href="#id"> is NOT linked — it stays a live reference
-    let main = format!(r##"{XW}<rect id="r" x="0" y="0" width="4" height="4"/><use href="#r"/></svg>"##);
+    let main =
+        format!(r##"{XW}<rect id="r" x="0" y="0" width="4" height="4"/><use href="#r"/></svg>"##);
     let out = compile_linked(&main, &[]);
-    assert!(out.contains(r##"<use href="#r""##), "same-doc use passes through: {out}");
+    assert!(
+        out.contains(r##"<use href="#r""##),
+        "same-doc use passes through: {out}"
+    );
 
     // cycle a → b → a is refused
     let a = format!(r##"{XW}<use href="b.svg"/></svg>"##);
@@ -3093,20 +3296,48 @@ fn use_links_external_files() {
 fn linked_fragment_is_a_verbatim_slice_of_the_full_compile() {
     // The incremental invariant must hold for linked elements too: re-emitting the
     // <use>'s fragment must match its span in the full linked compile (not degrade).
-    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
-    let main =
-        format!(r##"{XW}<rect id="bg" x="0" y="0" width="100" height="100"/><use href="logo.svg" x="20" y="20" width="40"/></svg>"##);
-    let map = MapResolver([("logo.svg".to_string(), logo.clone())].into_iter().collect());
-    let full =
-        compile_linked_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner, &map, "main")
-            .unwrap();
-    let off = main.find("<use").unwrap();
-    let frag = compile_fragment_linked_impl(
-        &main, "balanced", false, off, &Mono, &NoShaper, &NoOutliner, &map, "main",
+    let logo =
+        format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+    let main = format!(
+        r##"{XW}<rect id="bg" x="0" y="0" width="100" height="100"/><use href="logo.svg" x="20" y="20" width="40"/></svg>"##
+    );
+    let map = MapResolver(
+        [("logo.svg".to_string(), logo.clone())]
+            .into_iter()
+            .collect(),
+    );
+    let full = compile_linked_impl(
+        &main,
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+        &map,
+        "main",
     )
     .unwrap();
-    assert!(frag.contains(r#"<svg x="20""#) && frag.contains("#f00"), "fragment links: {frag}");
-    assert!(full.contains(&frag), "fragment is a verbatim slice of the full compile:\nfrag={frag}\nfull={full}");
+    let off = main.find("<use").unwrap();
+    let frag = compile_fragment_linked_impl(
+        &main,
+        "balanced",
+        false,
+        off,
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+        &map,
+        "main",
+    )
+    .unwrap();
+    assert!(
+        frag.contains(r#"<svg x="20""#) && frag.contains("#f00"),
+        "fragment links: {frag}"
+    );
+    assert!(
+        full.contains(&frag),
+        "fragment is a verbatim slice of the full compile:\nfrag={frag}\nfull={full}"
+    );
 }
 
 #[test]
@@ -3118,15 +3349,24 @@ fn text_border_strokes_behind_the_fill() {
     );
     let out = compile_fast(&svg);
     assert!(out.contains(r##"stroke="#000""##), "border color: {out}");
-    assert!(out.contains(r#"stroke-width="4""#), "border-width doubled: {out}");
-    assert!(out.contains(r#"paint-order="stroke""#), "stroke behind fill: {out}");
+    assert!(
+        out.contains(r#"stroke-width="4""#),
+        "border-width doubled: {out}"
+    );
+    assert!(
+        out.contains(r#"paint-order="stroke""#),
+        "stroke behind fill: {out}"
+    );
 
     // Raw stroke on *live* text now passes through (was silently dropped before).
     let svg = format!(
         r##"{XW}<x:textbox x="0" y="0" width="200" height="50" stroke="#f00" stroke-width="1">Hi</x:textbox></svg>"##
     );
     let out = compile_fast(&svg);
-    assert!(out.contains("<text") && out.contains(r##"stroke="#f00""##), "raw stroke on live text: {out}");
+    assert!(
+        out.contains("<text") && out.contains(r##"stroke="#f00""##),
+        "raw stroke on live text: {out}"
+    );
 }
 
 #[test]
@@ -3134,12 +3374,22 @@ fn external_use_source_map_points_at_the_use_not_the_dependency() {
     // A linked dependency's element ranges index the *dependency* file, not the entry
     // document the viewer maps against — so baked content must carry no data-xsvg-pos,
     // and the block resolves (up the DOM) to the <use>'s range in the entry source.
-    let logo = format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
-    let main = format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
+    let logo =
+        format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
+    let main =
+        format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
     let map = MapResolver([("logo.svg".to_string(), logo)].into_iter().collect());
-    let out =
-        compile_linked_impl(&main, "balanced", true, &Mono, &NoShaper, &NoOutliner, &map, "main")
-            .unwrap();
+    let out = compile_linked_impl(
+        &main,
+        "balanced",
+        true,
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+        &map,
+        "main",
+    )
+    .unwrap();
 
     // only the root and the <use> wrapper are tagged — nothing baked in from the dep
     assert_eq!(
@@ -3162,21 +3412,42 @@ fn by_id_bbox_ignores_non_rendered_hidden_and_clips_viewports() {
     // scale by 2. Anything that wrongly inflates the measured box breaks that.
     let cases: &[(&str, &str)] = &[
         // definition-only subtrees are referenced, never drawn in place
-        ("defs", r##"<g id="mark"><rect width="10" height="10"/><defs><rect width="1000" height="1000"/></defs></g>"##),
-        ("clipPath", r##"<g id="mark"><rect width="10" height="10"/><clipPath id="c"><rect width="1000" height="1000"/></clipPath></g>"##),
+        (
+            "defs",
+            r##"<g id="mark"><rect width="10" height="10"/><defs><rect width="1000" height="1000"/></defs></g>"##,
+        ),
+        (
+            "clipPath",
+            r##"<g id="mark"><rect width="10" height="10"/><clipPath id="c"><rect width="1000" height="1000"/></clipPath></g>"##,
+        ),
         // explicitly hidden, by attribute and by inline style
-        ("display-attr", r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" display="none"/></g>"##),
-        ("display-style", r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" style="display: none"/></g>"##),
+        (
+            "display-attr",
+            r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" display="none"/></g>"##,
+        ),
+        (
+            "display-style",
+            r##"<g id="mark"><rect width="10" height="10"/><rect width="1000" height="1000" style="display: none"/></g>"##,
+        ),
         // a nested <svg> clips to its viewport — 10 wide, not its 1000-unit viewBox content
-        ("nested-svg", r##"<g id="mark"><svg x="0" y="0" width="10" height="10" viewBox="0 0 1000 1000"><rect width="1000" height="1000"/></svg></g>"##),
+        (
+            "nested-svg",
+            r##"<g id="mark"><svg x="0" y="0" width="10" height="10" viewBox="0 0 1000 1000"><rect width="1000" height="1000"/></svg></g>"##,
+        ),
         // <image> is box-shaped: it has no path geometry but does have an extent
-        ("image", r##"<g id="mark"><image x="0" y="0" width="10" height="10" href="p.png"/></g>"##),
+        (
+            "image",
+            r##"<g id="mark"><image x="0" y="0" width="10" height="10" href="p.png"/></g>"##,
+        ),
     ];
     for (name, body) in cases {
         let dep = format!("{XW}{body}</svg>");
         let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
         let out = compile_linked(&main, &[("d.svg", &dep)]);
-        assert!(out.contains("scale(2)"), "{name}: expected scale(2) — got {out}");
+        assert!(
+            out.contains("scale(2)"),
+            "{name}: expected scale(2) — got {out}"
+        );
     }
 }
 
@@ -3190,7 +3461,10 @@ fn by_id_bbox_follows_same_document_use() {
     );
     let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="40"/></svg>"##);
     let out = compile_linked(&main, &[("d.svg", &dep)]);
-    assert!(out.contains("scale(2)"), "measured through the <use>: {out}");
+    assert!(
+        out.contains("scale(2)"),
+        "measured through the <use>: {out}"
+    );
 
     // a <use> chain that loops back must stop, not recurse forever
     let dep = format!(
@@ -3218,7 +3492,10 @@ fn by_id_bbox_counts_the_stroke_outset() {
     );
     let main = format!(r##"{XW}<use href="d.svg#mark" x="0" y="0" width="20"/></svg>"##);
     let out = compile_linked(&main, &[("d.svg", &dep)]);
-    assert!(out.contains("scale(2)"), "stroke=none adds no outset: {out}");
+    assert!(
+        out.contains("scale(2)"),
+        "stroke=none adds no outset: {out}"
+    );
 
     // stroke inherits from an ancestor group
     let dep = format!(
@@ -3661,8 +3938,16 @@ fn keys_for(input: &str) -> MapKeys {
 fn keyed_fragments_are_verbatim_slices_of_the_full_compile() {
     // The canary invariant holds in keyed mode too.
     let keys = keys_for(INC);
-    let full =
-        compile_keyed_impl(INC, "balanced", true, &keys, &Mono, &BoxShaper, &BoxOutliner).unwrap();
+    let full = compile_keyed_impl(
+        INC,
+        "balanced",
+        true,
+        &keys,
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
     let mut cursor = 0;
     for off in top_level_offsets(INC) {
         let frag = compile_fragment_keyed_impl(
@@ -3686,7 +3971,10 @@ fn keyed_fragments_are_verbatim_slices_of_the_full_compile() {
     assert!(full.contains("data-xsvg-node=\"n0\""), "{full}");
     assert!(!full.contains("data-xsvg-pos"), "{full}");
     assert!(full.contains("x-flt-n"), "{full}");
-    assert!(!full.contains("x-flt-1"), "no byte-offset filter ids in keyed mode: {full}");
+    assert!(
+        !full.contains("x-flt-1"),
+        "no byte-offset filter ids in keyed mode: {full}"
+    );
 }
 
 #[test]
@@ -3705,14 +3993,31 @@ fn keyed_fragment_output_is_byte_stable_under_text_shifts() {
         .enumerate()
     {
         let frag_a = compile_fragment_keyed_impl(
-            INC, "balanced", true, off_a, &keys_a, &Mono, &BoxShaper, &BoxOutliner,
+            INC,
+            "balanced",
+            true,
+            off_a,
+            &keys_a,
+            &Mono,
+            &BoxShaper,
+            &BoxOutliner,
         )
         .unwrap();
         let frag_b = compile_fragment_keyed_impl(
-            &shifted, "balanced", true, off_b, &keys_b, &Mono, &BoxShaper, &BoxOutliner,
+            &shifted,
+            "balanced",
+            true,
+            off_b,
+            &keys_b,
+            &Mono,
+            &BoxShaper,
+            &BoxOutliner,
         )
         .unwrap();
-        assert_eq!(frag_a, frag_b, "fragment {i} must be byte-identical across the shift");
+        assert_eq!(
+            frag_a, frag_b,
+            "fragment {i} must be byte-identical across the shift"
+        );
     }
 }
 
@@ -3726,28 +4031,57 @@ fn a_keyed_compile_reports_elements_the_host_failed_to_name() {
     let victim = top_level_offsets(INC)[1];
 
     // A complete provider — and the byte-span default — get no marker.
-    let full = compile_keyed_impl(INC, "balanced", true, &keys_for(INC), &Mono, &BoxShaper, &BoxOutliner)
-        .unwrap();
+    let full = compile_keyed_impl(
+        INC,
+        "balanced",
+        true,
+        &keys_for(INC),
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
     assert!(!full.contains("unkeyed"), "{full}");
     let plain = compile_impl(INC, "balanced", true, &Mono, &BoxShaper, &BoxOutliner).unwrap();
-    assert!(!plain.contains("unkeyed"), "byte-span identity is not a violation: {plain}");
+    assert!(
+        !plain.contains("unkeyed"),
+        "byte-span identity is not a violation: {plain}"
+    );
 
     // A provider that missed one element: the output says so, once, at the end —
     // trailing so every fragment span is untouched.
     let mut partial = keys_for(INC);
     partial.0.remove(&victim);
-    let out = compile_keyed_impl(INC, "balanced", true, &partial, &Mono, &BoxShaper, &BoxOutliner)
-        .unwrap();
+    let out = compile_keyed_impl(
+        INC,
+        "balanced",
+        true,
+        &partial,
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
     assert!(
         out.ends_with("<!-- xsvg: 1 element(s) unkeyed; identity fell back to byte spans (docs/Incremental.md §3.1) -->"),
         "{out}"
     );
-    assert!(out.contains("data-xsvg-pos"), "the miss fell back to a byte span: {out}");
+    assert!(
+        out.contains("data-xsvg-pos"),
+        "the miss fell back to a byte span: {out}"
+    );
 
     // Fragment compiles never carry the marker — their output must stay a verbatim
     // slice of the full compile, and the marker sits outside every fragment span.
     let frag = compile_fragment_keyed_impl(
-        INC, "balanced", true, victim, &partial, &Mono, &BoxShaper, &BoxOutliner,
+        INC,
+        "balanced",
+        true,
+        victim,
+        &partial,
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
     )
     .unwrap();
     assert!(!frag.contains("unkeyed"), "{frag}");
@@ -3755,8 +4089,12 @@ fn a_keyed_compile_reports_elements_the_host_failed_to_name() {
 
 #[test]
 fn dependents_multi_is_the_union_closure() {
-    let wave = fragment_range_impl(INC, INC.find("id=\"wave\"").unwrap()).unwrap().0;
-    let blob = fragment_range_impl(INC, INC.find("id=\"blob\"").unwrap()).unwrap().0;
+    let wave = fragment_range_impl(INC, INC.find("id=\"wave\"").unwrap())
+        .unwrap()
+        .0;
+    let blob = fragment_range_impl(INC, INC.find("id=\"blob\"").unwrap())
+        .unwrap()
+        .0;
 
     let mut union: Vec<(usize, usize)> = dependents_impl(INC, wave)
         .into_iter()
@@ -3772,7 +4110,10 @@ fn dependents_multi_is_the_union_closure() {
 
     assert_eq!(dependents_multi_impl(INC, &[wave, blob]), union);
     // duplicate seeds inside one fragment collapse
-    assert_eq!(dependents_multi_impl(INC, &[wave, wave + 1]), dependents_impl(INC, wave));
+    assert_eq!(
+        dependents_multi_impl(INC, &[wave, wave + 1]),
+        dependents_impl(INC, wave)
+    );
     // and both closures are non-trivial (textpath / textbox+boolean-use chains)
     assert!(!dependents_impl(INC, wave).is_empty());
     assert!(dependents_impl(INC, blob).len() >= 2);
@@ -3795,11 +4136,15 @@ fn fragment_compile_reloads_theme_from_its_own_document() {
     // Poison the thread-local with red…
     let _ = compile_test(&red);
     // …then a fragment compile of the BLUE document must resolve blue.
-    let off = fragment_range_impl(&blue, blue.find("<rect").unwrap()).unwrap().0;
-    let frag =
-        compile_fragment_impl(&blue, "balanced", false, off, &Mono, &NoShaper, &NoOutliner)
-            .unwrap();
-    assert!(frag.contains("#0000ff"), "fragment must use its own document's theme: {frag}");
+    let off = fragment_range_impl(&blue, blue.find("<rect").unwrap())
+        .unwrap()
+        .0;
+    let frag = compile_fragment_impl(&blue, "balanced", false, off, &Mono, &NoShaper, &NoOutliner)
+        .unwrap();
+    assert!(
+        frag.contains("#0000ff"),
+        "fragment must use its own document's theme: {frag}"
+    );
     assert!(!frag.contains("#ff0000"), "stale theme leaked: {frag}");
 }
 
@@ -3876,7 +4221,14 @@ fn text_layout_matches_emitted_tspans() {
     // compare through the emitter's number formatting to match exactly
     let fmt3 = |v: &[(f64, f64, String)]| -> Vec<String> {
         v.iter()
-            .map(|(x, y, t)| format!("{}|{}|{}", crate::compile::fmt(*x), crate::compile::fmt(*y), t))
+            .map(|(x, y, t)| {
+                format!(
+                    "{}|{}|{}",
+                    crate::compile::fmt(*x),
+                    crate::compile::fmt(*y),
+                    t
+                )
+            })
             .collect()
     };
     assert_eq!(fmt3(&reported), fmt3(&emitted));
@@ -3929,7 +4281,15 @@ fn text_layout_region_flow_reports_padded_bounds() {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
 <circle id="c" cx="30" cy="30" r="30"/>
 <x:textbox in="#c" font-size="10" padding="5">one two three</x:textbox></svg>"##;
-    let tl = text_layout_impl(svg, at(svg, "<x:textbox"), "balanced", &Mono, &BoxShaper, &NoOutliner).unwrap();
+    let tl = text_layout_impl(
+        svg,
+        at(svg, "<x:textbox"),
+        "balanced",
+        &Mono,
+        &BoxShaper,
+        &NoOutliner,
+    )
+    .unwrap();
     // BoxShaper pretends a 60×60 region at the origin
     assert_eq!(tl.content, (5.0, 5.0, 50.0, 50.0));
     assert!(!tl.paras[0].lines.is_empty());
@@ -4001,10 +4361,12 @@ impl GeneratorHost for MockHost {
             return ElementInfo::Unbound;
         }
         match tag {
-            "bar" | "evil" | "nested" | "warped" | "exfil" | "shadow" | "prose" => ElementInfo::Ready {
-                input: InputMode::None,
-                children: ChildMode::None,
-            },
+            "bar" | "evil" | "nested" | "warped" | "exfil" | "shadow" | "prose" => {
+                ElementInfo::Ready {
+                    input: InputMode::None,
+                    children: ChildMode::None,
+                }
+            }
             "edge" => ElementInfo::Ready {
                 input: InputMode::Required,
                 children: ChildMode::None,
@@ -4122,7 +4484,10 @@ fn plug_doc(body: &str) -> String {
 #[test]
 fn an_imported_namespace_dispatches_to_its_generator() {
     let out = compile_plug(&plug_doc(r##"<c:bar width="20" fill="#f00"/>"##));
-    assert!(out.contains(r##"d="M 0 0 L 20 0 L 20 5 L 0 5 Z""##), "{out}");
+    assert!(
+        out.contains(r##"d="M 0 0 L 20 0 L 20 5 L 0 5 Z""##),
+        "{out}"
+    );
     assert!(out.contains(r##"fill="#f00""##), "{out}");
     // <x:import> itself compiles to nothing
     assert!(!out.contains("x:import"), "{out}");
@@ -4233,7 +4598,10 @@ fn required_input_geometry_degrades_when_it_cannot_resolve() {
     let out = compile_plug(&plug_doc(
         r##"<rect id="r" x="0" y="0" width="10" height="10"/><c:edge in="#r"/>"##,
     ));
-    assert!(out.contains(r##"<path fill="none" d="M0,0 h10 v10 h-10 Z""##), "{out}");
+    assert!(
+        out.contains(r##"<path fill="none" d="M0,0 h10 v10 h-10 Z""##),
+        "{out}"
+    );
 }
 
 #[test]
@@ -4265,10 +4633,17 @@ fn a_container_measures_text_children_as_line_boxes() {
     ));
     let b = frame_box(&out).unwrap_or_default();
     let expect = Mono.measure("abc", &crate::TextStyle::default(), 10.0);
-    assert!((b[2] - expect).abs() < 0.5, "line box width {}: {out}", b[2]);
+    assert!(
+        (b[2] - expect).abs() < 0.5,
+        "line box width {}: {out}",
+        b[2]
+    );
     // vertically the box spans ascent above the baseline to descent below it
     let fm = Mono.font_metrics(&crate::TextStyle::default(), 10.0);
-    assert!((b[1] - (20.0 - fm.ascent)).abs() < 0.5, "top of line box: {out}");
+    assert!(
+        (b[1] - (20.0 - fm.ascent)).abs() < 0.5,
+        "top of line box: {out}"
+    );
     assert!(
         (b[3] - (fm.ascent + fm.descent)).abs() < 0.5,
         "line box height: {out}"
@@ -4288,7 +4663,11 @@ fn a_container_measures_multi_line_text_line_by_line() {
     // the box starts at the text's own left edge, not the origin
     assert!((b[0] - 40.0).abs() < 0.5, "left edge {}: {out}", b[0]);
     // and is no wider than the box the lines were laid out in
-    assert!(b[2] <= 120.0 + 0.5, "width {} exceeds the textbox: {out}", b[2]);
+    assert!(
+        b[2] <= 120.0 + 0.5,
+        "width {} exceeds the textbox: {out}",
+        b[2]
+    );
     assert!(b[1] > 80.0, "top follows the first baseline: {out}");
 }
 
@@ -4362,7 +4741,10 @@ fn a_plugin_element_carries_a_source_range() {
     )
     .unwrap();
     let start = src.find("<c:bar").unwrap();
-    assert!(out.contains(&format!(r##"data-xsvg-pos="{start}-"##)), "{out}");
+    assert!(
+        out.contains(&format!(r##"data-xsvg-pos="{start}-"##)),
+        "{out}"
+    );
     // only the root and the wrapper are stamped — a range inside generator
     // output would index the module's output string, not this document
     assert_eq!(out.matches("data-xsvg-pos").count(), 2, "{out}");
@@ -4443,8 +4825,16 @@ fn every_bordered_text_element_declares_the_border_block() {
         .iter()
         .find(|s| s.name == "textbox")
         .unwrap();
-    for p in textbox.all_params().filter(|p| p.name.starts_with("border-")) {
-        assert_eq!(p.ns, Some(XSVG_NS), "border param `{}` names no namespace", p.name);
+    for p in textbox
+        .all_params()
+        .filter(|p| p.name.starts_with("border-"))
+    {
+        assert_eq!(
+            p.ns,
+            Some(XSVG_NS),
+            "border param `{}` names no namespace",
+            p.name
+        );
     }
     assert!(
         !textbox.all_params().any(|p| p.name == "stroke-width"),
@@ -4480,7 +4870,10 @@ fn placement_and_extent_are_declared_as_geometry() {
         ("connector", "bulge"),
         ("textbox", "padding"),
     ] {
-        let spec = crate::built_in_elements().iter().find(|s| s.name == el).unwrap();
+        let spec = crate::built_in_elements()
+            .iter()
+            .find(|s| s.name == el)
+            .unwrap();
         let p = spec.all_params().find(|p| p.name == name).unwrap();
         assert!(!p.geometry, "<x:{el}> `{name}` is not placement or extent");
     }
@@ -4531,7 +4924,10 @@ fn same_side_anchors_arc_over_instead_of_detouring() {
         // running out past the far box to x=438 before doubling back to 420
         use crate::kurbo::Shape;
         let bbox = crate::kurbo::BezPath::from_svg(&d).unwrap().bounding_box();
-        assert!(bbox.x1 <= 481.0, "{anchors} overshoots the far box: {bbox:?}");
+        assert!(
+            bbox.x1 <= 481.0,
+            "{anchors} overshoots the far box: {bbox:?}"
+        );
     }
 }
 
@@ -4549,7 +4945,11 @@ fn a_forced_anchor_decides_which_axis_its_rail_leaves_along() {
     // A diagonal corner contributes a SIGN, not its 0.707 component. Scaling one
     // end's stub by that left the two stubs on different lines and put a stair-step
     // where they were meant to meet.
-    let d = connector_d(r##"from="#a:bottom" to="#b:right-bottom""##, "y-major", "none");
+    let d = connector_d(
+        r##"from="#a:bottom" to="#b:right-bottom""##,
+        "y-major",
+        "none",
+    );
     assert_eq!(d, "M120,206 L120,224 L480,224 L480,206");
 }
 
@@ -4592,7 +4992,6 @@ fn a_rail_never_repeats_or_runs_straight_through_a_waypoint() {
     }
 }
 
-
 // ------------------------------------------------ the plugin sandbox (Sandbox.md)
 
 #[test]
@@ -4604,12 +5003,24 @@ fn plugin_output_cannot_reach_the_network() {
     // exfiltration built entirely from primitives that individually look benign.
     let out = compile_plug(&plug_doc(r##"<c:exfil/>"##));
 
-    assert!(!out.contains("attacker.example"), "output reaches a remote origin: {out}");
-    assert!(!out.contains("javascript:"), "output can run script on click: {out}");
+    assert!(
+        !out.contains("attacker.example"),
+        "output reaches a remote origin: {out}"
+    );
+    assert!(
+        !out.contains("javascript:"),
+        "output can run script on click: {out}"
+    );
     // the elements themselves may stay — inert, having lost only the URL
-    assert!(out.contains("<a"), "the anchor is kept, just defused: {out}");
+    assert!(
+        out.contains("<a"),
+        "the anchor is kept, just defused: {out}"
+    );
     // a paint server pointing out of the document collapses rather than fetching
-    assert!(out.contains(r##"fill="none""##), "remote paint not neutralized: {out}");
+    assert!(
+        out.contains(r##"fill="none""##),
+        "remote paint not neutralized: {out}"
+    );
     // <foreignObject> is an HTML escape hatch a geometry generator has no use for
     assert!(!out.contains("<iframe"), "{out}");
     assert!(out.contains("<foreignObject> from a generator"), "{out}");
@@ -4630,9 +5041,20 @@ fn plugin_ids_cannot_shadow_the_document() {
     assert!(out.contains(r##"<linearGradient id="brand">"##), "{out}");
     assert!(out.contains(r##"fill="url(#brand)""##), "{out}");
     // the generator's are namespaced to the element that produced them
-    assert_eq!(out.matches(r##"id="brand""##).count(), 1, "id collision: {out}");
-    assert_eq!(out.matches(r##"id="authored""##).count(), 1, "id collision: {out}");
-    assert!(out.contains("id=\"x-plg-"), "generator ids are not scoped: {out}");
+    assert_eq!(
+        out.matches(r##"id="brand""##).count(),
+        1,
+        "id collision: {out}"
+    );
+    assert_eq!(
+        out.matches(r##"id="authored""##).count(),
+        1,
+        "id collision: {out}"
+    );
+    assert!(
+        out.contains("id=\"x-plg-"),
+        "generator ids are not scoped: {out}"
+    );
     // and a reference *within* the generator's own output still resolves, rewritten
     // to match — scoping ids must not break the module's own paint
     let scoped = out
@@ -4658,7 +5080,6 @@ fn an_author_may_still_write_what_a_generator_may_not() {
     assert!(out.contains(r##"id="brand""##), "{out}");
 }
 
-
 #[test]
 fn plugin_output_is_confined_however_it_was_lowered() {
     // The sandbox's output rules used to live in copy_attrs, and a generator may emit
@@ -4667,12 +5088,24 @@ fn plugin_output_is_confined_however_it_was_lowered() {
     // remote url() and a run's remote paint straight through. The rules now run over
     // the finished markup, so how it was lowered no longer matters.
     let out = compile_plug(&plug_doc(r##"<c:prose/>"##));
-    assert!(!out.contains("javascript:"), "a linked run carried script: {out}");
-    assert!(!out.contains("attacker.example"), "lowered text reached the network: {out}");
+    assert!(
+        !out.contains("javascript:"),
+        "a linked run carried script: {out}"
+    );
+    assert!(
+        !out.contains("attacker.example"),
+        "lowered text reached the network: {out}"
+    );
     // a fragment link inside the module's own output still works, scoped like its ids
-    assert!(out.contains(r##"href="#x-plg-"##), "own fragment link lost or unscoped: {out}");
+    assert!(
+        out.contains(r##"href="#x-plg-"##),
+        "own fragment link lost or unscoped: {out}"
+    );
     // a cross-file link would make the HOST read another file on the module's say-so
-    assert!(!out.contains("secrets"), "generator output triggered a cross-file link: {out}");
+    assert!(
+        !out.contains("secrets"),
+        "generator output triggered a cross-file link: {out}"
+    );
     // and a stylesheet would restyle the whole document, not just this element
     assert!(out.contains("<style> from a generator"), "{out}");
     assert!(out.contains("pointed outside the document"), "{out}");
@@ -4686,18 +5119,39 @@ fn a_forwarded_preserve_aspect_ratio_cannot_carry_markup() {
     struct Dep;
     impl Resolver for Dep {
         fn resolve(&self, _: &str, _: &str) -> Option<(String, String)> {
-            Some(("dep.xsvg".into(), format!(r##"{XW}<rect width="4" height="4"/></svg>"##)))
+            Some((
+                "dep.xsvg".into(),
+                format!(r##"{XW}<rect width="4" height="4"/></svg>"##),
+            ))
         }
     }
     let doc = |par: &str| {
-        let svg = format!(r##"{XW}<use href="dep.xsvg" width="40" height="20" preserveAspectRatio="{par}"/></svg>"##);
-        compile_linked_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner, &Dep, "doc.xsvg").unwrap()
+        let svg = format!(
+            r##"{XW}<use href="dep.xsvg" width="40" height="20" preserveAspectRatio="{par}"/></svg>"##
+        );
+        compile_linked_impl(
+            &svg,
+            "balanced",
+            false,
+            &Mono,
+            &NoShaper,
+            &NoOutliner,
+            &Dep,
+            "doc.xsvg",
+        )
+        .unwrap()
     };
     let hostile = doc(r##"none&quot; onload=&quot;alert(1)"##);
     assert!(!hostile.contains("onload"), "{hostile}");
-    assert!(!hostile.contains("preserveAspectRatio"), "an invalid value is not forwarded: {hostile}");
+    assert!(
+        !hostile.contains("preserveAspectRatio"),
+        "an invalid value is not forwarded: {hostile}"
+    );
     for ok in ["none", "xMaxYMin", "xMidYMid slice"] {
-        assert!(doc(ok).contains(&format!(r##"preserveAspectRatio="{ok}""##)), "{ok} should forward");
+        assert!(
+            doc(ok).contains(&format!(r##"preserveAspectRatio="{ok}""##)),
+            "{ok} should forward"
+        );
     }
 }
 
@@ -4710,10 +5164,19 @@ fn a_highlight_colour_cannot_carry_markup() {
     // the escaped value still *contains* the text `onload=`, harmlessly — what must
     // not exist is an onload ATTRIBUTE, so ask the parser rather than the string
     let doc = roxmltree::Document::parse(&out).expect("output is well-formed");
-    let smuggled = doc.descendants().any(|n| n.attributes().any(|a| a.name() == "onload"));
-    assert!(!smuggled, "the colour opened an attribute of its own: {out}");
+    let smuggled = doc
+        .descendants()
+        .any(|n| n.attributes().any(|a| a.name() == "onload"));
+    assert!(
+        !smuggled,
+        "the colour opened an attribute of its own: {out}"
+    );
     let rect = doc.descendants().find(|n| n.has_tag_name("rect")).unwrap();
-    assert_eq!(rect.attribute("fill"), Some(r##"#ff0" onload="alert(1)"##), "kept whole, as one value");
+    assert_eq!(
+        rect.attribute("fill"),
+        Some(r##"#ff0" onload="alert(1)"##),
+        "kept whole, as one value"
+    );
 }
 
 #[test]
@@ -4738,11 +5201,20 @@ fn a_list_item_steps_by_the_size_of_its_own_first_line() {
     let big = base(r#"<tspan font-size="300%">two</tspan>"#);
     let (lh, gap) = (1.2, 16.0 * 0.35);
     // the plain list steps by the base size throughout
-    assert!((plain[1] - plain[0] - (16.0 * lh + gap)).abs() < 1e-6, "{plain:?}");
+    assert!(
+        (plain[1] - plain[0] - (16.0 * lh + gap)).abs() < 1e-6,
+        "{plain:?}"
+    );
     // the item holding the 48px run is pushed down by ITS size...
-    assert!((big[1] - big[0] - (48.0 * lh + gap)).abs() < 1e-6, "{big:?}");
+    assert!(
+        (big[1] - big[0] - (48.0 * lh + gap)).abs() < 1e-6,
+        "{big:?}"
+    );
     // ...and the next item steps by its own, back at the base size
-    assert!((big[2] - big[1] - (16.0 * lh + gap)).abs() < 1e-6, "{big:?}");
+    assert!(
+        (big[2] - big[1] - (16.0 * lh + gap)).abs() < 1e-6,
+        "{big:?}"
+    );
 }
 
 #[test]
@@ -4759,10 +5231,22 @@ fn a_highlight_follows_a_raised_or_lowered_run() {
         y[..y.find('"').unwrap()].parse().unwrap()
     };
     let level = rect_y("baseline");
-    assert!((level - rect_y("10") - 10.0).abs() < 1e-6, "a length lifts it by that length");
-    assert!((level - rect_y("50%") - 10.0).abs() < 1e-6, "a percentage is of the run's size");
-    assert!(rect_y("super") < level && rect_y("sub") > level, "super raises, sub lowers");
-    assert!(((level - rect_y("super")) - (rect_y("sub") - level)).abs() < 1e-6, "symmetrically");
+    assert!(
+        (level - rect_y("10") - 10.0).abs() < 1e-6,
+        "a length lifts it by that length"
+    );
+    assert!(
+        (level - rect_y("50%") - 10.0).abs() < 1e-6,
+        "a percentage is of the run's size"
+    );
+    assert!(
+        rect_y("super") < level && rect_y("sub") > level,
+        "super raises, sub lowers"
+    );
+    assert!(
+        ((level - rect_y("super")) - (rect_y("sub") - level)).abs() < 1e-6,
+        "symmetrically"
+    );
 }
 
 #[test]
@@ -4777,7 +5261,11 @@ fn a_space_inside_a_larger_run_wraps_at_the_runs_size() {
         ));
         out.matches(r#" y=""#).count()
     };
-    assert_eq!(lines(47.0), 2, "the 2x space is 10 wide, so aa bb (50) cannot fit in 47");
+    assert_eq!(
+        lines(47.0),
+        2,
+        "the 2x space is 10 wide, so aa bb (50) cannot fit in 47"
+    );
     assert_eq!(lines(51.0), 1, "and does fit once the box allows it");
 }
 
@@ -4802,7 +5290,10 @@ fn a_session_parses_its_document_once() {
         compile_fragment_platform_impl(&svg, "balanced", true, off, "", &platform).unwrap();
     }
     dependents_multi_impl(&svg, &tops);
-    assert_eq!(super::session::PARSE_COUNT.with(|c| c.get()), tops.len() + 1);
+    assert_eq!(
+        super::session::PARSE_COUNT.with(|c| c.get()),
+        tops.len() + 1
+    );
 
     // The session: a whole flush's worth of calls on one parse.
     super::session::PARSE_COUNT.with(|c| c.set(0));
@@ -4846,7 +5337,10 @@ fn two_sessions_on_one_thread_keep_their_own_themes() {
         for tag in ["<rect", "<text"] {
             let frag = s.compile_fragment(src.find(tag).unwrap()).unwrap();
             assert!(frag.contains(own), "{tag}: own theme: {frag}");
-            assert!(!frag.contains(other), "{tag}: the other session's theme leaked: {frag}");
+            assert!(
+                !frag.contains(other),
+                "{tag}: the other session's theme leaked: {frag}"
+            );
         }
     }
 }

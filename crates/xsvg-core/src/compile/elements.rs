@@ -41,7 +41,10 @@ pub(super) struct Offset {
     pub join: OffsetJoin,
     #[param(default = 4.0, min = 1.0, max = 100.0)]
     pub miter_limit: f64,
-    #[param(default = "nonzero", doc = "how the referenced region reads its own winding")]
+    #[param(
+        default = "nonzero",
+        doc = "how the referenced region reads its own winding"
+    )]
     pub fill_rule: FillRule,
 }
 
@@ -63,7 +66,10 @@ pub(super) enum FillRule {
 }
 
 #[derive(Params)]
-#[element(name = "boolean", doc = "Combine its operand shapes with a path-algebra operation.")]
+#[element(
+    name = "boolean",
+    doc = "Combine its operand shapes with a path-algebra operation."
+)]
 pub(super) struct Boolean {
     /// Optional on purpose. A non-`Option` enum falls back to its default when a
     /// value is misspelled, which is right for a forgiving parameter like
@@ -121,7 +127,10 @@ pub(super) enum WarpAxisParam {
 // ---- charts ---------------------------------------------------------------
 
 #[derive(Params)]
-#[element(name = "pie", doc = "A pie or donut chart built from <x:slice> children.")]
+#[element(
+    name = "pie",
+    doc = "A pie or donut chart built from <x:slice> children."
+)]
 pub(super) struct Pie {
     #[param(default = 0.0, geometry)]
     pub cx: f64,
@@ -171,7 +180,10 @@ pub(super) struct Plot {
 // ---- mesh -----------------------------------------------------------------
 
 #[derive(Params)]
-#[element(name = "mesh", doc = "A gradient mesh, rasterized to a texel-aligned image.")]
+#[element(
+    name = "mesh",
+    doc = "A gradient mesh, rasterized to a texel-aligned image."
+)]
 pub(super) struct Mesh {
     #[param(default = 0.0, geometry)]
     pub x: f64,
@@ -181,7 +193,12 @@ pub(super) struct Mesh {
     pub width: f64,
     #[param(default = 0.0, min = 0.0, max = 4000.0, geometry)]
     pub height: f64,
-    #[param(default = 0.0, min = 0.0, max = 64.0, doc = "with rows, builds a uniform grid")]
+    #[param(
+        default = 0.0,
+        min = 0.0,
+        max = 64.0,
+        doc = "with rows, builds a uniform grid"
+    )]
     pub cols: f64,
     #[param(default = 0.0, min = 0.0, max = 64.0)]
     pub rows: f64,
@@ -190,7 +207,10 @@ pub(super) struct Mesh {
 // ---- connector ------------------------------------------------------------
 
 #[derive(Params)]
-#[element(name = "connector", doc = "A routed line between two elements, with arrowheads.")]
+#[element(
+    name = "connector",
+    doc = "A routed line between two elements, with arrowheads."
+)]
 pub(super) struct Connector {
     #[param(doc = "#id of the element the line leaves")]
     pub from: Option<String>,
@@ -204,9 +224,18 @@ pub(super) struct Connector {
     pub route: ConnectorRoute,
     #[param(default = "end")]
     pub arrow: ConnectorArrow,
-    #[param(min = 0.0, max = 100.0, doc = "defaults to 3.5x stroke-width, minimum 7")]
+    #[param(
+        min = 0.0,
+        max = 100.0,
+        doc = "defaults to 3.5x stroke-width, minimum 7"
+    )]
     pub arrow_size: Option<f64>,
-    #[param(default = 44.0, min = 0.0, max = 500.0, doc = "curve bow, for route=curve")]
+    #[param(
+        default = 44.0,
+        min = 0.0,
+        max = 500.0,
+        doc = "curve bow, for route=curve"
+    )]
     pub bulge: f64,
     #[param(color, default = "#334155")]
     pub stroke: String,
@@ -305,7 +334,12 @@ pub(super) struct Textbox {
     pub align: AlignParam,
     pub valign: VAlignParam,
     pub fit: FitParam,
-    #[param(default = 6.0, min = 1.0, max = 400.0, doc = "smallest font size shrink-to-fit will use")]
+    #[param(
+        default = 6.0,
+        min = 1.0,
+        max = 400.0,
+        doc = "smallest font size shrink-to-fit will use"
+    )]
     pub fit_min: f64,
     #[param(name = "text-overflow")]
     pub text_overflow: OverflowParam,
@@ -390,19 +424,40 @@ pub(super) struct List {
     pub y: f64,
     #[param(default = 320.0, min = 0.0, max = 4000.0, geometry)]
     pub width: f64,
-    #[param(default = "bullet", doc = "bullet or number; marker glyphs cycle by depth")]
+    #[param(
+        default = "bullet",
+        doc = "bullet or number; marker glyphs cycle by depth"
+    )]
     pub list: String,
     #[param(doc = "literal marker text for every item, overriding the list style")]
     pub marker: Option<String>,
     #[param(color, doc = "defaults to the list's own fill")]
     pub marker_fill: Option<String>,
-    #[param(default = 1.0, min = 0.0, max = 10.0, step = 0.1, doc = "marker size as a multiple of the item size")]
+    #[param(
+        default = 1.0,
+        min = 0.0,
+        max = 10.0,
+        step = 0.1,
+        doc = "marker size as a multiple of the item size"
+    )]
     pub marker_size: f64,
-    #[param(min = 0.0, max = 200.0, doc = "gap between marker and text; defaults to 0.5em")]
+    #[param(
+        min = 0.0,
+        max = 200.0,
+        doc = "gap between marker and text; defaults to 0.5em"
+    )]
     pub marker_gap: Option<f64>,
-    #[param(min = 0.0, max = 400.0, doc = "indent step per level; defaults to 1.5em")]
+    #[param(
+        min = 0.0,
+        max = 400.0,
+        doc = "indent step per level; defaults to 1.5em"
+    )]
     pub indent: Option<f64>,
-    #[param(min = 0.0, max = 200.0, doc = "space between items; defaults to 0.35em")]
+    #[param(
+        min = 0.0,
+        max = 200.0,
+        doc = "space between items; defaults to 0.35em"
+    )]
     pub item_spacing: Option<f64>,
     pub valign: VAlignParam,
     #[param(color, default = "#111827")]
@@ -453,7 +508,13 @@ pub fn built_in_elements() -> &'static [ElementSpec] {
 /// with. A property panel therefore reads both tiers through one path and never
 /// has to know which it is editing.
 pub fn describe_impl() -> String {
-    xsvg_schema::manifest_json(1, super::XSVG_NS, "xsvg", env!("CARGO_PKG_VERSION"), ELEMENTS)
+    xsvg_schema::manifest_json(
+        1,
+        super::XSVG_NS,
+        "xsvg",
+        env!("CARGO_PKG_VERSION"),
+        ELEMENTS,
+    )
 }
 
 static ELEMENTS: &[ElementSpec] = &[

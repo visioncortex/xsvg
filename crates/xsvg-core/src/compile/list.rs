@@ -60,16 +60,16 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // kept OUTSIDE `lines` so an EMPTY item (whose text laid out to
         // nothing) still knows its row: it takes vertical space like any
         // item, and its marker must sit on that row, not at the block top
-        size: f64, // per-item font size (defaults to the list's)
-        style: TextStyle, // the item's resolved base style (its own size)
-        emits: Vec<EmitAttrs>, // its styled-run emit table (`collect_runs`)
+        size: f64,                    // per-item font size (defaults to the list's)
+        style: TextStyle,             // the item's resolved base style (its own size)
+        emits: Vec<EmitAttrs>,        // its styled-run emit table (`collect_runs`)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
     let mut items: Vec<Item> = Vec::new();
     let mut last_baseline = 0.0; // baseline of the last line placed (relative frame)
-    // Sizes of the block's first and last lines: its top edge is the first line's cap
-    // and its bottom edge the last line's descent, each at that line's OWN size, as for
-    // every other text block (§6.11). Uniform lists keep the list size for both.
+                                 // Sizes of the block's first and last lines: its top edge is the first line's cap
+                                 // and its bottom edge the last line's descent, each at that line's OWN size, as for
+                                 // every other text block (§6.11). Uniform lists keep the list size for both.
     let (mut first_size, mut last_size) = (size, size);
     let mut first = true;
     for li in node
@@ -81,8 +81,8 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let text_x = x + (level as f64 + 1.0) * indent_step;
         let max_w = (x + width - text_x).max(1.0);
         let col = text_x - marker_gap; // markers' right-edge column
-        // an <x:li> may override the font size (e.g. a smaller sub-point); it
-        // inherits the list's size otherwise, keeping the list's line-height
+                                       // an <x:li> may override the font size (e.g. a smaller sub-point); it
+                                       // inherits the list's size otherwise, keeping the list's line-height
         let item_size = attr_pos(li, "font-size", size);
         let item_style = TextStyle {
             size: item_size,
@@ -179,7 +179,15 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let block_h = if items.is_empty() {
         0.0
     } else {
-        let at = |sz: f64| m.font_metrics(&TextStyle { size: sz, ..style.clone() }, sz);
+        let at = |sz: f64| {
+            m.font_metrics(
+                &TextStyle {
+                    size: sz,
+                    ..style.clone()
+                },
+                sz,
+            )
+        };
         last_baseline + at(first_size).cap_height + at(last_size).descent
     };
     let block_top = match (valign, avail_h) {
@@ -188,7 +196,13 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         _ => y, // top, or no height to align within
     };
     // relative baseline 0 → this y, the first line's cap at its own size
-    let first_fm = m.font_metrics(&TextStyle { size: first_size, ..style.clone() }, first_size);
+    let first_fm = m.font_metrics(
+        &TextStyle {
+            size: first_size,
+            ..style.clone()
+        },
+        first_size,
+    );
     let offset = block_top + first_fm.cap_height;
 
     // Pass 2: emit, shifting every relative baseline by `offset`. Markers and text
@@ -244,7 +258,9 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     ..l.clone()
                 })
                 .collect();
-            emit_highlights(&mut body, &shifted, "start", false, &it.style, it.size, &it.emits, m, ctx);
+            emit_highlights(
+                &mut body, &shifted, "start", false, &it.style, it.size, &it.emits, m, ctx,
+            );
             body.push_str("<text text-anchor=\"start\"");
             push_font_attrs(&mut body, &it.style, it.size, fill, ctx);
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map

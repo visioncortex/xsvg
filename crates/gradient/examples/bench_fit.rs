@@ -10,8 +10,8 @@
 //!    error measured in *premultiplied* space (what compositing shows over
 //!    any background).
 
-use xsvg_gradient::{fit_grid, GridField};
 use std::time::Instant;
+use xsvg_gradient::{fit_grid, GridField};
 
 /// Dense Gauss–Jordan reference (the solver the CG replaced), assembled from
 /// the same bilinear footprint — used only to check fidelity/time here.

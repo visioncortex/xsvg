@@ -316,7 +316,12 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
         .filter(|a| a.namespace().is_none())
         .filter(|a| !RESERVED_ATTRS.contains(&a.name()))
         .filter(|a| !a.name().starts_with("on"))
-        .map(|a| (a.name().to_string(), ctx.resolve_var(a.value()).into_owned()))
+        .map(|a| {
+            (
+                a.name().to_string(),
+                ctx.resolve_var(a.value()).into_owned(),
+            )
+        })
         .collect();
 
     let req = GenRequest {
@@ -443,7 +448,9 @@ fn confine(lowered: &str, scope: &str) -> Option<(String, u32)> {
         // restyle the *document*, not just this element, and can `@import`. Neither
         // has any business coming out of a geometry generator.
         if matches!(name, "foreignObject" | "style" | "script") {
-            out.push_str(&format!("<!-- xsvg: <{name}> from a generator — dropped -->"));
+            out.push_str(&format!(
+                "<!-- xsvg: <{name}> from a generator — dropped -->"
+            ));
             return;
         }
         out.push('<');
@@ -551,8 +558,7 @@ fn fragment_bbox(svg: &str, ctx: &Ctx) -> Option<[f64; 4]> {
         accumulate_bbox(child, Affine::IDENTITY, ctx, &mut acc);
     }
     let r = acc?;
-    (r.width().is_finite() && r.height().is_finite())
-        .then(|| [r.x0, r.y0, r.width(), r.height()])
+    (r.width().is_finite() && r.height().is_finite()).then(|| [r.x0, r.y0, r.width(), r.height()])
 }
 
 fn accumulate_bbox(n: roxmltree::Node, parent: Affine, ctx: &Ctx, acc: &mut Option<Rect>) {
@@ -632,7 +638,9 @@ fn run_bbox(n: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
         return None;
     }
     let mut style = crate::TextStyle {
-        size: inherited(n, "font-size").and_then(super::parse_num).unwrap_or(16.0),
+        size: inherited(n, "font-size")
+            .and_then(super::parse_num)
+            .unwrap_or(16.0),
         ..Default::default()
     };
     if let Some(f) = inherited(n, "font-family") {
@@ -686,4 +694,3 @@ fn inflate_stroke(n: roxmltree::Node, r: Rect) -> Rect {
         }
     }
 }
-

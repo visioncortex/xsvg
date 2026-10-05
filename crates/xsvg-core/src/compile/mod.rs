@@ -6,11 +6,10 @@
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
 pub(crate) use crate::{
     boolean_svg_paths, filter_primitives, layout_area_runs, layout_flow, layout_flow_runs,
-    split_flows,
     layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
-    parse_filter_functions, run_offset, svg_path_bbox, warp_svg_path, warp_text_on_path, Align,
-    Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign,
-    EnvelopePreset, Field, Fit, FontMetrics, FreeDistort, GlyphOutliner, Homography,
+    parse_filter_functions, run_offset, split_flows, svg_path_bbox, warp_svg_path,
+    warp_text_on_path, Align, Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain,
+    DisplayAlign, EnvelopePreset, Field, Fit, FontMetrics, FreeDistort, GlyphOutliner, Homography,
     LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec,
     RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
     WarpAxis,
@@ -156,7 +155,11 @@ pub struct Backend<'a> {
 
 impl<'a> Backend<'a> {
     /// The three font seams every compile needs; everything else inert.
-    pub(super) fn new(m: &'a dyn Measurer, shaper: &'a dyn Shaper, outliner: &'a dyn GlyphOutliner) -> Self {
+    pub(super) fn new(
+        m: &'a dyn Measurer,
+        shaper: &'a dyn Shaper,
+        outliner: &'a dyn GlyphOutliner,
+    ) -> Self {
         Self {
             m,
             shaper,
@@ -355,9 +358,16 @@ impl<'a> Ctx<'a> {
 
     /// The element `r` (`#id` or bare id) names, in `node`'s document. A table
     /// lookup for the entry document; a scan for a linked dependency's.
-    fn resolve_ref<'n>(&self, node: roxmltree::Node<'n, 'n>, r: &str) -> Option<roxmltree::Node<'n, 'n>> {
+    fn resolve_ref<'n>(
+        &self,
+        node: roxmltree::Node<'n, 'n>,
+        r: &str,
+    ) -> Option<roxmltree::Node<'n, 'n>> {
         let doc = node.document();
-        if std::ptr::eq(doc as *const _ as *const (), self.doc as *const _ as *const ()) {
+        if std::ptr::eq(
+            doc as *const _ as *const (),
+            self.doc as *const _ as *const (),
+        ) {
             let id = r.strip_prefix('#').unwrap_or(r);
             return self.ids.get(id).and_then(|&nid| doc.get_node(nid));
         }
@@ -463,7 +473,8 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
 /// (the target rect is the frame there) and outside keyed mode, so viewer
 /// output is untouched.
 fn frame_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
-    if !ctx.sourcemap.get() || ctx.key_for(node.range().start).is_none() || node.has_attribute("in") {
+    if !ctx.sourcemap.get() || ctx.key_for(node.range().start).is_none() || node.has_attribute("in")
+    {
         return String::new();
     }
     let (Some(w), Some(h)) = (
@@ -491,7 +502,16 @@ pub fn compile_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
-    compile_linked_impl(input, quality, sourcemap, m, shaper, outliner, &NoResolver, "")
+    compile_linked_impl(
+        input,
+        quality,
+        sourcemap,
+        m,
+        shaper,
+        outliner,
+        &NoResolver,
+        "",
+    )
 }
 
 /// Compile entry with cross-file `<use>` linking: `resolver` fetches dependencies and
@@ -508,7 +528,9 @@ pub fn compile_linked_impl(
     resolver: &dyn Resolver,
     base: &str,
 ) -> Result<String, String> {
-    compile_linked_keyed_impl(input, quality, sourcemap, m, shaper, outliner, resolver, base, &NoKeys)
+    compile_linked_keyed_impl(
+        input, quality, sourcemap, m, shaper, outliner, resolver, base, &NoKeys,
+    )
 }
 
 /// Keyed compile without cross-file linking — the editor-host entry ([`NodeKeys`]).
@@ -521,7 +543,17 @@ pub fn compile_keyed_impl(
     shaper: &dyn Shaper,
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
-    compile_linked_keyed_impl(input, quality, sourcemap, m, shaper, outliner, &NoResolver, "", keys)
+    compile_linked_keyed_impl(
+        input,
+        quality,
+        sourcemap,
+        m,
+        shaper,
+        outliner,
+        &NoResolver,
+        "",
+        keys,
+    )
 }
 
 /// [`compile_linked_impl`] with host-supplied node keys ([`NodeKeys`]).
@@ -587,7 +619,15 @@ pub fn compile_fragment_impl(
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
     compile_fragment_linked_impl(
-        input, quality, sourcemap, offset, m, shaper, outliner, &NoResolver, "",
+        input,
+        quality,
+        sourcemap,
+        offset,
+        m,
+        shaper,
+        outliner,
+        &NoResolver,
+        "",
     )
 }
 
@@ -625,7 +665,16 @@ pub fn compile_fragment_keyed_impl(
     outliner: &dyn GlyphOutliner,
 ) -> Result<String, String> {
     compile_fragment_linked_keyed_impl(
-        input, quality, sourcemap, offset, m, shaper, outliner, &NoResolver, "", keys,
+        input,
+        quality,
+        sourcemap,
+        offset,
+        m,
+        shaper,
+        outliner,
+        &NoResolver,
+        "",
+        keys,
     )
 }
 
@@ -713,7 +762,10 @@ fn baked_refs<'a>(
     }
     // <x:connector from to> bakes both endpoint boxes into the routed path (§7.6)
     if n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "connector" {
-        for r in [n.attribute("from"), n.attribute("to")].into_iter().flatten() {
+        for r in [n.attribute("from"), n.attribute("to")]
+            .into_iter()
+            .flatten()
+        {
             out.push(r);
             // An endpoint may carry a `:anchor` suffix (`#box:right`), and the
             // dependency is on the id in front of it. Report both spellings rather
@@ -778,7 +830,12 @@ pub fn dependents_multi_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)
 /// when one is provided (offset-independent, see [`NodeKeys`]), else the node's
 /// byte start — the legacy form, byte-for-byte.
 fn gen_id_seed(node: roxmltree::Node, ctx: &Ctx) -> String {
-    match ctx.sourcemap.get().then(|| ctx.key_for(node.range().start)).flatten() {
+    match ctx
+        .sourcemap
+        .get()
+        .then(|| ctx.key_for(node.range().start))
+        .flatten()
+    {
         Some(k) => k,
         None => node.range().start.to_string(),
     }
@@ -969,7 +1026,6 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
-
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);
         return;
@@ -1117,7 +1173,9 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .collect();
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
-            Some(r) => ctx.resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            Some(r) => ctx
+                .resolve_ref(node, r)
+                .filter(|t| t.tag_name().name() == "rect"),
             None => Some(node),
         };
         if let Some(geom) = geom {
@@ -1265,7 +1323,17 @@ fn emit_paragraphs(
                 ..l.clone()
             })
             .collect();
-        emit_highlights(out, &shifted, para.anchor, para.rtl, &para.style, para.style.size, &para.emits, m, ctx);
+        emit_highlights(
+            out,
+            &shifted,
+            para.anchor,
+            para.rtl,
+            &para.style,
+            para.style.size,
+            &para.emits,
+            m,
+            ctx,
+        );
         out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
         push_font_attrs(out, &para.style, para.style.size, para.fill, ctx);
         if para.rtl {
@@ -1386,7 +1454,10 @@ fn plan_paragraphs<'a>(
                 text_overflow: TextOverflow::Clip,
                 text_indent: attr_num(p, "text-indent", 0.0) * scale,
                 // a paragraph's own direction, else the box's
-                rtl: p.attribute("direction").or_else(|| node.attribute("direction")) == Some("rtl"),
+                rtl: p
+                    .attribute("direction")
+                    .or_else(|| node.attribute("direction"))
+                    == Some("rtl"),
             };
             let (segments, pstyles, emits) = collect_runs(p, &pstyle);
             let mut layout = layout_area_runs(&segments, &pstyles, &pspec, m);
@@ -1405,7 +1476,13 @@ fn plan_paragraphs<'a>(
             for l in &mut layout.lines {
                 l.baseline += shift;
             }
-            last_baseline = Some(layout.lines.last().map(|l| l.baseline).unwrap_or(first_baseline));
+            last_baseline = Some(
+                layout
+                    .lines
+                    .last()
+                    .map(|l| l.baseline)
+                    .unwrap_or(first_baseline),
+            );
             last_descent = m.font_metrics(&pstyle, last_size).descent;
             items.push(ParaPlan {
                 lines: layout.lines,
@@ -1757,7 +1834,10 @@ fn intrinsic_size(root: roxmltree::Node) -> (f64, f64) {
         }
     }
     let dim = |a: &str| root.attribute(a).and_then(parse_num).filter(|v| *v > 0.0);
-    (dim("width").unwrap_or(100.0), dim("height").unwrap_or(100.0))
+    (
+        dim("width").unwrap_or(100.0),
+        dim("height").unwrap_or(100.0),
+    )
 }
 
 /// The intrinsic extent of a by-id `<use>` target when it *declares* one — a nested
@@ -1818,7 +1898,9 @@ impl Stroke {
                 Some(v) => v != "none",
                 None => self.painted,
             },
-            width: get("stroke-width").and_then(parse_num).unwrap_or(self.width),
+            width: get("stroke-width")
+                .and_then(parse_num)
+                .unwrap_or(self.width),
         }
     }
 
@@ -2535,7 +2617,9 @@ pub(super) const TEXT_BORDER_PARAMS: &[xsvg_schema::ParamSpec] = &[
 /// visible outside each glyph (the emitted `stroke-width` is doubled, since the fill covers
 /// the inner half). Otherwise raw SVG stroke attributes pass through unchanged.
 fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
-    let bw = node.attribute((XSVG_NS, "border-width")).and_then(parse_num);
+    let bw = node
+        .attribute((XSVG_NS, "border-width"))
+        .and_then(parse_num);
     let bc = node.attribute((XSVG_NS, "border-color"));
     if bw.is_some() || bc.is_some() {
         let w = bw.unwrap_or(3.0).max(0.0);
@@ -2651,7 +2735,17 @@ fn write_area_text(
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    emit_highlights(out, &layout.lines, layout.anchor.svg(), layout.rtl, style, layout.font_size, emits, m, ctx);
+    emit_highlights(
+        out,
+        &layout.lines,
+        layout.anchor.svg(),
+        layout.rtl,
+        style,
+        layout.font_size,
+        emits,
+        m,
+        ctx,
+    );
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
     push_font_attrs(out, style, layout.font_size, fill, ctx);
     if layout.rtl {
@@ -2695,7 +2789,11 @@ fn baseline_shift_px(v: &str, em_box: f64, size: f64) -> f64 {
             } else if let Some(e) = v.strip_suffix("em") {
                 e.trim().parse::<f64>().map_or(0.0, |e| e * size)
             } else {
-                v.strip_suffix("px").unwrap_or(v).trim().parse::<f64>().unwrap_or(0.0)
+                v.strip_suffix("px")
+                    .unwrap_or(v)
+                    .trim()
+                    .parse::<f64>()
+                    .unwrap_or(0.0)
             }
         }
     }
@@ -2721,7 +2819,11 @@ fn emit_highlights(
     m: &dyn Measurer,
     ctx: &Ctx,
 ) {
-    let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        1.0
+    };
     // the run's measuring style: the base with the run's overrides folded in
     let run_style = |a: &EmitAttrs| -> (TextStyle, f64) {
         let mut st = style.clone();
@@ -2739,14 +2841,21 @@ fn emit_highlights(
         (st, rs)
     };
     for line in lines {
-        if !line.runs.iter().any(|r| emits.get(r.style).is_some_and(|a| a.highlight.is_some())) {
+        if !line
+            .runs
+            .iter()
+            .any(|r| emits.get(r.style).is_some_and(|a| a.highlight.is_some()))
+        {
             continue;
         }
         let natural: f64 = line
             .runs
             .iter()
             .map(|r| {
-                let (st, rs) = emits.get(r.style).map(&run_style).unwrap_or((style.clone(), size));
+                let (st, rs) = emits
+                    .get(r.style)
+                    .map(&run_style)
+                    .unwrap_or((style.clone(), size));
                 line_advance(&r.text, &st, rs, m)
             })
             .sum();
@@ -2846,7 +2955,11 @@ fn emit_line(
                     emit_attr(out, "font-family", &a.family);
                     if let Some(s) = a.size {
                         // the run's size rides the same fit scale as the base size
-                        let scale = if style.size > 0.0 { size / style.size } else { 1.0 };
+                        let scale = if style.size > 0.0 {
+                            size / style.size
+                        } else {
+                            1.0
+                        };
                         out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
                     }
                     emit_attr(out, "text-decoration", &a.decoration);
@@ -3115,7 +3228,10 @@ fn walk_runs(
                     set(&mut c.shift, child.attribute("baseline-shift"));
                     set(&mut c.href, child.attribute("href"));
                     set(&mut c.highlight, child.attribute((XSVG_NS, "highlight")));
-                    if let Some(s) = child.attribute("font-size").and_then(|v| run_size(v, base.size)) {
+                    if let Some(s) = child
+                        .attribute("font-size")
+                        .and_then(|v| run_size(v, base.size))
+                    {
                         c.size = Some(s);
                     }
                     walk_runs(child, &c, base, segments, styles, emits);
@@ -3211,32 +3327,35 @@ const FONT_PROPS: [&str; 7] = [
 impl Theme {
     /// Collect `<x:theme>`'s `<x:color>` / `<x:font>` tokens.
     pub(super) fn load(doc: &roxmltree::Document) -> Theme {
-    let mut theme = Theme::default();
-    for th in doc
-        .descendants()
-        .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "theme")
-    {
-        for c in th.children().filter(|c| c.is_element()) {
-            match c.tag_name().name() {
-                "color" => {
-                    if let (Some(name), Some(val)) = (c.attribute("name"), c.attribute("value")) {
-                        theme.colors.insert(name.to_string(), val.to_string());
+        let mut theme = Theme::default();
+        for th in doc
+            .descendants()
+            .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "theme")
+        {
+            for c in th.children().filter(|c| c.is_element()) {
+                match c.tag_name().name() {
+                    "color" => {
+                        if let (Some(name), Some(val)) = (c.attribute("name"), c.attribute("value"))
+                        {
+                            theme.colors.insert(name.to_string(), val.to_string());
+                        }
                     }
-                }
-                "font" => {
-                    if let Some(name) = c.attribute("name") {
-                        let props = FONT_PROPS
-                            .iter()
-                            .filter_map(|&p| c.attribute(p).map(|v| (p.to_string(), v.to_string())))
-                            .collect();
-                        theme.fonts.insert(name.to_string(), props);
+                    "font" => {
+                        if let Some(name) = c.attribute("name") {
+                            let props = FONT_PROPS
+                                .iter()
+                                .filter_map(|&p| {
+                                    c.attribute(p).map(|v| (p.to_string(), v.to_string()))
+                                })
+                                .collect();
+                            theme.fonts.insert(name.to_string(), props);
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
-    }
-    theme
+        theme
     }
 
     /// See [`Ctx::resolve_var`].
@@ -3280,8 +3399,8 @@ impl Theme {
 /// whole grammar of `preserveAspectRatio` (SVG 2 §8.2).
 fn valid_preserve_aspect_ratio(v: &str) -> bool {
     const ALIGN: [&str; 10] = [
-        "none", "xMinYMin", "xMidYMin", "xMaxYMin", "xMinYMid", "xMidYMid", "xMaxYMid",
-        "xMinYMax", "xMidYMax", "xMaxYMax",
+        "none", "xMinYMin", "xMidYMin", "xMaxYMin", "xMinYMid", "xMidYMid", "xMaxYMid", "xMinYMax",
+        "xMidYMax", "xMaxYMax",
     ];
     let mut it = v.split_ascii_whitespace();
     match (it.next(), it.next(), it.next()) {
@@ -3438,8 +3557,8 @@ mod tests;
 
 /// One parse per flush: the editor's compile session (docs/Compile Session.md).
 mod session;
-pub use session::CompileSession;
 use crate::MeasureCache;
+pub use session::CompileSession;
 
 // ---- feature modules (split out of this file) ----
 mod connector;
@@ -3459,9 +3578,7 @@ use elements::params_of;
 // so submodules reach `.as_str()` on a declared enum parameter through `super::*`
 pub(crate) use xsvg_schema::{ParamEnum, ParamSpec};
 pub mod plugin;
-use plugin::{
-    check_import, emit_plugin, GeneratorHost, ImportTable, NoGenerators,
-};
+use plugin::{check_import, emit_plugin, GeneratorHost, ImportTable, NoGenerators};
 
 // ============================================================================
 // Text-layout seam for editors (docs/Incremental.md §6; consumer: xsvg-kit).
@@ -3565,7 +3682,9 @@ fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
         .collect();
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
-            Some(r) => ctx.resolve_ref(node, r).filter(|t| t.tag_name().name() == "rect"),
+            Some(r) => ctx
+                .resolve_ref(node, r)
+                .filter(|t| t.tag_name().name() == "rect"),
             None => Some(node),
         };
         if let Some(geom) = geom {

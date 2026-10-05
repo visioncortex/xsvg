@@ -180,7 +180,12 @@ pub struct AreaLayout {
 /// Lay `text` into `spec`'s box: shrink-to-fit (if requested), wrap to the content
 /// width, then align horizontally and vertically into positioned lines.
 pub fn layout_area(text: &str, style: &TextStyle, spec: &AreaSpec, m: &dyn Measurer) -> AreaLayout {
-    layout_area_measured(&measure_words(text, style, m), std::slice::from_ref(style), spec, m)
+    layout_area_measured(
+        &measure_words(text, style, m),
+        std::slice::from_ref(style),
+        spec,
+        m,
+    )
 }
 
 /// The font size a line of `pieces` renders at (at the BASE scale): its
@@ -246,13 +251,21 @@ fn place_lines(
     let ch = spec.height - 2.0 * spec.padding;
     // Guard the base-size divide: a zero/degenerate `style.size` must not produce
     // NaN coordinates (scale falls back to 0 → zero-width glyphs, no NaN).
-    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        0.0
+    };
     let indent = spec.text_indent;
 
     // the anchor edge: start/end mirror under rtl (SVG's text-anchor "start"
     // is the RIGHT side of right-to-left text, so the keyword stays put)
     let anchor = spec.align.anchor();
-    let (start_edge, end_edge) = if spec.rtl { (cx + cw, cx) } else { (cx, cx + cw) };
+    let (start_edge, end_edge) = if spec.rtl {
+        (cx + cw, cx)
+    } else {
+        (cx, cx + cw)
+    };
     let ax = match spec.align {
         Align::Center => cx + cw / 2.0,
         Align::End => end_edge,
@@ -282,7 +295,15 @@ fn place_lines(
 
     let justify = spec.align == Align::Justify && cw > 0.0;
     // the indent insets from the start edge — inward, whichever side that is
-    let indent_x = if anchor == Anchor::Start { if spec.rtl { -indent } else { indent } } else { 0.0 };
+    let indent_x = if anchor == Anchor::Start {
+        if spec.rtl {
+            -indent
+        } else {
+            indent
+        }
+    } else {
+        0.0
+    };
 
     let mut lines = Vec::new();
     let mut dropped = false;
@@ -367,7 +388,11 @@ pub fn layout_area_runs(
         Fit::Shrink { min } => fit_size_flows(&measured, styles, cw, ch, min),
         Fit::None => style.size,
     };
-    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        0.0
+    };
 
     // Wrap each flow; the box-wide first-line indent applies to the very
     // first line only (flow 0). A blank flow contributes one empty line. Word
@@ -387,7 +412,11 @@ pub fn layout_area_runs(
         let n = wrapped.len();
         for (j, (pieces, words)) in wrapped.into_iter().enumerate() {
             // each flow's LAST line stays ragged (the paragraph-final convention)
-            line_meta.push((pieces, (words.0 + word_base, words.1 + word_base), j + 1 == n));
+            line_meta.push((
+                pieces,
+                (words.0 + word_base, words.1 + word_base),
+                j + 1 == n,
+            ));
         }
         word_base += mw.words.len();
     }
@@ -412,7 +441,11 @@ pub fn layout_area_measured(
         Fit::Shrink { min } => fit_size(measured, styles, cw, ch, min),
         Fit::None => style.size,
     };
-    let scale = if style.size > 0.0 { size / style.size } else { 0.0 };
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        0.0
+    };
     // First-line indent (§6.6): wrap the first line to the reduced width, the rest
     // to the full content width. Only when there is text and a real indent.
     let wrapped = wrap_indented(measured, cw, scale, spec.text_indent);

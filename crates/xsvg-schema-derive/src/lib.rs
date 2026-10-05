@@ -151,13 +151,16 @@ fn parse_meta_list(
     let Meta::List(list) = meta else {
         return Ok(());
     };
-    let parsed = list.parse_args_with(
-        syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-    )?;
+    let parsed = list
+        .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)?;
     for m in parsed {
         match &m {
             Meta::NameValue(nv) => {
-                let key = nv.path.get_ident().map(Ident::to_string).unwrap_or_default();
+                let key = nv
+                    .path
+                    .get_ident()
+                    .map(Ident::to_string)
+                    .unwrap_or_default();
                 on(&key, Some(&nv.value), nv.path.span())?;
             }
             Meta::Path(p) => {
@@ -209,13 +212,20 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             Ok(())
         })?;
     }
-    let el_name = el
-        .name
-        .clone()
-        .unwrap_or_else(|| kebab_variant(&ast.ident));
+    let el_name = el.name.clone().unwrap_or_else(|| kebab_variant(&ast.ident));
     let el_doc = opt_str(&el.doc);
-    let input_mode = mode_tokens(&el.input, "InputMode", &["none", "optional", "required"], ast.ident.span())?;
-    let child_mode = mode_tokens(&el.children, "ChildMode", &["none", "container"], ast.ident.span())?;
+    let input_mode = mode_tokens(
+        &el.input,
+        "InputMode",
+        &["none", "optional", "required"],
+        ast.ident.span(),
+    )?;
+    let child_mode = mode_tokens(
+        &el.children,
+        "ChildMode",
+        &["none", "container"],
+        ast.ident.span(),
+    )?;
 
     let mut specs = Vec::new();
     let mut reads = Vec::new();
@@ -252,7 +262,9 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                             .and_then(expr_text)
                             .into_iter()
                             .flat_map(|s| {
-                                s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()
+                                s.split(',')
+                                    .map(|p| p.trim().to_string())
+                                    .collect::<Vec<_>>()
                             })
                             .filter(|s| !s.is_empty())
                             .collect();
@@ -396,9 +408,9 @@ fn is_enum_field(base: &Type) -> bool {
 
 fn default_f64(opts: &ParamOpts, span: proc_macro2::Span) -> syn::Result<f64> {
     match &opts.default {
-        Some(d) => d.parse::<f64>().map_err(|_| {
-            syn::Error::new(span, format!("default `{d}` is not a number"))
-        }),
+        Some(d) => d
+            .parse::<f64>()
+            .map_err(|_| syn::Error::new(span, format!("default `{d}` is not a number"))),
         // A required-looking number with no default would silently become 0.0,
         // which is rarely what an element means. Say so at compile time.
         None => err(
@@ -464,7 +476,10 @@ fn extract_values(raw: &str) -> Option<Vec<String>> {
 
 fn expand_param_enum(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let Data::Enum(data) = &ast.data else {
-        return err(ast.ident.span(), "ParamEnum can only be derived for an enum");
+        return err(
+            ast.ident.span(),
+            "ParamEnum can only be derived for an enum",
+        );
     };
     let mut names = Vec::new();
     let mut idents = Vec::new();

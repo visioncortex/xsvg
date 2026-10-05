@@ -58,30 +58,30 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         Some(Point::new(x, y))
     };
     // A resolved endpoint: its box (a point is a zero-size box) + an optional forced anchor.
-    let resolve_end = |reference: Option<&str>, point: Option<&str>| -> Option<(Rect, Option<Anchor>)> {
-        if let Some(r) = reference {
-            let (id, anchor) = match r.rsplit_once(':') {
-                Some((base, suf)) => match parse_anchor(suf) {
-                    Some(an) => (base, Some(an)),
-                    None => (r, None), // `:` but not an anchor keyword — treat whole value as the id
-                },
-                None => (r, None),
-            };
-            let rect = ref_geometry(node, id, ctx)
-                .ok()
-                .and_then(|d| svg_path_bbox(&d))?;
-            Some((rect, anchor))
-        } else if let Some(pt) = point.and_then(parse_point) {
-            Some((Rect::new(pt.x, pt.y, pt.x, pt.y), None))
-        } else {
-            None
-        }
-    };
+    let resolve_end =
+        |reference: Option<&str>, point: Option<&str>| -> Option<(Rect, Option<Anchor>)> {
+            if let Some(r) = reference {
+                let (id, anchor) = match r.rsplit_once(':') {
+                    Some((base, suf)) => match parse_anchor(suf) {
+                        Some(an) => (base, Some(an)),
+                        None => (r, None), // `:` but not an anchor keyword — treat whole value as the id
+                    },
+                    None => (r, None),
+                };
+                let rect = ref_geometry(node, id, ctx)
+                    .ok()
+                    .and_then(|d| svg_path_bbox(&d))?;
+                Some((rect, anchor))
+            } else if let Some(pt) = point.and_then(parse_point) {
+                Some((Rect::new(pt.x, pt.y, pt.x, pt.y), None))
+            } else {
+                None
+            }
+        };
     let (Some((a, anchor_a)), Some((b, anchor_b))) = (
         resolve_end(cn.from.as_deref(), cn.from_point.as_deref()),
         resolve_end(cn.to.as_deref(), cn.to_point.as_deref()),
-    )
-    else {
+    ) else {
         out.push_str("<!-- xsvg: <x:connector> endpoint not found or not geometry -->");
         return;
     };
@@ -89,7 +89,10 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // The anchor point for (h, v), and its outward unit normal (0,0 at the center,
     // where callers fall back to aiming at the other endpoint).
     let anchor_pt = |r: Rect, (h, v): Anchor| {
-        Point::new(r.center().x + h * r.width() / 2.0, r.center().y + v * r.height() / 2.0)
+        Point::new(
+            r.center().x + h * r.width() / 2.0,
+            r.center().y + v * r.height() / 2.0,
+        )
     };
     let anchor_norm = |(h, v): Anchor| -> Option<(f64, f64)> {
         let len = (h * h + v * v).sqrt();
@@ -227,7 +230,13 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // minor axis, else around the nearer side). Mirrors Google Docs' elbow connectors.
     let stub = 18.0_f64;
     let elbow = |ax: Point, da: f64, bx: Point, db: f64, horiz: bool| -> Vec<Point> {
-        let pt = |m: f64, n: f64| if horiz { Point::new(m, n) } else { Point::new(n, m) };
+        let pt = |m: f64, n: f64| {
+            if horiz {
+                Point::new(m, n)
+            } else {
+                Point::new(n, m)
+            }
+        };
         let (am, an, bm, bn) = if horiz {
             (ax.x, ax.y, bx.x, bx.y)
         } else {
@@ -250,7 +259,11 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             // Bias toward `lo` on a near-tie so the choice is stable against the ULP-level
             // float divergence between the native and wasm builds (a perfect tie must not
             // land on opposite sides per platform).
-            if (mid - lo).abs() <= (hi - mid).abs() + 1e-6 { lo } else { hi }
+            if (mid - lo).abs() <= (hi - mid).abs() + 1e-6 {
+                lo
+            } else {
+                hi
+            }
         } else {
             (an + bn) / 2.0 // clear vertical band between them
         };
@@ -285,7 +298,11 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // send an exit sideways along an axis its anchor says nothing about.
     let along = |(h, v): (f64, f64), horiz: bool| -> f64 {
         let c = if horiz { h } else { v };
-        if c.abs() < 1e-9 { 0.0 } else { c.signum() }
+        if c.abs() < 1e-9 {
+            0.0
+        } else {
+            c.signum()
+        }
     };
     // Both ends' exits, resolved to work together: a diagonal corner adopts the far
     // end's axis wherever it has a component there, so the pair shares one rail
@@ -300,11 +317,19 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             (Some((ah, asg)), Some((bh, bsg))) => (ah, asg, bh, bsg),
             (Some((ah, asg)), None) => {
                 let s = along(nb, ah);
-                if s != 0.0 { (ah, asg, ah, s) } else { (ah, asg, !ah, along(nb, !ah)) }
+                if s != 0.0 {
+                    (ah, asg, ah, s)
+                } else {
+                    (ah, asg, !ah, along(nb, !ah))
+                }
             }
             (None, Some((bh, bsg))) => {
                 let s = along(na, bh);
-                if s != 0.0 { (bh, s, bh, bsg) } else { (!bh, along(na, !bh), bh, bsg) }
+                if s != 0.0 {
+                    (bh, s, bh, bsg)
+                } else {
+                    (!bh, along(na, !bh), bh, bsg)
+                }
             }
             (None, None) => (prefer, along(na, prefer), prefer, along(nb, prefer)),
         };
@@ -319,20 +344,41 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // is the one corner where the two exit lines meet, taken when it lies ahead of A
     // and lets the line arrive against B's normal rather than out of it. Otherwise
     // stub both ends clear of their boxes first and join the stubs with one corner.
-    let corner_rail = |ax: Point, ah: bool, asg: f64, bx: Point, bh: bool, bsg: f64| -> Vec<Point> {
-        let meet = if ah { Point::new(bx.x, ax.y) } else { Point::new(ax.x, bx.y) };
-        let out_a = if ah { (meet.x - ax.x) * asg } else { (meet.y - ax.y) * asg };
-        let into_b = if bh { (bx.x - meet.x) * bsg } else { (bx.y - meet.y) * bsg };
-        if out_a > 1e-6 && into_b < -1e-6 {
-            return vec![ax, meet, bx];
-        }
-        let step = |p: Point, horiz: bool, s: f64| {
-            if horiz { Point::new(p.x + s * stub, p.y) } else { Point::new(p.x, p.y + s * stub) }
+    let corner_rail =
+        |ax: Point, ah: bool, asg: f64, bx: Point, bh: bool, bsg: f64| -> Vec<Point> {
+            let meet = if ah {
+                Point::new(bx.x, ax.y)
+            } else {
+                Point::new(ax.x, bx.y)
+            };
+            let out_a = if ah {
+                (meet.x - ax.x) * asg
+            } else {
+                (meet.y - ax.y) * asg
+            };
+            let into_b = if bh {
+                (bx.x - meet.x) * bsg
+            } else {
+                (bx.y - meet.y) * bsg
+            };
+            if out_a > 1e-6 && into_b < -1e-6 {
+                return vec![ax, meet, bx];
+            }
+            let step = |p: Point, horiz: bool, s: f64| {
+                if horiz {
+                    Point::new(p.x + s * stub, p.y)
+                } else {
+                    Point::new(p.x, p.y + s * stub)
+                }
+            };
+            let (pa, pb) = (step(ax, ah, asg), step(bx, bh, bsg));
+            let bend = if ah {
+                Point::new(pa.x, pb.y)
+            } else {
+                Point::new(pb.x, pa.y)
+            };
+            vec![ax, pa, bend, pb, bx]
         };
-        let (pa, pb) = (step(ax, ah, asg), step(bx, bh, bsg));
-        let bend = if ah { Point::new(pa.x, pb.y) } else { Point::new(pb.x, pa.y) };
-        vec![ax, pa, bend, pb, bx]
-    };
     // Drop repeated and straight-through waypoints.
     //
     // Not cosmetic: `round_rail` shares ONE radius across every corner, capped by the
@@ -374,8 +420,16 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // segment back to the arrowhead base as needed. Works for any rail of ≥2 points.
     let build_rail = |pts: &[Point]| {
         let n = pts.len();
-        let s = if arrow_start { trim(pts[0], pts[1]) } else { pts[0] };
-        let e = if arrow_end { trim(pts[n - 1], pts[n - 2]) } else { pts[n - 1] };
+        let s = if arrow_start {
+            trim(pts[0], pts[1])
+        } else {
+            pts[0]
+        };
+        let e = if arrow_end {
+            trim(pts[n - 1], pts[n - 2])
+        } else {
+            pts[n - 1]
+        };
         let mut d = format!("M{}", p(s));
         for q in &pts[1..n - 1] {
             d.push_str(&format!(" L{}", p(*q)));
@@ -412,12 +466,21 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         let seg = |from: Point, to: Point| -> Point {
             let (dx, dy) = (to.x - from.x, to.y - from.y);
             let l = (dx * dx + dy * dy).sqrt();
-            if l < 1e-9 { from } else { Point::new(from.x + dx / l * rr, from.y + dy / l * rr) }
+            if l < 1e-9 {
+                from
+            } else {
+                Point::new(from.x + dx / l * rr, from.y + dy / l * rr)
+            }
         };
         let mut d = format!("M{}", p(q[0]));
         for i in 1..n - 1 {
             // approach the corner, then a quadratic through it to the departure point
-            d.push_str(&format!(" L{} Q{} {}", p(seg(q[i], q[i - 1])), p(q[i]), p(seg(q[i], q[i + 1]))));
+            d.push_str(&format!(
+                " L{} Q{} {}",
+                p(seg(q[i], q[i - 1])),
+                p(q[i]),
+                p(seg(q[i], q[i + 1]))
+            ));
         }
         d.push_str(&format!(" L{}", p(q[n - 1])));
         (d, pts[0], pts[1], pts[n - 1], pts[n - 2])
@@ -427,52 +490,56 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     // plus the two endpoint tangents as (tip, adj) pairs: `adj` is the
     // neighbouring path point, so unit(tip − adj) is the direction the line
     // travels OUT of that end — the way its arrowhead points.
-    let (d, start_tip, start_adj, end_tip, end_adj) =
-        match cn.route.as_str() {
-            "x-major" => {
-                let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
-                let ax = match anchor_a {
-                    Some(s) => anchor_pt(a, s),
-                    None => Point::new(ca.x + dir * a.width() / 2.0, ca.y),
-                };
-                let bx = match anchor_b {
-                    Some(s) => anchor_pt(b, s),
-                    None => Point::new(cb.x - dir * b.width() / 2.0, cb.y),
-                };
-                // A forced anchor's own normal decides which way that end leaves — and
-                // which axis, since an anchor facing across the route (`:top` on an
-                // x-major rail) is the more specific instruction of the two.
-                let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((dir, 0.0));
-                let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((-dir, 0.0));
-                build_rail(&rail(ax, na, bx, nb, true))
-            }
-            "y-major" => {
-                let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
-                let ay = match anchor_a {
-                    Some(s) => anchor_pt(a, s),
-                    None => Point::new(ca.x, ca.y + dir * a.height() / 2.0),
-                };
-                let by = match anchor_b {
-                    Some(s) => anchor_pt(b, s),
-                    None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
-                };
-                let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((0.0, dir));
-                let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((0.0, -dir));
-                build_rail(&rail(ay, na, by, nb, false))
-            }
-            "curve" => {
-                let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
-                // Each endpoint's exit point + outward direction: a forced side gives
-                // its edge midpoint and normal; otherwise the box edge along the
-                // dominant axis toward the other end (the original auto behaviour).
-                let exit = |r: Rect, c: Point, toward: Point, forced: Option<Anchor>| -> (Point, (f64, f64)) {
+    let (d, start_tip, start_adj, end_tip, end_adj) = match cn.route.as_str() {
+        "x-major" => {
+            let dir = if cb.x >= ca.x { 1.0 } else { -1.0 };
+            let ax = match anchor_a {
+                Some(s) => anchor_pt(a, s),
+                None => Point::new(ca.x + dir * a.width() / 2.0, ca.y),
+            };
+            let bx = match anchor_b {
+                Some(s) => anchor_pt(b, s),
+                None => Point::new(cb.x - dir * b.width() / 2.0, cb.y),
+            };
+            // A forced anchor's own normal decides which way that end leaves — and
+            // which axis, since an anchor facing across the route (`:top` on an
+            // x-major rail) is the more specific instruction of the two.
+            let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((dir, 0.0));
+            let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((-dir, 0.0));
+            build_rail(&rail(ax, na, bx, nb, true))
+        }
+        "y-major" => {
+            let dir = if cb.y >= ca.y { 1.0 } else { -1.0 };
+            let ay = match anchor_a {
+                Some(s) => anchor_pt(a, s),
+                None => Point::new(ca.x, ca.y + dir * a.height() / 2.0),
+            };
+            let by = match anchor_b {
+                Some(s) => anchor_pt(b, s),
+                None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
+            };
+            let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((0.0, dir));
+            let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((0.0, -dir));
+            build_rail(&rail(ay, na, by, nb, false))
+        }
+        "curve" => {
+            let horiz = (cb.x - ca.x).abs() >= (cb.y - ca.y).abs();
+            // Each endpoint's exit point + outward direction: a forced side gives
+            // its edge midpoint and normal; otherwise the box edge along the
+            // dominant axis toward the other end (the original auto behaviour).
+            let exit =
+                |r: Rect, c: Point, toward: Point, forced: Option<Anchor>| -> (Point, (f64, f64)) {
                     if let Some(an) = forced {
                         let pt = anchor_pt(r, an);
                         // center has no edge normal — aim the tangent at the other endpoint
                         let dir = anchor_norm(an).unwrap_or_else(|| {
                             let (dx, dy) = (toward.x - pt.x, toward.y - pt.y);
                             let l = (dx * dx + dy * dy).sqrt();
-                            if l < 1e-9 { (0.0, 0.0) } else { (dx / l, dy / l) }
+                            if l < 1e-9 {
+                                (0.0, 0.0)
+                            } else {
+                                (dx / l, dy / l)
+                            }
                         });
                         return (pt, dir);
                     }
@@ -484,80 +551,83 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                         (Point::new(c.x, c.y + d * r.height() / 2.0), (0.0, d))
                     }
                 };
-                let (a0, an) = exit(a, ca, cb, anchor_a);
-                let (b0, bn) = exit(b, cb, ca, anchor_b);
-                let unit = |dx: f64, dy: f64| {
-                    let l = (dx * dx + dy * dy).sqrt();
-                    if l < 1e-9 { (0.0, 0.0) } else { (dx / l, dy / l) }
-                };
-                // When the other anchor is *behind* the exit (dot < 0 — overlapping or
-                // back-to-back boxes, the case the elbow routes flip for), a single cubic
-                // can't both bow around and still meet the far edge along its normal; it
-                // ends up cutting across the box. Route it as a rounded elbow instead (the
-                // same rail path, corners filleted) so it reads as a smooth cornered line.
-                let (cax, cay) = unit(b0.x - a0.x, b0.y - a0.y);
-                let (cbx, cby) = unit(a0.x - b0.x, a0.y - b0.y);
-                // "Behind" means pointing very nearly straight BACK, not merely away.
-                // A corner anchor is 45° off the chord (dot −0.707) and two same-side
-                // anchors are 90° off (dot 0) — both arc cleanly, because the tilted
-                // handles below pull them round; that is what `#a:left-top → #b:top`
-                // is *for*, and testing `< 0` sent every one of them to the elbow.
-                // Only an exit facing back down the chord defeats a cubic, so the
-                // threshold sits between a corner's −0.707 and a reversed edge's −1,
-                // with margin to spare against float noise.
-                const BACKWARD: f64 = -0.9;
-                let behind =
-                    an.0 * cax + an.1 * cay < BACKWARD || bn.0 * cbx + bn.1 * cby < BACKWARD;
-                if behind {
-                    round_rail(&rail(a0, an, b0, bn, horiz), 22.0)
+            let (a0, an) = exit(a, ca, cb, anchor_a);
+            let (b0, bn) = exit(b, cb, ca, anchor_b);
+            let unit = |dx: f64, dy: f64| {
+                let l = (dx * dx + dy * dy).sqrt();
+                if l < 1e-9 {
+                    (0.0, 0.0)
                 } else {
-                    // Facing with room: a single smooth cubic. Tilt each handle from the
-                    // exit toward the other anchor, so a same-side pair reads as a leaf
-                    // (pointed at both ends) rather than bulging into a half-circle.
-                    let da = unit(an.0 + cax * 0.7, an.1 + cay * 0.7);
-                    let db = unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7);
-                    // fixed bow; only clamped down for connectors shorter than the bulge
-                    // itself, so a short link can't loop past its own endpoints
-                    let dist = ((b0.x - a0.x).powi(2) + (b0.y - a0.y).powi(2)).sqrt();
-                    let k = bulge.min(dist);
-                    let c1 = Point::new(a0.x + da.0 * k, a0.y + da.1 * k);
-                    let c2 = Point::new(b0.x + db.0 * k, b0.y + db.1 * k);
-                    let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
-                    let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
-                    // draw only the middle of the cubic, between the two bases
-                    let [q0, q1, q2, q3] = subcubic(
-                        a0,
-                        c1,
-                        c2,
-                        b0,
-                        if arrow_start { t0 } else { 0.0 },
-                        if arrow_end { t1 } else { 1.0 },
-                    );
-                    (
-                        format!("M{} C{} {} {}", p(q0), p(q1), p(q2), p(q3)),
-                        a0,
-                        s_base,
-                        b0,
-                        e_base,
-                    )
+                    (dx / l, dy / l)
                 }
+            };
+            // When the other anchor is *behind* the exit (dot < 0 — overlapping or
+            // back-to-back boxes, the case the elbow routes flip for), a single cubic
+            // can't both bow around and still meet the far edge along its normal; it
+            // ends up cutting across the box. Route it as a rounded elbow instead (the
+            // same rail path, corners filleted) so it reads as a smooth cornered line.
+            let (cax, cay) = unit(b0.x - a0.x, b0.y - a0.y);
+            let (cbx, cby) = unit(a0.x - b0.x, a0.y - b0.y);
+            // "Behind" means pointing very nearly straight BACK, not merely away.
+            // A corner anchor is 45° off the chord (dot −0.707) and two same-side
+            // anchors are 90° off (dot 0) — both arc cleanly, because the tilted
+            // handles below pull them round; that is what `#a:left-top → #b:top`
+            // is *for*, and testing `< 0` sent every one of them to the elbow.
+            // Only an exit facing back down the chord defeats a cubic, so the
+            // threshold sits between a corner's −0.707 and a reversed edge's −1,
+            // with margin to spare against float noise.
+            const BACKWARD: f64 = -0.9;
+            let behind = an.0 * cax + an.1 * cay < BACKWARD || bn.0 * cbx + bn.1 * cby < BACKWARD;
+            if behind {
+                round_rail(&rail(a0, an, b0, bn, horiz), 22.0)
+            } else {
+                // Facing with room: a single smooth cubic. Tilt each handle from the
+                // exit toward the other anchor, so a same-side pair reads as a leaf
+                // (pointed at both ends) rather than bulging into a half-circle.
+                let da = unit(an.0 + cax * 0.7, an.1 + cay * 0.7);
+                let db = unit(bn.0 + cbx * 0.7, bn.1 + cby * 0.7);
+                // fixed bow; only clamped down for connectors shorter than the bulge
+                // itself, so a short link can't loop past its own endpoints
+                let dist = ((b0.x - a0.x).powi(2) + (b0.y - a0.y).powi(2)).sqrt();
+                let k = bulge.min(dist);
+                let c1 = Point::new(a0.x + da.0 * k, a0.y + da.1 * k);
+                let c2 = Point::new(b0.x + db.0 * k, b0.y + db.1 * k);
+                let (s_base, t0) = chord_back(a0, c1, c2, b0, false);
+                let (e_base, t1) = chord_back(a0, c1, c2, b0, true);
+                // draw only the middle of the cubic, between the two bases
+                let [q0, q1, q2, q3] = subcubic(
+                    a0,
+                    c1,
+                    c2,
+                    b0,
+                    if arrow_start { t0 } else { 0.0 },
+                    if arrow_end { t1 } else { 1.0 },
+                );
+                (
+                    format!("M{} C{} {} {}", p(q0), p(q1), p(q2), p(q3)),
+                    a0,
+                    s_base,
+                    b0,
+                    e_base,
+                )
             }
-            _ => {
-                // straight: clip the center-to-center line to each box edge (or the
-                // forced side's midpoint)
-                let a0 = match anchor_a {
-                    Some(s) => anchor_pt(a, s),
-                    None => edge(a, cb),
-                };
-                let b0 = match anchor_b {
-                    Some(s) => anchor_pt(b, s),
-                    None => edge(b, ca),
-                };
-                let s = if arrow_start { trim(a0, b0) } else { a0 };
-                let e = if arrow_end { trim(b0, a0) } else { b0 };
-                (format!("M{} L{}", p(s), p(e)), a0, b0, b0, a0)
-            }
-        };
+        }
+        _ => {
+            // straight: clip the center-to-center line to each box edge (or the
+            // forced side's midpoint)
+            let a0 = match anchor_a {
+                Some(s) => anchor_pt(a, s),
+                None => edge(a, cb),
+            };
+            let b0 = match anchor_b {
+                Some(s) => anchor_pt(b, s),
+                None => edge(b, ca),
+            };
+            let s = if arrow_start { trim(a0, b0) } else { a0 };
+            let e = if arrow_end { trim(b0, a0) } else { b0 };
+            (format!("M{} L{}", p(s), p(e)), a0, b0, b0, a0)
+        }
+    };
 
     // Arrowhead as a computed triangle: tip AT the endpoint (no penetration),
     // base midpoint at `adj` (for the curve, an on-curve point at chord distance
@@ -598,7 +668,17 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     copy_attrs(
         node,
         out,
-        &["from", "to", "from-point", "to-point", "route", "arrow", "arrow-size", "bulge", "fill"],
+        &[
+            "from",
+            "to",
+            "from-point",
+            "to-point",
+            "route",
+            "arrow",
+            "arrow-size",
+            "bulge",
+            "fill",
+        ],
         ctx,
     );
     out.push_str(&pos_attr(node, ctx));

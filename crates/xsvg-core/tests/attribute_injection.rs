@@ -48,7 +48,9 @@ fn value_spans(src: &str) -> Vec<(String, String, std::ops::Range<usize>)> {
             // otherwise identical elements at different positions do not.
             let mut context: Vec<String> = n
                 .attributes()
-                .filter(|a| a.value().parse::<f64>().is_err() && !a.value().contains(char::is_numeric))
+                .filter(|a| {
+                    a.value().parse::<f64>().is_err() && !a.value().contains(char::is_numeric)
+                })
                 .map(|a| format!("{}={}", a.name(), a.value()))
                 .collect();
             context.sort();
@@ -73,7 +75,14 @@ fn escape_failure(out: &str) -> Option<String> {
     doc.descendants().filter(|n| n.is_element()).find_map(|n| {
         n.attributes()
             .find(|a| a.name().starts_with("onxss"))
-            .map(|a| format!("<{} {}=\"{}\"> appeared in the output", n.tag_name().name(), a.name(), a.value()))
+            .map(|a| {
+                format!(
+                    "<{} {}=\"{}\"> appeared in the output",
+                    n.tag_name().name(),
+                    a.name(),
+                    a.value()
+                )
+            })
     })
 }
 
@@ -85,7 +94,11 @@ fn no_authored_value_escapes_its_attribute() {
         .filter(|p| p.extension().is_some_and(|x| x == "xsvg"))
         .collect();
     files.sort();
-    assert!(files.len() > 40, "dataset not found at {}", dataset().display());
+    assert!(
+        files.len() > 40,
+        "dataset not found at {}",
+        dataset().display()
+    );
 
     let mut failures = Vec::new();
     let mut probed = 0;
@@ -103,9 +116,16 @@ fn no_authored_value_escapes_its_attribute() {
                 continue;
             }
             let probe = format!("{}{PAYLOAD}{}", &src[..span.end], &src[span.end..]);
-            let Ok(out) =
-                compile_linked_impl(&probe, "balanced", false, &Mono, &BoxShaper, &BoxOutliner, &Dataset, &base)
-            else {
+            let Ok(out) = compile_linked_impl(
+                &probe,
+                "balanced",
+                false,
+                &Mono,
+                &BoxShaper,
+                &BoxOutliner,
+                &Dataset,
+                &base,
+            ) else {
                 continue; // the probe made the document itself unparseable — nothing emitted
             };
             probed += 1;
@@ -114,7 +134,10 @@ fn no_authored_value_escapes_its_attribute() {
             }
         }
     }
-    assert!(probed > 500, "only {probed} probes ran — the harness is not reaching the dataset");
+    assert!(
+        probed > 500,
+        "only {probed} probes ran — the harness is not reaching the dataset"
+    );
     assert!(
         failures.is_empty(),
         "{} authored value(s) escaped their attribute over {probed} probes:\n  {}",

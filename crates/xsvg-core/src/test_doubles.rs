@@ -28,7 +28,12 @@ impl Shaper for BoxShaper {
     fn rasterize(&self, _d: &str, row_h: f64) -> Option<RasterRegion> {
         let n = (60.0 / row_h).ceil().max(1.0) as usize;
         Some(RasterRegion::new(
-            Rect { x: 0.0, y: 0.0, w: 60.0, h: 60.0 },
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 60.0,
+                h: 60.0,
+            },
             0.0,
             row_h,
             vec![Some((0.0, 60.0)); n],

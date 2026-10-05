@@ -9,8 +9,8 @@
 
 use super::plugin::{load_imports, ImportTable};
 use super::{
-    check_nesting_depth, serialize, top_level_at, Backend, Ctx, Host, TextLayout,
-    Theme, MAX_NESTING_DEPTH,
+    check_nesting_depth, serialize, top_level_at, Backend, Ctx, Host, TextLayout, Theme,
+    MAX_NESTING_DEPTH,
 };
 use crate::QualityProfile;
 use std::collections::HashMap;
@@ -103,7 +103,12 @@ impl<'a> Parsed<'a> {
         let node = top_level_at(&self.doc, offset)
             .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
         let mut out = String::new();
-        serialize(node, &mut out, false, &Ctx::new(backend, quality, sourcemap, base, self));
+        serialize(
+            node,
+            &mut out,
+            false,
+            &Ctx::new(backend, quality, sourcemap, base, self),
+        );
         Ok(out)
     }
 
@@ -119,7 +124,9 @@ impl<'a> Parsed<'a> {
             .doc
             .descendants()
             .find(|n| n.is_element() && n.range().start == offset)?;
-        if node.tag_name().namespace() != Some(super::XSVG_NS) || node.tag_name().name() != "textbox" {
+        if node.tag_name().namespace() != Some(super::XSVG_NS)
+            || node.tag_name().name() != "textbox"
+        {
             return None;
         }
         super::layout_textbox(node, &Ctx::new(backend, quality, false, "", self))
@@ -284,8 +291,12 @@ impl<'a, P: Host> CompileSession<'a, P> {
 
     /// The whole document — byte-identical to [`super::compile_platform_impl`].
     pub fn compile(&self) -> Result<String, String> {
-        self.parsed
-            .compile(&self.platform.backend(), self.quality, self.sourcemap, &self.base)
+        self.parsed.compile(
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
     }
 
     /// The top-level element containing byte `offset` — byte-identical to

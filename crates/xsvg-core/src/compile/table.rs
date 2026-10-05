@@ -55,26 +55,18 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let text_fill = ctx.resolve_var(&tp.fill).into_owned();
     let grid = ctx.paint(&tp.stroke);
     let grid_w = tp.stroke_width.max(0.0);
-    let body_bg = node
-        .attribute("cell-fill")
-        .map(|v| ctx.paint(v));
+    let body_bg = node.attribute("cell-fill").map(|v| ctx.paint(v));
     let header_bg = ctx.paint(&tp.header_fill);
     // zebra striping: an alternate background for every other BODY row (rows with
     // no header cell); the first data row is unstriped.
-    let stripe = node
-        .attribute("stripe")
-        .map(|v| ctx.paint(v));
+    let stripe = node.attribute("stripe").map(|v| ctx.paint(v));
     let pad = tp.cell_padding.max(0.0);
     let default_align = tp.align.as_str();
     let default_valign = tp.valign.as_str();
     let row_min = tp.row_min_height;
 
     // block geometry: `in="#rect"` bbox, else x/y/width
-    let (mut x, mut y, mut width) = (
-        tp.x,
-        tp.y,
-        tp.width,
-    );
+    let (mut x, mut y, mut width) = (tp.x, tp.y, tp.width);
     if let Some(r) = node.attribute("in") {
         if let Some(bb) = ref_geometry(node, r, ctx)
             .ok()
@@ -216,18 +208,15 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
             let header = cell.tag_name().name() == "th";
             let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
-            let bg = cell
-                .attribute("bg")
-                .map(|v| ctx.paint(v))
-                .or_else(|| {
-                    if header {
-                        Some(header_bg.clone())
-                    } else if striped {
-                        stripe.clone()
-                    } else {
-                        body_bg.clone()
-                    }
-                });
+            let bg = cell.attribute("bg").map(|v| ctx.paint(v)).or_else(|| {
+                if header {
+                    Some(header_bg.clone())
+                } else if striped {
+                    stripe.clone()
+                } else {
+                    body_bg.clone()
+                }
+            });
             out.push_str("<g");
             out.push_str(&pos_attr(cell, ctx));
             out.push('>');
@@ -269,7 +258,17 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     rtl: false,
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
-                emit_highlights(out, &layout.lines, layout.anchor.svg(), false, &st, layout.font_size, &emits, m, ctx);
+                emit_highlights(
+                    out,
+                    &layout.lines,
+                    layout.anchor.svg(),
+                    false,
+                    &st,
+                    layout.font_size,
+                    &emits,
+                    m,
+                    ctx,
+                );
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill, ctx);
                 out.push('>');

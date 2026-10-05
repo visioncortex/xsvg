@@ -150,7 +150,12 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// texel-aligned tiny PNG (or plain path for constant regions) per region.
 /// `seed` namespaces the clip ids (the caller's source position). Returns
 /// `false` on a degenerate extent (caller emits its marker).
-pub(super) fn lower_mesh(mesh: &crate::gradient::Mesh, seed: &str, out: &mut String, ctx: &Ctx) -> bool {
+pub(super) fn lower_mesh(
+    mesh: &crate::gradient::Mesh,
+    seed: &str,
+    out: &mut String,
+    ctx: &Ctx,
+) -> bool {
     use crate::gradient::{fit_field, fit_grid, texel_placement, Dof};
 
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);

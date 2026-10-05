@@ -65,7 +65,11 @@ pub(crate) fn fill_line(
     while let Some(w) = measured.words.get(i) {
         let prev_style = pieces.last().map(|p| p.style).unwrap_or(0);
         let next_style = w.pieces.first().map(|p| p.style).unwrap_or(0);
-        let sp_style = if prev_style == next_style { prev_style } else { 0 };
+        let sp_style = if prev_style == next_style {
+            prev_style
+        } else {
+            0
+        };
         // The space is drawn in its run's size, so it is measured in it too: a space
         // inside a 2x run is twice as wide on screen, and counting it at the base
         // width let a line through that renders wider than its box. Size only — a

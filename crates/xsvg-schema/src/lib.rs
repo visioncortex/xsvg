@@ -188,7 +188,9 @@ pub struct ElementSpec {
 impl ElementSpec {
     /// Every parameter this element accepts, own and inherited.
     pub fn all_params(&self) -> impl Iterator<Item = &'static ParamSpec> {
-        self.params.iter().chain(self.groups.iter().copied().flatten())
+        self.params
+            .iter()
+            .chain(self.groups.iter().copied().flatten())
     }
 }
 
@@ -473,7 +475,11 @@ mod tests {
 
     #[test]
     fn an_enum_parameter_carries_its_own_spellings() {
-        let heads = Arrow::SPEC.params.iter().find(|p| p.name == "heads").unwrap();
+        let heads = Arrow::SPEC
+            .params
+            .iter()
+            .find(|p| p.name == "heads")
+            .unwrap();
         assert_eq!(heads.kind, ParamKind::Enum);
         // the values come from the enum's own derive — they cannot be restated wrongly
         assert_eq!(heads.values, &["end", "start", "both", "none"]);
@@ -524,7 +530,11 @@ mod tests {
         ]));
         assert_eq!(a.thickness, 16.0);
         assert_eq!(a.head_width, None);
-        assert_eq!(a.heads, Heads::End, "unknown spelling → the default variant");
+        assert_eq!(
+            a.heads,
+            Heads::End,
+            "unknown spelling → the default variant"
+        );
         assert!(!a.outlined);
     }
 
@@ -532,8 +542,14 @@ mod tests {
     fn a_manifest_is_generated_from_the_declarations() {
         let json = manifest_json(1, "https://x.example/c", "clip", "0.1.0", &[Arrow::SPEC]);
         // numbers stay unquoted so a consumer's types match the declared kind
-        assert!(json.contains(r#""thickness":{"type":"number","default":16.0,"min":0,"max":200}"#), "{json}");
-        assert!(json.contains(r#""values":["end","start","both","none"]"#), "{json}");
+        assert!(
+            json.contains(r#""thickness":{"type":"number","default":16.0,"min":0,"max":200}"#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""values":["end","start","both","none"]"#),
+            "{json}"
+        );
         assert!(json.contains(r#""children":"container""#), "{json}");
         assert!(json.contains(r#""ns":"https://x.example/c""#), "{json}");
         assert!(json.contains(r#""supersededBy":["x2","y2"]"#), "{json}");

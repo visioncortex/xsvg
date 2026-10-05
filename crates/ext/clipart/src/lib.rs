@@ -110,7 +110,12 @@ struct Arrow {
     fill: String,
     #[param(color, doc = "outline colour")]
     stroke: Option<String>,
-    #[param(default = 0.0, min = 0.0, max = 40.0, doc = "outline width; needs stroke to be visible")]
+    #[param(
+        default = 0.0,
+        min = 0.0,
+        max = 40.0,
+        doc = "outline width; needs stroke to be visible"
+    )]
     outline: f64,
 }
 
@@ -128,7 +133,13 @@ struct Callout {
     tail: Tail,
     #[param(default = 14.0, min = 0.0, max = 100.0)]
     tail_size: f64,
-    #[param(default = 0.5, min = 0.0, max = 1.0, step = 0.05, doc = "0..1 along the tailed edge")]
+    #[param(
+        default = 0.5,
+        min = 0.0,
+        max = 1.0,
+        step = 0.05,
+        doc = "0..1 along the tailed edge"
+    )]
     tail_offset: f64,
     #[param(color, default = "#fff")]
     fill: String,
@@ -540,12 +551,7 @@ mod tests {
     #[test]
     fn rounding_keeps_the_outline_inside_the_unrounded_one() {
         let plain = arrow_of(&[("length", "100"), ("thickness", "20")]).unwrap();
-        let round = arrow_of(&[
-            ("length", "100"),
-            ("thickness", "20"),
-            ("radius", "4"),
-        ])
-        .unwrap();
+        let round = arrow_of(&[("length", "100"), ("thickness", "20"), ("radius", "4")]).unwrap();
         assert!(
             round.contains(" Q"),
             "rounded corners are quadratics: {round}"
@@ -670,7 +676,16 @@ mod tests {
         // the single source there is no field to read that isn't described, so
         // this pins the specific bug rather than the general property.
         let names: Vec<&str> = Arrow::SPEC.params.iter().map(|p| p.name).collect();
-        for n in ["x", "y", "x1", "y1", "x2", "y2", "head-width", "head-length"] {
+        for n in [
+            "x",
+            "y",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "head-width",
+            "head-length",
+        ] {
             assert!(names.contains(&n), "{n} is not declared: {names:?}");
         }
         // and the alias really is an alias

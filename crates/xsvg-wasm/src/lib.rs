@@ -155,7 +155,10 @@ pub struct JsOutliner<'a> {
 impl<'a> JsOutliner<'a> {
     /// For downstream wasm crates (xsvg-kit) reusing the browser seams.
     pub fn new(outline_run: &'a js_sys::Function, advance_width: &'a js_sys::Function) -> Self {
-        Self { outline_run, advance_width }
+        Self {
+            outline_run,
+            advance_width,
+        }
     }
 }
 
