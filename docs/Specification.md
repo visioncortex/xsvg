@@ -733,7 +733,7 @@ never breaks.
 do not apply, as §6.12); for skew the path is treated as a height field (single-valued in `x`). The
 run width used by `align` matches the geometry being placed: the outline advance for warped runs (no
 letter/word-spacing, §6.12), the spacing-inclusive advance for the stepped fallback. The
-native-`<textPath>` non-deforming follow is future work.
+non-deforming follow is `effect="follow"` (§6.13.5), SVG's own `<textPath>`.
 
 ### 6.14 Lists — `<x:list>` / `<x:li>` [implemented]
 
@@ -1095,11 +1095,12 @@ stroke-to-fill, honoring `stroke-width`, `stroke-linecap`, `stroke-linejoin`, an
 Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable seam (curve-exact
 and kurbo-native backends can slot in later without surface changes).
 
-### 7.5 Remaining pillars & deferred [planned]
+### 7.5 Remaining pillars & deferred
 
-- **Pillar 3 — paint & pixels.** Pixel adjustments (§8) and **`<x:mesh>` mesh gradients with
-  cracks and feathering (§8.2) shipped**. Remaining: smooth-interior T-junctions, `.qmesh`
-  import from the vtracer pipeline.
+- **Pillar 3 — paint & pixels** [implemented]. Pixel adjustments (§8) and `<x:mesh>` mesh
+  gradients with cracks, feathering and smooth-interior T-junctions (§8.2), plus SVG 2
+  `<meshgradient>` fills ([Paint.md](Paint.md) has the account). Deferred: `.qmesh` import,
+  which belongs to vtracer's exporter.
 - **Deferred** (valuable, but no longer a headline pillar): **`<x:vstroke>`** variable-width strokes
   (research retained in [Research.md §1](Research.md)).
 
@@ -1446,12 +1447,11 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Mesh grid fits — banded conjugate-gradient solver (fidelity-identical, no dense-solve cliff — [Bench.md](Bench.md)) | implemented |
 | Static-subset enforcement — script/animation elements dropped, `on*` attributes stripped (Plan R6) | implemented |
 | `<x:mesh>` — `.qmesh` binary import (belongs to vtracer's exporter; indexed syntax is its 1:1 target) | deferred |
-| Text on a path — native `<textPath>` non-deforming follow | planned |
 | `<x:warp>` front-end — all 15 Make-with-Warp presets (displacement · scale · polar · radial · rotational families) over shapes, paths, outlined text | implemented |
 | `<x:warp>` — **perspective** (corners-solved homography), **free** distort (bilinear), `distort-h`/`distort-v` slider taper | implemented |
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit | implemented at the API, **disabled in lowering** (kurbo fitter overshoots on glyph-density input) |
 | Geometry bake — compact path serialization (quantized grid, relative + implicit repetition, drift-free) | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
-| `<x:vstroke>`, `<x:mesh>` | planned |
+| `<x:vstroke>` variable-width strokes | deferred (§7.5) |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |

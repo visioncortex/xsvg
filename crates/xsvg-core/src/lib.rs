@@ -13,9 +13,11 @@ pub mod text;
 pub mod warp;
 
 // The document compiler: parse xsvg/SVG, run the lowering passes, emit plain SVG. Behind
-// the `compile` feature (on by default) since it's the only thing that needs an XML parser;
-// without it, xsvg-core is the geometry/text/gradient primitives alone. Kept a private
-// module — only its entry points are re-exported (the emit_* internals stay here).
+// the `compile` feature — off by default, since it is the only thing that needs an XML
+// parser; without it, xsvg-core is the geometry/text/gradient primitives alone. xsvg-wasm
+// and xsvg-cli enable it, and the tests get it through the self dev-dependency in
+// Cargo.toml. Kept a private module — only its entry points are re-exported (the emit_*
+// internals stay here).
 #[cfg(feature = "compile")]
 mod compile;
 #[cfg(any(test, feature = "test-doubles"))]

@@ -1,5 +1,8 @@
 # xsvg — Rust workspace (pure-Rust core, compiles to WASM and native).
-# See PLAN.md §1.2 for the full intended crate layout. v0 ships the minimum: core + wasm.
+# The crate layout is docs/Plan.md §1.2: `gradient` (mesh engine), `xsvg-schema` +
+# `xsvg-schema-derive` (element parameter schemas), `xsvg-core` (the compiler),
+# `xsvg-plugin` (the generator ABI), `xsvg-wasm` and `xsvg-cli` (the two hosts), and
+# `ext/clipart` (the official extension module). CHANGELOG.md: every crate shares one version.
 [workspace]
 resolver = "2"
 members = [
