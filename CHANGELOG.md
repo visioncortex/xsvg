@@ -59,6 +59,9 @@ partial one.
 - **`MeasureCache`**: a `Measurer` that remembers advance widths and font metrics for
   as long as it lives, bounded; `Platform::with_measure_cache()` puts one in front of
   the measurer, so an editor's second flush over unchanged text measures nothing.
+- `Measurer::measure_batch`, a default method measuring many runs in one call, for
+  adapters whose single measurement is a round trip. `MeasureCache` serves hits from
+  the map and batches only the misses to the adapter. Existing adapters need nothing.
 
 ### Fixed
 

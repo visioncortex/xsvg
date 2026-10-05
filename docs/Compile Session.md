@@ -1,7 +1,8 @@
 # Compile Session — one parse per flush
 
-**Status: normative; §2–4, §5's measurement cache and §6 built
-(2026-10-04); §5's batch seam and layout cache open.** The in-process API that lets an editor compile many fragments of
+**Status: normative; §2–4, §5's measurement cache and batch seam, and §6
+built (2026-10-05); the core's use of the batch seam and the layout cache
+are open.** The in-process API that lets an editor compile many fragments of
 one document without re-parsing it for each. Not a server, not a protocol,
 not a daemon: a struct with a lifetime, created and dropped inside one render
 flush by whoever already links `xsvg-core` as a library (the kit's wasm module
@@ -163,10 +164,16 @@ passes `&mut` storage and keeps it as long as it likes.
   platform. A second flush over unchanged text reaches the adapter zero
   times (pinned). The key is the whole dependency of `measure` by contract:
   it returns the raw glyph advance, and `line_advance` layers the spacing on.
-  Still open: a `measure_batch(&[(text, style, size)]) -> Vec<f64>` default
-  method on `Measurer`, so the misses of one fragment cross the wasm
-  boundary in one hop instead of one per word. Embedders may also memoize
-  on their side of the seam; the two compose.
+  `Measurer::measure_batch(&[(text, style, size)]) -> Vec<f64>` is the
+  transport seam beside it: a default method that measures each item in
+  turn, which an adapter whose single measurement is a round trip overrides
+  to make the trip once per batch. `MeasureCache` forwards it hits-first —
+  only the misses reach the adapter, in one call — so a cold paragraph costs
+  one trip and a warm one none. Still open: the core's `measure_runs` /
+  `measure_words` calling it with a paragraph's words at once, and the
+  browser adapter's override with its JS-side callback; until then the seam
+  is exercised only by its own tests. Embedders may also memoize on their
+  side of the seam; the two compose.
 - **Paragraph layout** (open). A keystroke relays out every paragraph of its
   textbox. A `LayoutCache` keyed by `(paragraph text, resolved style, area
   spec)` lets the core skip paragraphs whose inputs did not change; the

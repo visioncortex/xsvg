@@ -32,6 +32,18 @@ pub trait Measurer {
             x_height: 0.5 * size,
         }
     }
+
+    /// [`Measurer::measure`] for many runs at once, one result per item in order.
+    /// An adapter whose single measurement is a round trip (a JS hop into canvas
+    /// `measureText`) overrides this to make the trip once per batch; the default
+    /// measures each item in turn, so an adapter that does not is unaffected. The
+    /// results are the same either way — this is a transport seam, not a semantic one.
+    fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+        items
+            .iter()
+            .map(|(text, style, size)| self.measure(text, style, *size))
+            .collect()
+    }
 }
 
 impl<T: Measurer + ?Sized> Measurer for &T {
@@ -41,6 +53,9 @@ impl<T: Measurer + ?Sized> Measurer for &T {
     fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
         (**self).font_metrics(style, size)
     }
+    fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+        (**self).measure_batch(items)
+    }
 }
 
 impl<T: Measurer + ?Sized> Measurer for Box<T> {
@@ -49,6 +64,9 @@ impl<T: Measurer + ?Sized> Measurer for Box<T> {
     }
     fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
         (**self).font_metrics(style, size)
+    }
+    fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+        (**self).measure_batch(items)
     }
 }
 
@@ -138,6 +156,135 @@ impl<M: Measurer> Measurer for MeasureCache<M> {
         }
         map.insert(key, fm);
         fm
+    }
+
+    /// Hits are served from the map; only the misses go to the adapter, in one
+    /// batch, so a cold paragraph costs the adapter one trip and a warm one none.
+    fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+        let keys: Vec<(FontKey, String)> = items
+            .iter()
+            .map(|(text, style, size)| (FontKey::of(style, *size), text.to_string()))
+            .collect();
+        let mut out = vec![0.0; items.len()];
+        let misses: Vec<usize> = {
+            let map = self.advances.lock().unwrap_or_else(|e| e.into_inner());
+            (0..items.len())
+                .filter(|&i| match map.get(&keys[i]) {
+                    Some(&w) => {
+                        out[i] = w;
+                        false
+                    }
+                    None => true,
+                })
+                .collect()
+        };
+        if misses.is_empty() {
+            return out;
+        }
+        // The lock is not held across the adapter call: it may be slow, and the
+        // same word twice in one batch is simply measured twice.
+        let asked: Vec<(&str, &TextStyle, f64)> = misses.iter().map(|&i| items[i]).collect();
+        let widths = self.inner.measure_batch(&asked);
+        let mut map = self.advances.lock().unwrap_or_else(|e| e.into_inner());
+        for (k, &i) in misses.iter().enumerate() {
+            // an adapter that returns too few results leaves those items at the
+            // single-call path's answer rather than at zero
+            let w = widths
+                .get(k)
+                .copied()
+                .unwrap_or_else(|| self.inner.measure(items[i].0, items[i].1, items[i].2));
+            out[i] = w;
+            if map.len() >= Self::CAPACITY {
+                map.clear();
+            }
+            map.insert(keys[i].clone(), w);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Width = chars × size; counts single calls and batch calls separately.
+    struct Counting {
+        singles: AtomicUsize,
+        batches: AtomicUsize,
+    }
+    impl Measurer for Counting {
+        fn measure(&self, text: &str, _style: &TextStyle, size: f64) -> f64 {
+            self.singles.fetch_add(1, Ordering::Relaxed);
+            text.chars().count() as f64 * size
+        }
+        fn measure_batch(&self, items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+            self.batches.fetch_add(1, Ordering::Relaxed);
+            items.iter().map(|(t, _, s)| t.chars().count() as f64 * s).collect()
+        }
+    }
+
+    fn counting() -> Counting {
+        Counting {
+            singles: AtomicUsize::new(0),
+            batches: AtomicUsize::new(0),
+        }
+    }
+
+    #[test]
+    fn the_default_batch_is_the_single_calls_in_order() {
+        struct Single;
+        impl Measurer for Single {
+            fn measure(&self, text: &str, _style: &TextStyle, size: f64) -> f64 {
+                text.len() as f64 * size
+            }
+        }
+        let st = TextStyle::default();
+        let items = [("ab", &st, 10.0), ("", &st, 10.0), ("abcd", &st, 2.0)];
+        assert_eq!(Single.measure_batch(&items), vec![20.0, 0.0, 8.0]);
+    }
+
+    #[test]
+    fn the_cache_batches_only_its_misses() {
+        let cache = MeasureCache::new(counting());
+        let st = TextStyle::default();
+        let big = TextStyle {
+            size: 32.0,
+            ..TextStyle::default()
+        };
+        // a cold batch: one trip, every item a miss
+        let items = [("alpha", &st, 16.0), ("beta", &st, 16.0), ("alpha", &big, 32.0)];
+        assert_eq!(cache.measure_batch(&items), vec![80.0, 64.0, 160.0]);
+        assert_eq!(cache.inner().batches.load(Ordering::Relaxed), 1);
+        assert_eq!(cache.inner().singles.load(Ordering::Relaxed), 0);
+
+        // a warm batch with one new word: one trip carrying only that word
+        let items = [("alpha", &st, 16.0), ("gamma", &st, 16.0), ("beta", &st, 16.0)];
+        assert_eq!(cache.measure_batch(&items), vec![80.0, 80.0, 64.0]);
+        assert_eq!(cache.inner().batches.load(Ordering::Relaxed), 2);
+        assert_eq!(cache.inner().singles.load(Ordering::Relaxed), 0);
+
+        // everything known: no trip at all, and single calls see the batch's entries
+        assert_eq!(cache.measure_batch(&items), vec![80.0, 80.0, 64.0]);
+        assert_eq!(cache.measure("gamma", &st, 16.0), 80.0);
+        assert_eq!(cache.inner().batches.load(Ordering::Relaxed), 2);
+        assert_eq!(cache.inner().singles.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn a_short_answer_from_the_adapter_falls_back_per_item() {
+        struct Short;
+        impl Measurer for Short {
+            fn measure(&self, text: &str, _style: &TextStyle, size: f64) -> f64 {
+                text.len() as f64 * size
+            }
+            fn measure_batch(&self, _items: &[(&str, &TextStyle, f64)]) -> Vec<f64> {
+                Vec::new() // a broken adapter
+            }
+        }
+        let cache = MeasureCache::new(Short);
+        let st = TextStyle::default();
+        assert_eq!(cache.measure_batch(&[("ab", &st, 3.0), ("abc", &st, 3.0)]), vec![6.0, 9.0]);
     }
 }
 
