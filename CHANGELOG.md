@@ -56,6 +56,13 @@ partial one.
   `compile_platform_impl` / `compile_fragment_platform_impl` and take `&Platform`.
   The seam traits are implemented for `&T`, so a value serving several seams can be
   lent to each.
+- **One compile entry.** `compile_with(input, &Options, &platform)` is the entry;
+  `Options` carries quality, source map, base and an optional fragment offset, with
+  `Default` the pure entry's defaults. The ten `compile*_impl` functions remain, as thin
+  wrappers over it. `compile/mod.rs` is split along its seams: `entries`, `theme`,
+  `refs` (reference resolution and geometry), `link` (cross-file `<use>`), `runs`
+  (styled runs and text attributes), `textbox` (area and paragraph flows and the
+  text-layout seam) and `textpath`. No output changes.
 - **`MeasureCache`**: a `Measurer` that remembers advance widths and font metrics for
   as long as it lives, bounded; `Platform::with_measure_cache()` puts one in front of
   the measurer, so an editor's second flush over unchanged text measures nothing.

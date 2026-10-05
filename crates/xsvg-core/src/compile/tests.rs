@@ -5344,3 +5344,58 @@ fn two_sessions_on_one_thread_keep_their_own_themes() {
         }
     }
 }
+
+// ---------------------------------------------------------------- entry points
+// Every `*_impl` entry is `compile_with` over an `Options` and a platform; this
+// pins that the thin wrappers stay thin.
+
+#[test]
+fn every_entry_is_compile_with_over_options() {
+    let svg = format!(
+        r##"{XW}<x:theme><x:color name="ink" value="#123"/></x:theme><rect id="a" x="0" y="0" width="10" height="10" fill="var(ink)"/><x:textbox in="#a" font-size="4">one two</x:textbox><circle cx="5" cy="5" r="2"/></svg>"##
+    );
+    let off = svg.find("<x:textbox").unwrap();
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let whole = |sourcemap: bool| Options {
+        quality: "fast",
+        sourcemap,
+        ..Options::default()
+    };
+    assert_eq!(
+        compile_impl(&svg, "fast", true, &Mono, &NoShaper, &NoOutliner).unwrap(),
+        compile_with(&svg, &whole(true), &platform).unwrap()
+    );
+    assert_eq!(
+        compile_platform_impl(&svg, "fast", false, "", &platform).unwrap(),
+        compile_with(&svg, &whole(false), &platform).unwrap()
+    );
+    let fragment = Options {
+        fragment: Some(off),
+        ..whole(true)
+    };
+    assert_eq!(
+        compile_fragment_impl(&svg, "fast", true, off, &Mono, &NoShaper, &NoOutliner).unwrap(),
+        compile_with(&svg, &fragment, &platform).unwrap()
+    );
+    assert_eq!(
+        compile_fragment_platform_impl(&svg, "fast", true, off, "", &platform).unwrap(),
+        compile_with(&svg, &fragment, &platform).unwrap()
+    );
+    // the defaults are the pure entry's defaults
+    assert_eq!(
+        compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap(),
+        compile_with(&svg, &Options::default(), &platform).unwrap()
+    );
+    // a fragment offset outside every top-level element fails the same way
+    assert_eq!(
+        compile_with(
+            &svg,
+            &Options {
+                fragment: Some(1),
+                ..Options::default()
+            },
+            &platform
+        ),
+        compile_fragment_impl(&svg, "balanced", false, 1, &Mono, &NoShaper, &NoOutliner)
+    );
+}

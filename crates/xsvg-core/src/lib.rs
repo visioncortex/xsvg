@@ -27,9 +27,9 @@ pub use compile::{
     compile_fragment_impl, compile_fragment_keyed_impl, compile_fragment_linked_impl,
     compile_fragment_linked_keyed_impl, compile_fragment_platform_impl, compile_impl,
     compile_keyed_impl, compile_linked_impl, compile_linked_keyed_impl, compile_platform_impl,
-    dependents_impl, dependents_multi_impl, fragment_range_impl, node_spans_impl, text_layout_impl,
-    CompileSession, Host, NoKeys, NoResolver, NodeKeys, Platform, Resolver, TextLayout,
-    TextLayoutLine, TextLayoutPara,
+    compile_with, dependents_impl, dependents_multi_impl, fragment_range_impl, node_spans_impl,
+    text_layout_impl, CompileSession, Host, NoKeys, NoResolver, NodeKeys, Options, Platform,
+    Resolver, TextLayout, TextLayoutLine, TextLayoutPara,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.

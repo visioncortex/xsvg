@@ -4,7 +4,7 @@
 //! pure `compile_fragment_*_impl` call redoes the whole-document work first: the
 //! nesting check, the XML parse, the theme and import pre-scans. [`CompileSession`]
 //! does that work once, over text it borrows for the length of one flush, on a
-//! [`Platform`] that outlives it. The pure entries are one-shot sessions. Nothing
+//! [`Platform`](super::Platform) that outlives it. The pure entries are one-shot sessions. Nothing
 //! here outlives its input and the core keeps no state between calls.
 
 use super::plugin::{load_imports, ImportTable};
@@ -243,9 +243,9 @@ impl<'a> Parsed<'a> {
 }
 
 /// One document, parsed and pre-scanned once, ready to compile any number of its
-/// fragments on a [`Platform`] (docs/Compile Session.md).
+/// fragments on a [`Platform`](super::Platform) (docs/Compile Session.md).
 ///
-/// Created by [`Platform::session`] at the top of a render flush over the text the
+/// Created by [`Platform::session`](super::Platform::session) at the top of a render flush over the text the
 /// embedder just serialized, used for every compile that flush needs, and dropped
 /// with it: the session borrows the input, so a stale parse cannot be held. It
 /// retains exactly what the pure entries recompute per call — the parse, the
@@ -272,7 +272,7 @@ pub struct CompileSession<'a, P: Host> {
 impl<'a, P: Host> CompileSession<'a, P> {
     /// Parse once, pre-scan once. Fails exactly where the pure entries fail
     /// (nesting depth, XML parse error), with the same message. Usually reached
-    /// as [`Platform::session`].
+    /// as [`Platform::session`](super::Platform::session).
     pub fn new(
         platform: &'a P,
         input: &'a str,
