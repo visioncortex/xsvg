@@ -117,7 +117,7 @@ mod tests {
         let m = measured("aaa bbb ccc ddd", 0.1, 20.0);
         // narrow + short box: at 20px this wraps to 2 lines (48 tall) > 30 → shrink
         let s = fit_size(&m, &styles(20.0), 20.0, 30.0, 6.0);
-        assert!(s < 20.0 && s >= 6.0, "expected shrink, got {s}");
+        assert!((6.0..20.0).contains(&s), "expected shrink, got {s}");
         // generous box → keep base size
         assert_eq!(fit_size(&m, &styles(20.0), 1000.0, 1000.0, 6.0), 20.0);
     }

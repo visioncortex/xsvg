@@ -18,12 +18,15 @@ pub type Loop = Vec<(u32, u32)>;
 /// Edges follow the crack between pixels with the region interior on the LEFT of the
 /// walking direction; at corner-touching vertices (four cracks meeting) the sharpest
 /// left turn is taken, which keeps loops simple (non-self-crossing).
+/// One label's crack edges: start vertex → outgoing `(dir, end x, end y)`.
+type EdgeMap = HashMap<u64, Vec<(u8, u32, u32)>>;
+
 pub fn region_contours(labels: &[u32], w: usize, h: usize, count: usize) -> Vec<Vec<Loop>> {
     // directed crack edges per label; dir: 0=+x 1=+y 2=-x 3=-y, vertex grid is (w+1)x(h+1)
     let vw = (w + 1) as u32;
     let key = |x: u32, y: u32| (y * vw + x) as u64;
     // per label: map start-vertex -> outgoing (dir, end-vertex)
-    let mut edges: Vec<HashMap<u64, Vec<(u8, u32, u32)>>> = vec![HashMap::new(); count];
+    let mut edges: Vec<EdgeMap> = vec![HashMap::new(); count];
     let mut push = |l: usize, sx: u32, sy: u32, dir: u8, ex: u32, ey: u32| {
         edges[l].entry(key(sx, sy)).or_default().push((dir, ex, ey));
     };
@@ -60,8 +63,7 @@ pub fn region_contours(labels: &[u32], w: usize, h: usize, count: usize) -> Vec<
         // walk until all edges consumed
         let starts: Vec<u64> = em.keys().copied().collect();
         for s in starts {
-            loop {
-                let Some(list) = em.get_mut(&s) else { break };
+            while let Some(list) = em.get_mut(&s) {
                 let Some(&(d0, ex0, ey0)) = list.last() else {
                     em.remove(&s);
                     break;
@@ -148,8 +150,8 @@ mod tests {
     fn traces_disconnected_islands() {
         let (w, h) = (8usize, 3usize);
         let mut labels = vec![0u32; w * h];
-        labels[1 * w + 1] = 1;
-        labels[1 * w + 5] = 1;
+        labels[w + 1] = 1;
+        labels[w + 5] = 1;
         let c = region_contours(&labels, w, h, 2);
         assert_eq!(c[1].len(), 2, "two islands, two loops");
     }

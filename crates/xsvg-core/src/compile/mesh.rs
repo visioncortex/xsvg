@@ -295,8 +295,8 @@ pub(super) fn lower_mesh(
         let ch = if opaque { 3 } else { 4 };
         let mut px = Vec::with_capacity(tw * th * ch);
         for vert in &grid.verts {
-            for c in 0..ch {
-                px.push(vert[c].round().clamp(0.0, 255.0) as u8);
+            for v in &vert[..ch] {
+                px.push(v.round().clamp(0.0, 255.0) as u8);
             }
         }
         let png = if opaque {
@@ -538,9 +538,13 @@ pub(super) fn parse_meshgradient(
     Some(mesh)
 }
 
+/// One `<stop path>` edge: its four control points in walking order, and the new
+/// current point.
+pub(super) type StopEdge = ([(f32, f32); 4], (f32, f32));
+
 /// One `<stop path>` edge: a single `c`/`C` cubic or `l`/`L` line from `cur`.
 /// Returns the edge (4 control points, walking order) and the new current point.
-pub(super) fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<([(f32, f32); 4], (f32, f32))> {
+pub(super) fn parse_stop_edge(d: &str, cur: (f32, f32)) -> Option<StopEdge> {
     let d = d.trim();
     let (cmd, rest) = d.split_at(1);
     let nums: Vec<f32> = rest

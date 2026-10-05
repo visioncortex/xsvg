@@ -1286,6 +1286,7 @@ fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// block. Each paragraph carries its own `align` / `text-indent` / `font-*` /
 /// `fill`, and maps to its own source range. Live text (create-outlines is not
 /// applied in paragraph mode).
+#[allow(clippy::too_many_arguments)]
 fn emit_paragraphs(
     node: roxmltree::Node,
     paras: &[roxmltree::Node],

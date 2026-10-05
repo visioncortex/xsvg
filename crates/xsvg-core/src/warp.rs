@@ -302,6 +302,7 @@ impl Homography {
 
 /// Gauss–Jordan elimination with partial pivoting on an 8×9 augmented system.
 /// `None` when a pivot collapses (singular — degenerate corner configuration).
+#[allow(clippy::needless_range_loop)] // row ops read one row while writing another
 fn solve8(a: &mut [[f64; 9]; 8]) -> Option<[f64; 8]> {
     for col in 0..8 {
         let piv = (col..8).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;
@@ -863,6 +864,7 @@ fn subdivide(
     fb: Point,
     tol: f64,
 ) {
+    #[allow(clippy::too_many_arguments)]
     fn rec(
         out: &mut BezPath,
         field: &dyn Field,

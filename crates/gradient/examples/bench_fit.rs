@@ -9,6 +9,7 @@
 //! 2. ALPHA: fitting straight vs premultiplied RGBA on a feathered field,
 //!    error measured in *premultiplied* space (what compositing shows over
 //!    any background).
+#![allow(clippy::needless_range_loop)] // the same kernels as the library
 
 use std::time::Instant;
 use xsvg_gradient::{fit_grid, GridField};

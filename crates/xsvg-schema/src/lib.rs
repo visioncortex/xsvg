@@ -415,6 +415,7 @@ mod tests {
 
     #[derive(Params, Debug)]
     #[element(name = "arrow", doc = "a thick arrow", children = "container")]
+    #[allow(dead_code)] // declared for the schema it derives, never constructed
     struct Arrow {
         #[param(default = 16.0, min = 0.0, max = 200.0)]
         thickness: f64,

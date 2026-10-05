@@ -1067,7 +1067,7 @@ fn textbox_shrinks_to_fit() {
         .and_then(|s| s.split('"').next())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap();
-    assert!(size < 40.0 && size >= 5.0, "expected shrink, got {size}");
+    assert!((5.0..40.0).contains(&size), "expected shrink, got {size}");
 }
 
 #[test]
@@ -2671,7 +2671,7 @@ fn b64_prefix(out: &str, n: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut buf = 0u32;
     let mut bits = 0;
-    for &c in out[k..].as_bytes() {
+    for &c in &out.as_bytes()[k..] {
         if c == b'"' || bytes.len() >= n {
             break;
         }
@@ -4892,7 +4892,7 @@ fn connector_d(anchors: &str, route: &str, arrow: &str) -> String {
 
 /// Every `M`/`L`/`Q`/`C` segment endpoint of a route, in order.
 fn waypoints(d: &str) -> Vec<crate::kurbo::Point> {
-    d.split(|c: char| c == 'M' || c == 'L' || c == 'Q' || c == 'C')
+    d.split(['M', 'L', 'Q', 'C'])
         .skip(1)
         .filter_map(|seg| {
             let last = seg.split_whitespace().last()?;

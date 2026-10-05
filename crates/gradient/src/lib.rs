@@ -24,6 +24,10 @@
 //!
 //! Everything is pure and platform-free (wasm-safe, no_std-adjacent).
 
+// The fitting and contour kernels index several arrays by one counter (matrix
+// rows, colour channels, patch corners); the iterator forms read worse there.
+#![allow(clippy::needless_range_loop)]
+
 pub mod base64;
 pub mod color;
 pub mod contour;

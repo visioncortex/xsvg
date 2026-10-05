@@ -67,11 +67,7 @@ fn flatten_operand(paths: &[&str], tolerance: f64) -> Vec<Contour> {
                     cur.push([p.x, p.y]);
                 }
             }
-            PathEl::LineTo(p) => {
-                if p.x.is_finite() && p.y.is_finite() {
-                    cur.push([p.x, p.y]);
-                }
-            }
+            PathEl::LineTo(p) if p.x.is_finite() && p.y.is_finite() => cur.push([p.x, p.y]),
             PathEl::ClosePath => {
                 if cur.len() >= 3 {
                     contours.push(std::mem::take(&mut cur));

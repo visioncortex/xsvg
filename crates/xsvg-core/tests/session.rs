@@ -248,7 +248,7 @@ fn a_second_flush_measures_nothing_the_first_one_did() {
         .unwrap();
     let added = cache.inner().0.load(Ordering::Relaxed) - measured;
     assert!(
-        added >= 1 && added <= 4,
+        (1..=4).contains(&added),
         "one new word, plus at most the lines it changed: {added}"
     );
 }

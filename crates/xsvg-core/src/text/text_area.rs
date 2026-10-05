@@ -100,7 +100,12 @@ pub fn layout_text_area(
     spec: &TextAreaSpec,
     m: &dyn Measurer,
 ) -> AreaLayout {
-    layout_text_area_runs(&[(text.to_string(), 0)], &[style.clone()], spec, m)
+    layout_text_area_runs(
+        &[(text.to_string(), 0)],
+        std::slice::from_ref(style),
+        spec,
+        m,
+    )
 }
 
 /// Like [`layout_text_area`], but takes styled segments (`(text, style_id)`, from

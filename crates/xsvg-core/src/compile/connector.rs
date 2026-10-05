@@ -72,10 +72,10 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     .ok()
                     .and_then(|d| svg_path_bbox(&d))?;
                 Some((rect, anchor))
-            } else if let Some(pt) = point.and_then(parse_point) {
-                Some((Rect::new(pt.x, pt.y, pt.x, pt.y), None))
             } else {
-                None
+                point
+                    .and_then(parse_point)
+                    .map(|pt| (Rect::new(pt.x, pt.y, pt.x, pt.y), None))
             }
         };
     let (Some((a, anchor_a)), Some((b, anchor_b))) = (
@@ -504,8 +504,8 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
             // A forced anchor's own normal decides which way that end leaves — and
             // which axis, since an anchor facing across the route (`:top` on an
             // x-major rail) is the more specific instruction of the two.
-            let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((dir, 0.0));
-            let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((-dir, 0.0));
+            let na = anchor_a.and_then(anchor_norm).unwrap_or((dir, 0.0));
+            let nb = anchor_b.and_then(anchor_norm).unwrap_or((-dir, 0.0));
             build_rail(&rail(ax, na, bx, nb, true))
         }
         "y-major" => {
@@ -518,8 +518,8 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                 Some(s) => anchor_pt(b, s),
                 None => Point::new(cb.x, cb.y - dir * b.height() / 2.0),
             };
-            let na = anchor_a.and_then(|s| anchor_norm(s)).unwrap_or((0.0, dir));
-            let nb = anchor_b.and_then(|s| anchor_norm(s)).unwrap_or((0.0, -dir));
+            let na = anchor_a.and_then(anchor_norm).unwrap_or((0.0, dir));
+            let nb = anchor_b.and_then(anchor_norm).unwrap_or((0.0, -dir));
             build_rail(&rail(ay, na, by, nb, false))
         }
         "curve" => {
