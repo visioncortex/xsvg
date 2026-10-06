@@ -365,6 +365,7 @@ spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-al
 | `align` | `start` \| `center` \| `end` \| `justify` | `start` | horizontal alignment (§6.9) |
 | `valign` | `top` \| `middle` \| `bottom` | `top` | vertical alignment |
 | `fit` | `none` \| `shrink` | `none` | shrink-to-fit (§6.1) |
+| `transform` | SVG transform list | — | passes through to the element the box lowers to (the `<text>`, or the paragraph `<g>`): glyphs are laid out in the box's own user space, so rotating or scaling the box is this transform, as on a raw `<text>` |
 | `fit-min` | length | 6 | font-size floor for `shrink` |
 | `line-height` | number | 1.2 | line advance multiplier |
 | `text-indent` | length | 0 | first-line indent — the first line wraps to `width − indent` and is placed that far in from the start edge; **negative outdents** (a hanging first line). Applies to `start`/`justify` alignment |

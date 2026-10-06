@@ -443,6 +443,24 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
 /// (Slides: a click anywhere in the box). Omitted for `in="#rect"` geometry
 /// (the target rect is the frame there) and outside keyed mode, so viewer
 /// output is untouched.
+/// A `transform` authored on an `x:` text element passes through to the
+/// element it lowers to — the textbox computes glyph positions in its own
+/// user space, so rotating or scaling the box is the referrer's transform,
+/// exactly as on a raw `<text>`. Found live by the editor: a rotated or
+/// ⌘-scaled textbox rendered upright and unscaled, because the attribute was
+/// consumed with the rest of the `x:` vocabulary and never re-emitted.
+fn transform_attr(node: roxmltree::Node) -> String {
+    match node.attribute("transform") {
+        Some(t) if !t.trim().is_empty() => {
+            let mut s = String::from(" transform=\"");
+            push_escaped(&mut s, t, true);
+            s.push('"');
+            s
+        }
+        _ => String::new(),
+    }
+}
+
 fn frame_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
     if !ctx.sourcemap.get() || ctx.key_for(node.range().start).is_none() || node.has_attribute("in")
     {
