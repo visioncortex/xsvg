@@ -14,116 +14,109 @@ partial one.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-10-08
+
+**A security fix and a round of text typesetting.** Opening an untrusted `.xsvg` in the
+viewer or the VS Code extension could run script: an authored attribute value containing
+a quote broke out of its attribute and added an event handler. Every value is now escaped
+where it is written. Upgrading is recommended for anyone who opens documents they did not
+write.
+
+Text runs gain sizes, super/subscripts, decoration, links and highlights, paragraphs gain
+right-to-left direction, and list items and table cells finally render their styled runs.
+Existing documents compile the same, apart from the fixes below: of the 51 dataset samples,
+44 are byte-identical to 0.2.1's output and the other 7 render the same or better.
+
+The npm packages, the wasm module and the CLI keep their interfaces. The `xsvg-core` Rust
+API changed (see *Internal*), which matters only to code that embeds the compiler directly.
+
 ### Security
 
 - **Authored values could break out of their attribute and add event handlers.** About
-  three dozen emitters formatted values straight into their output, so a `"` in a
-  value closed the attribute and opened another: `fill='#000" onload="…'` compiled to
-  a live `onload` on text, connectors, charts, tables, lists, textpaths, highlights,
-  theme tokens, and the viewport a cross-file link bakes (`preserveAspectRatio`). That
-  breaks the static-subset promise for *authored* documents. Opening an untrusted
-  `.xsvg` in the viewer or the VS Code extension could run script. Every value is now
-  escaped where it is written (theme tokens after they resolve, since a token's value
-  is authored too), and `preserveAspectRatio` is forwarded only when it is a value SVG
-  defines. Legitimate documents compile byte-identically: all 51 samples are unchanged.
+  three dozen emitters formatted values straight into their output, so a `"` in a value
+  closed the attribute and opened another: `fill='#000" onload="…'` compiled to a live
+  `onload` on text, connectors, charts, tables, lists, textpaths, highlights, theme
+  tokens, and the viewport a cross-file link bakes. Every value is now escaped where it
+  is written (theme tokens after they resolve, since a token's value is authored too),
+  and `preserveAspectRatio` is forwarded only when it is a value SVG defines.
+  Legitimate documents compile byte-identically.
 - **Generator output could bypass the sandbox by emitting xsvg text.** The output rules
-  lived in one emitter (`copy_attrs`), and text runs lower through others. A module
-  emitting an `<x:textbox>` could carry a linked run's `javascript:` href, a highlight's
-  remote `url()`, or a run's remote paint straight through. The rules now run as one
-  pass over the generator's markup *after* lowering, so the emitter doesn't matter.
-  The pass also drops `<style>` (it restyles the whole document and can `@import`) and
-  stops a generator's `<use href="file">` from making the host read another file.
-- `tests/attribute_injection.rs` appends a quote-breaking payload to every attribute of
-  every dataset sample, one at a time, and requires well-formed output with nothing
-  smuggled in. It found 36 distinct leaking paths when first run. It probes once per
-  element, attribute and keyword context, which finds all 36 at a sixth of the cost of
-  probing every occurrence.
-
-### Changed
-
-- **One parse per flush.** `CompileSession` (docs/Compile Session.md) parses and
-  pre-scans a document once and compiles any number of its fragments, dependents,
-  caret layouts and span tables from the retained parse, byte-identical to the pure
-  entries, which are now one-shot sessions. The `<x:theme>` tokens moved from a
-  thread-local into the compile context, so no compile path touches process-wide
-  state.
-- **`Seams` is now `Platform`, owned and long-lived** (Rust API; the wasm and npm
-  entry points are unchanged). `Platform::new(m, shaper, outliner)` takes its adapters
-  by value and keeps their types, so the auto traits fall where the adapters put
-  them; `with_resolver` / `with_keys` / `with_generators` as before, and
-  `platform.session(text, …)` opens a `CompileSession` that borrows it. The pure
-  entries `compile_seams_impl` / `compile_fragment_seams_impl` are renamed
-  `compile_platform_impl` / `compile_fragment_platform_impl` and take `&Platform`.
-  The seam traits are implemented for `&T`, so a value serving several seams can be
-  lent to each.
-- **One compile entry.** `compile_with(input, &Options, &platform)` is the entry;
-  `Options` carries quality, source map, base and an optional fragment offset, with
-  `Default` the pure entry's defaults. The ten `compile*_impl` functions remain, as thin
-  wrappers over it. `compile/mod.rs` is split along its seams: `entries`, `theme`,
-  `refs` (reference resolution and geometry), `link` (cross-file `<use>`), `runs`
-  (styled runs and text attributes), `textbox` (area and paragraph flows and the
-  text-layout seam) and `textpath`. No output changes.
-- **`MeasureCache`**: a `Measurer` that remembers advance widths and font metrics for
-  as long as it lives, bounded; `Platform::with_measure_cache()` puts one in front of
-  the measurer, so an editor's second flush over unchanged text measures nothing.
-- `Measurer::measure_batch`, a default method measuring many runs in one call, for
-  adapters whose single measurement is a round trip. `MeasureCache` serves hits from
-  the map and batches only the misses to the adapter. Existing adapters need nothing.
-
-### Fixed
-
-- **A list item opening with a large run overlapped the item above.** Lines inside an item
-  already stepped by their largest run, but the step *into* an item used the item's base size,
-  so a 300% word put its ascent up inside the previous bullet. Every line now advances by its
-  own size, and the list's top and bottom edges follow its first and last lines, as areas do.
-- **A highlight now follows its run's `baseline-shift`.** A highlighted superscript kept its
-  rect on the baseline below the text it marked. Lengths move it exactly; `super`, `sub` and
-  percentages use Chromium's measured model (± half the em box, % of the run's size), since
-  renderers define those distances themselves.
-- **A space inside a larger run is measured at that run's size when wrapping.** The renderer
-  draws it at the run's size, so counting it at the paragraph's let a line of large type pass
-  the width check and render wider than its box. Only size is scaled; a bold space differs from
-  a regular one by a hair.
-- Mixed-bidi highlights are documented as not handled in v0: under `direction="rtl"` an embedded
-  left-to-right word is reordered by the renderer and its highlight lands on the wrong glyphs.
-
-- **Mesh gradients render exactly in resvg.** A mesh lowers to tiny texel-aligned PNGs
-  placed so that *bilinear* upsampling reproduces each region's fitted colour field, but
-  the images left `image-rendering` at `auto`, and resvg's `auto` is bicubic. Measured,
-  that drifted up to ~9/255 off the field. Too little to see, but no longer the field. The
-  images now ask for bilinear by name and land within 0.5/255 (8-bit rounding) at 1× and
-  3×, curved Coons patches included. Both spellings are emitted: resvg honours only
-  `style="image-rendering:smooth"` and silently drops the attribute, while the attribute
-  survives tools that strip `style`. Chromium renders the new output pixel-identically
-  to the old, and Safari, which doesn't know `smooth`, keeps `auto` and looks unchanged.
-- `scripts/compare.mjs` reads its dev server from `XSVG_SERVER`, and refuses a page that
-  isn't xsvg's. With another project's Vite server on the default port 5173 it had been
-  slicing out a 24×24 UI icon and reporting every sample as a structural mismatch.
+  covered the attributes a generator wrote directly, but a module emitting an
+  `<x:textbox>` could carry a run's `javascript:` link, a remote `url()` highlight or a
+  remote paint through the text emitters. The rules now run as one pass over the
+  generator's markup *after* it is lowered, whatever it lowered through. The pass also
+  drops `<style>` (it restyles the whole document and can `@import`), and stops a
+  generator's `<use href="file">` from making the host read another file.
 
 ### Added
 
-- Text runs (`<tspan>`) take `font-size`, `baseline-shift` and `text-decoration`; a line steps by its largest run.
-- `href` on a run (or an authored `<a>`) becomes an SVG link.
-- `x:highlight` on a run draws a background behind it.
-- `direction="rtl"` on a textbox or paragraph.
-- List items and table cells render their runs and honour `<tbreak/>`.
-- `preserveAspectRatio` on a cross-file `<use>` is forwarded to the viewport it bakes.
-- Keyed (editor) output stamps a textbox's frame as `data-xsvg-frame`.
-- **CI.** `.github/workflows/ci.yml` runs every gate the repo has on each push and pull
-  request: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`, the
-  feature-less core, both wasm targets, the web build and typecheck, and every
-  `npm run check:*` script, with resvg installed so the mesh raster check gates rather
-  than skips. The workspace is rustfmt-formatted and clippy-clean to make those gates
-  real.
-- **A fuzz target.** `crates/xsvg-core/fuzz` drives every entry an embedder can reach
-  — the whole compile, each fragment, dependents, caret geometry, span tables — over
-  arbitrary input and requires an answer or an `Err`, never a panic or a hang. Seeded
-  with the dataset and an xsvg token dictionary; CI runs it for a minute per push. The
-  one unwrap it could reach is fixed: a NaN arc length on a text path (a coordinate
-  large enough to overflow the cumulative length) panicked the frame's segment search.
-- `npm run check:mesh` renders every region of `dataset/mesh.xsvg` through resvg and
-  requires each pixel inside its clip to match the bilinear field within 1/255. Removing
-  the bilinear request fails all 14 measurements. Skips cleanly without `resvg` on PATH.
+- **Mixed sizes in one paragraph.** A `<tspan>` takes `font-size`, as a length or as a
+  percentage or `em` of the paragraph's size. A line steps by the largest run on it, as a
+  word processor does, and fit and wrapping account for it.
+- **Superscript and subscript.** `baseline-shift` on a run takes `super`, `sub`, a length
+  or a percentage. Pair it with a smaller `font-size` for footnote marks and formulas.
+- **Underline, strike-through and overline.** `text-decoration` on a run takes
+  `underline`, `line-through`, `overline`, or a space-separated list. An underline stops at
+  the end of a word and continues across the space only between two underlined words.
+- **Links in text.** `href` on a `<tspan>`, or an authored `<a>` around a run, becomes a
+  clickable SVG link in the output.
+- **The highlighter.** `x:highlight="#fde047"` on a run draws a background behind it, one
+  rectangle per line the run spans. It follows the run's size, a justified line's
+  stretch, and its `baseline-shift`.
+- **Right-to-left paragraphs.** `direction="rtl"` on a textbox, or on one `<x:p>`, makes the
+  start edge the right one: `align="start"` right-aligns, `end` left-aligns, and the
+  first-line indent insets from the right. Glyph order within a line is left to the
+  renderer's bidi algorithm.
+- **Styled runs in lists and tables.** Bold, colour, size and the rest inside a bullet or a
+  table cell now render; before, they were flattened to plain text. `<tbreak/>` breaks a
+  line inside an item or a cell, and a row grows to fit.
+- **Fitting a linked drawing to its frame.** `preserveAspectRatio` on a cross-file
+  `<use href="file.xsvg">` is forwarded to the viewport it becomes, so `none` stretches
+  the drawing to the frame instead of letterboxing it.
+- **Editor output marks a textbox's frame.** Keyed output (the editor's mode) stamps each
+  textbox with `data-xsvg-frame="x y w h"`, the box the text flows in, so an editor can
+  select and resize the box rather than the ink. Viewer output is unchanged.
+
+### Fixed
+
+- **A rotated or scaled textbox rendered upright and unscaled.** `transform` on an
+  `<x:textbox>` was consumed with the rest of its attributes and never re-emitted. It is
+  now carried to the element the box lowers to, as on a plain `<text>`. A document that
+  carried a stray transform on a textbox will now show it.
+- **A list item opening with a large run overlapped the item above.** The step into an
+  item used the item's base size. Every line now advances by its own size.
+- **A highlighted superscript kept its highlight on the baseline below it.** The
+  highlight now moves with the run's `baseline-shift`.
+- **A line of large type could render wider than its box.** A space inside a larger run
+  was measured at the paragraph's size when wrapping, though it renders at the run's.
+- **Mesh gradients render exactly in resvg.** Mesh images now ask for bilinear smoothing
+  by name, which resvg needs; its default is bicubic, which drifted up to ~9/255 off the
+  colour field. Browsers render the new output as before.
+- **A text path could crash the compiler.** A coordinate large enough to overflow the
+  path's length panicked instead of compiling. Found by the new fuzz target.
+
+### Known limitations
+
+- Highlights under `direction="rtl"` do not handle mixed bidi: an embedded left-to-right
+  word or number is reordered by the renderer and its highlight lands on the wrong glyphs.
+- Lists and tables stay left-to-right.
+
+### Internal
+
+- `xsvg-core`: a `CompileSession` parses a document once and compiles any number of its
+  fragments from that parse, for editors. `Seams` became an owned `Platform`;
+  `compile_seams_impl` and `compile_fragment_seams_impl` are now `compile_platform_impl`
+  and `compile_fragment_platform_impl`; `compile_with(input, &Options, &platform)` is the
+  single entry the others wrap. A `MeasureCache` and a `Measurer::measure_batch` seam
+  avoid re-measuring text across compiles. The theme is no longer a thread-local.
+- CI runs on every push: formatting, clippy, tests, both wasm targets, the web build,
+  every `check:*` script, and a minute of fuzzing. `npm run check:mesh` checks mesh output
+  against resvg pixel by pixel. `tests/attribute_injection.rs` probes every attribute of
+  every sample for the escaping bug above.
+- `scripts/compare.mjs` reads its server from `XSVG_SERVER` and refuses a foreign page.
+  `scripts/bump.mjs` covers every crate. `scripts/publish.sh` takes the GitHub release
+  notes from this changelog and no longer labels a real publish as a dry run. `docs/Sandbox.md` no longer claims the Node
+  compiler bounds a generator's run time; only the CLI does.
 
 ## [0.2.1] — 2026-08-12
 

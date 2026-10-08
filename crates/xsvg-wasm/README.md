@@ -17,6 +17,7 @@
     <a href="https://github.com/visioncortex/xsvg/releases">Release</a>
   </h3>
 
+[![CI](https://img.shields.io/github/actions/workflow/status/visioncortex/xsvg/ci.yml?branch=main&label=ci)](https://github.com/visioncortex/xsvg/actions/workflows/ci.yml)
 [![xsvg-core on crates.io](https://img.shields.io/crates/v/xsvg-core.svg?label=crates.io&color=blue)](https://crates.io/crates/xsvg-core)
 [![xsvg-compile on npm](https://img.shields.io/npm/v/@visioncortex/xsvg-compile.svg?label=npm&color=blue)](https://www.npmjs.com/package/@visioncortex/xsvg-compile)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -252,8 +253,15 @@ source-mapped element inspector), and a bare **preview**. Open any sample by nam
 | `npm run dev` | wasm (debug) + Vite dev server, hot reload |
 | `npm run build` | wasm (release) + bundle the tool pages + single-file embed |
 | `npm run build:packages` | build both npm packages (release wasm + dist) |
-| `npm run compare` | browser-vs-native parity suite over every sample |
-| `cargo test` | the compiler's Rust test suite |
+| `npm run compare` | browser-vs-native parity suite over every sample (needs a browser) |
+| `npm run check:*` | the headless gates: inspector params, host hooks, plugin sandbox, incremental parity, DOM patching, mesh raster |
+| `cargo test --workspace` | the Rust test suite |
+| `cargo +nightly fuzz run compile` | fuzz the compiler (run from `crates/xsvg-core`; see `fuzz/Cargo.toml`) |
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `cargo fmt --check`,
+`cargo clippy -D warnings`, the Rust tests, both wasm targets, the web build, the
+typecheck, every `check:*` script and a minute of fuzzing on each push and pull request. `npm run compare`
+is the one gate that still needs a browser, so it stays manual.
 
 ## Documentation
 

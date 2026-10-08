@@ -1,6 +1,6 @@
 [package]
 name = "xsvg-ext-clipart"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/visioncortex/xsvg"
@@ -16,4 +16,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 xsvg-plugin = { path = "../../xsvg-plugin" }
-xsvg-schema = { version = "0.2.1", path = "../../xsvg-schema" }
+xsvg-schema = { version = "0.2.2", path = "../../xsvg-schema" }

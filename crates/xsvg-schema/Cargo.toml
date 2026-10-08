@@ -1,10 +1,10 @@
 [package]
 name = "xsvg-schema"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/visioncortex/xsvg"
 description = "Machine-readable descriptions of xsvg elements: declare parameters as a struct, derive both the description and the parsing"
 
 [dependencies]
-xsvg-schema-derive = { path = "../xsvg-schema-derive", version = "0.2.1" }
+xsvg-schema-derive = { path = "../xsvg-schema-derive", version = "0.2.2" }

@@ -61,18 +61,20 @@ What a module can do while it runs. This is the strongest layer.
   code and is the one deliberate hole in "no document access". It is contained by the
   fact that the module cannot transmit anything — see §4, where that becomes load
   bearing.
-- **Resource bounds**: native hosts meter each call with wasmi fuel, so a runaway
-  generator degrades that one element. A trap (including memory exhaustion) degrades
+- **Resource bounds**: the CLI runs modules in wasmi and meters each call with fuel,
+  so a runaway generator degrades that one element. (The Node compiler does not; see
+  below.) A trap (including memory exhaustion) degrades
   the element rather than failing the compile.
 - **Purity across compiles**: the browser drops every instance between compiles, so
   retained state cannot be observed from one compile to the next. That is what lets
   the incremental byte-stability invariant hold for plugin content.
 
 **Not guaranteed:**
-- **The browser cannot bound execution time.** A synchronous WASM call on the main
-  thread is not interruptible, so a non-terminating generator hangs the tab. Fixing it
-  means moving the compile to a Worker. Do that before loading modules from anywhere
-  untrusted.
+- **The browser and the Node compiler cannot bound execution time.** Both run modules
+  on the platform's own WebAssembly engine, where a synchronous call is not
+  interruptible, so a non-terminating generator hangs the tab or the process. Fixing it
+  means moving the compile to a Worker (a worker thread in Node) with a timeout. Do
+  that before loading modules from anywhere untrusted.
 - **Statefulness *within* one compile** is still possible: a module may return
   different output for the same request at different points in a single pass.
 
@@ -163,7 +165,7 @@ from becoming a channel.
 | Cross-origin needs `integrity` | `packages/xsvg-viewer/src/plugins.ts` |
 | `integrity` verification | all three hosts |
 | Empty import object | all three hosts |
-| Fuel metering | native hosts (wasmi) |
+| Fuel metering | the CLI only (wasmi); not the Node compiler or the browser |
 | Values escaped into their attribute | every emitter (`esc`/`paint` in `compile/mod.rs`), probed by `tests/attribute_injection.rs` |
 | Plugin output rules | `confine` in `compile/plugin.rs`, one pass after lowering, host-independent |
 | The compiler survives its input — an answer or an `Err`, never a panic or a hang | `crates/xsvg-core/fuzz` (parse, then every compile entry, over arbitrary input; seeded with the dataset), a minute per push in CI |
