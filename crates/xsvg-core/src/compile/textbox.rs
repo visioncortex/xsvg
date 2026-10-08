@@ -36,7 +36,12 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let tb: elements::Textbox = params_of(node);
     let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node, ctx);
-    let pos = format!("{}{}{}", pos_attr(node, ctx), frame_attr(node, ctx), transform_attr(node));
+    let pos = format!(
+        "{}{}{}",
+        pos_attr(node, ctx),
+        frame_attr(node, ctx),
+        transform_attr(node)
+    );
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
     // space-before/after. Rectangular geometry only (own box or `in="#rect"`);

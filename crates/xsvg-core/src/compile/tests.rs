@@ -3176,14 +3176,29 @@ fn a_textbox_transform_passes_through_to_its_text() {
     // the textbox lays glyphs out in its own user space; rotating or scaling
     // the box is a transform on what it lowers to (found live: rotated and
     // scaled textboxes rendered upright)
-    let main = format!(r##"{XW}<x:textbox x="10" y="20" width="200" height="80" font-size="18" transform="translate(5 5) rotate(30)">Hi</x:textbox></svg>"##);
+    let main = format!(
+        r##"{XW}<x:textbox x="10" y="20" width="200" height="80" font-size="18" transform="translate(5 5) rotate(30)">Hi</x:textbox></svg>"##
+    );
     let out = compile_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap();
-    assert!(out.contains(r#"<text transform="translate(5 5) rotate(30)""#) || out.contains(r#"transform="translate(5 5) rotate(30)""#), "forwarded: {out}");
+    assert!(
+        out.contains(r#"<text transform="translate(5 5) rotate(30)""#)
+            || out.contains(r#"transform="translate(5 5) rotate(30)""#),
+        "forwarded: {out}"
+    );
     // paragraph mode wraps the paragraphs in one <g>: the transform rides the wrapper
-    let main = format!(r##"{XW}<x:textbox x="10" y="20" width="200" height="80" transform="scale(2 0.5)"><x:p>a</x:p><x:p>b</x:p></x:textbox></svg>"##);
+    let main = format!(
+        r##"{XW}<x:textbox x="10" y="20" width="200" height="80" transform="scale(2 0.5)"><x:p>a</x:p><x:p>b</x:p></x:textbox></svg>"##
+    );
     let out = compile_impl(&main, "balanced", false, &Mono, &NoShaper, &NoOutliner).unwrap();
-    assert!(out.contains(r#"<g transform="scale(2 0.5)">"#), "paragraph wrapper carries it: {out}");
-    assert_eq!(out.matches("transform=").count(), 1, "once, not per paragraph: {out}");
+    assert!(
+        out.contains(r#"<g transform="scale(2 0.5)">"#),
+        "paragraph wrapper carries it: {out}"
+    );
+    assert_eq!(
+        out.matches("transform=").count(),
+        1,
+        "once, not per paragraph: {out}"
+    );
 }
 
 #[test]
