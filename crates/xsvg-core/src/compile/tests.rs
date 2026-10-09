@@ -5429,3 +5429,76 @@ fn every_entry_is_compile_with_over_options() {
         compile_fragment_impl(&svg, "balanced", false, 1, &Mono, &NoShaper, &NoOutliner)
     );
 }
+
+#[test]
+fn an_artboard_fill_paints_its_frame_under_the_slide() {
+    // the backdrop is the frame, as the group's first child — under everything
+    let svg = format!(
+        r##"{XW}<g x:artboard="Title" x:frame="0 0 720 405" x:fill="#0b1020"><text x="10" y="20">hi</text></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    let g = out.find("<g ").unwrap();
+    let rect = out.find(r##"<rect x="0" y="0" width="720" height="405" fill="#0b1020"/>"##);
+    assert!(
+        rect.is_some_and(|r| r > g && r < out.find("<text").unwrap()),
+        "{out}"
+    );
+    assert!(!out.contains("x:fill"), "the attribute is consumed: {out}");
+
+    // a placed slide: the frame is document space, the children are the
+    // group's, so the rect lands at the group's origin
+    let svg = format!(
+        r##"{XW}<g x:artboard="Why" x:frame="840 525 720 405" x:fill="#fff" transform="translate(840,525)"><rect x="0" y="0" width="8" height="405" fill="#6366f1"/></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<rect x="0" y="0" width="720" height="405" fill="#fff"/><path"##),
+        "{out}"
+    );
+
+    // a scaled slide: not a translation, so the rect keeps the frame's
+    // coordinates and carries the inverse transform
+    let svg = format!(
+        r##"{XW}<g x:artboard="Half" x:frame="100 0 720 405" x:fill="#eee" transform="translate(100,0) scale(0.5)"><text x="0" y="0">a</text></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<rect x="100" y="0" width="720" height="405" transform="matrix(2 0 0 2 -200 0)" fill="#eee"/>"##),
+        "{out}"
+    );
+
+    // nested under a transformed parent: the whole chain is undone
+    let svg = format!(
+        r##"{XW}<g transform="translate(0,1000)"><g x:artboard="Deep" x:frame="0 1000 10 10" x:fill="#abc" transform="translate(5,5)"><text x="0" y="0">a</text></g></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<rect x="-5" y="-5" width="10" height="10" fill="#abc"/>"##),
+        "{out}"
+    );
+
+    // the fill is a paint: theme tokens resolve, and an empty slide still paints
+    let svg = format!(
+        r##"{XW}<x:theme><x:color name="paper" value="#fafafa"/></x:theme><g x:artboard="Blank" x:frame="0 0 4 4" x:fill="var(paper)"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"><rect x="0" y="0" width="4" height="4" fill="#fafafa"/></g>"##),
+        "{out}"
+    );
+
+    // without a frame there is nothing to paint: a marker, no rect
+    let svg = format!(
+        r##"{XW}<g x:artboard="Loose" x:fill="#000"><text x="0" y="0">a</text></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("x:fill needs a valid x:frame") && !out.contains("<rect"),
+        "{out}"
+    );
+
+    // a fill on a group that is not an artboard is foreign metadata: dropped
+    let svg = format!(r##"{XW}<g x:fill="#000"><text x="0" y="0">a</text></g></svg>"##);
+    let out = compile_test(&svg);
+    assert!(!out.contains("<rect") && !out.contains("fill"), "{out}");
+}

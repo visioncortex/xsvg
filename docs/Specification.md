@@ -288,12 +288,21 @@ slide. Degradation-safe the same way as layers (§5.1): it compiles to a plain `
 normally in any viewer) carrying **`data-xsvg-artboard="Label"`**, so tools can enumerate, frame,
 and page through them. An optional `x:frame="x y w h"` sets an explicit slide rectangle (content
 may bleed past it) and is echoed as **`data-xsvg-frame`**; without it, tools fall back to the
-group's bounding box.
+group's bounding box. An optional `x:fill` paints the frame: it lowers to a `<rect>` of the
+frame as the group's **first child**, under everything the slide draws — the backdrop an author
+would otherwise write by hand, repeating the frame. `x:frame` is in document space and the group's
+children are in its own, so the rect is the frame mapped through the inverse of every transform
+from the root down to the group: a `translate` (how a slide is normally placed) just shifts the
+coordinates; anything else rides on the rect as a `transform="matrix(…)"`. `x:fill` is a paint
+(`var()` tokens resolve); a `<meshgradient>` backdrop still needs an authored `<rect>`, since
+meshes compile per shape (§8.2). Without a valid `x:frame` there is nothing to paint, and the
+fill degrades to a marker.
 
 | Attribute | Meaning |
 |---|---|
 | `x:artboard` | marks the group as an artboard; the value is its name |
 | `x:frame` | optional explicit frame `x y w h` (else the group's bbox) |
+| `x:fill` | optional backdrop paint for the frame, lowered to a first-child `<rect>` |
 
 **Tooling.** The bundled tools treat artboards as **slides**: the standalone preview shows a
 `‹ ›` nav with a slide counter when a document has multiple artboards, paging by reframing the SVG

@@ -640,6 +640,22 @@ fn is_hidden(node: roxmltree::Node) -> bool {
     matches!(node.attribute((XSVG_NS, "hidden")), Some(v) if v != "false")
 }
 
+/// The `x:frame="x y w h"` of an artboard, when it is well-formed (four finite
+/// numbers, a positive size). Document user space, like the viewport the tools
+/// page to.
+fn artboard_frame(node: roxmltree::Node) -> Option<[f64; 4]> {
+    let nums: Vec<f64> = node
+        .attribute((XSVG_NS, "frame"))?
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .filter_map(parse_num)
+        .collect();
+    match nums[..] {
+        [x, y, w, h] if w > 0.0 && h > 0.0 => Some([x, y, w, h]),
+        _ => None,
+    }
+}
+
 /// Artboard metadata (§5.2): a `<g x:artboard="Label">` is a named frame — a
 /// slide — that the viewer/preview can zoom to and page through. It compiles to
 /// a plain `<g>` (renders normally in any viewer) carrying
@@ -653,23 +669,83 @@ fn artboard_attr(node: roxmltree::Node) -> String {
     let mut s = String::from(" data-xsvg-artboard=\"");
     push_escaped(&mut s, label, true);
     s.push('"');
-    if let Some(frame) = node.attribute((XSVG_NS, "frame")) {
-        let nums: Vec<f64> = frame
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .filter(|t| !t.is_empty())
-            .filter_map(parse_num)
-            .collect();
-        if nums.len() == 4 && nums[2] > 0.0 && nums[3] > 0.0 {
-            s.push_str(&format!(
-                " data-xsvg-frame=\"{} {} {} {}\"",
-                fmt(nums[0]),
-                fmt(nums[1]),
-                fmt(nums[2]),
-                fmt(nums[3])
-            ));
-        }
+    if let Some([x, y, w, h]) = artboard_frame(node) {
+        s.push_str(&format!(
+            " data-xsvg-frame=\"{} {} {} {}\"",
+            fmt(x),
+            fmt(y),
+            fmt(w),
+            fmt(h)
+        ));
     }
     s
+}
+
+/// An artboard's backdrop (§5.2): `x:fill` on a `<g x:artboard>` paints its
+/// `x:frame`, as the first child of the group so it sits under everything the
+/// slide draws — the `<rect>` an author would otherwise write by hand, repeating
+/// the frame. The frame is in document space and the group's children are in
+/// its own, so the rect is the frame mapped through the inverse of every
+/// transform from the root down to the group: a translate (the usual way a
+/// slide is placed) just shifts the coordinates, anything else rides as a
+/// `transform="matrix(…)"`. `None` when the group is not an artboard with a
+/// fill; a marker when the frame is missing or the transform cannot be undone.
+fn artboard_backdrop(node: roxmltree::Node, ctx: &Ctx) -> Option<String> {
+    node.attribute((XSVG_NS, "artboard"))?;
+    let fill = node.attribute((XSVG_NS, "fill"))?;
+    let Some([x, y, w, h]) = artboard_frame(node) else {
+        return Some("<!-- xsvg: x:fill needs a valid x:frame to paint -->".to_string());
+    };
+    // the document → group transform: every element from the root's child down
+    // to the group itself, outermost first (the root's own transform does not
+    // apply to its user space)
+    let root = node.document().root_element();
+    let chain: Vec<roxmltree::Node> = node
+        .ancestors()
+        .take_while(|n| n.id() != root.id())
+        .filter(|n| n.is_element())
+        .collect();
+    let total = chain
+        .iter()
+        .rev()
+        .fold(crate::kurbo::Affine::IDENTITY, |acc, n| {
+            acc * element_transform(*n)
+        });
+    if total.determinant().abs() < 1e-12 || !total.determinant().is_finite() {
+        return Some(
+            "<!-- xsvg: x:fill cannot paint the frame through a singular transform -->".to_string(),
+        );
+    }
+    let inv = total.inverse();
+    let [a, b, c, d, e, f] = inv.as_coeffs();
+    let mut out = String::from("<rect");
+    let translation_only =
+        (a - 1.0).abs() < 1e-9 && b.abs() < 1e-9 && c.abs() < 1e-9 && (d - 1.0).abs() < 1e-9;
+    if translation_only {
+        out.push_str(&format!(
+            " x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            fmt(x + e),
+            fmt(y + f),
+            fmt(w),
+            fmt(h)
+        ));
+    } else {
+        out.push_str(&format!(
+            " x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" transform=\"matrix({} {} {} {} {} {})\"",
+            fmt(x),
+            fmt(y),
+            fmt(w),
+            fmt(h),
+            fmt(a),
+            fmt(b),
+            fmt(c),
+            fmt(d),
+            fmt(e),
+            fmt(f)
+        ));
+    }
+    out.push_str(&format!(" fill=\"{}\"/>", ctx.paint(fill)));
+    Some(out)
 }
 
 fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) {
@@ -811,12 +887,18 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         None => copy_attrs(node, out, &[], ctx),
     }
     out.push_str(&pos_attr(node, ctx));
-    if !is_root {
+    let backdrop = if is_root {
+        None
+    } else {
         out.push_str(&artboard_attr(node));
-    }
+        artboard_backdrop(node, ctx)
+    };
 
-    if node.has_children() {
+    if node.has_children() || backdrop.is_some() {
         out.push('>');
+        if let Some(backdrop) = backdrop {
+            out.push_str(&backdrop);
+        }
         let elems: Vec<roxmltree::Node> = node.children().filter(|c| c.is_element()).collect();
         let restack = elems.iter().any(|c| {
             c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()

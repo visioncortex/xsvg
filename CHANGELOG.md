@@ -14,6 +14,13 @@ partial one.
 
 ## [Unreleased]
 
+### Added
+
+- **`x:fill` on an artboard paints its frame.** A slide's backdrop used to be a hand-written
+  `<rect>` repeating the frame's size; `<g x:artboard="…" x:frame="x y w h" x:fill="#0b1020">`
+  now lowers that rect itself, as the group's first child, mapped through the group's
+  transform so a placed slide gets it at its own origin (§5.2). The deck sample uses it.
+
 ## [0.2.2] — 2026-10-08
 
 **A security fix and a round of text typesetting.** Opening an untrusted `.xsvg` in the

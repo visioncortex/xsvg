@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"
      viewBox="0 0 3240 1455" font-family="'Helvetica Neue', Arial, sans-serif">
   <!-- A ten-slide deck in one file: each slide is a <g x:artboard> with an
-       explicit x:frame, authored in local 0..720 space and placed by a translate.
+       explicit x:frame, authored in local 0..720 space and placed by a translate,
+       and an x:fill that paints the frame as the slide's backdrop (the mesh slide
+       keeps an authored rect: a meshgradient fill compiles per shape).
        The slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
        a 720x405 frame plus a 120-unit gutter). Every slide showcases a real xsvg
        extension LIVE — lists, textbox flow, type on a path, warps, mesh gradients,
@@ -10,8 +12,7 @@
        first. The x: tagging is ignorable, so the file never breaks. -->
 
   <!-- 1 — Title: a mesh-gradient hero band over a dark cover -->
-  <g x:artboard="Title" x:frame="0 0 720 405">
-    <rect x="0" y="0" width="720" height="405" fill="#0b1020"/>
+  <g x:artboard="Title" x:frame="0 0 720 405" x:fill="#0b1020">
     <x:mesh points="0,0 360,0 720,0 0,170 360,170 720,170">
       <x:face v="0 1 4 3" fill="#6366f1 #8b5cf6 #ec4899 #6366f1"/>
       <x:face v="1 2 5 4" fill="#8b5cf6 #38bdf8 #22d3ee #ec4899"/>
@@ -22,8 +23,7 @@
   </g>
 
   <!-- 2 — The pitch: a bulleted <x:list> -->
-  <g x:artboard="Why" x:frame="840 0 720 405" transform="translate(840,0)">
-    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+  <g x:artboard="Why" x:frame="840 0 720 405" x:fill="#ffffff" transform="translate(840,0)">
     <rect x="0" y="0" width="8" height="405" fill="#6366f1"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#6366f1">THE PITCH</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">One file. Every feature.</text>
@@ -38,8 +38,7 @@
   </g>
 
   <!-- 3 — Text layout: justify + shape-bound region flow -->
-  <g x:artboard="Text" x:frame="1680 0 720 405" transform="translate(1680,0)">
-    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+  <g x:artboard="Text" x:frame="1680 0 720 405" x:fill="#ffffff" transform="translate(1680,0)">
     <rect x="0" y="0" width="8" height="405" fill="#0ea5e9"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#0ea5e9">TEXT LAYOUT</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Wrap · fit · justify · flow</text>
@@ -64,8 +63,7 @@
   </g>
 
   <!-- 4 — Type on a path: rainbow deform + native follow -->
-  <g x:artboard="Path" x:frame="2520 0 720 405" transform="translate(2520,0)">
-    <rect x="0" y="0" width="720" height="405" fill="#0f172a"/>
+  <g x:artboard="Path" x:frame="2520 0 720 405" x:fill="#0f172a" transform="translate(2520,0)">
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6">TEXT EFFECTS</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#f8fafc">Type, transformed</text>
 
@@ -98,8 +96,7 @@
   </g>
 
   <!-- 5 — Envelope warps: presets baked to plain paths -->
-  <g x:artboard="Warp" x:frame="0 525 720 405" transform="translate(0,525)">
-    <rect x="0" y="0" width="720" height="405" fill="#faf5ff"/>
+  <g x:artboard="Warp" x:frame="0 525 720 405" x:fill="#faf5ff" transform="translate(0,525)">
     <rect x="0" y="0" width="8" height="405" fill="#a855f7"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#a855f7">ENVELOPE WARPS</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Bend the geometry</text>
@@ -186,8 +183,7 @@
   </g>
 
   <!-- 7 — Diagrams: connectors between boxes + boolean union -->
-  <g x:artboard="Diagram" x:frame="1680 525 720 405" transform="translate(1680,525)">
-    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+  <g x:artboard="Diagram" x:frame="1680 525 720 405" x:fill="#ffffff" transform="translate(1680,525)">
     <rect x="0" y="0" width="8" height="405" fill="#16a34a"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a">DIAGRAMS</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Connectors &amp; path algebra</text>
@@ -238,8 +234,7 @@
   </g>
 
   <!-- 8 — Words & data: paragraphs + styled runs on the left, a table on the right -->
-  <g x:artboard="Words" x:frame="2520 525 720 405" transform="translate(2520,525)">
-    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+  <g x:artboard="Words" x:frame="2520 525 720 405" x:fill="#ffffff" transform="translate(2520,525)">
     <rect x="0" y="0" width="8" height="405" fill="#a21caf"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#a21caf">TEXT &amp; TABLES</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Paragraphs meet data</text>
@@ -283,8 +278,7 @@
   </g>
 
   <!-- 9 — Charts: a data coordinate frame — bars, a line graph, and a pie -->
-  <g x:artboard="Data viz" x:frame="0 1050 720 405" transform="translate(0,1050)">
-    <rect x="0" y="0" width="720" height="405" fill="#ffffff"/>
+  <g x:artboard="Data viz" x:frame="0 1050 720 405" x:fill="#ffffff" transform="translate(0,1050)">
     <rect x="0" y="0" width="8" height="405" fill="#0d9488"/>
     <text x="56" y="66" font-size="13" font-weight="700" letter-spacing="2" fill="#0d9488">DATA VISUALIZATION</text>
     <text x="56" y="104" font-size="32" font-weight="800" fill="#0f172a">Bars, lines &amp; pie</text>
@@ -320,8 +314,7 @@
   </g>
 
   <!-- 10 — Closing: a numbered <x:list> call-to-action -->
-  <g x:artboard="Ship it" x:frame="840 1050 720 405" transform="translate(840,1050)">
-    <rect x="0" y="0" width="720" height="405" fill="#0b1020"/>
+  <g x:artboard="Ship it" x:frame="840 1050 720 405" x:fill="#0b1020" transform="translate(840,1050)">
     <rect x="0" y="330" width="720" height="6" fill="#38bdf8"/>
     <circle cx="96" cy="118" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
     <path d="M80,118 l12,12 l22,-26" fill="none" stroke="#34d399" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
