@@ -144,6 +144,27 @@ fn connector_anchors_turn_with_a_rotated_target() {
 }
 
 #[test]
+fn connector_anchors_on_an_ellipse_lie_on_its_circumference() {
+    // a circle of radius 20 at (140, 20): its top anchor is (140, 0), as on a
+    // box; its left-top anchor is on the circumference at 45° — (140 − 20/√2,
+    // 20 − 20/√2) ≈ (125.86, 5.86), not the box corner (120, 0)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><circle id="b" cx="140" cy="20" r="20"/><x:connector from="#a" to="#b:left-top" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    let d = route_d(&out);
+    let end = d.rsplit('L').next().unwrap_or("");
+    let (x, y) = end
+        .split_once(',')
+        .map(|(a, b)| (a.parse::<f64>().unwrap(), b.parse::<f64>().unwrap()))
+        .unwrap();
+    assert!(
+        (x - 125.858).abs() < 0.01 && (y - 5.858).abs() < 0.01,
+        "on the circumference at 45°: {d}"
+    );
+}
+
+#[test]
 fn connectors_accept_points_and_side_anchors() {
     // to-point: the connector ends at a raw x,y — no target element needed
     let svg = format!(

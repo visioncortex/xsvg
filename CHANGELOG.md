@@ -16,9 +16,11 @@ partial one.
 
 ### Added
 
-- **Connector anchors turn with a rotated target.** `to="#id:top"` on a rotated or skewed
-  plain shape attaches to the shape's own top-edge midpoint, mapped through its transform,
-  instead of the top of its axis-aligned bounds, where no edge of the shape lies (§7.6).
+- **Connector anchors sit on the shape.** `to="#id:top"` on a rotated or skewed plain
+  shape attaches to the shape's own top-edge midpoint, mapped through its transform,
+  instead of the top of its axis-aligned bounds, where no edge of the shape lies; on an
+  ellipse or circle the eight anchors lie on the circumference — the four axis points and
+  the four diagonals at 45° — where a box's corners would float off the curve (§7.6).
 
 - **`<x:doc>` — document settings.** The one element for an editor's document-level settings
   (artboard defaults and arrangement, a print size, …), dropped whole at compile with no marker
