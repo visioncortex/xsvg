@@ -1241,6 +1241,24 @@ fn xsvg_root_aliases_to_svg() {
 }
 
 #[test]
+fn document_settings_compile_to_nothing() {
+    // §4.4: <x:doc> and everything inside it is an editor's business — dropped
+    // whole, no marker, whatever the children are (known or not); the
+    // sibling content is untouched
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:doc><x:artboards width="720" height="405" fill="#fff" columns="4" gap="120 60"/><x:sparkle/><rect width="9" height="9"/></x:doc><rect width="1" height="1"/></svg>"##;
+    let out = compile_test(svg);
+    assert!(
+        !out.contains("xsvg:"),
+        "no marker for document settings: {out}"
+    );
+    assert!(
+        !out.contains("artboards") && !out.contains("h9"),
+        "nothing inside is emitted: {out}"
+    );
+    assert!(out.contains("h1 v1"), "siblings compile as usual: {out}");
+}
+
+#[test]
 fn unknown_extension_degrades_to_marker() {
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:sparkle/></svg>"#;
     let out = compile_test(svg);

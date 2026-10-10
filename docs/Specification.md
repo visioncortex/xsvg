@@ -234,6 +234,26 @@ elements the compiler knows nothing about. Design rationale, ABI, and the extens
 - A plugin element is a **baked reference** like §4 in both directions: its `in="#id"` re-emits it
   when the target changes, and editing an `<x:import>` re-emits every element in that namespace.
 
+### 4.4 Document settings — `<x:doc>` [implemented]
+
+`<x:doc>` is the one place for **an editor's document-level settings** — things a tool needs to
+keep with the file and the compiler has no business rendering: artboard defaults and their
+arrangement, a page size for print, whatever an editor adds next. The compiler **drops the element
+and its whole subtree**, silently: no marker, no validation, no vocabulary of its own. Its content
+is the tool's, in the `x:` namespace by convention (so an uncompiled viewer skips it with its
+subtree, §3) and documented by the tool that writes it.
+
+```xml
+<x:doc>
+  <x:artboards width="720" height="405" fill="#ffffff" columns="4" gap="120 60"/>
+</x:doc>
+```
+
+One per document, a top-level child, first by convention (like `<x:theme>`); a tool ignores later
+ones. The compiler makes no promise about any child element here — `<x:artboards>` above is the
+xsvg-kit editor's (`docs/Slides.md` in that repository), and a second tool may keep its own child
+beside it.
+
 ## 5. Graphics elements (reused SVG) [implemented]
 
 `<g>`, `<path>`, basic shapes, gradients, `transform`, `fill`/`stroke` are normalized or passed
@@ -1440,6 +1460,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Pie / donut charts — `<x:pie>`/`<x:slice>` per-slice angle (value), radius (r/grow), explode; donut + polar-area from one primitive (§7.8) | implemented |
 | Plots — `<x:plot>` linear data frame (x/y domains → pixels, sizes stay in px) with `<x:bars>`/`<x:line>` marks + gridlines (§7.9) | implemented |
 | Lists — `<x:list list="bullet\|number\|none">` / `<x:li indent="N">` hanging-indent items, cycling markers, outline counters (§6.14) | implemented |
+| Document settings — `<x:doc>` holds an editor's own document-level settings, dropped whole at compile (§4.4) | implemented |
 | Theming — `<x:theme>` compile-time color tokens (`var(name)` in any paint) + font tokens (`x:font` overridable base), degrade-safe (§4.1) | implemented |
 | Tables — `<x:table>`/`<x:tr>`/`<x:td>`/`<x:th>` author-set columns + content-driven row heights (Slides/Canva model), baked to rects + text (§6.15) | implemented |
 | Paragraphs — `<x:p>` in `<x:textbox>`: stacked paragraphs with `space-before`/`after`, per-paragraph align/indent/style (§6.16) | implemented |

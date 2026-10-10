@@ -779,6 +779,9 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
             "pie" => emit_pie(node, out, ctx),
             "plot" => emit_plot(node, out, ctx),
             "theme" => {} // §4.1 definitions — loaded up front, emit nothing
+            // §4.4 document settings: an editor's own, dropped whole — no
+            // marker, no validation, nothing inside is this compiler's
+            "doc" => {}
             // §Extensibility definitions — collected up front like <x:theme>, so
             // only a binding we could not honor has anything to say here.
             "import" => {

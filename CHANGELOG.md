@@ -16,6 +16,10 @@ partial one.
 
 ### Added
 
+- **`<x:doc>` — document settings.** The one element for an editor's document-level settings
+  (artboard defaults and arrangement, a print size, …), dropped whole at compile with no marker
+  and no validation; its children are the tool's, in the `x:` namespace by convention (§4.4).
+
 - **`x:fill` on an artboard paints its frame.** A slide's backdrop used to be a hand-written
   `<rect>` repeating the frame's size; `<g x:artboard="…" x:frame="x y w h" x:fill="#0b1020">`
   now lowers that rect itself, as the group's first child, mapped through the group's
