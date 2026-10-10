@@ -1155,7 +1155,12 @@ lowers to a plain `<path>` carrying the connector's own stroke.
   (`left-top`, `right-bottom`, … — one horizontal + one vertical token, either order), or
   `center`. For `curve`, the tangent leaves the anchor tilted toward the other end (so a
   same-side pair reads as a leaf, not a half-circle). (A trailing `:<anchor>` keyword is
-  reserved for this; any other `:` is part of the id.)
+  reserved for this; any other `:` is part of the id.) On a plain shape with a **rotated
+  or skewed** `transform`, the anchor is the shape's own edge midpoint or corner turned
+  with it — its untransformed box's anchor mapped through the transform — since no edge
+  of the shape lies on its axis-aligned bounds; an unanchored end keeps the bounds (the
+  centre ray clipped at them), as do groups and `x:` elements, which harvest as
+  document-space geometry.
 
 A raw coordinate is given instead via **`from-point="x,y"` / `to-point="x,y"`** — the endpoint is
 an exact point (a zero-size box), needing no target element. If both a reference (`from`/`to`) and

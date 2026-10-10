@@ -117,6 +117,33 @@ fn connectors_are_baked_references() {
 }
 
 #[test]
+fn connector_anchors_turn_with_a_rotated_target() {
+    // b is a 40×40 square rotated 90° about its centre (140, 20): its own
+    // top-edge midpoint (140, 0) turns to (160, 20) — the right side of the
+    // axis-aligned bounds, where the shape's top edge now lies. An anchored
+    // end attaches there, not at the bounds' top midpoint (140, 0).
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40" transform="rotate(90 140 20)"/><x:connector from="#a" to="#b:top" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        route_d(&out).ends_with("L160,20"),
+        "attaches at the turned top midpoint: {}",
+        route_d(&out)
+    );
+    // without an anchor the bounds still decide (the centre ray clips at them)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40" transform="rotate(90 140 20)"/><x:connector from="#a" to="#b" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        route_d(&out).ends_with("L120,20"),
+        "unanchored: the bounds' edge: {}",
+        route_d(&out)
+    );
+}
+
+#[test]
 fn connectors_accept_points_and_side_anchors() {
     // to-point: the connector ends at a raw x,y — no target element needed
     let svg = format!(

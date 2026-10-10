@@ -68,6 +68,32 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                     },
                     None => (r, None),
                 };
+                // An anchored end on a ROTATED (or skewed) shape attaches to the
+                // shape's own edge midpoint or corner, turned with it — the anchor
+                // of its untransformed box mapped through its transform — not to
+                // the axis-aligned bounds, where no edge of the shape lies. Only
+                // for a plain shape with its own transform: a group or an x:
+                // element harvests as document-space geometry below.
+                if let (Some(an), Some(target)) = (anchor, ctx.resolve_ref(node, id)) {
+                    let own = super::refs::element_transform(target);
+                    let [_, b, c, _, _, _] = own.as_coeffs();
+                    let turned = b.abs() > 1e-9 || c.abs() > 1e-9;
+                    let plain = target.tag_name().namespace() != Some(XSVG_NS)
+                        && target.tag_name().name() != "g";
+                    if turned && plain {
+                        if let Some(local) =
+                            super::refs::shape_to_path_d(target).and_then(|d| svg_path_bbox(&d))
+                        {
+                            let (h, v) = an;
+                            let at = own
+                                * Point::new(
+                                    local.center().x + h * local.width() / 2.0,
+                                    local.center().y + v * local.height() / 2.0,
+                                );
+                            return Some((Rect::new(at.x, at.y, at.x, at.y), Some(an)));
+                        }
+                    }
+                }
                 let rect = ref_geometry(node, id, ctx)
                     .ok()
                     .and_then(|d| svg_path_bbox(&d))?;
