@@ -862,6 +862,23 @@ fn table_column_and_row_styles_resolve_cell_row_column_table() {
 }
 
 #[test]
+fn table_and_list_forward_their_transform() {
+    let svg = format!(
+        r##"{XW}<x:table x="0" y="0" width="60" transform="rotate(10 30 10)"><x:tr><x:td>a</x:td></x:tr></x:table><x:list x="0" y="40" width="60" transform="translate(5 5)"><x:li>i</x:li></x:list></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r#"<g transform="rotate(10 30 10)">"#)
+            || out.contains(r#" transform="rotate(10 30 10)">"#),
+        "the table's wrapper carries its transform: {out}"
+    );
+    assert!(
+        out.contains(r#" transform="translate(5 5)">"#),
+        "the list's wrapper carries its transform: {out}"
+    );
+}
+
+#[test]
 fn table_stripe_alternates_body_rows() {
     // header + 3 body rows; the stripe lands on the 2nd body row only
     let svg = format!(

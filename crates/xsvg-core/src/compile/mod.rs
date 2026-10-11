@@ -449,7 +449,7 @@ fn pos_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
 /// exactly as on a raw `<text>`. Found live by the editor: a rotated or
 /// ⌘-scaled textbox rendered upright and unscaled, because the attribute was
 /// consumed with the rest of the `x:` vocabulary and never re-emitted.
-fn transform_attr(node: roxmltree::Node) -> String {
+pub(super) fn transform_attr(node: roxmltree::Node) -> String {
     match node.attribute("transform") {
         Some(t) if !t.trim().is_empty() => {
             let mut s = String::from(" transform=\"");

@@ -276,6 +276,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // the generated-marker text, and the per-item texts
     out.push_str("<g");
     out.push_str(&pos);
+    out.push_str(&super::transform_attr(node)); // the list's own transform, as a table's (§6.15)
     out.push('>');
     out.push_str(&shapes);
     if !markers.is_empty() {

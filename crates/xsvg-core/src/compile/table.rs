@@ -211,6 +211,11 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // findable by the range `fragment_range` reports (docs/Incremental.md §4).
     out.push_str("<g");
     out.push_str(&pos_attr(node, ctx));
+    // the table's own `transform` rides on the wrapper, as a textbox's does on
+    // its <text>: cells are laid out in the table's user space, so rotating or
+    // scaling the table is this transform (found live by the editor: a
+    // transform on a table was consumed and never re-emitted — immovable)
+    out.push_str(&super::transform_attr(node));
     out.push('>');
     let mut body_row = 0usize;
     for (ri, row) in rows.iter().enumerate() {

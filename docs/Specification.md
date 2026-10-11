@@ -800,6 +800,7 @@ and last lines' sizes) render styled, and `<tbreak/>` forces a line within the b
 | `marker-gap` | length (default `0.5em`) | gap between the marker and the text column |
 | `item-spacing` | length (default `0.35em`) | extra vertical gap between items |
 | `font-*`, `line-height`, `fill` | as §6.1 | base style for every item |
+| `transform` | SVG transform list | passes through to the `<g>` the list lowers to, as on a table (§6.15) |
 
 Each **`<x:li>`** is one item; `indent="N"` sets its **nesting level** (0 = top). Every level steps
 the text column right by `indent` and **cycles the marker**. Bullet markers are **drawn shapes**, not
@@ -846,6 +847,7 @@ It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` �
 | `cell-fill` / `header-fill` | color | default background for `<x:td>` / `<x:th>` cells |
 | `stripe` | color | zebra background for every other **body** row (rows with no header cell); the first data row is unstriped |
 | `fill`, `align`, `valign`, `font-*` | as §6.1 | default text color, alignment, and style for all cells |
+| `transform` | SVG transform list | passes through to the `<g>` the table lowers to: cells are laid out in the table's own user space, so rotating or scaling the table is this transform, as on a textbox (§6.4) |
 
 `<x:th>` cells default to **bold** and the `header-fill` background. The same cell properties —
 `align` / `valign` / `fill` (text color) / `bg` (background) / `font-*` (family/size/weight/style/

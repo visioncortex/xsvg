@@ -16,6 +16,10 @@ partial one.
 
 ### Added
 
+- **`transform` on `<x:table>` and `<x:list>`** passes through to the `<g>` each lowers to, as a
+  textbox's does: rotating or scaling a table or a list is its transform (§6.14, §6.15). Found by
+  the editor: a transform on a table was consumed and never re-emitted, so the table could not move.
+
 - **Table column and row styles.** `<x:col>` children (one per column, HTML's `<col>`) and
   attributes on `<x:tr>` carry cell defaults — `align`, `valign`, `fill`, `bg`, `font-*`,
   `line-height` — resolving cell › row › column › header default › table, so a bold first
