@@ -6,7 +6,8 @@
        keeps an authored rect: a meshgradient fill compiles per shape).
        Every title, caption and label is a full-width text box (Slides), point text
        being the advanced form — kept on the two warp captions, which sit over the
-       warped grids; the slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
+       warped grids, and on the two route labels over the connectors; the slides
+       tile in a 4-across grid (840 horizontal pitch, 525 vertical —
        a 720x405 frame plus a 120-unit gutter). Every slide showcases a real xsvg
        extension LIVE — lists, textbox flow, type on a path, warps, mesh gradients,
        connectors, boolean algebra, tables, charts. In a plain viewer the slides
@@ -206,9 +207,9 @@
     <rect id="n3" x="520" y="138" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
     <x:textbox x="510" y="160" width="150" height="14" font-size="15" font-weight="600" fill="#3730a3" align="center" text-overflow="ellipsis">Plain SVG</x:textbox>
     <x:connector from="#n1" to="#n2" route="x-major" arrow="end" stroke="#475569" stroke-width="2"/>
-    <x:textbox x="160" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center" text-overflow="ellipsis">route="x-major"</x:textbox>
+    <text x="240" y="150" font-size="10" fill="#94a3b8" text-anchor="middle">route="x-major"</text>
     <x:connector from="#n2" to="#n3" route="curve" arrow="end" stroke="#475569" stroke-width="2"/>
-    <x:textbox x="400" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center" text-overflow="ellipsis">route="curve"</x:textbox>
+    <text x="480" y="150" font-size="10" fill="#94a3b8" text-anchor="middle">route="curve"</text>
 
     <!-- path algebra gallery: four operands-in / one-plain-path-out demos -->
     <x:textbox x="56" y="239" width="608" height="12" font-size="13" fill="#64748b" text-overflow="ellipsis">Path algebra &amp; offset — operands in, one plain path out</x:textbox>
