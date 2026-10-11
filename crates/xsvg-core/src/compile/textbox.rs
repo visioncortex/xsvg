@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::text::fit::bisect_fit;
-use crate::{apply_ellipsis, split_visible};
 
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
 pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
@@ -200,13 +199,13 @@ pub(super) fn emit_paragraphs(
     let mut markers = String::new();
     for para in &items {
         let Some(mk) = &para.marker else { continue };
-        let Some(first) = para.lines.first().map(|l| l.baseline + block_top) else {
+        let Some(first) = para.laid.lines.first().map(|l| l.baseline + block_top) else {
             continue;
         };
         if first < cy - 1e-6 || first > cy + ch + 1e-6 {
             continue; // the item's first row is clipped: no marker
         }
-        let fm = m.font_metrics(&para.style, para.style.size);
+        let fm = m.font_metrics(&para.laid.style, para.laid.style.size);
         match &mk.kind {
             super::list::Marker::None => {}
             super::list::Marker::Shape(tok) => {
@@ -225,7 +224,7 @@ pub(super) fn emit_paragraphs(
                     fmt(mk.col),
                     fmt(first),
                     ctx.paint(&mk.fill),
-                    fmt(para.style.size)
+                    fmt(para.laid.style.size)
                 ));
                 push_escaped(&mut markers, t, false);
                 markers.push_str("</tspan>");
@@ -251,35 +250,37 @@ pub(super) fn emit_paragraphs(
         emit_highlights(
             out,
             shifted,
-            para.anchor,
-            para.rtl,
-            &para.style,
-            para.style.size,
+            para.laid.anchor.svg(),
+            para.laid.rtl,
+            &para.laid.style,
+            para.laid.style.size,
             &para.emits,
             m,
             ctx,
         );
-        out.push_str(&format!("<text text-anchor=\"{}\"", para.anchor));
-        push_font_attrs(out, &para.style, para.style.size, para.fill, ctx);
-        if para.rtl {
+        out.push_str(&format!("<text text-anchor=\"{}\"", para.laid.anchor.svg()));
+        push_font_attrs(out, &para.laid.style, para.laid.style.size, para.fill, ctx);
+        if para.laid.rtl {
             out.push_str(" direction=\"rtl\"");
         }
         out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
         out.push('>');
         for l in shifted {
-            emit_line(out, l, &para.style, para.style.size, gx, m, &para.emits);
+            emit_line(
+                out,
+                l,
+                &para.laid.style,
+                para.laid.style.size,
+                gx,
+                m,
+                &para.emits,
+            );
         }
         out.push_str("</text>");
     }
 }
 
-/// Pass 2 of paragraph flow (§6.16), shared by emission and the editor's
-/// text-layout seam so the two cannot drift: the lines whose baseline lands
-/// inside the box, shifted into place, with `text-overflow` applied across the
-/// whole block as §6.6 says — `ellipsis` marks any rendered line wider than
-/// its paragraph's width, and the block's last rendered line when a line of
-/// any paragraph was dropped (a paragraph that fell off the bottom entirely
-/// included). One `Vec` per paragraph, empty where none of it shows.
+/// Pass 2 of paragraph flow: the engine's [`clip_paragraphs`] over the plan.
 pub(super) fn visible_paragraph_lines(
     items: &[ParaPlan],
     block_top: f64,
@@ -288,58 +289,27 @@ pub(super) fn visible_paragraph_lines(
     overflow: TextOverflow,
     m: &dyn Measurer,
 ) -> Vec<Vec<PlacedLine>> {
-    let mut dropped = false;
-    let mut per: Vec<Vec<PlacedLine>> = Vec::with_capacity(items.len());
-    for para in items {
-        let placed = para
-            .lines
-            .iter()
-            .map(|l| PlacedLine {
-                baseline: l.baseline + block_top,
-                ..l.clone()
-            })
-            .collect();
-        let (lines, cut) = split_visible(placed, |l| {
-            l.baseline >= cy - 1e-6 && l.baseline <= cy + ch + 1e-6
-        });
-        dropped |= cut;
-        per.push(lines);
-    }
-    if overflow == TextOverflow::Ellipsis {
-        let last = per.iter().rposition(|v| !v.is_empty());
-        for (i, (para, lines)) in items.iter().zip(per.iter_mut()).enumerate() {
-            if lines.is_empty() {
-                continue;
-            }
-            apply_ellipsis(
-                lines,
-                dropped && Some(i) == last,
-                para.width,
-                &para.style,
-                para.style.size,
-                m,
-            );
-        }
-    }
-    per
+    clip_paragraphs(
+        items.iter().map(|p| &p.laid),
+        block_top,
+        cy,
+        ch,
+        overflow,
+        m,
+    )
 }
 
 /// One planned paragraph of a §6.16 flow: lines laid in a RELATIVE frame
 /// (paragraph 0's cap-top at 0) — shift baselines by the plan's `block_top`
 /// to place them in the box.
 pub(super) struct ParaPlan<'a> {
-    pub(super) lines: Vec<PlacedLine>,
-    /// The content width the paragraph wrapped to (the box's, less a list
-    /// item's gutter), scaled — what a line must not exceed under `ellipsis`.
-    pub(super) width: f64,
-    pub(super) style: TextStyle,
+    /// The stacked block: lines in the RELATIVE frame (paragraph 0's cap-top
+    /// at 0 — shift by the plan's `block_top`), width, style and anchor.
+    pub(super) laid: ParaLines,
     pub(super) fill: &'a str,
-    pub(super) anchor: &'static str,
     /// The paragraph's styled-run emit table (`collect_runs`) — `<tspan>`
     /// overrides render styled in paragraph mode, same as a plain box.
     pub(super) emits: Vec<EmitAttrs>,
-    /// Right-to-left paragraph (§6.4 `direction`): emits `direction="rtl"`.
-    pub(super) rtl: bool,
     pub(super) src: roxmltree::Node<'a, 'a>,
     /// A list item's marker in the gutter (§6.16, lists in a textbox).
     pub(super) marker: Option<PlanMarker>,
@@ -493,12 +463,16 @@ pub(super) fn plan_paragraphs<'a>(
         }
     }
 
+    // one trial at a given SCALE (fit="shrink" searches it below): every text
+    // metric — the font sizes, the gaps, the insets, the first-line indent —
+    // scales together, so the stack shrinks like a zoom while the box geometry
+    // stays put. The runs are re-collected at each scale so a run's size
+    // resolves against its paragraph's scaled size, as emission will see it.
     let plan_at = |scale: f64| -> (Vec<ParaPlan<'a>>, f64) {
-        let mut items: Vec<ParaPlan> = Vec::with_capacity(units.len());
-        let mut last_baseline: Option<f64> = None; // relative frame: para 0's cap-top at 0
-        let mut last_descent = 0.0f64;
-        let mut prev_after = 0.0f64;
-        for u in units.iter() {
+        let mut blocks: Vec<ParaUnit> = Vec::with_capacity(units.len());
+        let mut extra: Vec<(&'a str, Vec<EmitAttrs>, Option<PlanMarker>, TextStyle)> =
+            Vec::with_capacity(units.len());
+        for (i, u) in units.iter().enumerate() {
             let p = u.src;
             // an item takes the list's style (font-* on <x:list>) under the
             // box's, then its own font-size; a paragraph its own font-*
@@ -512,8 +486,10 @@ pub(super) fn plan_paragraphs<'a>(
             };
             pstyle.size *= scale;
             // spacing: between items of one list its item-spacing; into the
-            // first item, and around a paragraph, the paragraph gaps
-            let (sb, sa) = match u.list {
+            // first item, and around a paragraph, the paragraph gaps; the gap
+            // AFTER a list's last item is a paragraph gap, not its
+            // item-spacing — the next block is a paragraph or another list
+            let (space_before, space_after) = match u.list {
                 Some(l) => {
                     let item_gap = attr_num(l, "item-spacing", pstyle.size / scale * 0.35) * scale;
                     let before = if u.first_in_list {
@@ -521,30 +497,32 @@ pub(super) fn plan_paragraphs<'a>(
                     } else {
                         0.0
                     };
-                    (before, item_gap)
+                    let last_of_list =
+                        i + 1 == units.len() || units.get(i + 1).is_some_and(|n| n.list != Some(l));
+                    let after = if last_of_list {
+                        attr_num(l, "space-after", default_spacing) * scale
+                    } else {
+                        item_gap
+                    };
+                    (before, after)
                 }
                 None => (
                     attr_num(p, "space-before", 0.0) * scale,
                     attr_num(p, "space-after", default_spacing) * scale,
                 ),
             };
-            let inset = u.inset * scale;
-            let pspec = AreaSpec {
-                x: cx + inset,
-                // lay out in the paragraph's OWN frame (its cap-top at 0); it
-                // moves onto the stack once its first line's size is known
-                y: 0.0,
-                width: (cw - inset).max(1.0),
-                height: 1e5, // tall → no clip; valign=top places lines from `y`
-                padding: 0.0,
+            let (segments, pstyles, emits) = collect_runs(p, &pstyle);
+            blocks.push(ParaUnit {
+                segments,
+                styles: pstyles,
+                space_before,
+                space_after,
+                inset: u.inset * scale,
                 align: if u.list.is_some() {
                     Align::Start
                 } else {
                     Align::parse(p.attribute("align").unwrap_or(default_align))
                 },
-                valign: VAlign::Top,
-                fit: Fit::None,
-                text_overflow: TextOverflow::Clip,
                 text_indent: if u.list.is_some() {
                     0.0
                 } else {
@@ -555,45 +533,7 @@ pub(super) fn plan_paragraphs<'a>(
                     .attribute("direction")
                     .or_else(|| node.attribute("direction"))
                     == Some("rtl"),
-            };
-            let (segments, pstyles, emits) = collect_runs(p, &pstyle);
-            let mut layout = layout_area_runs(&segments, &pstyles, &pspec, m);
-            // the advance INTO this paragraph is its first line's own (that
-            // line's largest run size × line-height); an empty paragraph owns
-            // one base-size row. Layout put the first baseline at that line's
-            // cap-height, so the whole paragraph shifts by the difference.
-            let first_size = layout.lines.first().map(|l| l.size).unwrap_or(pstyle.size);
-            let last_size = layout.lines.last().map(|l| l.size).unwrap_or(pstyle.size);
-            let cap0 = m.font_metrics(&pstyle, first_size).cap_height;
-            let first_baseline = match last_baseline {
-                None => cap0,
-                Some(lb) => lb + prev_after + sb + first_size * pstyle.line_height,
-            };
-            let shift = first_baseline - cap0;
-            for l in &mut layout.lines {
-                l.baseline += shift;
-            }
-            last_baseline = Some(
-                layout
-                    .lines
-                    .last()
-                    .map(|l| l.baseline)
-                    .unwrap_or(first_baseline),
-            );
-            last_descent = m.font_metrics(&pstyle, last_size).descent;
-            // the gap AFTER a list's last item is a paragraph gap, not its
-            // item-spacing: the next block is a paragraph or another list
-            let after = match u.list {
-                Some(l)
-                    if items.len() + 1 == units.len()
-                        || units
-                            .get(items.len() + 1)
-                            .is_some_and(|n| n.list != Some(l)) =>
-                {
-                    attr_num(l, "space-after", default_spacing) * scale
-                }
-                _ => sa,
-            };
+            });
             let marker = u.marker.as_ref().map(|(kind, col_inset, fill)| PlanMarker {
                 kind: match kind {
                     super::list::Marker::None => super::list::Marker::None,
@@ -610,48 +550,39 @@ pub(super) fn plan_paragraphs<'a>(
                     * u.list
                         .map_or(1.0, |l| attr_num(l, "marker-size", 1.0).max(0.0)),
             });
-            items.push(ParaPlan {
-                lines: layout.lines,
-                width: pspec.width,
-                style: pstyle,
-                fill: p
-                    .attribute("fill")
-                    .or_else(|| u.list.and_then(|l| l.attribute("fill")))
-                    .unwrap_or(base_fill),
-                anchor: layout.anchor.svg(),
-                emits,
-                rtl: layout.rtl,
-                src: p,
-                marker,
-            });
-            prev_after = after;
+            let fill = p
+                .attribute("fill")
+                .or_else(|| u.list.and_then(|l| l.attribute("fill")))
+                .unwrap_or(base_fill);
+            extra.push((fill, emits, marker, pstyle));
         }
-        let block_h = last_baseline.map(|lb| lb + last_descent).unwrap_or(0.0);
+        let (laid, block_h) = stack_paragraphs(&blocks, cx, cw, m);
+        let items = laid
+            .into_iter()
+            .zip(extra)
+            .zip(units.iter())
+            .map(|((laid, (fill, emits, marker, _)), u)| ParaPlan {
+                laid,
+                fill,
+                emits,
+                src: u.src,
+                marker,
+            })
+            .collect();
         (items, block_h)
     };
 
-    // fit="shrink" (§6.1, extended to paragraph mode): binary-search the
-    // block scale like `fit_size` searches the font size — the stacked height
-    // drives it (each trial re-wraps to the width), plus `fit_size`'s width
-    // condition: a lone unbreakable word is the only line greedy wrap lets
-    // overflow, so it must fit the content width too. `fit-min` floors the
-    // BASE size; per-paragraph overrides scale proportionally with it. Each
-    // trial re-lays every paragraph (measures at the scaled size): the cost
-    // is paid only by overflowing shrink boxes.
+    // fit="shrink" (§6.1, extended to paragraph mode): bisect the stack's scale
+    // like `fit_size` bisects the font size, on the engine's fit predicate
+    // (stacked height within the box, widest lone word within the width).
+    // `fit-min` floors the BASE size; per-paragraph overrides scale
+    // proportionally with it. Each trial re-lays every paragraph: the cost is
+    // paid only by overflowing shrink boxes.
     let (items, block_h) = match spec.fit {
         Fit::Shrink { min } if base_style.size > 0.0 => {
             let fits = |s: f64| {
                 let (items, h) = plan_at(s);
-                h <= ch
-                    && items.iter().all(|it| {
-                        it.lines.iter().all(|l| {
-                            l.words.1 - l.words.0 != 1
-                                || m.measure(&l.text, &it.style, it.style.size)
-                                    + it.style.letter_spacing
-                                        * (l.text.chars().count().saturating_sub(1)) as f64
-                                    <= cw + 1e-6
-                        })
-                    })
+                paragraphs_fit(items.iter().map(|it| &it.laid), h, cw, ch, m)
             };
             let min_scale = (min / base_style.size).clamp(0.0, 1.0);
             plan_at(bisect_fit(min_scale, 1.0, fits))
@@ -659,12 +590,7 @@ pub(super) fn plan_paragraphs<'a>(
         _ => plan_at(1.0),
     };
     let valign = VAlign::parse(node.attribute("valign").unwrap_or("top"));
-    let block_top = match valign {
-        VAlign::Top => cy,
-        VAlign::Middle => cy + (ch - block_h) / 2.0,
-        VAlign::Bottom => cy + (ch - block_h),
-    };
-    (items, block_top)
+    (items, block_top(valign, cy, ch, block_h))
 }
 
 /// Build the rectangular [`AreaSpec`] for a textbox, taking geometry from `geom`
@@ -1240,10 +1166,10 @@ pub(super) fn paragraphs_layout_info(
             let r = para.src.range();
             TextLayoutPara {
                 span: (r.start, r.end),
-                rtl: para.rtl,
-                style: para.style.clone(),
-                anchor: para.anchor.to_string(),
-                metrics: m.font_metrics(&para.style, para.style.size),
+                rtl: para.laid.rtl,
+                style: para.laid.style.clone(),
+                anchor: para.laid.anchor.svg().to_string(),
+                metrics: m.font_metrics(&para.laid.style, para.laid.style.size),
                 words,
                 lines,
             }

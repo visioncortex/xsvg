@@ -5,12 +5,13 @@
 //! browser callbacks and `xsvg-cli` backs them with native font libraries. Both are thin
 //! adapters over the `compile_impl` / `compile_fragment_impl` entry points here.
 pub(crate) use crate::{
-    boolean_svg_paths, filter_primitives, layout_area_runs, layout_flow, layout_flow_runs,
-    layout_region, layout_text_area_runs, line_advance, measure_runs, offset_svg_paths,
-    parse_filter_functions, run_offset, split_flows, svg_path_bbox, warp_svg_path,
-    warp_text_on_path, Align, Anchor, AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain,
-    DisplayAlign, EnvelopePreset, Field, Fit, FontMetrics, FreeDistort, GlyphOutliner, Homography,
-    LineIncrement, Measurer, PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec,
+    block_top, boolean_svg_paths, clip_paragraphs, filter_primitives, layout_area_runs,
+    layout_flow, layout_flow_runs, layout_region, layout_text_area_runs, line_advance,
+    measure_runs, offset_svg_paths, paragraphs_fit, parse_filter_functions, run_offset,
+    split_flows, stack_paragraphs, svg_path_bbox, warp_svg_path, warp_text_on_path, Align, Anchor,
+    AreaLayout, AreaSpec, BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset,
+    Field, Fit, FontMetrics, FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer,
+    ParaLines, ParaUnit, PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec,
     RoughenField, Shaper, Taper, TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign,
     WarpAxis,
 };

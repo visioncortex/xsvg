@@ -5,6 +5,7 @@
 //! - [`wrap`] — greedy line breaking.
 //! - [`fit`] — shrink-to-fit font sizing.
 //! - [`area`] — box placement (wrap + fit + align) into positioned lines.
+//! - [`paragraphs`] — several blocks stacked in one box (`<x:p>`, list items).
 //! - [`region`] — flow text into an arbitrary shape (the [`Region`]/[`Shaper`] seam).
 //!
 //! Everything here is pure and platform-free: it depends only on a [`Measurer`]
@@ -15,6 +16,7 @@ pub mod area;
 pub mod fit;
 pub mod measure;
 pub mod outline;
+pub mod paragraphs;
 pub mod region;
 pub mod style;
 pub mod text_area;
@@ -28,6 +30,7 @@ pub mod wrap;
 pub use area::*;
 pub use measure::*;
 pub use outline::*;
+pub use paragraphs::*;
 pub use region::*;
 pub use style::*;
 pub use text_area::*;
