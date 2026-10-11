@@ -6,8 +6,8 @@
        keeps an authored rect: a meshgradient fill compiles per shape).
        Every title, caption and label is a full-width text box (Slides), point text
        being the advanced form — kept on the two warp captions, which sit over the
-       warped grids, and on the two route labels over the connectors; the slides
-       tile in a 4-across grid (840 horizontal pitch, 525 vertical —
+       warped grids, on the two route labels over the connectors and on the four
+       path-algebra labels; the slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
        a 720x405 frame plus a 120-unit gutter). Every slide showcases a real xsvg
        extension LIVE — lists, textbox flow, type on a path, warps, mesh gradients,
        connectors, boolean algebra, tables, charts. In a plain viewer the slides
@@ -214,14 +214,14 @@
     <!-- path algebra gallery: four operands-in / one-plain-path-out demos -->
     <x:textbox x="56" y="239" width="608" height="12" font-size="13" fill="#64748b" text-overflow="ellipsis">Path algebra &amp; offset — operands in, one plain path out</x:textbox>
 
-    <x:textbox x="86" y="280" width="150" height="16" font-size="11" fill="#94a3b8" text-overflow="ellipsis">op="union"</x:textbox>
+    <text x="86" y="288" font-size="11" fill="#94a3b8">op="union"</text>
     <x:boolean op="union" fill="#dcfce7" stroke="#16a34a" stroke-width="2">
       <circle cx="104" cy="356" r="24"/>
       <circle cx="138" cy="344" r="30"/>
       <circle cx="170" cy="356" r="22"/>
     </x:boolean>
 
-    <x:textbox x="256" y="280" width="150" height="16" font-size="11" fill="#94a3b8" text-overflow="ellipsis">op="subtract"</x:textbox>
+    <text x="256" y="288" font-size="11" fill="#94a3b8">op="subtract"</text>
     <circle cx="278" cy="352" r="34" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <circle cx="300" cy="343" r="30" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="subtract" fill="#16a34a">
@@ -229,7 +229,7 @@
       <circle cx="300" cy="343" r="30"/>
     </x:boolean>
 
-    <x:textbox x="418" y="280" width="150" height="16" font-size="11" fill="#94a3b8" text-overflow="ellipsis">op="intersect"</x:textbox>
+    <text x="418" y="288" font-size="11" fill="#94a3b8">op="intersect"</text>
     <circle cx="444" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <circle cx="486" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="intersect" fill="#15803d" stroke="#86efac" stroke-width="2">
@@ -237,7 +237,7 @@
       <circle cx="486" cy="352" r="38"/>
     </x:boolean>
 
-    <x:textbox x="558" y="280" width="150" height="16" font-size="11" fill="#94a3b8" text-overflow="ellipsis">x:offset · outset</x:textbox>
+    <text x="558" y="288" font-size="11" fill="#94a3b8">x:offset · outset</text>
     <path id="tri3" d="M600,322 L630,378 L570,378 Z" fill="#dcfce7"/>
     <x:offset in="#tri3" distance="10" join="round" fill="none" stroke="#16a34a" stroke-width="2"/>
     <x:offset in="#tri3" distance="20" join="round" fill="none" stroke="#86efac" stroke-width="2"/>
