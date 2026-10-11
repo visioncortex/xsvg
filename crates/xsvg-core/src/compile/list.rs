@@ -49,9 +49,10 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     let mut counters: Vec<u32> = Vec::new(); // one running number per nesting level
 
-    // Pass 1: resolve each item's marker and wrap its text, with baselines laid
-    // out relative to a zero origin (0, advance, 2·advance, …). The absolute
-    // vertical offset is applied in pass 2 once the block height is known.
+    // Pass 1: resolve each item's marker and collect its runs; the stacking is
+    // the paragraph engine's (§6.16, the same stack a list inside a textbox
+    // gets): one block per item, its gutter as the inset, the list's
+    // item-spacing as the gap after it, every line stepping by its own size.
     struct Item<'n> {
         col: f64,
         marker: Marker,
@@ -65,34 +66,26 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         emits: Vec<EmitAttrs>,        // its styled-run emit table (`collect_runs`)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
-    let mut items: Vec<Item> = Vec::new();
-    let mut last_baseline = 0.0; // baseline of the last line placed (relative frame)
-                                 // Sizes of the block's first and last lines: its top edge is the first line's cap
-                                 // and its bottom edge the last line's descent, each at that line's OWN size, as for
-                                 // every other text block (§6.11). Uniform lists keep the list size for both.
-    let (mut first_size, mut last_size) = (size, size);
-    let mut first = true;
+    let mut units: Vec<ParaUnit> = Vec::new();
+    let mut meta: Vec<(f64, Marker, f64, TextStyle, Vec<EmitAttrs>, roxmltree::Node)> = Vec::new();
     for li in node
         .children()
         .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
     {
         let level = attr_num(li, "indent", 0.0).max(0.0) as usize;
         let kind = li.attribute("list").unwrap_or(list_kind);
-        let text_x = x + (level as f64 + 1.0) * indent_step;
-        let max_w = (x + width - text_x).max(1.0);
-        let col = text_x - marker_gap; // markers' right-edge column
-                                       // an <x:li> may override the font size (e.g. a smaller sub-point); it
-                                       // inherits the list's size otherwise, keeping the list's line-height
+        let inset = (level as f64 + 1.0) * indent_step;
+        let col = x + inset - marker_gap; // markers' right-edge column
+                                          // an <x:li> may override the font size (e.g. a smaller sub-point); it
+                                          // inherits the list's size otherwise, keeping the list's line-height
         let item_size = attr_pos(li, "font-size", size);
         let item_style = TextStyle {
             size: item_size,
             ..style.clone()
         };
-        let item_advance = item_size * style.line_height;
         // an item is a real run leaf: <tspan> styling and <tbreak/> forced
         // breaks ('\n' in the stream) flow through the walker every box uses
         let (segments, styles, emits) = collect_runs(li, &item_style);
-        let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
 
         // outline counters: extend to this level, drop any deeper ones (a pop
         // restarts sublists), then advance this level's number
@@ -118,92 +111,48 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             },
         };
 
-        // Every line advances by its OWN size (its largest run) × line-height — the
-        // first line of an item and of each forced chunk included. Stepping into an
-        // item by the item's base size put a 3×-size run's ascent up inside the item
-        // above. The gap is also *this* line's, not the previous item's, so a smaller
-        // sub-point still tucks up under a larger parent.
-        //
-        // `layout_flow_runs` pins its first line at the `y` it is given, so each chunk
-        // is laid out at 0, its first line's size read, and the chunk shifted into
-        // place. A blank chunk (consecutive breaks) occupies one row, like everywhere.
-        let mut lines: Vec<PlacedLine> = Vec::new();
-        let mut item_last_b = last_baseline;
-        let mut item_first_b = None;
-        if !plain.trim().is_empty() {
-            // the advance onto the next row: the gap between items, or within one
-            let mut gap = if first { None } else { Some(item_spacing) };
-            for flow in split_flows(&segments) {
-                if flow.iter().all(|(t, _)| t.trim().is_empty()) {
-                    item_last_b += gap.map_or(0.0, |g| g + item_advance);
-                    item_first_b.get_or_insert(item_last_b);
-                    gap = Some(0.0);
-                    continue;
-                }
-                let mut ls = layout_flow_runs(&flow, &styles, text_x, 0.0, max_w, m);
-                let lead = ls.first().map_or(item_size, |l| l.size) * style.line_height;
-                let at = gap.map_or(0.0, |g| item_last_b + g + lead);
-                for l in &mut ls {
-                    l.baseline += at;
-                }
-                if lines.is_empty() && first {
-                    first_size = ls.first().map_or(item_size, |l| l.size);
-                }
-                item_first_b.get_or_insert(at);
-                item_last_b = ls.last().map_or(at, |l| l.baseline);
-                last_size = ls.last().map_or(item_size, |l| l.size);
-                lines.extend(ls);
-                gap = Some(0.0);
-            }
-        } else if !first {
-            item_last_b += item_advance + item_spacing; // an empty item keeps its row
-        }
-        let first_baseline = item_first_b.unwrap_or(item_last_b);
-        last_baseline = item_last_b;
-        items.push(Item {
+        units.push(ParaUnit {
+            segments,
+            styles,
+            space_before: 0.0,
+            space_after: item_spacing,
+            inset,
+            align: Align::Start,
+            text_indent: 0.0,
+            rtl: false,
+        });
+        meta.push((col, marker, item_size, item_style, emits, li));
+    }
+    let (laid, block_h) = stack_paragraphs(&units, x, width, m);
+    let items: Vec<Item> = laid
+        .into_iter()
+        .zip(meta)
+        .map(|(laid, (col, marker, size, style, emits, src))| Item {
             col,
             marker,
-            lines,
-            baseline: first_baseline,
-            size: item_size,
-            style: item_style,
+            baseline: laid.first_baseline,
+            // a blank row (an empty item, or a forced blank line) takes its
+            // space and emits nothing
+            lines: laid
+                .lines
+                .into_iter()
+                .filter(|l| !l.text.is_empty())
+                .collect(),
+            size,
+            style,
             emits,
-            src: li,
-        });
-        first = false;
-    }
+            src,
+        })
+        .collect();
 
-    // Block height = first cap-top → last descent. In the relative frame the first
-    // baseline is 0 (so cap-top is −cap_height) and the last baseline is
-    // `last_baseline`. Place per `valign` within the available height (top else).
-    let block_h = if items.is_empty() {
-        0.0
-    } else {
-        let at = |sz: f64| {
-            m.font_metrics(
-                &TextStyle {
-                    size: sz,
-                    ..style.clone()
-                },
-                sz,
-            )
-        };
-        last_baseline + at(first_size).cap_height + at(last_size).descent
-    };
+    // Block height = first cap-top → last descent (the engine's frame puts the
+    // first cap-top at 0). Place per `valign` within the available height (top else).
     let block_top = match (valign, avail_h) {
         (VAlign::Middle, Some(h)) => y + (h - block_h) / 2.0,
         (VAlign::Bottom, Some(h)) => y + (h - block_h),
         _ => y, // top, or no height to align within
     };
-    // relative baseline 0 → this y, the first line's cap at its own size
-    let first_fm = m.font_metrics(
-        &TextStyle {
-            size: first_size,
-            ..style.clone()
-        },
-        first_size,
-    );
-    let offset = block_top + first_fm.cap_height;
+    let offset = block_top;
 
     // Pass 2: emit, shifting every relative baseline by `offset`. Markers and text
     // scale with the item's own size; a per-line `font-size` overrides the <text>

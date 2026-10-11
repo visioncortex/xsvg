@@ -53,6 +53,14 @@ partial one.
   paragraph it falls in, and a line wider than its paragraph is cut to fit, as §6.6 says
   for every other flow. The editor's text-layout seam reports the same rewritten line.
 
+### Internal
+
+- Text layout consolidated, with no output change: one clip-and-truncate pass
+  (`truncate::clip_lines`) for the area, textArea and paragraph flows, one shrink-to-fit
+  bisection (`fit::bisect_fit`), and paragraph stacking moved out of the emitter into a
+  `text::paragraphs` engine that the textbox, the standalone list and the editor's
+  text-layout seam all share.
+
 ## [0.2.2] — 2026-10-08
 
 **A security fix and a round of text typesetting.** Opening an untrusted `.xsvg` in the
