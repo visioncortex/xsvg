@@ -830,6 +830,7 @@ It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` �
 
 ```xml
 <x:table x="28" y="60" width="664" cols="150 * 2*" cell-padding="10" header-fill="#eef2ff">
+  <x:col font-weight="600"/>
   <x:tr><x:th>Feature</x:th><x:th>What it does</x:th></x:tr>
   <x:tr><x:td>Text layout</x:td><x:td>wraps, fits, justifies — this cell grows the row</x:td></x:tr>
 </x:table>
@@ -846,10 +847,15 @@ It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` �
 | `stripe` | color | zebra background for every other **body** row (rows with no header cell); the first data row is unstriped |
 | `fill`, `align`, `valign`, `font-*` | as §6.1 | default text color, alignment, and style for all cells |
 
-`<x:th>` cells default to **bold** and the `header-fill` background. Any cell (`td`/`th`) may override
+`<x:th>` cells default to **bold** and the `header-fill` background. The same cell properties —
 `align` / `valign` / `fill` (text color) / `bg` (background) / `font-*` (family/size/weight/style/
-line-height — a per-cell font-size also grows its row) per cell. Background precedence is
-`bg` › header › stripe › `cell-fill`. The table **auto-heights** to its content (rows stack top-down).
+line-height — a per-cell font-size also grows its row) — may be set at three levels: on an
+**`<x:col>`** child (one per column, in order, before the rows — HTML's `<col>`; a column's
+defaults, so a bold first column is one element, not an attribute on every cell), on an
+**`<x:tr>`** (the row's defaults — a header row's tint or weight), and on the cell. A property
+resolves **cell › row › column › header default › table**. Background precedence within a level
+is `bg` › header › stripe › `cell-fill`. An editor that inserts a row or column therefore creates
+plain cells and the look holds. The table **auto-heights** to its content (rows stack top-down).
 Each cell compiles to its own `<g>` carrying the source range of its `<x:td>`/`<x:th>` — so a viewer's
 inspector resolves a click to the individual **cell**, not the whole table.
 

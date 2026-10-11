@@ -831,6 +831,37 @@ fn table_source_map_is_per_cell() {
 }
 
 #[test]
+fn table_column_and_row_styles_resolve_cell_row_column_table() {
+    // <x:col> styles a column, <x:tr> attrs style a row, a cell wins over both
+    let svg = format!(
+        r##"{XW}<x:table x="0" y="0" width="200" cols="* *"><x:col font-weight="600" fill="#111111"/><x:col align="end"/><x:tr><x:td>a</x:td><x:td>b</x:td></x:tr><x:tr font-weight="300" fill="#222222"><x:td>c</x:td><x:td fill="#333333">d</x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_test(&svg);
+    let texts: Vec<&str> = out.split("<text ").skip(1).collect();
+    assert_eq!(texts.len(), 4, "{out}");
+    assert!(
+        texts[0].contains("font-weight=\"600\"") && texts[0].contains("fill=\"#111111\""),
+        "column 0 bold and tinted: {}",
+        texts[0]
+    );
+    assert!(
+        texts[1].contains("text-anchor=\"end\"") && !texts[1].contains("font-weight=\"600\""),
+        "column 1 right-aligned, not bold: {}",
+        texts[1]
+    );
+    assert!(
+        texts[2].contains("font-weight=\"300\"") && texts[2].contains("fill=\"#222222\""),
+        "the row overrides the column: {}",
+        texts[2]
+    );
+    assert!(
+        texts[3].contains("fill=\"#333333\"") && texts[3].contains("font-weight=\"300\""),
+        "the cell overrides the row, keeps the rest: {}",
+        texts[3]
+    );
+}
+
+#[test]
 fn table_stripe_alternates_body_rows() {
     // header + 3 body rows; the stripe lands on the 2nd body row only
     let svg = format!(

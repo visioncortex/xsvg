@@ -16,6 +16,11 @@ partial one.
 
 ### Added
 
+- **Table column and row styles.** `<x:col>` children (one per column, HTML's `<col>`) and
+  attributes on `<x:tr>` carry cell defaults — `align`, `valign`, `fill`, `bg`, `font-*`,
+  `line-height` — resolving cell › row › column › header default › table, so a bold first
+  column or a tinted header row is one declaration and an inserted row keeps the look (§6.15).
+
 - **Connector anchors sit on the shape.** `to="#id:top"` on a rotated or skewed plain
   shape attaches to the shape's own top-edge midpoint, mapped through its transform,
   instead of the top of its axis-aligned bounds, where no edge of the shape lies; on an

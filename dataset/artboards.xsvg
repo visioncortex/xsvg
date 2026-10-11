@@ -260,25 +260,29 @@
     <x:table x="392" y="150" width="300" cols="* 96" cell-padding="8"
              font-size="12.5" fill="#334155" stroke="#e2e8f0" stroke-width="1"
              header-fill="#fae8ff" stripe="#faf5ff" valign="middle">
+      <!-- column styles (HTML's <col>): the first column bold and dark, the
+           second right-aligned — a new row keeps the look with plain cells -->
+      <x:col font-weight="600" fill="#0f172a"/>
+      <x:col align="end"/>
       <x:tr>
-        <x:th align="start">Feature</x:th>
-        <x:th align="end">Bakes to</x:th>
+        <x:th align="start" fill="#334155">Feature</x:th>
+        <x:th>Bakes to</x:th>
       </x:tr>
       <x:tr>
-        <x:td font-weight="600" fill="#0f172a">Paragraphs</x:td>
-        <x:td align="end">tspans</x:td>
+        <x:td>Paragraphs</x:td>
+        <x:td>tspans</x:td>
       </x:tr>
       <x:tr>
-        <x:td font-weight="600" fill="#0f172a">Styled runs</x:td>
-        <x:td align="end">tspans</x:td>
+        <x:td>Styled runs</x:td>
+        <x:td>tspans</x:td>
       </x:tr>
       <x:tr>
-        <x:td font-weight="600" fill="#0f172a">Tables</x:td>
-        <x:td align="end">rects + text</x:td>
+        <x:td>Tables</x:td>
+        <x:td>rects + text</x:td>
       </x:tr>
       <x:tr>
-        <x:td font-weight="600" fill="#0f172a">First-line indent</x:td>
-        <x:td align="end">shifted tspan</x:td>
+        <x:td>First-line indent</x:td>
+        <x:td>shifted tspan</x:td>
       </x:tr>
     </x:table>
   </g>

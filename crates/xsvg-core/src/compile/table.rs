@@ -48,6 +48,19 @@ pub(super) fn resolve_cols(spec: Option<&str>, ncols: usize, total: f64) -> Vec<
 /// widths are author-set (`cols`, else even); **row heights grow to fit content** —
 /// each cell wraps its text to its column and the tallest cell sets the row — the
 /// presentation-table model (Slides/Canva), baked to plain `<rect>`s + `<text>`.
+/// A cell property resolved cell › row (`<x:tr>` attrs) › column (`<x:col>`);
+/// the caller supplies the header default and the table's below that.
+fn cell_prop<'a, 'i>(
+    cell: roxmltree::Node<'a, 'i>,
+    row: roxmltree::Node<'a, 'i>,
+    col: Option<roxmltree::Node<'a, 'i>>,
+    name: &str,
+) -> Option<&'a str> {
+    cell.attribute(name)
+        .or_else(|| row.attribute(name))
+        .or_else(|| col.and_then(|c| c.attribute(name)))
+}
+
 pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node, ctx);
@@ -85,6 +98,13 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .children()
         .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "tr")
         .collect();
+    // column styles: one <x:col> per column, in order (HTML's <col>), each a
+    // set of cell defaults for that column; a cell property resolves
+    // cell › row (<x:tr> attrs) › column › header default › table
+    let col_styles: Vec<roxmltree::Node> = node
+        .children()
+        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "col")
+        .collect();
     let ncols = rows
         .iter()
         .map(|r| r.children().filter(is_cell).count())
@@ -100,32 +120,29 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         colx[i + 1] = colx[i] + colw[i];
     }
 
-    // per-cell text style: bold for header cells, else the table style
-    // per-cell text style: the table style, with `<x:th>` defaulting to bold and
-    // any explicit font-* on the cell overriding the table.
-    let cell_style = |cell: roxmltree::Node| {
+    // per-cell text style: the table style, with `<x:th>` defaulting to bold,
+    // then the column's, the row's and the cell's own font-* in turn.
+    let cell_style = |cell: roxmltree::Node, row: roxmltree::Node, ci: usize| {
         let mut st = style.clone();
         if cell.tag_name().name() == "th" {
             st.weight = "700".to_string();
         }
-        if let Some(v) = cell.attribute("font-family") {
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-family") {
             st.family = v.to_string();
         }
-        if let Some(v) = cell
-            .attribute("font-size")
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-size")
             .and_then(parse_num)
             .filter(|n| *n > 0.0)
         {
             st.size = v;
         }
-        if let Some(v) = cell.attribute("font-weight") {
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-weight") {
             st.weight = v.to_string();
         }
-        if let Some(v) = cell.attribute("font-style") {
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-style") {
             st.style = v.to_string();
         }
-        if let Some(v) = cell
-            .attribute("line-height")
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "line-height")
             .and_then(parse_num)
             .filter(|n| *n > 0.0)
         {
@@ -155,7 +172,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     for row in &rows {
         let mut h = 0.0f64;
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
-            let cst = cell_style(cell);
+            let cst = cell_style(cell, *row, ci);
             let cfm = m.font_metrics(&cst, cst.size);
             // a cell is a run leaf: styled runs and <tbreak/> forced breaks
             // lay out like a textbox, and the row takes the block's cap band
@@ -208,15 +225,17 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         for (ci, cell) in row.children().filter(is_cell).enumerate() {
             let header = cell.tag_name().name() == "th";
             let (cx, cw, cy, ch) = (colx[ci], colw[ci], rowy[ri], row_h[ri]);
-            let bg = cell.attribute("bg").map(|v| ctx.paint(v)).or_else(|| {
-                if header {
-                    Some(header_bg.clone())
-                } else if striped {
-                    stripe.clone()
-                } else {
-                    body_bg.clone()
-                }
-            });
+            let bg = cell_prop(cell, *row, col_styles.get(ci).copied(), "bg")
+                .map(|v| ctx.paint(v))
+                .or_else(|| {
+                    if header {
+                        Some(header_bg.clone())
+                    } else if striped {
+                        stripe.clone()
+                    } else {
+                        body_bg.clone()
+                    }
+                });
             out.push_str("<g");
             out.push_str(&pos_attr(cell, ctx));
             out.push('>');
@@ -236,12 +255,11 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             }
             out.push_str("/>");
 
-            let st = cell_style(cell);
+            let st = cell_style(cell, *row, ci);
             let (segments, styles, emits) = collect_runs(cell, &st);
             let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
             if !plain.trim().is_empty() {
-                let fill = cell
-                    .attribute("fill")
+                let fill = cell_prop(cell, *row, col_styles.get(ci).copied(), "fill")
                     .map(|v| ctx.resolve_var(v).into_owned())
                     .unwrap_or_else(|| text_fill.clone());
                 let spec = AreaSpec {
@@ -250,8 +268,14 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     width: cw,
                     height: ch,
                     padding: pad,
-                    align: Align::parse(cell.attribute("align").unwrap_or(default_align)),
-                    valign: VAlign::parse(cell.attribute("valign").unwrap_or(default_valign)),
+                    align: Align::parse(
+                        cell_prop(cell, *row, col_styles.get(ci).copied(), "align")
+                            .unwrap_or(default_align),
+                    ),
+                    valign: VAlign::parse(
+                        cell_prop(cell, *row, col_styles.get(ci).copied(), "valign")
+                            .unwrap_or(default_valign),
+                    ),
                     fit: Fit::None,
                     text_overflow: TextOverflow::Clip,
                     text_indent: 0.0,
