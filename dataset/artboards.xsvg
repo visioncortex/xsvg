@@ -5,7 +5,8 @@
        and an x:fill that paints the frame as the slide's backdrop (the mesh slide
        keeps an authored rect: a meshgradient fill compiles per shape).
        Every title, caption and label is a full-width text box (Slides), point text
-       being the advanced form; the slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
+       being the advanced form — kept on the two warp captions, which sit over the
+       warped grids; the slides tile in a 4-across grid (840 horizontal pitch, 525 vertical —
        a 720x405 frame plus a 120-unit gutter). Every slide showcases a real xsvg
        extension LIVE — lists, textbox flow, type on a path, warps, mesh gradients,
        connectors, boolean algebra, tables, charts. In a plain viewer the slides
@@ -110,14 +111,14 @@
     <x:textbox x="56" y="81" width="608" height="30" font-size="32" font-weight="800" fill="#0f172a" text-overflow="ellipsis">Bend the geometry</x:textbox>
 
     <!-- a plain square grid, bulged by a fisheye lens -->
-    <x:textbox x="86" y="147" width="300" height="11" font-size="12" fill="#6b7280" text-overflow="ellipsis">field="fisheye" — a grid through a lens</x:textbox>
+    <text x="86" y="156" font-size="12" fill="#6b7280">field="fisheye" — a grid through a lens</text>
     <rect x="86" y="168" width="200" height="160" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1"/>
     <x:warp field="fisheye" bend="62">
       <path fill="none" stroke="#7c3aed" stroke-width="2.5" d="M96,178 L96,318 M121,178 L121,318 M146,178 L146,318 M171,178 L171,318 M196,178 L196,318 M221,178 L221,318 M246,178 L246,318 M271,178 L271,318 M96,178 L271,178 M96,201 L271,201 M96,224 L271,224 M96,248 L271,248 M96,271 L271,271 M96,294 L271,294 M96,318 L271,318"/>
     </x:warp>
 
     <!-- a filled star, swirled by twist -->
-    <x:textbox x="420" y="147" width="300" height="11" font-size="12" fill="#6b7280" text-overflow="ellipsis">field="twist" — a star given a swirl</x:textbox>
+    <text x="420" y="156" font-size="12" fill="#6b7280">field="twist" — a star given a swirl</text>
     <x:warp field="twist" bend="58">
       <polygon fill="#db2777" points="520,180 539,224 587,227 549,257 562,304 520,278 478,304 491,257 453,227 501,224"/>
     </x:warp>
