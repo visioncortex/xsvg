@@ -17,7 +17,20 @@ export interface ViewState {
   ty: number;
 }
 
+/** Edges of the viewport covered by chrome (CSS px): fits and centred zooms
+ *  use the uncovered rect. A host that floats panels over a fixed canvas —
+ *  so the canvas never relayouts when a panel opens — sets these instead. */
+export interface Insets {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface PanZoom {
+  /** The covered edges (see `Insets`); partial updates keep the rest. */
+  setInsets(insets: Partial<Insets>): void;
+  insets(): Insets;
   /** Center the content at 1:1. */
   reset(): void;
   /** Put content point (cx, cy) at the viewport center, at 1:1 — 1:1 on a
@@ -60,10 +73,25 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   let pointerId = -1;
   const listeners = new Set<() => void>();
   const bgClickListeners = new Set<() => void>();
+  const inset: Insets = { left: 0, top: 0, right: 0, bottom: 0 };
+  // the uncovered part of the viewport: origin and size
+  const visible = () => ({
+    x: inset.left,
+    y: inset.top,
+    w: Math.max(0, viewport.clientWidth - inset.left - inset.right),
+    h: Math.max(0, viewport.clientHeight - inset.top - inset.bottom),
+  });
 
   const apply = () => {
     content.style.transformOrigin = "0 0";
-    content.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    // The rendered translation snaps to whole device pixels: a fractional
+    // offset makes the engine resample the composited layer and vector art
+    // reads blurry (found live: a fit beside a sidebar). The camera state
+    // stays exact, so zoom anchors and pans accumulate without drift.
+    const dpr = window.devicePixelRatio || 1;
+    const sx = Math.round(tx * dpr) / dpr;
+    const sy = Math.round(ty * dpr) / dpr;
+    content.style.transform = `translate(${sx}px, ${sy}px) scale(${scale})`;
     listeners.forEach((cb) => cb());
   };
 
@@ -82,8 +110,10 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     apply();
   };
 
-  const zoomAtCenter = (factor: number) =>
-    zoomBy(factor, viewport.clientWidth / 2, viewport.clientHeight / 2);
+  const zoomAtCenter = (factor: number) => {
+    const v = visible();
+    zoomBy(factor, v.x + v.w / 2, v.y + v.h / 2);
+  };
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -173,43 +203,43 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
 
   const reset = () => {
     const [w, h] = contentSize();
+    const v = visible();
     scale = 1;
-    tx = (viewport.clientWidth - w) / 2;
-    ty = (viewport.clientHeight - h) / 2;
+    tx = v.x + (v.w - w) / 2;
+    ty = v.y + (v.h - h) / 2;
     apply();
   };
 
   const fit = () => {
     const [w, h] = contentSize();
-    const vw = viewport.clientWidth;
-    const vh = viewport.clientHeight;
-    if (!(w > 0 && h > 0 && vw > 0 && vh > 0)) {
+    const v = visible();
+    if (!(w > 0 && h > 0 && v.w > 0 && v.h > 0)) {
       reset();
       return;
     }
-    scale = clamp(Math.min(vw / w, vh / h) * 0.94, MIN_SCALE, MAX_SCALE);
-    tx = (vw - scale * w) / 2;
-    ty = (vh - scale * h) / 2;
+    scale = clamp(Math.min(v.w / w, v.h / h) * 0.94, MIN_SCALE, MAX_SCALE);
+    tx = v.x + (v.w - scale * w) / 2;
+    ty = v.y + (v.h - scale * h) / 2;
     apply();
   };
 
   const resetTo = (cx: number, cy: number) => {
+    const v = visible();
     scale = 1;
-    tx = viewport.clientWidth / 2 - cx;
-    ty = viewport.clientHeight / 2 - cy;
+    tx = v.x + v.w / 2 - cx;
+    ty = v.y + v.h / 2 - cy;
     apply();
   };
 
   const fitTo = (x: number, y: number, w: number, h: number) => {
-    const vw = viewport.clientWidth;
-    const vh = viewport.clientHeight;
-    if (!(w > 0 && h > 0 && vw > 0 && vh > 0)) {
+    const v = visible();
+    if (!(w > 0 && h > 0 && v.w > 0 && v.h > 0)) {
       fit();
       return;
     }
-    scale = clamp(Math.min(vw / w, vh / h) * 0.94, MIN_SCALE, MAX_SCALE);
-    tx = (vw - scale * w) / 2 - scale * x;
-    ty = (vh - scale * h) / 2 - scale * y;
+    scale = clamp(Math.min(v.w / w, v.h / h) * 0.94, MIN_SCALE, MAX_SCALE);
+    tx = v.x + (v.w - scale * w) / 2 - scale * x;
+    ty = v.y + (v.h - scale * h) / 2 - scale * y;
     apply();
   };
 
@@ -224,6 +254,8 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   window.addEventListener("blur", onBlur);
 
   return {
+    setInsets: (i) => Object.assign(inset, i),
+    insets: () => ({ ...inset }),
     reset,
     resetTo,
     fit,
