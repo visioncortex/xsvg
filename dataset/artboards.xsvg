@@ -48,7 +48,7 @@
     <!-- tile 1: full justification -->
     <x:textbox x="56" y="144" width="200" height="16" font-size="11" fill="#64748b" text-overflow="ellipsis">align="justify" · text-indent</x:textbox>
     <x:textbox x="56" y="162" width="200" height="184" align="justify" valign="top"
-               text-indent="18" font-size="12.5" line-height="1.5" fill="#334155">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — a first-line indent leads it in, live and selectable.</x:textbox>
+               text-indent="18" font-size="12.5" line-height="1.5" fill="#334155" text-overflow="ellipsis">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — a first-line indent leads it in, live and selectable.</x:textbox>
 
     <!-- tile 2: shrink-to-fit — a shape with text, as the editor makes one:
          a <g> of the shape and a textbox bound to it by in="#id", autosized
@@ -66,7 +66,7 @@
     <g>
       <circle id="flow3" cx="576" cy="256" r="86" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="2"/>
       <x:textbox in="#flow3" align="center" valign="middle" padding="14"
-                 font-size="12" line-height="1.35" fill="#075985">Text flows inside any shape's outline, not just a box — the words wrap to the curve, filling this circle line by line, right out to the rim.</x:textbox>
+                 font-size="12" line-height="1.35" fill="#075985" text-overflow="ellipsis">Text flows inside any shape's outline, not just a box — the words wrap to the curve, filling this circle line by line, right out to the rim.</x:textbox>
     </g>
   </g>
 
@@ -88,7 +88,7 @@
     <x:warp id="archword" field="arch" bend="52">
       <x:textbox x="392" y="176" width="300" height="86" align="center" valign="middle"
                  outline="true" font-family="-x-google-Anton" font-size="42"
-                 fill="#38bdf8" stroke="#ffffff" stroke-width="2">ARCH</x:textbox>
+                 fill="#38bdf8" stroke="#ffffff" stroke-width="2" text-overflow="ellipsis">ARCH</x:textbox>
     </x:warp>
 
     <!-- lower-left: skew — verticals stay upright, the baseline rides a wave -->
