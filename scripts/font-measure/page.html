@@ -1,0 +1,84 @@
+<!doctype html>
+<!-- Measures a matrix of web fonts × strings through canvas measureText, the same
+     calls the viewer's JsMeasurer makes (packages/xsvg-viewer/src/compiler.ts): the
+     advance width, and the font box (fontBoundingBoxAscent/Descent) plus cap height
+     ("H") and x-height ("x") from actualBoundingBoxAscent.
+
+     Every family is loaded from one fixed Google Fonts woff2 URL (the latin subset
+     the viewer's pickLatinWoff2 would choose) through the FontFace API, so both
+     browsers measure the identical font file and what differs is the text engine.
+     When all faces are loaded the JSON goes into <body> and the title becomes
+     "done", which the runners wait for. -->
+<meta charset="utf-8">
+<title>loading</title>
+<body><script>
+const FONTS = {
+  "Anton": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3Kz-C8CSKlv.woff2",
+  "Inter": "https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff2",
+  "Roboto": "https://fonts.gstatic.com/s/roboto/v51/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWubEbVmUiAr0klQmz24.woff2",
+  "Open Sans": "https://fonts.gstatic.com/s/opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0B4gaVIUwaEQbjA.woff2",
+  "Lato": "https://fonts.gstatic.com/s/lato/v25/S6uyw4BMUTPHjx4wXiWtFCc.woff2",
+  "Montserrat": "https://fonts.gstatic.com/s/montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCtr6Hw5aXp-p7K4KLg.woff2",
+  "Oswald": "https://fonts.gstatic.com/s/oswald/v57/TK3_WkUHHAIjg75cFRf3bXL8LICs1_FvsUZiZSSUhiCXAA.woff2",
+  "Playfair Display": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKdFvXDXbtPK-F2qC0s.woff2",
+  "Noto Sans": "https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9A-9a6VLYyWtZ3rI.woff2",
+  "Source Serif 4": "https://fonts.gstatic.com/s/sourceserif4/v15/vEFy2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6OAVIJmeUDygwjihdqnhtdDs4DrjTMXw.woff2",
+  "Merriweather": "https://fonts.gstatic.com/s/merriweather/v33/u-4D0qyriQwlOrhSvowK_l5UcA6zuSYEqOzpPe3HOZJ5eX1WtLaQwmYiScCmDxhtNOKl8yDr3icaFF31CPDaYKfF.woff2",
+  "Poppins": "https://fonts.gstatic.com/s/poppins/v24/pxiEyp8kv8JHgFVrJJfecnFHGPc.woff2",
+  "Roboto Mono": "https://fonts.gstatic.com/s/robotomono/v31/L0xuDF4xlVMF-BfR8bXMIhJHg45mwgGEFl0_3vq_ROW4AJi8SJQt.woff2",
+  "Lora": "https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787weuxJBkq18ndeYxZ0.woff2",
+};
+const WEIGHTS = ["normal", "bold"]; // bold is synthesized for single-weight files: an engine choice
+const SIZES = [11, 14, 16, 20, 32, 64];
+const STRINGS = {
+  pangram: "The quick brown fox jumps over the lazy dog",
+  kern: "AVAWAY To Ty Vo We f) LT",
+  digits: "0123456789 $1,234.56",
+  punct: "— “quotes” … (x) [y] {z}",
+  long: "Every x: extension degrades to plain SVG, so a viewer that has never heard of xsvg still shows the document.",
+  caps: "HAMBURGEFONTSIV",
+  lower: "hamburgefontsiv",
+  i: "iiiiiiiiii",
+  w: "WWWWWWWWWW",
+  space: " ",
+  accents: "Ångström façade naïve résumé",
+};
+(async () => {
+  const out = { ua: navigator.userAgent, dpr: devicePixelRatio, loaded: {}, fonts: {} };
+  await Promise.all(Object.entries(FONTS).map(async ([family, url]) => {
+    try {
+      // fetch the bytes ourselves so a caching or format quirk cannot hand the two
+      // browsers different files; FontFace then parses the same buffer in each
+      const bytes = await (await fetch(url)).arrayBuffer();
+      const face = new FontFace(family, bytes);
+      await face.load();
+      document.fonts.add(face);
+      out.loaded[family] = bytes.byteLength;
+    } catch (e) {
+      out.loaded[family] = String(e);
+    }
+  }));
+  const c = document.createElement("canvas").getContext("2d");
+  for (const family of Object.keys(FONTS)) {
+    for (const weight of WEIGHTS) {
+      for (const size of SIZES) {
+        const css = `normal ${weight} ${size}px "${family}"`;
+        c.font = css;
+        const box = c.measureText("Hg");
+        const rec = {
+          applied: c.font,
+          ascent: box.fontBoundingBoxAscent,
+          descent: box.fontBoundingBoxDescent,
+          cap: c.measureText("H").actualBoundingBoxAscent,
+          xh: c.measureText("x").actualBoundingBoxAscent,
+          widths: {},
+        };
+        for (const [k, s] of Object.entries(STRINGS)) rec.widths[k] = c.measureText(s).width;
+        out.fonts[css] = rec;
+      }
+    }
+  }
+  document.body.textContent = JSON.stringify(out);
+  document.title = "done";
+})();
+</script></body>
