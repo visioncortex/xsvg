@@ -78,8 +78,12 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                 // geometry below, and keeps the box.
                 if let (Some(an), Some(target)) = (anchor, ctx.resolve_ref(node, id)) {
                     let own = super::refs::element_transform(target);
-                    let [_, b, c, _, _, _] = own.as_coeffs();
-                    let turned = b.abs() > 1e-9 || c.abs() > 1e-9;
+                    // turned: a rotation or skew (b, c), or a half turn / a
+                    // reflection (a or d negative) — at exactly 180° b and c
+                    // are zero yet the shape's top is at the bottom of its
+                    // bounds (found live: the wrong edge)
+                    let [a, b, c, d, _, _] = own.as_coeffs();
+                    let turned = b.abs() > 1e-9 || c.abs() > 1e-9 || a < 0.0 || d < 0.0;
                     let name = target.tag_name().name();
                     let round = target.tag_name().namespace() != Some(XSVG_NS)
                         && (name == "ellipse" || name == "circle");

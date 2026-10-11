@@ -131,6 +131,17 @@ fn connector_anchors_turn_with_a_rotated_target() {
         "attaches at the turned top midpoint: {}",
         route_d(&out)
     );
+    // a half turn: b and c are zero, yet the shape's top is at the bottom of
+    // its bounds — rotate(180 140 20) maps (140, 0) to (140, 40)
+    let svg = format!(
+        r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40" transform="rotate(180 140 20)"/><x:connector from="#a" to="#b:top" arrow="none"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        route_d(&out).ends_with("L140,40"),
+        "a half turn puts top at the bottom: {}",
+        route_d(&out)
+    );
     // without an anchor the bounds still decide (the centre ray clips at them)
     let svg = format!(
         r##"{XW}<rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40" transform="rotate(90 140 20)"/><x:connector from="#a" to="#b" arrow="none"/></svg>"##
