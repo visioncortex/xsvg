@@ -31,6 +31,11 @@ export interface PanZoom {
   /** The covered edges (see `Insets`); partial updates keep the rest. */
   setInsets(insets: Partial<Insets>): void;
   insets(): Insets;
+  /** The hand tool: every left press pans, painted content included, and
+   *  no background press is a click. The viewport carries the `hand` class
+   *  while on, for the cursor. */
+  setHandMode(on: boolean): void;
+  handMode(): boolean;
   /** Center the content at 1:1. */
   reset(): void;
   /** Put content point (cx, cy) at the viewport center, at 1:1 — 1:1 on a
@@ -74,6 +79,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   const listeners = new Set<() => void>();
   const bgClickListeners = new Set<() => void>();
   const inset: Insets = { left: 0, top: 0, right: 0, bottom: 0 };
+  let hand = false;
   // the uncovered part of the viewport: origin and size
   const visible = () => ({
     x: inset.left,
@@ -136,10 +142,11 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
       e.target === content ||
       (e.target instanceof SVGSVGElement && e.target.parentElement === content);
     const bgPan = e.button === 0 && empty;
-    if (!(middle || spacePan || bgPan)) return;
-    if (middle || spacePan) e.preventDefault(); // no text-selection / autoscroll
+    const handPan = e.button === 0 && hand;
+    if (!(middle || spacePan || bgPan || handPan)) return;
+    if (middle || spacePan || handPan) e.preventDefault(); // no text-selection / autoscroll
     dragging = true;
-    bgClickCandidate = bgPan;
+    bgClickCandidate = bgPan && !handPan; // the hand never deselects
     pointerId = e.pointerId;
     startX = lastX = e.clientX;
     startY = lastY = e.clientY;
@@ -256,6 +263,11 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   return {
     setInsets: (i) => Object.assign(inset, i),
     insets: () => ({ ...inset }),
+    setHandMode: (on) => {
+      hand = on;
+      viewport.classList.toggle("hand", on);
+    },
+    handMode: () => hand,
     reset,
     resetTo,
     fit,
