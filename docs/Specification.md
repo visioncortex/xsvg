@@ -919,7 +919,10 @@ an Enter reads as a paragraph and a `<tbreak/>` as a plain line). A paragraph br
 therefore never tighter than a wrapped line, and an **empty `<x:p>` owns one blank row** (it emits
 no glyphs but takes its line advance — the blank line an editor's double-Enter produces). The
 whole stacked block is then placed by the box's `valign` (top/middle/bottom), and lines whose
-baseline leaves the box are clipped. Each `<x:p>` compiles to its own `<text>` carrying its source
+baseline leaves the box are clipped, and `text-overflow` (§6.6) then applies across the block:
+under `ellipsis` the last line that renders — in whichever paragraph it falls, including when a
+later paragraph was dropped whole — is ellipsized, as is any line wider than its paragraph. Each
+`<x:p>` compiles to its own `<text>` carrying its source
 range (a click resolves to the paragraph); `<tspan>` runs inside a paragraph keep their styling,
 and a `<tbreak/>` forces a line break **within** the paragraph at the same line advance.
 `fit="shrink"` applies to the whole block (§6.1: the scale is searched, so all paragraphs shrink

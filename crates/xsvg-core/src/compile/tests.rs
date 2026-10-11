@@ -4389,8 +4389,10 @@ fn text_layout_matches_emitted_tspans() {
 <x:textbox x="0" y="100" width="60" height="30" font-size="20" fit="shrink" valign="middle">epsilon zeta</x:textbox>
 <x:textbox x="0" y="200" width="120" height="80" font-size="10" align="center" text-indent="12">eta theta iota kappa</x:textbox>
 <x:textbox x="0" y="300" width="160" height="120" font-size="12"><x:p>lambda mu</x:p><x:p align="end">nu xi omicron</x:p></x:textbox>
+<x:textbox x="0" y="500" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:p>aa bb</x:p><x:p>cc dd ee ff gg hh</x:p></x:textbox>
 </svg>"#;
     let out = compile_test(svg);
+    assert!(out.contains("…"), "the ellipsis case must truncate: {out}");
     let mut emitted: Vec<(f64, f64, String)> = Vec::new();
     let doc = roxmltree::Document::parse(&out).unwrap();
     for n in doc.descendants().filter(|n| n.tag_name().name() == "tspan") {
@@ -5666,4 +5668,88 @@ fn an_artboard_fill_paints_its_frame_under_the_slide() {
     let svg = format!(r##"{XW}<g x:fill="#000"><text x="0" y="0">a</text></g></svg>"##);
     let out = compile_test(&svg);
     assert!(!out.contains("<rect") && !out.contains("fill"), "{out}");
+}
+
+// ---------------------------------------------------------------- paragraph overflow
+// §6.6 applies to paragraph mode too: `ellipsis` marks the block's last rendered
+// line when any line was dropped, and any line wider than its paragraph.
+// Mono measures 5px per char at font-size 10; a 60px box holds 12 chars a line;
+// baselines fall at 7, then 7 + 3.5 (paragraph gap) + 12 (line advance) = 22.5,
+// then 34.5 — so height 30 shows the first two and drops the third.
+
+fn para_lines(out: &str) -> Vec<String> {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    doc.descendants()
+        .filter(|n| n.tag_name().name() == "tspan" && n.attribute("x").is_some())
+        .map(|n| {
+            n.descendants()
+                .filter(|d| d.is_text())
+                .filter_map(|d| d.text())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+#[test]
+fn paragraph_mode_ellipsizes_the_blocks_last_rendered_line() {
+    // the second paragraph loses its second line: its first line takes the mark
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:p>aa bb</x:p><x:p>cc dd ee ff gg hh</x:p></x:textbox></svg>"##
+    );
+    assert_eq!(para_lines(&compile_test(&svg)), ["aa bb", "cc dd ee ff…"]);
+
+    // a whole paragraph falling off the bottom marks the last line that shows,
+    // even though that paragraph itself fit
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:p>aa bb</x:p><x:p>cc dd</x:p><x:p>ee ff</x:p></x:textbox></svg>"##
+    );
+    assert_eq!(para_lines(&compile_test(&svg)), ["aa bb", "cc dd…"]);
+
+    // inline overflow: an unbreakable word wider than the box is cut to fit
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="100" font-size="10" text-overflow="ellipsis"><x:p>abcdefghijklmnop</x:p><x:p>cc</x:p></x:textbox></svg>"##
+    );
+    assert_eq!(para_lines(&compile_test(&svg)), ["abcdefghijk…", "cc"]);
+
+    // the default is clip: lines drop silently, nothing is rewritten
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="30" font-size="10"><x:p>aa bb</x:p><x:p>cc dd ee ff gg hh</x:p></x:textbox></svg>"##
+    );
+    assert_eq!(para_lines(&compile_test(&svg)), ["aa bb", "cc dd ee ff"]);
+
+    // styled runs survive the cut: the mark lands inside the last run that shows
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:p>aa bb</x:p><x:p>cc <tspan font-weight="bold">dd ee ff gg hh</tspan></x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(para_lines(&out), ["aa bb", "cc dd ee ff…"]);
+    assert!(
+        out.contains(r#"<tspan font-weight="bold">dd ee ff…</tspan>"#),
+        "{out}"
+    );
+
+    // a list inside the box: its last visible item carries the mark
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:list list="none"><x:li>aa</x:li><x:li>bb</x:li><x:li>cc</x:li></x:list></x:textbox></svg>"##
+    );
+    assert_eq!(para_lines(&compile_test(&svg)), ["aa", "bb…"]);
+}
+
+#[test]
+fn text_layout_reports_the_ellipsized_paragraph_line() {
+    // the editor seam shows the caret what is rendered: the rewritten text, with
+    // the word range it came from still intact (docs/Incremental.md §6)
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="60" height="30" font-size="10" text-overflow="ellipsis"><x:p>aa bb</x:p><x:p>cc dd ee ff gg hh</x:p></x:textbox></svg>"#;
+    let tl = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    assert_eq!(tl.paras.len(), 2);
+    assert_eq!(tl.paras[0].lines[0].text, "aa bb");
+    let cut = &tl.paras[1].lines;
+    assert_eq!(cut.len(), 1, "the dropped line is absent: {cut:?}");
+    assert_eq!(cut[0].text, "cc dd ee ff…");
+    assert_eq!(cut[0].words, (0, 4), "the line still covers its four words");
+    assert_eq!(
+        cut[0].justify_width, None,
+        "an ellipsized line renders at natural width"
+    );
 }

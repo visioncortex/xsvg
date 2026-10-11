@@ -45,6 +45,14 @@ partial one.
   now lowers that rect itself, as the group's first child, mapped through the group's
   transform so a placed slide gets it at its own origin (§5.2). The deck sample uses it.
 
+### Fixed
+
+- **Paragraph mode ignored `text-overflow="ellipsis"`.** A textbox with `<x:p>` children
+  dropped the lines that fell past its bottom but never marked the cut, so a truncated
+  card read as complete. The block's last rendered line now ends in `…`, whichever
+  paragraph it falls in, and a line wider than its paragraph is cut to fit, as §6.6 says
+  for every other flow. The editor's text-layout seam reports the same rewritten line.
+
 ## [0.2.2] — 2026-10-08
 
 **A security fix and a round of text typesetting.** Opening an untrusted `.xsvg` in the

@@ -4,6 +4,7 @@
 //! editor (docs/Incremental.md §6).
 
 use super::*;
+use crate::apply_ellipsis;
 
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
 pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
@@ -198,12 +199,7 @@ pub(super) fn emit_paragraphs(
     let mut markers = String::new();
     for para in &items {
         let Some(mk) = &para.marker else { continue };
-        let Some(first) = para
-            .lines
-            .first()
-            .map(|l| l.baseline + block_top)
-            .or_else(|| None)
-        else {
+        let Some(first) = para.lines.first().map(|l| l.baseline + block_top) else {
             continue;
         };
         if first < cy - 1e-6 || first > cy + ch + 1e-6 {
@@ -244,31 +240,16 @@ pub(super) fn emit_paragraphs(
         out.push_str("</text>");
     }
 
-    // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
-    // <text> per paragraph
-    for para in &items {
-        let visible: Vec<PlacedLine> = para
-            .lines
-            .iter()
-            .filter(|l| {
-                let b = l.baseline + block_top;
-                b >= cy - 1e-6 && b <= cy + ch + 1e-6
-            })
-            .cloned()
-            .collect();
-        if visible.is_empty() {
+    // pass 2: the lines the box shows, placed and truncated as its text-overflow
+    // asks; one <text> per paragraph
+    let visible = visible_paragraph_lines(&items, block_top, cy, ch, spec.text_overflow, m);
+    for (para, shifted) in items.iter().zip(&visible) {
+        if shifted.is_empty() {
             continue;
         }
-        let shifted: Vec<PlacedLine> = visible
-            .iter()
-            .map(|l| PlacedLine {
-                baseline: l.baseline + block_top,
-                ..l.clone()
-            })
-            .collect();
         emit_highlights(
             out,
-            &shifted,
+            shifted,
             para.anchor,
             para.rtl,
             &para.style,
@@ -284,11 +265,62 @@ pub(super) fn emit_paragraphs(
         }
         out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
         out.push('>');
-        for l in &shifted {
+        for l in shifted {
             emit_line(out, l, &para.style, para.style.size, gx, m, &para.emits);
         }
         out.push_str("</text>");
     }
+}
+
+/// Pass 2 of paragraph flow (§6.16), shared by emission and the editor's
+/// text-layout seam so the two cannot drift: the lines whose baseline lands
+/// inside the box, shifted into place, with `text-overflow` applied across the
+/// whole block as §6.6 says — `ellipsis` marks any rendered line wider than
+/// its paragraph's width, and the block's last rendered line when a line of
+/// any paragraph was dropped (a paragraph that fell off the bottom entirely
+/// included). One `Vec` per paragraph, empty where none of it shows.
+pub(super) fn visible_paragraph_lines(
+    items: &[ParaPlan],
+    block_top: f64,
+    cy: f64,
+    ch: f64,
+    overflow: TextOverflow,
+    m: &dyn Measurer,
+) -> Vec<Vec<PlacedLine>> {
+    let mut dropped = false;
+    let mut per: Vec<Vec<PlacedLine>> = Vec::with_capacity(items.len());
+    for para in items {
+        let mut lines = Vec::new();
+        for l in &para.lines {
+            let b = l.baseline + block_top;
+            if b >= cy - 1e-6 && b <= cy + ch + 1e-6 {
+                lines.push(PlacedLine {
+                    baseline: b,
+                    ..l.clone()
+                });
+            } else {
+                dropped = true;
+            }
+        }
+        per.push(lines);
+    }
+    if overflow == TextOverflow::Ellipsis {
+        let last = per.iter().rposition(|v| !v.is_empty());
+        for (i, (para, lines)) in items.iter().zip(per.iter_mut()).enumerate() {
+            if lines.is_empty() {
+                continue;
+            }
+            apply_ellipsis(
+                lines,
+                dropped && Some(i) == last,
+                para.width,
+                &para.style,
+                para.style.size,
+                m,
+            );
+        }
+    }
+    per
 }
 
 /// One planned paragraph of a §6.16 flow: lines laid in a RELATIVE frame
@@ -296,6 +328,9 @@ pub(super) fn emit_paragraphs(
 /// to place them in the box.
 pub(super) struct ParaPlan<'a> {
     pub(super) lines: Vec<PlacedLine>,
+    /// The content width the paragraph wrapped to (the box's, less a list
+    /// item's gutter), scaled — what a line must not exceed under `ellipsis`.
+    pub(super) width: f64,
     pub(super) style: TextStyle,
     pub(super) fill: &'a str,
     pub(super) anchor: &'static str,
@@ -576,6 +611,7 @@ pub(super) fn plan_paragraphs<'a>(
             });
             items.push(ParaPlan {
                 lines: layout.lines,
+                width: pspec.width,
                 style: pstyle,
                 fill: p
                     .attribute("fill")
@@ -1193,26 +1229,24 @@ pub(super) fn paragraphs_layout_info(
     let cy = spec.y + spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
     let p = spec.padding;
+    let visible = visible_paragraph_lines(&items, block_top, cy, ch, spec.text_overflow, m);
     let out_paras = items
         .iter()
-        .map(|para| {
+        .zip(&visible)
+        .map(|(para, shown)| {
             let words: Vec<String> = collect_text(para.src)
                 .split_whitespace()
                 .map(str::to_string)
                 .collect();
-            let lines = para
-                .lines
+            let lines = shown
                 .iter()
-                .filter_map(|l| {
-                    let b = l.baseline + block_top;
-                    (b >= cy - 1e-6 && b <= cy + ch + 1e-6).then(|| TextLayoutLine {
-                        text: l.text.clone(),
-                        x: l.x,
-                        baseline: b,
-                        size: l.size,
-                        justify_width: l.justify_width,
-                        words: l.words,
-                    })
+                .map(|l| TextLayoutLine {
+                    text: l.text.clone(),
+                    x: l.x,
+                    baseline: l.baseline,
+                    size: l.size,
+                    justify_width: l.justify_width,
+                    words: l.words,
                 })
                 .collect();
             let r = para.src.range();
