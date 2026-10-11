@@ -18,17 +18,17 @@
       <x:face v="0 1 4 3" fill="#6366f1 #8b5cf6 #ec4899 #6366f1"/>
       <x:face v="1 2 5 4" fill="#8b5cf6 #38bdf8 #22d3ee #ec4899"/>
     </x:mesh>
-    <x:textbox x="56" y="212" width="608" height="101" font-size="78" font-weight="800" fill="#f8fafc" fit="shrink" fit-min="8">xsvg</x:textbox>
-    <x:textbox x="60" y="296" width="600" height="29" font-size="22" fill="#94a3b8" fit="shrink" fit-min="8">an XML graphics format that compiles to plain SVG</x:textbox>
-    <x:textbox x="60" y="365" width="600" height="20" font-size="15" fill="#38bdf8" fit="shrink" fit-min="8">▸ the text layout, live diagrams &amp; mesh gradients SVG never shipped</x:textbox>
+    <x:textbox x="56" y="212" width="608" height="94" font-size="78" font-weight="800" fill="#f8fafc">xsvg</x:textbox>
+    <x:textbox x="60" y="296" width="600" height="26" font-size="22" fill="#94a3b8">an XML graphics format that compiles to plain SVG</x:textbox>
+    <x:textbox x="60" y="365" width="600" height="18" font-size="15" fill="#38bdf8">▸ the text layout, live diagrams &amp; mesh gradients SVG never shipped</x:textbox>
   </g>
 
   <!-- 2 — The pitch: a bulleted list inside a text box (§6.16) -->
   <g x:artboard="Why" x:frame="840 0 720 405" x:fill="#ffffff" transform="translate(840,0)">
     <rect x="0" y="0" width="8" height="405" fill="#6366f1"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#6366f1" fit="shrink" fit-min="8">THE PITCH</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">One file. Every feature.</x:textbox>
-    <x:textbox x="56" y="150" width="600" height="230" font-size="20" line-height="1.35" fill="#334155" fit="shrink" fit-min="8">
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#6366f1">THE PITCH</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">One file. Every feature.</x:textbox>
+    <x:textbox x="56" y="150" width="600" height="230" font-size="20" line-height="1.35" fill="#334155">
       <x:list list="bullet" marker="disc" marker-fill="#6366f1" item-spacing="12">
         <x:li>Every x: extension degrades to plain SVG — unknown viewers just skip it</x:li>
         <x:li>Text that wraps, fits, justifies, and flows into any shape</x:li>
@@ -42,18 +42,18 @@
   <!-- 3 — Text layout: justify + shape-bound region flow -->
   <g x:artboard="Text" x:frame="1680 0 720 405" x:fill="#ffffff" transform="translate(1680,0)">
     <rect x="0" y="0" width="8" height="405" fill="#0ea5e9"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#0ea5e9" fit="shrink" fit-min="8">TEXT LAYOUT</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">Wrap · fit · justify · flow</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#0ea5e9">TEXT LAYOUT</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">Wrap · fit · justify · flow</x:textbox>
 
     <!-- tile 1: full justification -->
-    <x:textbox x="56" y="144" width="200" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">align="justify" · text-indent</x:textbox>
+    <x:textbox x="56" y="144" width="200" height="16" font-size="11" fill="#64748b">align="justify" · text-indent</x:textbox>
     <x:textbox x="56" y="162" width="200" height="184" align="justify" valign="top"
                text-indent="18" font-size="12.5" line-height="1.5" fill="#334155">Greedy line breaking measured from real font metrics, then every line but the last stretched to the full width with textLength — a first-line indent leads it in, live and selectable.</x:textbox>
 
     <!-- tile 2: shrink-to-fit — a shape with text, as the editor makes one:
          a <g> of the shape and a textbox bound to it by in="#id", autosized
          down until it fits -->
-    <x:textbox x="272" y="144" width="200" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">fit="shrink" — autosized to the box</x:textbox>
+    <x:textbox x="272" y="144" width="200" height="16" font-size="11" fill="#64748b">fit="shrink" — autosized to the box</x:textbox>
     <g>
       <rect id="shape-fit" x="272" y="162" width="200" height="184" rx="8" fill="#f1f5f9"/>
       <x:textbox in="#shape-fit" align="center" valign="middle" padding="8"
@@ -62,7 +62,7 @@
     </g>
 
     <!-- tile 3: flow inside any shape's outline — the same unit on a circle -->
-    <x:textbox x="488" y="144" width="200" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">in="#circle" — flow in a shape</x:textbox>
+    <x:textbox x="488" y="144" width="200" height="16" font-size="11" fill="#64748b">in="#circle" — flow in a shape</x:textbox>
     <g>
       <circle id="flow3" cx="576" cy="256" r="86" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="2"/>
       <x:textbox in="#flow3" align="center" valign="middle" padding="14"
@@ -72,18 +72,18 @@
 
   <!-- 4 — Type on a path: rainbow deform + native follow -->
   <g x:artboard="Path" x:frame="2520 0 720 405" x:fill="#0f172a" transform="translate(2520,0)">
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6" fit="shrink" fit-min="8">TEXT EFFECTS</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#f8fafc" fit="shrink" fit-min="8">Type, transformed</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#f472b6">TEXT EFFECTS</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#f8fafc">Type, transformed</x:textbox>
 
     <!-- upper-left: rainbow — glyphs rotate and bend along a path -->
-    <x:textbox x="48" y="142" width="320" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">effect="rainbow" — deformed along a path</x:textbox>
+    <x:textbox x="48" y="142" width="320" height="16" font-size="11" fill="#94a3b8">effect="rainbow" — deformed along a path</x:textbox>
     <path id="arc4" d="M52,236 C138,172 262,172 348,236" fill="none" stroke="#312e4e" stroke-width="2"/>
     <x:textpath in="#arc4" effect="rainbow" align="middle"
                 font-family="-x-google-Anton" font-size="34" fill="#38bdf8">RAINBOW</x:textpath>
 
     <!-- upper-right: arch-warped bordered text + an x:offset outline = a double
          border (the offset traces the arched word's silhouette, 8u out) -->
-    <x:textbox x="392" y="142" width="320" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">field="arch" + x:offset — a double border</x:textbox>
+    <x:textbox x="392" y="142" width="320" height="16" font-size="11" fill="#94a3b8">field="arch" + x:offset — a double border</x:textbox>
     <x:offset in="#archword" distance="8" join="round" fill="none" stroke="#f472b6" stroke-width="3"/>
     <x:warp id="archword" field="arch" bend="52">
       <x:textbox x="392" y="176" width="300" height="86" align="center" valign="middle"
@@ -92,12 +92,12 @@
     </x:warp>
 
     <!-- lower-left: skew — verticals stay upright, the baseline rides a wave -->
-    <x:textbox x="48" y="304" width="320" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">effect="skew" — upright on a wave</x:textbox>
+    <x:textbox x="48" y="304" width="320" height="16" font-size="11" fill="#94a3b8">effect="skew" — upright on a wave</x:textbox>
     <path id="sk4" d="M52,372 C128,334 205,398 300,356" fill="none" stroke="#1e293b" stroke-width="1.5"/>
     <x:textpath in="#sk4" effect="skew" font-family="-x-google-Anton" font-size="30" fill="#a78bfa">SKEW</x:textpath>
 
     <!-- lower-right: follow — SVG's own textPath, live and selectable -->
-    <x:textbox x="392" y="304" width="320" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">effect="follow" — live &amp; selectable</x:textbox>
+    <x:textbox x="392" y="304" width="320" height="16" font-size="11" fill="#94a3b8">effect="follow" — live &amp; selectable</x:textbox>
     <path id="fol4" d="M392,368 C492,344 582,390 660,356" fill="none" stroke="#1e293b" stroke-width="1.5"/>
     <x:textpath in="#fol4" effect="follow" align="middle" baseline-shift="6"
                 font-size="16" fill="#4ade80">still real text</x:textpath>
@@ -106,18 +106,18 @@
   <!-- 5 — Envelope warps: presets baked to plain paths -->
   <g x:artboard="Warp" x:frame="0 525 720 405" x:fill="#faf5ff" transform="translate(0,525)">
     <rect x="0" y="0" width="8" height="405" fill="#a855f7"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#a855f7" fit="shrink" fit-min="8">ENVELOPE WARPS</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">Bend the geometry</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#a855f7">ENVELOPE WARPS</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">Bend the geometry</x:textbox>
 
     <!-- a plain square grid, bulged by a fisheye lens -->
-    <x:textbox x="86" y="147" width="300" height="16" font-size="12" fill="#6b7280" fit="shrink" fit-min="8">field="fisheye" — a grid through a lens</x:textbox>
+    <x:textbox x="86" y="147" width="300" height="14" font-size="12" fill="#6b7280">field="fisheye" — a grid through a lens</x:textbox>
     <rect x="86" y="168" width="200" height="160" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1"/>
     <x:warp field="fisheye" bend="62">
       <path fill="none" stroke="#7c3aed" stroke-width="2.5" d="M96,178 L96,318 M121,178 L121,318 M146,178 L146,318 M171,178 L171,318 M196,178 L196,318 M221,178 L221,318 M246,178 L246,318 M271,178 L271,318 M96,178 L271,178 M96,201 L271,201 M96,224 L271,224 M96,248 L271,248 M96,271 L271,271 M96,294 L271,294 M96,318 L271,318"/>
     </x:warp>
 
     <!-- a filled star, swirled by twist -->
-    <x:textbox x="420" y="147" width="300" height="16" font-size="12" fill="#6b7280" fit="shrink" fit-min="8">field="twist" — a star given a swirl</x:textbox>
+    <x:textbox x="420" y="147" width="300" height="14" font-size="12" fill="#6b7280">field="twist" — a star given a swirl</x:textbox>
     <x:warp field="twist" bend="58">
       <polygon fill="#db2777" points="520,180 539,224 587,227 549,257 562,304 520,278 478,304 491,257 453,227 501,224"/>
     </x:warp>
@@ -185,41 +185,41 @@
       </meshgradient>
     </defs>
     <rect x="0" y="0" width="720" height="405" fill="url(#ridge6)"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#c7d2fe" fit="shrink" fit-min="8">MESH GRADIENTS</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#ffffff" fit="shrink" fit-min="8">Smooth by nature</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#c7d2fe">MESH GRADIENTS</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#ffffff">Smooth by nature</x:textbox>
     <x:textbox x="56" y="342" width="620" height="54" font-size="15" line-height="1.35" fill="#e0e7ff">a real SVG 2 meshgradient — many colour poles on curved Coons patches; no linear or radial gradient can do this, and no browser draws it</x:textbox>
   </g>
 
   <!-- 7 — Diagrams: connectors between boxes + boolean union -->
   <g x:artboard="Diagram" x:frame="1680 525 720 405" x:fill="#ffffff" transform="translate(1680,525)">
     <rect x="0" y="0" width="8" height="405" fill="#16a34a"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a" fit="shrink" fit-min="8">DIAGRAMS</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">Connectors &amp; path algebra</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#16a34a">DIAGRAMS</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">Connectors &amp; path algebra</x:textbox>
 
     <!-- pipeline flow: the Compile box sits lower so the two connectors can show
          off different routes — an orthogonal rail in, a smooth curve out -->
     <rect id="n1" x="70" y="138" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <x:textbox x="60" y="160" width="150" height="20" font-size="15" font-weight="600" fill="#3730a3" align="center" fit="shrink" fit-min="8">Author</x:textbox>
+    <x:textbox x="60" y="160" width="150" height="18" font-size="15" font-weight="600" fill="#3730a3" align="center">Author</x:textbox>
     <rect id="n2" x="295" y="182" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <x:textbox x="285" y="204" width="150" height="20" font-size="15" font-weight="600" fill="#3730a3" align="center" fit="shrink" fit-min="8">Compile</x:textbox>
+    <x:textbox x="285" y="204" width="150" height="18" font-size="15" font-weight="600" fill="#3730a3" align="center">Compile</x:textbox>
     <rect id="n3" x="520" y="138" width="130" height="54" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-    <x:textbox x="510" y="160" width="150" height="20" font-size="15" font-weight="600" fill="#3730a3" align="center" fit="shrink" fit-min="8">Plain SVG</x:textbox>
+    <x:textbox x="510" y="160" width="150" height="18" font-size="15" font-weight="600" fill="#3730a3" align="center">Plain SVG</x:textbox>
     <x:connector from="#n1" to="#n2" route="x-major" arrow="end" stroke="#475569" stroke-width="2"/>
-    <x:textbox x="160" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center" fit="shrink" fit-min="8">route="x-major"</x:textbox>
+    <x:textbox x="160" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center">route="x-major"</x:textbox>
     <x:connector from="#n2" to="#n3" route="curve" arrow="end" stroke="#475569" stroke-width="2"/>
-    <x:textbox x="400" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center" fit="shrink" fit-min="8">route="curve"</x:textbox>
+    <x:textbox x="400" y="143" width="160" height="16" font-size="10" fill="#94a3b8" align="center">route="curve"</x:textbox>
 
     <!-- path algebra gallery: four operands-in / one-plain-path-out demos -->
-    <x:textbox x="56" y="239" width="608" height="17" font-size="13" fill="#64748b" fit="shrink" fit-min="8">Path algebra &amp; offset — operands in, one plain path out</x:textbox>
+    <x:textbox x="56" y="239" width="608" height="16" font-size="13" fill="#64748b">Path algebra &amp; offset — operands in, one plain path out</x:textbox>
 
-    <x:textbox x="86" y="280" width="150" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">op="union"</x:textbox>
+    <x:textbox x="86" y="280" width="150" height="16" font-size="11" fill="#94a3b8">op="union"</x:textbox>
     <x:boolean op="union" fill="#dcfce7" stroke="#16a34a" stroke-width="2">
       <circle cx="104" cy="356" r="24"/>
       <circle cx="138" cy="344" r="30"/>
       <circle cx="170" cy="356" r="22"/>
     </x:boolean>
 
-    <x:textbox x="256" y="280" width="150" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">op="subtract"</x:textbox>
+    <x:textbox x="256" y="280" width="150" height="16" font-size="11" fill="#94a3b8">op="subtract"</x:textbox>
     <circle cx="278" cy="352" r="34" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <circle cx="300" cy="343" r="30" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="subtract" fill="#16a34a">
@@ -227,7 +227,7 @@
       <circle cx="300" cy="343" r="30"/>
     </x:boolean>
 
-    <x:textbox x="418" y="280" width="150" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">op="intersect"</x:textbox>
+    <x:textbox x="418" y="280" width="150" height="16" font-size="11" fill="#94a3b8">op="intersect"</x:textbox>
     <circle cx="444" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <circle cx="486" cy="352" r="38" fill="none" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 3"/>
     <x:boolean op="intersect" fill="#15803d" stroke="#86efac" stroke-width="2">
@@ -235,7 +235,7 @@
       <circle cx="486" cy="352" r="38"/>
     </x:boolean>
 
-    <x:textbox x="558" y="280" width="150" height="16" font-size="11" fill="#94a3b8" fit="shrink" fit-min="8">x:offset · outset</x:textbox>
+    <x:textbox x="558" y="280" width="150" height="16" font-size="11" fill="#94a3b8">x:offset · outset</x:textbox>
     <path id="tri3" d="M600,322 L630,378 L570,378 Z" fill="#dcfce7"/>
     <x:offset in="#tri3" distance="10" join="round" fill="none" stroke="#16a34a" stroke-width="2"/>
     <x:offset in="#tri3" distance="20" join="round" fill="none" stroke="#86efac" stroke-width="2"/>
@@ -244,8 +244,8 @@
   <!-- 8 — Words & data: paragraphs + styled runs on the left, a table on the right -->
   <g x:artboard="Words" x:frame="2520 525 720 405" x:fill="#ffffff" transform="translate(2520,525)">
     <rect x="0" y="0" width="8" height="405" fill="#a21caf"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#a21caf" fit="shrink" fit-min="8">TEXT &amp; TABLES</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">Paragraphs meet data</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#a21caf">TEXT &amp; TABLES</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">Paragraphs meet data</x:textbox>
 
     <!-- left: a paragraph flow (space, indent, justify) then a styled-run line -->
     <x:textbox x="56" y="146" width="300" height="150" font-size="13" line-height="1.5"
@@ -254,11 +254,11 @@
       <x:p>Paragraphs flow one after another in a single box, each wrapped to the width, the gap set by paragraph-spacing.</x:p>
       <x:p text-indent="18" align="justify">A first-line indent leads this one in, and it is justified — inner lines stretch to the width, the last stays ragged.</x:p>
     </x:textbox>
-    <x:textbox x="56" y="318" width="300" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">styled runs — each &lt;tspan&gt; keeps its own fill &amp; weight</x:textbox>
+    <x:textbox x="56" y="318" width="300" height="16" font-size="11" fill="#64748b">styled runs — each &lt;tspan&gt; keeps its own fill &amp; weight</x:textbox>
     <x:textbox x="56" y="336" width="300" height="56" font-size="14" line-height="1.4" fill="#334155">Mix <tspan font-weight="800" fill="#a21caf">bold</tspan>, <tspan fill="#0ea5e9">colored</tspan>, and <tspan font-style="italic" fill="#7c3aed">italic</tspan> runs — they wrap together as one flowing paragraph.</x:textbox>
 
     <!-- right: a striped table with content-driven row heights -->
-    <x:textbox x="392" y="132" width="300" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">x:table — striped, row heights grow to fit</x:textbox>
+    <x:textbox x="392" y="132" width="300" height="16" font-size="11" fill="#64748b">x:table — striped, row heights grow to fit</x:textbox>
     <x:table x="392" y="150" width="300" cols="* 96" cell-padding="8"
              font-size="12.5" fill="#334155" stroke="#e2e8f0" stroke-width="1"
              header-fill="#fae8ff" stripe="#faf5ff" valign="middle">
@@ -292,11 +292,11 @@
   <!-- 9 — Charts: a data coordinate frame — bars, a line graph, and a pie -->
   <g x:artboard="Data viz" x:frame="0 1050 720 405" x:fill="#ffffff" transform="translate(0,1050)">
     <rect x="0" y="0" width="8" height="405" fill="#0d9488"/>
-    <x:textbox x="56" y="57" width="608" height="17" font-size="13" font-weight="700" letter-spacing="2" fill="#0d9488" fit="shrink" fit-min="8">DATA VISUALIZATION</x:textbox>
-    <x:textbox x="56" y="81" width="608" height="42" font-size="32" font-weight="800" fill="#0f172a" fit="shrink" fit-min="8">Bars, lines &amp; pie</x:textbox>
+    <x:textbox x="56" y="57" width="608" height="16" font-size="13" font-weight="700" letter-spacing="2" fill="#0d9488">DATA VISUALIZATION</x:textbox>
+    <x:textbox x="56" y="81" width="608" height="38" font-size="32" font-weight="800" fill="#0f172a">Bars, lines &amp; pie</x:textbox>
 
     <!-- bar chart: value → bottom-aligned height, mapped into the y-domain -->
-    <x:textbox x="72" y="140" width="200" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">bar · value → height</x:textbox>
+    <x:textbox x="72" y="140" width="200" height="16" font-size="11" fill="#64748b">bar · value → height</x:textbox>
     <x:plot x="86" y="158" width="150" height="182" y-domain="0 100" y-ticks="4">
       <x:bars fill="#0d9488" gap="0.34" radius="2">
         <x:bar value="52" label="Q1"/>
@@ -307,14 +307,14 @@
     </x:plot>
 
     <!-- line graph: y-domain 20..25 maps to pixels; area fill + dot markers -->
-    <x:textbox x="292" y="140" width="200" height="16" font-size="11" fill="#64748b" fit="shrink" fit-min="8">line · y-domain 20–25</x:textbox>
+    <x:textbox x="292" y="140" width="200" height="16" font-size="11" fill="#64748b">line · y-domain 20–25</x:textbox>
     <x:plot x="306" y="158" width="164" height="182" x-domain="0 6" y-domain="20 25" y-ticks="5">
       <x:line points="0,21.2 1,22.0 2,23.4 3,22.6 4,24.1 5,23.2 6,24.6"
               stroke="#0ea5e9" stroke-width="2.5" marker="dot" marker-size="4" marker-fill="#0369a1" area="#0ea5e9"/>
     </x:plot>
 
     <!-- pie: angle from value; a donut with parallel gaps -->
-    <x:textbox x="500" y="140" width="200" height="16" font-size="11" fill="#64748b" align="center" fit="shrink" fit-min="8">pie · angle from value</x:textbox>
+    <x:textbox x="500" y="140" width="200" height="16" font-size="11" fill="#64748b" align="center">pie · angle from value</x:textbox>
     <x:pie cx="600" cy="252" r="82" inner-radius="42" gap="3" start="-90">
       <x:slice value="40" fill="#4f46e5"/>
       <x:slice value="25" fill="#0ea5e9"/>
@@ -322,7 +322,7 @@
       <x:slice value="15" fill="#10b981"/>
     </x:pie>
 
-    <x:textbox x="56" y="377" width="608" height="20" font-size="15" fill="#334155" fit="shrink" fit-min="8">Data units in, plain shapes out — no chart runtime, no script.</x:textbox>
+    <x:textbox x="56" y="377" width="608" height="18" font-size="15" fill="#334155">Data units in, plain shapes out — no chart runtime, no script.</x:textbox>
   </g>
 
   <!-- 10 — Closing: a numbered list inside a text box, the call-to-action -->
@@ -330,14 +330,14 @@
     <rect x="0" y="330" width="720" height="6" fill="#38bdf8"/>
     <circle cx="96" cy="118" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
     <path d="M80,118 l12,12 l22,-26" fill="none" stroke="#34d399" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <x:textbox x="152" y="97" width="540" height="60" font-size="46" font-weight="800" fill="#f8fafc" fit="shrink" fit-min="8">Ship it.</x:textbox>
-    <x:textbox x="154" y="176" width="540" height="150" font-size="19" line-height="1.4" fill="#cbd5e1" fit="shrink" fit-min="8">
+    <x:textbox x="152" y="97" width="540" height="55" font-size="46" font-weight="800" fill="#f8fafc">Ship it.</x:textbox>
+    <x:textbox x="154" y="176" width="540" height="150" font-size="19" line-height="1.4" fill="#cbd5e1">
       <x:list list="number" marker-fill="#38bdf8" item-spacing="10">
         <x:li>Write plain XML — the x: tags are just extensions</x:li>
         <x:li>Compile to plain SVG — warps, meshes &amp; layout baked in</x:li>
         <x:li>Ship one self-contained file — no runtime, no editor</x:li>
       </x:list>
     </x:textbox>
-    <x:textbox x="154" y="360" width="540" height="21" font-size="16" fill="#64748b" fit="shrink" fit-min="8">xsvg — hello@visioncortex.org</x:textbox>
+    <x:textbox x="154" y="360" width="540" height="19" font-size="16" fill="#64748b">xsvg — hello@visioncortex.org</x:textbox>
   </g>
 </svg>
