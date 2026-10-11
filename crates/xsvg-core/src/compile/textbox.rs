@@ -4,7 +4,8 @@
 //! editor (docs/Incremental.md §6).
 
 use super::*;
-use crate::apply_ellipsis;
+use crate::text::fit::bisect_fit;
+use crate::{apply_ellipsis, split_visible};
 
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
 pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
@@ -290,18 +291,18 @@ pub(super) fn visible_paragraph_lines(
     let mut dropped = false;
     let mut per: Vec<Vec<PlacedLine>> = Vec::with_capacity(items.len());
     for para in items {
-        let mut lines = Vec::new();
-        for l in &para.lines {
-            let b = l.baseline + block_top;
-            if b >= cy - 1e-6 && b <= cy + ch + 1e-6 {
-                lines.push(PlacedLine {
-                    baseline: b,
-                    ..l.clone()
-                });
-            } else {
-                dropped = true;
-            }
-        }
+        let placed = para
+            .lines
+            .iter()
+            .map(|l| PlacedLine {
+                baseline: l.baseline + block_top,
+                ..l.clone()
+            })
+            .collect();
+        let (lines, cut) = split_visible(placed, |l| {
+            l.baseline >= cy - 1e-6 && l.baseline <= cy + ch + 1e-6
+        });
+        dropped |= cut;
         per.push(lines);
     }
     if overflow == TextOverflow::Ellipsis {
@@ -652,21 +653,8 @@ pub(super) fn plan_paragraphs<'a>(
                         })
                     })
             };
-            if fits(1.0) {
-                plan_at(1.0)
-            } else {
-                let min_scale = (min / base_style.size).clamp(0.0, 1.0);
-                let (mut lo, mut hi) = (min_scale, 1.0f64);
-                for _ in 0..24 {
-                    let mid = 0.5 * (lo + hi);
-                    if fits(mid) {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                plan_at(lo.max(min_scale))
-            }
+            let min_scale = (min / base_style.size).clamp(0.0, 1.0);
+            plan_at(bisect_fit(min_scale, 1.0, fits))
         }
         _ => plan_at(1.0),
     };

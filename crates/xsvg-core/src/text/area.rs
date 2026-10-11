@@ -5,7 +5,7 @@ use super::{
     fit::{fit_size, fit_size_flows},
     measure::{measure_runs, measure_words, Measured, Measurer, Piece},
     style::TextStyle,
-    truncate::{apply_ellipsis, TextOverflow},
+    truncate::{clip_lines, TextOverflow},
     wrap::{fill_line, wrap_pieces},
 };
 
@@ -306,7 +306,6 @@ fn place_lines(
     };
 
     let mut lines = Vec::new();
-    let mut dropped = false;
     let mut baseline = first_baseline;
     for (i, (pieces, words, flow_final)) in line_meta.into_iter().enumerate() {
         if i > 0 {
@@ -315,10 +314,6 @@ fn place_lines(
             } else {
                 baseline + advances[i]
             };
-        }
-        if baseline < cy - 1e-6 || baseline > cy + ch + 1e-6 {
-            dropped = true;
-            continue;
         }
         let (text, runs) = merge_pieces(pieces);
         let line_w = if i == 0 { (cw - indent).max(0.0) } else { cw };
@@ -333,9 +328,16 @@ fn place_lines(
             words,
         });
     }
-    if spec.text_overflow == TextOverflow::Ellipsis {
-        apply_ellipsis(&mut lines, dropped, cw, style, size, m);
-    }
+    // a line is kept by its baseline (its block position), not its ink band
+    let lines = clip_lines(
+        lines,
+        |l| l.baseline >= cy - 1e-6 && l.baseline <= cy + ch + 1e-6,
+        spec.text_overflow,
+        cw,
+        style,
+        size,
+        m,
+    );
 
     AreaLayout {
         anchor,

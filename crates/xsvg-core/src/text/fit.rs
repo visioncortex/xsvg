@@ -76,10 +76,20 @@ pub(crate) fn fit_size_flows(
         height <= max_h && widest <= max_w + 1e-6
     };
 
-    if fits(base_size) {
-        return base_size;
+    bisect_fit(min_size, base_size, fits)
+}
+
+/// The largest value in `[lo, hi]` that `fits`, for a predicate that holds up to
+/// some threshold and fails above it: `hi` itself when it fits, else 24 halvings
+/// of the bracket, never below `lo`. The one search every shrink-to-fit uses, so
+/// a box, a run of forced flows and a stack of paragraphs all settle on the same
+/// value for the same predicate.
+pub(crate) fn bisect_fit(lo: f64, hi: f64, fits: impl Fn(f64) -> bool) -> f64 {
+    if fits(hi) {
+        return hi;
     }
-    let (mut lo, mut hi) = (min_size, base_size);
+    let floor = lo;
+    let (mut lo, mut hi) = (lo, hi);
     for _ in 0..24 {
         let mid = 0.5 * (lo + hi);
         if fits(mid) {
@@ -88,7 +98,7 @@ pub(crate) fn fit_size_flows(
             hi = mid;
         }
     }
-    lo.max(min_size)
+    lo.max(floor)
 }
 
 #[cfg(test)]

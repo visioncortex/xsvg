@@ -9,7 +9,7 @@
 use super::area::{line_size, merge_pieces, Anchor, AreaLayout, PlacedLine};
 use super::measure::{measure_runs, Measurer, Piece};
 use super::style::TextStyle;
-use super::truncate::{apply_ellipsis, TextOverflow};
+use super::truncate::{clip_lines, TextOverflow};
 use super::wrap::wrap_pieces;
 
 /// `text-align` — inline alignment of lines. `justify` extends the SVG Tiny 1.2
@@ -188,17 +188,8 @@ pub fn layout_text_area_runs(
     };
 
     let mut lines = Vec::new();
-    let mut dropped = false;
     for (i, (pieces, is_final, words)) in line_metas.into_iter().enumerate() {
         let baseline = first_baseline + i as f64 * line_h;
-        // clip by the line's ink band [cap-top, baseline + descent]
-        if let Some(h) = spec.height {
-            if baseline - fm.cap_height < spec.y - 1e-6 || baseline + fm.descent > spec.y + h + 1e-6
-            {
-                dropped = true;
-                continue; // outside the region in the block direction → not rendered
-            }
-        }
         // the line's size is informational here: a <textArea> steps by
         // line-increment regardless of the run sizes it carries
         let lsz = line_size(&pieces, styles);
@@ -215,9 +206,22 @@ pub fn layout_text_area_runs(
             words,
         });
     }
-    if spec.text_overflow == TextOverflow::Ellipsis {
-        apply_ellipsis(&mut lines, dropped, max_w, style, size, m);
-    }
+    // a line is kept by its ink band [cap-top, baseline + descent] (SVG Tiny 1.2),
+    // unlike a textbox's baseline rule; an auto height never clips
+    let lines = clip_lines(
+        lines,
+        |l| {
+            spec.height.is_none_or(|h| {
+                l.baseline - fm.cap_height >= spec.y - 1e-6
+                    && l.baseline + fm.descent <= spec.y + h + 1e-6
+            })
+        },
+        spec.text_overflow,
+        max_w,
+        style,
+        size,
+        m,
+    );
 
     AreaLayout {
         anchor: spec.text_align.anchor(),

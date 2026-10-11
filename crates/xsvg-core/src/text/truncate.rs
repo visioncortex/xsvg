@@ -128,6 +128,41 @@ pub fn apply_ellipsis(
     lines.retain(|l| !l.text.is_empty());
 }
 
+/// The lines a box shows and whether any fell outside it: `inside` is the flow's
+/// own block rule (a textbox keeps a line by its baseline, a `<textArea>` by its
+/// ink band), applied after every line is placed. The split every rectangular
+/// flow makes before deciding what `text-overflow` does about the remainder.
+pub fn split_visible(
+    lines: Vec<PlacedLine>,
+    inside: impl Fn(&PlacedLine) -> bool,
+) -> (Vec<PlacedLine>, bool) {
+    let n = lines.len();
+    let kept: Vec<PlacedLine> = lines.into_iter().filter(|l| inside(l)).collect();
+    let dropped = kept.len() < n;
+    (kept, dropped)
+}
+
+/// [`split_visible`] followed by the overflow rule (§6.6): under `ellipsis` the
+/// last line that shows is marked when any was dropped, and any line wider than
+/// `max_width` is cut to fit; under `clip` the remainder is simply gone. One
+/// call, so no flow can clip and forget the mark.
+#[allow(clippy::too_many_arguments)]
+pub fn clip_lines(
+    lines: Vec<PlacedLine>,
+    inside: impl Fn(&PlacedLine) -> bool,
+    overflow: TextOverflow,
+    max_width: f64,
+    style: &TextStyle,
+    size: f64,
+    m: &dyn Measurer,
+) -> Vec<PlacedLine> {
+    let (mut kept, dropped) = split_visible(lines, inside);
+    if overflow == TextOverflow::Ellipsis {
+        apply_ellipsis(&mut kept, dropped, max_width, style, size, m);
+    }
+    kept
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
