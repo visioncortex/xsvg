@@ -29,6 +29,17 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
 /// `<x:textbox>` (Rung 3): explicit `align`/`valign`/`padding`/`fit`, or — with
 /// `in="#id"` — bound to a referenced shape (rect → rectangular; any other shape →
 /// flowed inside its outline, §6.10).
+/// The block children of a textbox (§6.16): paragraphs, and lists whose
+/// items flow as paragraphs with a gutter. Any block puts the box in
+/// paragraph mode.
+pub(super) fn blocks_of<'a>(node: roxmltree::Node<'a, 'a>) -> Vec<roxmltree::Node<'a, 'a>> {
+    node.children()
+        .filter(|c| {
+            c.tag_name().namespace() == Some(XSVG_NS) && matches!(c.tag_name().name(), "p" | "list")
+        })
+        .collect()
+}
+
 pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node, ctx);
     let fill = node.attribute("fill").unwrap_or("#000");
@@ -44,12 +55,10 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
-    // space-before/after. Rectangular geometry only (own box or `in="#rect"`);
-    // curved region flow ignores `<x:p>` and falls through to a single flow.
-    let paras: Vec<roxmltree::Node> = node
-        .children()
-        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "p")
-        .collect();
+    // space-before/after, and `<x:list>` children flow their items among them.
+    // Rectangular geometry only (own box or `in="#rect"`); curved region flow
+    // ignores blocks and falls through to a single flow.
+    let paras = blocks_of(node);
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
             Some(r) => ctx
@@ -181,6 +190,60 @@ pub(super) fn emit_paragraphs(
     let ch = spec.height - 2.0 * spec.padding;
     let (items, block_top) = plan_paragraphs(node, paras, base_style, base_fill, spec, m);
 
+    // list items' markers (§6.16): drawn shapes and one shared <text> of
+    // generated markers, before the paragraphs, as a standalone list emits
+    // them — the marker <text> carries no source key, so the editor's
+    // char-cell tier reads the keyed paragraphs alone
+    let mut shapes = String::new();
+    let mut markers = String::new();
+    for para in &items {
+        let Some(mk) = &para.marker else { continue };
+        let Some(first) = para
+            .lines
+            .first()
+            .map(|l| l.baseline + block_top)
+            .or_else(|| None)
+        else {
+            continue;
+        };
+        if first < cy - 1e-6 || first > cy + ch + 1e-6 {
+            continue; // the item's first row is clipped: no marker
+        }
+        let fm = m.font_metrics(&para.style, para.style.size);
+        match &mk.kind {
+            super::list::Marker::None => {}
+            super::list::Marker::Shape(tok) => {
+                let cyy = first - fm.x_height * 0.5;
+                shapes.push_str(&super::list::shape_marker(
+                    tok,
+                    mk.col,
+                    cyy,
+                    mk.r,
+                    &ctx.paint(&mk.fill),
+                ));
+            }
+            super::list::Marker::Text(t) => {
+                markers.push_str(&format!(
+                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\" font-size=\"{}\">",
+                    fmt(mk.col),
+                    fmt(first),
+                    ctx.paint(&mk.fill),
+                    fmt(para.style.size)
+                ));
+                push_escaped(&mut markers, t, false);
+                markers.push_str("</tspan>");
+            }
+        }
+    }
+    out.push_str(&shapes);
+    if !markers.is_empty() {
+        out.push_str("<text text-anchor=\"start\"");
+        push_font_attrs(out, base_style, base_style.size, base_fill, ctx);
+        out.push('>');
+        out.push_str(&markers);
+        out.push_str("</text>");
+    }
+
     // pass 2: shift every line by `block_top`, clip to the box by baseline, emit one
     // <text> per paragraph
     for para in &items {
@@ -242,6 +305,17 @@ pub(super) struct ParaPlan<'a> {
     /// Right-to-left paragraph (§6.4 `direction`): emits `direction="rtl"`.
     pub(super) rtl: bool,
     pub(super) src: roxmltree::Node<'a, 'a>,
+    /// A list item's marker in the gutter (§6.16, lists in a textbox).
+    pub(super) marker: Option<PlanMarker>,
+}
+
+/// A list item's resolved marker, planned with the paragraph: what to draw,
+/// the gutter column its right edge sits on, the paint and the shape radius.
+pub(super) struct PlanMarker {
+    pub(super) kind: super::list::Marker,
+    pub(super) col: f64,
+    pub(super) fill: String,
+    pub(super) r: f64,
 }
 
 /// Pass 1 of paragraph flow (§6.16), shared verbatim by emission and the
@@ -310,29 +384,136 @@ pub(super) fn plan_paragraphs<'a>(
     // glyphs. Styled runs and `<tbreak/>` forced breaks flow through
     // `collect_runs` → `layout_area_runs`, sharing the plain textbox's
     // pipeline.
+    // the blocks as a flat list of paragraph-like units: a <x:p> as itself,
+    // a <x:list>'s items each with its gutter (text column and marker) and
+    // the list's own spacing between them (§6.16, lists in a textbox)
+    struct Unit<'n> {
+        src: roxmltree::Node<'n, 'n>,
+        /// the list this item belongs to, for its style and spacing
+        list: Option<roxmltree::Node<'n, 'n>>,
+        /// the text column's inset from the content edge (unscaled)
+        inset: f64,
+        marker: Option<(
+            super::list::Marker,
+            f64, /* gutter col inset */
+            Option<String>,
+        )>,
+        /// first item of its list: the gap before it is a paragraph gap
+        first_in_list: bool,
+    }
+    let mut units: Vec<Unit<'a>> = Vec::new();
+    for &b in paras.iter() {
+        if b.tag_name().name() != "list" {
+            units.push(Unit {
+                src: b,
+                list: None,
+                inset: 0.0,
+                marker: None,
+                first_in_list: false,
+            });
+            continue;
+        }
+        let lp: elements::List = params_of(b);
+        let lsize = attr_pos(b, "font-size", base_style.size);
+        let indent_step = lp.indent.unwrap_or(lsize * 1.5).max(0.0);
+        let marker_gap = lp.marker_gap.unwrap_or(lsize * 0.5);
+        let mut counters: Vec<u32> = Vec::new();
+        let mut first = true;
+        for li in b
+            .children()
+            .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
+        {
+            let level = attr_num(li, "indent", 0.0).max(0.0) as usize;
+            let inset = (level as f64 + 1.0) * indent_step;
+            if counters.len() <= level {
+                counters.resize(level + 1, 0);
+            }
+            counters.truncate(level + 1);
+            counters[level] += 1;
+            let kind = li.attribute("list").unwrap_or(lp.list.as_str());
+            let marker_attr = li.attribute("marker").or(lp.marker.as_deref());
+            let marker = match marker_attr {
+                Some(mk) => match super::list::shape_token(mk) {
+                    Some(tok) => super::list::Marker::Shape(tok),
+                    None => super::list::Marker::Text(mk.to_string()),
+                },
+                None => match kind {
+                    "none" => super::list::Marker::None,
+                    "number" => super::list::Marker::Text(super::list::number_marker(
+                        level,
+                        counters[level],
+                    )),
+                    _ => super::list::Marker::Shape(super::list::bullet_shape(level)),
+                },
+            };
+            units.push(Unit {
+                src: li,
+                list: Some(b),
+                inset,
+                marker: Some((marker, inset - marker_gap, lp.marker_fill.clone())),
+                first_in_list: first,
+            });
+            first = false;
+        }
+    }
+
     let plan_at = |scale: f64| -> (Vec<ParaPlan<'a>>, f64) {
-        let mut items: Vec<ParaPlan> = Vec::with_capacity(paras.len());
+        let mut items: Vec<ParaPlan> = Vec::with_capacity(units.len());
         let mut last_baseline: Option<f64> = None; // relative frame: para 0's cap-top at 0
         let mut last_descent = 0.0f64;
         let mut prev_after = 0.0f64;
-        for &p in paras.iter() {
-            let mut pstyle = para_style(p);
+        for u in units.iter() {
+            let p = u.src;
+            // an item takes the list's style (font-* on <x:list>) under the
+            // box's, then its own font-size; a paragraph its own font-*
+            let mut pstyle = match u.list {
+                Some(l) => {
+                    let mut st = para_style(l);
+                    st.size = attr_pos(p, "font-size", st.size);
+                    st
+                }
+                None => para_style(p),
+            };
             pstyle.size *= scale;
-            let sb = attr_num(p, "space-before", 0.0) * scale;
-            let sa = attr_num(p, "space-after", default_spacing) * scale;
+            // spacing: between items of one list its item-spacing; into the
+            // first item, and around a paragraph, the paragraph gaps
+            let (sb, sa) = match u.list {
+                Some(l) => {
+                    let item_gap = attr_num(l, "item-spacing", pstyle.size / scale * 0.35) * scale;
+                    let before = if u.first_in_list {
+                        attr_num(l, "space-before", 0.0) * scale
+                    } else {
+                        0.0
+                    };
+                    (before, item_gap)
+                }
+                None => (
+                    attr_num(p, "space-before", 0.0) * scale,
+                    attr_num(p, "space-after", default_spacing) * scale,
+                ),
+            };
+            let inset = u.inset * scale;
             let pspec = AreaSpec {
-                x: cx,
+                x: cx + inset,
                 // lay out in the paragraph's OWN frame (its cap-top at 0); it
                 // moves onto the stack once its first line's size is known
                 y: 0.0,
-                width: cw,
+                width: (cw - inset).max(1.0),
                 height: 1e5, // tall → no clip; valign=top places lines from `y`
                 padding: 0.0,
-                align: Align::parse(p.attribute("align").unwrap_or(default_align)),
+                align: if u.list.is_some() {
+                    Align::Start
+                } else {
+                    Align::parse(p.attribute("align").unwrap_or(default_align))
+                },
                 valign: VAlign::Top,
                 fit: Fit::None,
                 text_overflow: TextOverflow::Clip,
-                text_indent: attr_num(p, "text-indent", 0.0) * scale,
+                text_indent: if u.list.is_some() {
+                    0.0
+                } else {
+                    attr_num(p, "text-indent", 0.0) * scale
+                },
                 // a paragraph's own direction, else the box's
                 rtl: p
                     .attribute("direction")
@@ -364,16 +545,49 @@ pub(super) fn plan_paragraphs<'a>(
                     .unwrap_or(first_baseline),
             );
             last_descent = m.font_metrics(&pstyle, last_size).descent;
+            // the gap AFTER a list's last item is a paragraph gap, not its
+            // item-spacing: the next block is a paragraph or another list
+            let after = match u.list {
+                Some(l)
+                    if items.len() + 1 == units.len()
+                        || units
+                            .get(items.len() + 1)
+                            .is_some_and(|n| n.list != Some(l)) =>
+                {
+                    attr_num(l, "space-after", default_spacing) * scale
+                }
+                _ => sa,
+            };
+            let marker = u.marker.as_ref().map(|(kind, col_inset, fill)| PlanMarker {
+                kind: match kind {
+                    super::list::Marker::None => super::list::Marker::None,
+                    super::list::Marker::Shape(t) => super::list::Marker::Shape(t),
+                    super::list::Marker::Text(t) => super::list::Marker::Text(t.clone()),
+                },
+                col: cx + col_inset * scale,
+                fill: fill
+                    .clone()
+                    .or_else(|| u.list.and_then(|l| l.attribute("fill").map(str::to_string)))
+                    .unwrap_or_else(|| base_fill.to_string()),
+                r: pstyle.size
+                    * 0.16
+                    * u.list
+                        .map_or(1.0, |l| attr_num(l, "marker-size", 1.0).max(0.0)),
+            });
             items.push(ParaPlan {
                 lines: layout.lines,
                 style: pstyle,
-                fill: p.attribute("fill").unwrap_or(base_fill),
+                fill: p
+                    .attribute("fill")
+                    .or_else(|| u.list.and_then(|l| l.attribute("fill")))
+                    .unwrap_or(base_fill),
                 anchor: layout.anchor.svg(),
                 emits,
                 rtl: layout.rtl,
                 src: p,
+                marker,
             });
-            prev_after = sa;
+            prev_after = after;
         }
         let block_h = last_baseline.map(|lb| lb + last_descent).unwrap_or(0.0);
         (items, block_h)
@@ -891,10 +1105,7 @@ pub struct TextLayout {
 pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLayout> {
     let style = style_from(node, ctx);
 
-    let paras: Vec<roxmltree::Node> = node
-        .children()
-        .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "p")
-        .collect();
+    let paras = blocks_of(node);
     if !paras.is_empty() {
         let geom = match node.attribute("in") {
             Some(r) => ctx

@@ -871,7 +871,7 @@ oversights.
 
 ### 6.16 Paragraphs — `<x:p>` [implemented]
 
-A `<x:textbox>` whose children are `<x:p>` elements flows them as **separate paragraphs**, stacked
+A `<x:textbox>` whose children are `<x:p>` elements (and `<x:list>` blocks, below) flows them as **separate paragraphs**, stacked
 top-down inside the box with vertical gaps — the multi-paragraph body real documents need, rather
 than one endless run. Each paragraph wraps to the content width and carries its own alignment,
 indent, style, and spacing.
@@ -892,6 +892,25 @@ indent, style, and spacing.
 | `align` | `<x:p>` | per-paragraph alignment (else the box's) |
 | `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
 | `font-*`, `fill` | `<x:p>` | per-paragraph style over the box defaults |
+
+**Lists inside a textbox.** A `<x:list>` may stand among the paragraphs as a block of the same
+stack: its items flow as paragraphs with the list's gutter — each `<x:li>` laid out on the text
+column `(indent + 1) × indent-step` in from the content edge (the list's `indent`, default
+1.5em), its marker drawn in the gutter `marker-gap` before that column, with the list's
+`item-spacing` between items and the paragraph gaps around the list — under the box's
+shrink-to-fit, `valign` and padding like any paragraph. The list's placement attributes (`x`,
+`y`, `width`, `height`, `in`) are ignored inside a box; its `list`, `marker*`, `indent`,
+`item-spacing`, `font-*` and `fill` apply. So one box holds a heading, bullets and a closing
+paragraph, the way a presentation text box does; the standalone `<x:list>` (§6.14) remains for a
+list placed on its own.
+
+```xml
+<x:textbox x="40" y="60" width="384" height="240" font-size="14" fit="shrink">
+  <x:p font-weight="800">Agenda</x:p>
+  <x:list list="bullet"><x:li>Where we are</x:li><x:li indent="1">the numbers</x:li></x:list>
+  <x:p>Questions after.</x:p>
+</x:textbox>
+```
 
 Paragraphs stack by **baseline advance** (the editor convention): a paragraph's first baseline sits
 one line advance — its own `font-size × line-height` — below the previous paragraph's last

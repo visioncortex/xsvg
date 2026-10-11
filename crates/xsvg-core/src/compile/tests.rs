@@ -1650,6 +1650,46 @@ fn baseline_shift_rides_to_the_output() {
 }
 
 #[test]
+fn lists_flow_inside_a_textbox_as_gutter_paragraphs() {
+    // a heading paragraph, a two-item bullet list (one nested), a numbered
+    // list, a closing paragraph — all in one box. Mono: size 10, line-height
+    // 1.5, indent step 15 (1.5em), marker gap 5.
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="300" height="300" font-size="10" line-height="1.5"><x:p>Agenda</x:p><x:list list="bullet"><x:li>one</x:li><x:li indent="1">two</x:li></x:list><x:list list="number"><x:li>first</x:li></x:list><x:p>end</x:p></x:textbox></svg>"##;
+    let out = compile_test(svg);
+    // the items' text columns sit at the indent step (15) and twice it (30)
+    assert!(
+        out.contains(r#"x="15" y="#) && out.contains(">one<"),
+        "first item at the indent step: {out}"
+    );
+    assert!(
+        out.contains(r#"x="30" y="#) && out.contains(">two<"),
+        "nested item one step further: {out}"
+    );
+    // a bullet shape is drawn for each bullet item, a numbered marker as text
+    assert!(
+        out.matches("<circle").count()
+            + out.matches("<rect").count()
+            + out.matches("<path").count()
+            >= 2,
+        "drawn bullets: {out}"
+    );
+    assert!(
+        out.contains(r#"text-anchor="end""#) && out.contains(">1.<"),
+        "a numbered marker in the gutter: {out}"
+    );
+    // the paragraphs keep the content edge
+    assert!(out.contains(r#"x="0" y="7">Agenda"#), "{out}");
+    assert!(out.contains(">end<"), "{out}");
+    // every paragraph and item carries its own source key; the marker <text> does not
+    let keyed = compile_impl(svg, "balanced", true, &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert_eq!(
+        keyed.matches("<text ").count(),
+        6,
+        "five keyed blocks and one marker text: {keyed}"
+    );
+}
+
+#[test]
 fn paragraphs_stack_by_the_incoming_lines_own_size() {
     // para 1 plain 10 (cap 7); para 2 opens with a 20px run: its first
     // baseline = 7 + 0.35·10 gap + 20·1.5 = 40.5, and its cap-top is 14 above

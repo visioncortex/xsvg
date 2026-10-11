@@ -16,6 +16,11 @@ partial one.
 
 ### Added
 
+- **Lists inside a textbox.** A `<x:list>` stands among a textbox's paragraphs as a block of the
+  same stack: its items flow as paragraphs with the list's gutter and markers, under the box's
+  shrink-to-fit, `valign` and padding — one box holds a heading, bullets and a closing paragraph
+  (§6.16). The standalone list remains.
+
 - **`transform` on `<x:table>` and `<x:list>`** passes through to the `<g>` each lowers to, as a
   textbox's does: rotating or scaling a table or a list is its transform (§6.14, §6.15). Found by
   the editor: a transform on a table was consumed and never re-emitted, so the table could not move.
