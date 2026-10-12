@@ -16,6 +16,13 @@ partial one.
 
 ### Added
 
+- **Caret stops on outlined text** for editing hosts. `caret_stops_impl` (and
+  `CompileSession::caret_stops`) returns the caret positions between the outlined glyphs of an
+  `<x:textbox outline="true">` — through any `<x:warp>` it sits in — or an `<x:textpath>` effect,
+  in the coordinates of the emitted paths. The compile records them as it traces and warps, so
+  they agree with the rendered geometry by construction; an ordinary compile is unchanged
+  ([Incremental.md §7](docs/Incremental.md)).
+
 - **Lists inside a textbox.** A `<x:list>` stands among a textbox's paragraphs as a block of the
   same stack: its items flow as paragraphs with the list's gutter and markers, under the box's
   shrink-to-fit, `valign` and padding — one box holds a heading, bullets and a closing paragraph

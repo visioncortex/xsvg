@@ -298,6 +298,7 @@ pub(super) fn emit_plugin(node: roxmltree::Node, ns: &str, out: &mut String, ctx
     let has_element_children = node.children().any(|c| c.is_element());
     match children {
         ChildMode::Container => {
+            let _stops = ctx.suspend_stops(); // the generator decides what renders
             for child in node.children().filter(|c| c.is_element()) {
                 let mut buf = String::new();
                 serialize(child, &mut buf, false, ctx);
@@ -381,6 +382,7 @@ fn sanitize(svg: &str, node: roxmltree::Node, ctx: &Ctx) -> Option<String> {
 
     let prev_sourcemap = ctx.sourcemap.replace(false);
     let prev_in_plugin = ctx.in_plugin.replace(true);
+    let _stops = ctx.suspend_stops(); // generator output spans are not the document's
     let mut lowered = String::new();
     for child in doc.root_element().children() {
         serialize(child, &mut lowered, false, ctx);

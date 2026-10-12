@@ -67,6 +67,9 @@ pub(super) fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// unwarped behind a marker. The element's own paint / `transform` ride on the
 /// emitted `<g>` (an affine `transform` composes after the bake for free).
 pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // caret stops recorded while the children lower are mapped through the same
+    // field as their paths below (stops.rs); a nested warp has mapped its own first
+    let stops_mark = ctx.stops_mark();
     let mut inner = String::new();
     for child in node.children().filter(|c| c.is_element()) {
         match warp_child_markup(child, ctx) {
@@ -149,6 +152,7 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push('>');
     match field {
         Some(f) => {
+            ctx.map_stops_from(stops_mark, f.as_ref());
             let tol = ctx.quality.tolerance();
             let mut last = 0;
             for (a, b) in ranges {
@@ -253,6 +257,8 @@ pub(super) fn has_tag(s: &str, tag: &str) -> bool {
 /// ignored), a legitimately empty result emits an empty `<g>`, and an unknown
 /// `op` degrades behind a marker with the children un-operated.
 pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // operands are harvested into one region; no caret stands on them
+    let _stops = ctx.suspend_stops();
     // lower each child to path markup; one child = one operand. A <use href>
     // child is an operand **by reference** (§7.4): the target's geometry (§4
     // reference resolution — compiled output for x: targets) joins the algebra

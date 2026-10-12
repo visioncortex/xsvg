@@ -138,6 +138,10 @@ struct Ctx<'a> {
     /// Set while generator output is being sanitized, so a module emitting an
     /// element in its own namespace degrades instead of recursing forever.
     in_plugin: std::cell::Cell<bool>,
+    /// The caret-stop recorder (`stops.rs`): `Some` only inside a
+    /// [`CompileSession::caret_stops`] query's scratch compile. An ordinary
+    /// compile never records and emits exactly what it did before.
+    stops: std::cell::RefCell<Option<stops::StopRecorder>>,
 }
 
 /// The borrowed view of a platform a compile runs against — what [`Ctx`] is built
@@ -324,6 +328,7 @@ impl<'a> Ctx<'a> {
             doc: &parsed.doc,
             ids: &parsed.ids,
             in_plugin: std::cell::Cell::new(false),
+            stops: std::cell::RefCell::new(None),
         }
     }
 
@@ -1255,7 +1260,10 @@ use runs::*;
 mod textbox;
 use textbox::*;
 pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara};
+mod stops;
 mod textpath;
+use stops::{record_textpath_stops, span_of, stop_run};
+pub use stops::{CaretStop, CaretStops, StopRun};
 use textpath::*;
 mod connector;
 use connector::*;

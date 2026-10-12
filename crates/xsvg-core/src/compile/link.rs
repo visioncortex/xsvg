@@ -85,6 +85,8 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
     // shared on purpose — they are a whole-compile work budget.)
     let prev_resolved = ctx.resolved.replace(std::collections::HashMap::new());
     let prev_resolving = ctx.resolving.replace(Vec::new());
+    // the linked file's spans are its own, not this document's: no caret stops
+    let _stops = ctx.suspend_stops();
     let compiled = match session::parse_document(&source) {
         Ok(d) => {
             let mut s = String::new();

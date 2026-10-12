@@ -759,6 +759,47 @@ impl Field for RoughenField {
     }
 }
 
+/// The field a text-on-path effect bakes through (§6.13), placed on `frame`:
+/// `advance` is the flat run's width (align placement), `fx` selects the effect
+/// and carries its `align` / `start` / `baseline-shift`. `None` for an unknown
+/// effect. Shared by the bake ([`warp_text_on_path`]) and the caret-stop query, so
+/// the stops ride the field that drew the glyphs.
+pub fn path_effect_field<'a>(
+    frame: &'a PathFrame,
+    fx: &crate::PathEffect,
+    advance: f64,
+) -> Option<Box<dyn Field + 'a>> {
+    match fx.effect {
+        "skew" => {
+            let base_x =
+                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
+            Some(Box::new(SkewField {
+                frame,
+                base_x,
+                shift: fx.baseline_shift,
+            }))
+        }
+        "rainbow" => {
+            let s0 = run_offset(frame.len(), advance, fx.align, fx.start);
+            Some(Box::new(RainbowField {
+                frame,
+                s0,
+                shift: fx.baseline_shift,
+            }))
+        }
+        "ribbon" => {
+            let base_x =
+                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
+            Some(Box::new(RibbonField {
+                frame,
+                base_x,
+                shift: fx.baseline_shift,
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// The native text-on-path bake (§6.13): warp a flat-baseline outlined run onto a
 /// reference path. `outline_d` is the run outlined at the origin (baseline y = 0,
 /// advancing in +x); `advance` is its advance width (align placement); `fx` selects
@@ -779,38 +820,8 @@ pub fn warp_text_on_path(
     // the frame flattens finer still (tol/2 inside)
     let tolerance = tolerance.max(1e-3);
     let frame = PathFrame::new(ref_path_d, tolerance)?;
-    match fx.effect {
-        "skew" => {
-            let base_x =
-                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
-            let field = SkewField {
-                frame: &frame,
-                base_x,
-                shift: fx.baseline_shift,
-            };
-            warp_svg_path(outline_d, &field, tolerance, do_refit)
-        }
-        "rainbow" => {
-            let s0 = run_offset(frame.len(), advance, fx.align, fx.start);
-            let field = RainbowField {
-                frame: &frame,
-                s0,
-                shift: fx.baseline_shift,
-            };
-            warp_svg_path(outline_d, &field, tolerance, do_refit)
-        }
-        "ribbon" => {
-            let base_x =
-                frame.x0() + run_offset(frame.x1() - frame.x0(), advance, fx.align, fx.start);
-            let field = RibbonField {
-                frame: &frame,
-                base_x,
-                shift: fx.baseline_shift,
-            };
-            warp_svg_path(outline_d, &field, tolerance, do_refit)
-        }
-        _ => None,
-    }
+    let field = path_effect_field(&frame, fx, advance)?;
+    warp_svg_path(outline_d, field.as_ref(), tolerance, do_refit)
 }
 
 /// How many times a mapped segment may halve during adaptive subdivision (2^10 ≈

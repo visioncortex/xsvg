@@ -9,7 +9,7 @@
 //! dependents) and the text-layout seam are here too, as one-shot sessions.
 
 use super::session::Parsed;
-use super::{CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout};
+use super::{CaretStops, CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout};
 use super::{NodeKeys, Resolver};
 use crate::{GlyphOutliner, Measurer, Shaper};
 
@@ -384,4 +384,25 @@ pub fn text_layout_impl(
         .session(input, quality, false, "")
         .ok()?
         .text_layout(offset)
+}
+
+/// Caret stops for the outlined text element whose source range starts at byte
+/// `offset` (docs/Incremental.md §6; consumer: xsvg-kit): an `<x:textbox
+/// outline="true">` — inside any number of `<x:warp>`s or none — or an
+/// `<x:textpath>` with a geometric effect. The stops are recorded by the compile
+/// itself, so they sit between the glyphs the same fields drew. `None` when the
+/// element renders live text instead (no outline, or the outliner declined —
+/// the host's `charGeometry` case), is not text, or the document doesn't parse.
+pub fn caret_stops_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Option<CaretStops> {
+    Platform::new(m, shaper, outliner)
+        .session(input, quality, false, "")
+        .ok()?
+        .caret_stops(offset)
 }

@@ -86,6 +86,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
                 ctx.quality.text_tolerance(),
                 false,
             ) {
+                if ctx.recording_stops() {
+                    record_textpath_stops(&text, &style, &fx, &path_d, advance, span_of(node), ctx);
+                }
                 push_outline_group(out, fill, &stroke, &pos, &[d], ctx);
                 return;
             }

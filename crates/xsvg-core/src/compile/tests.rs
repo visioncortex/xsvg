@@ -5753,3 +5753,175 @@ fn text_layout_reports_the_ellipsized_paragraph_line() {
         "an ellipsized line renders at natural width"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Caret stops on outlined text (stops.rs; docs/Incremental.md §7)
+
+fn stops_at(svg: &str, needle: &str) -> Option<CaretStops> {
+    let off = svg.find(needle).unwrap();
+    caret_stops_impl(svg, off, "balanced", &Mono, &NoShaper, &BoxOutliner)
+}
+
+/// `(x, y)` of every `<path d="M…">` start in `out`, in document order. The
+/// `BoxOutliner` traces a 1×1 box from the pen origin, so a path's `M` is the
+/// line's `(start_x, baseline)` mapped through whatever fields the compile applied.
+fn path_starts(out: &str) -> Vec<(f64, f64)> {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    doc.descendants()
+        .filter(|n| n.tag_name().name() == "path")
+        .map(|n| {
+            let d = n.attribute("d").unwrap();
+            let body = d.trim_start_matches('M').trim_start();
+            let end = body
+                .find(|c: char| c.is_ascii_alphabetic())
+                .unwrap_or(body.len());
+            let nums: Vec<f64> = body[..end]
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.parse().unwrap())
+                .collect();
+            (nums[0], nums[1])
+        })
+        .collect()
+}
+
+#[test]
+fn caret_stops_none_for_live_text() {
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="80" height="20" font-size="10">hi</x:textbox><rect x="0" y="0" width="1" height="1"/><x:textbox x="0" y="40" width="80" height="20" font-size="10" outline="true">hi</x:textbox></svg>"##
+    );
+    assert!(
+        stops_at(&svg, "<x:textbox").is_none(),
+        "no outline → live text → None"
+    );
+    assert!(stops_at(&svg, "<rect").is_none(), "not text");
+    // outline asked for but no font bytes: the compile falls back to live text, and
+    // so must the query (the host measures live glyphs itself)
+    let off = svg.rfind("<x:textbox").unwrap();
+    assert!(caret_stops_impl(&svg, off, "balanced", &Mono, &NoShaper, &NoOutliner).is_none());
+    assert!(caret_stops_impl(&svg, off, "balanced", &Mono, &NoShaper, &BoxOutliner).is_some());
+}
+
+#[test]
+fn caret_stops_sit_on_the_traced_lines() {
+    // width 30 wraps "alpha beta" (Mono: 5 per char) into two lines
+    let svg = format!(
+        r##"{XW}<x:textbox x="7" y="3" width="30" height="40" font-size="10" outline="true">alpha beta</x:textbox></svg>"##
+    );
+    let out = compile_outlined(&svg);
+    let starts = path_starts(&out);
+    assert_eq!(starts.len(), 2, "{out}");
+    let cs = stops_at(&svg, "<x:textbox").unwrap();
+    assert_eq!(cs, stops_at(&svg, "<x:textbox").unwrap(), "deterministic");
+    let texts: Vec<&str> = cs.runs.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(texts, ["alpha", "beta"]);
+    for (run, &(mx, my)) in cs.runs.iter().zip(&starts) {
+        assert_eq!(run.stops.len(), run.text.chars().count() + 1);
+        // stop 0 is the pen origin the path was traced from, straddling its baseline
+        let s0 = &run.stops[0];
+        assert!(
+            (s0.top.0 - mx).abs() < 1e-9 && (s0.bottom.0 - mx).abs() < 1e-9,
+            "{s0:?} vs {mx}"
+        );
+        assert!(
+            s0.top.1 < my && my < s0.bottom.1,
+            "{s0:?} must bracket baseline {my}"
+        );
+        // consecutive stops differ by the outline font's advance (Mono: 0.5 em)
+        for w in run.stops.windows(2) {
+            assert!((w[1].top.0 - w[0].top.0 - 5.0).abs() < 1e-9, "{w:?}");
+            assert_eq!(w[1].top.1, w[0].top.1);
+            assert_eq!(w[1].bottom.1, w[0].bottom.1);
+        }
+    }
+}
+
+#[test]
+fn caret_stops_ride_the_warp_field() {
+    let inner = r##"<x:textbox x="0" y="0" width="80" height="20" font-size="10" outline="true">hi</x:textbox>"##;
+    let flat = format!("{XW}{inner}</svg>");
+    let zero = format!(r##"{XW}<x:warp field="arch" bend="0">{inner}</x:warp></svg>"##);
+    let bent = format!(r##"{XW}<x:warp field="arch" bend="50">{inner}</x:warp></svg>"##);
+    let nested = format!(
+        r##"{XW}<x:warp field="flag" bend="0"><x:warp field="arch" bend="50">{inner}</x:warp></x:warp></svg>"##
+    );
+    let a = stops_at(&flat, "<x:textbox").unwrap();
+    assert_eq!(
+        stops_at(&zero, "<x:textbox").unwrap(),
+        a,
+        "bend 0 is the identity"
+    );
+    let b = stops_at(&bent, "<x:textbox").unwrap();
+    assert_ne!(b, a, "a bend moves the stops");
+    assert_eq!(
+        stops_at(&nested, "<x:textbox").unwrap(),
+        b,
+        "an identity outer warp changes nothing; the inner one still applies"
+    );
+    let run = &b.runs[0];
+    assert_eq!(run.stops.len(), 3);
+    // the arch displaces y only: x is the flat run's, still monotone — and every
+    // coordinate stays finite although the caret heads lie far outside the ink bbox
+    for (s, f) in run.stops.iter().zip(&a.runs[0].stops) {
+        assert!((s.top.0 - f.top.0).abs() < 1e-9, "{s:?} vs {f:?}");
+    }
+    assert!(run.stops.windows(2).all(|w| w[1].top.0 > w[0].top.0));
+    assert!(run
+        .stops
+        .iter()
+        .all(|s| [s.top.0, s.top.1, s.bottom.0, s.bottom.1]
+            .iter()
+            .all(|v| v.is_finite())));
+}
+
+#[test]
+fn caret_stops_follow_a_text_on_path_effect() {
+    let svg = format!(
+        r##"{XW}<path id="p" d="M0 50 L200 50" fill="none"/><x:textpath in="#p" effect="skew" font-size="10">hey</x:textpath><x:textpath in="#p" effect="rainbow" align="middle" font-size="10">hey</x:textpath></svg>"##
+    );
+    let out = compile_outlined(&svg);
+    assert!(!out.contains("<text"), "{out}");
+    let m = Mono.font_metrics(&TextStyle::default(), 10.0);
+    let skew = stops_at(&svg, "<x:textpath").unwrap();
+    assert_eq!(skew.runs.len(), 1);
+    let run = &skew.runs[0];
+    assert_eq!(run.text, "hey");
+    assert_eq!(run.stops.len(), 4);
+    for (i, s) in run.stops.iter().enumerate() {
+        // a flat path: the pen advances 0.5 em per scalar from the path's start,
+        // and the caret spans ascent above the path's y to descent below it
+        assert!((s.top.0 - 5.0 * i as f64).abs() < 1e-9, "{s:?}");
+        assert!((s.top.1 - (50.0 - m.ascent)).abs() < 1e-9, "{s:?}");
+        assert!((s.bottom.1 - (50.0 + m.descent)).abs() < 1e-9, "{s:?}");
+    }
+    // the centred run: `run_offset` puts its pen at (200 − 15) / 2 along the path
+    let off = svg.rfind("<x:textpath").unwrap();
+    let rainbow = caret_stops_impl(&svg, off, "balanced", &Mono, &NoShaper, &BoxOutliner).unwrap();
+    let s = &rainbow.runs[0].stops;
+    assert!((s[0].top.0 - 92.5).abs() < 1e-9, "{:?}", s[0]);
+    assert!((s[3].top.0 - 107.5).abs() < 1e-9, "{:?}", s[3]);
+    assert!(
+        (s[3].bottom.1 - (50.0 + m.descent)).abs() < 1e-9,
+        "{:?}",
+        s[3]
+    );
+}
+
+#[test]
+fn caret_stops_are_per_element_and_skip_harvests() {
+    let svg = format!(
+        r##"{XW}<x:warp field="arch" bend="30"><x:textbox x="0" y="0" width="80" height="20" font-size="10" outline="true">one</x:textbox><x:textbox x="0" y="40" width="80" height="20" font-size="10" outline="true">two</x:textbox></x:warp><x:boolean op="union"><x:textbox x="0" y="100" width="80" height="20" font-size="10" outline="true">three</x:textbox></x:boolean></svg>"##
+    );
+    let offs: Vec<usize> = svg.match_indices("<x:textbox").map(|(i, _)| i).collect();
+    let at = |o| caret_stops_impl(&svg, o, "balanced", &Mono, &NoShaper, &BoxOutliner);
+    // two boxes share one warp (and so one envelope frame): each query answers for
+    // its own element only
+    let one = at(offs[0]).unwrap();
+    assert_eq!(one.runs.len(), 1);
+    assert_eq!(one.runs[0].text, "one");
+    let two = at(offs[1]).unwrap();
+    assert_eq!(two.runs.len(), 1);
+    assert_eq!(two.runs[0].text, "two");
+    // a boolean operand is harvested into a region, not rendered as itself
+    assert!(at(offs[2]).is_none());
+}

@@ -132,6 +132,39 @@ impl<'a> Parsed<'a> {
         super::layout_textbox(node, &Ctx::new(backend, quality, false, "", self))
     }
 
+    /// Caret stops of the outlined text element starting at byte `offset`
+    /// (`stops.rs`). Its top-level fragment compiles once more into a scratch
+    /// buffer with the recorder on, so the stops come out of the same outline,
+    /// placement and fields the rendered paths did. `None` when nothing of that
+    /// element was outlined — it renders live text, which the host measures
+    /// itself.
+    pub(super) fn caret_stops(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Option<super::CaretStops> {
+        let node = self
+            .doc
+            .descendants()
+            .find(|n| n.is_element() && n.range().start == offset)?;
+        let top = top_level_at(&self.doc, offset)?;
+        let ctx = Ctx::new(backend, quality, false, "", self);
+        *ctx.stops.borrow_mut() = Some(super::stops::StopRecorder::default());
+        let mut scratch = String::new();
+        serialize(top, &mut scratch, false, &ctx);
+        let span = super::stops::span_of(node);
+        let runs: Vec<super::StopRun> = ctx
+            .stops
+            .take()?
+            .runs
+            .into_iter()
+            .filter(|(s, _)| *s == span)
+            .map(|(_, run)| run)
+            .collect();
+        (!runs.is_empty()).then_some(super::CaretStops { runs })
+    }
+
     /// Source byte range of every element in document order, the root included.
     pub(super) fn node_spans(&self) -> Vec<(usize, usize)> {
         self.doc
@@ -324,6 +357,13 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
         self.parsed
             .text_layout(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// Caret stops on the outlined text element at byte `offset` — the same
+    /// answer as [`super::caret_stops_impl`]. `None` when nothing there outlines.
+    pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
+        self.parsed
+            .caret_stops(offset, &self.platform.backend(), self.quality)
     }
 
     /// Source byte range of every element, in document order — the same answer as

@@ -103,6 +103,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 ctx.m,
                 &emits,
                 &pos,
+                span_of(node),
                 outline,
                 ctx.outliner,
                 ctx,
@@ -144,6 +145,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             ctx.m,
             &[EmitAttrs::default()],
             &pos,
+            span_of(node),
             outline,
             ctx.outliner,
             ctx,
@@ -164,6 +166,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         ctx.m,
         &emits,
         &pos,
+        span_of(node),
         outline,
         ctx.outliner,
         ctx,
@@ -649,6 +652,7 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         m,
         &emits,
         &pos_attr(node, ctx),
+        span_of(node),
         outline,
         ctx.outliner,
         ctx,
@@ -666,6 +670,7 @@ pub(super) fn write_area_text(
     m: &dyn Measurer,
     emits: &[EmitAttrs],
     pos: &str,
+    span: (usize, usize),
     outline: bool,
     outliner: &dyn GlyphOutliner,
     ctx: &Ctx,
@@ -677,6 +682,7 @@ pub(super) fn write_area_text(
     // measured line width.
     if outline {
         let mut paths = Vec::new();
+        let mut traced = Vec::new(); // (text, start_x, baseline) of each traced line
         let mut ok = true;
         for line in &layout.lines {
             if line.text.is_empty() {
@@ -689,7 +695,10 @@ pub(super) fn write_area_text(
                 Anchor::End => line.x - w,
             };
             match outliner.outline(&line.text, style, layout.font_size, start_x, line.baseline) {
-                Some(d) => paths.push(d),
+                Some(d) => {
+                    paths.push(d);
+                    traced.push((line.text.as_str(), start_x, line.baseline));
+                }
                 None => {
                     ok = false;
                     break;
@@ -697,6 +706,24 @@ pub(super) fn write_area_text(
             }
         }
         if ok {
+            // a caret_stops query is listening: the stops of each traced line, at
+            // the very placement the outline above was traced from (stops.rs)
+            if ctx.recording_stops() {
+                let metrics = m.font_metrics(style, layout.font_size);
+                for (text, start_x, baseline) in traced {
+                    if let Some(run) = stop_run(
+                        text,
+                        style,
+                        layout.font_size,
+                        start_x,
+                        baseline,
+                        &metrics,
+                        outliner,
+                    ) {
+                        ctx.record_stops(span, run);
+                    }
+                }
+            }
             push_outline_group(out, fill, stroke, pos, &paths, ctx);
             return;
         }

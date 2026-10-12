@@ -268,6 +268,62 @@ valign, indent, and paragraph variants.
 
 **Limits (v1)**: styled-run boundaries inside a line are not broken out per
 run (caret x uses whole-line prefixes; correct while runs share the paragraph
-size, which §6.16 guarantees); `glyph-x-scale ≠ 1` and warped/textpath text are
-not caret targets; curved region flow reports lines and padded bounds but
+size, which §6.16 guarantees); `glyph-x-scale ≠ 1` is not a caret target, and
+warped or text-on-path text is not a *layout-tier* target — its outlined form
+answers through §7 instead; curved region flow reports lines and padded bounds but
 editors should treat it read-only for now.
+
+## 7. Caret stops on outlined text (`caret_stops_impl`, shipped)
+
+Outlined text — an `<x:textbox outline="true">`, inside any number of
+`<x:warp>`s or none, and an `<x:textpath>` with a geometric effect (`skew`,
+`rainbow`, `ribbon`) — compiles to path data with no glyph mapping, so neither
+§6 nor a host's own glyph cells can place a caret on it.
+`caret_stops_impl(input, offset, quality, measurer, shaper, outliner)` returns
+the caret positions between its outlined characters for the element whose
+source range starts at byte `offset` (the §6 convention). `None` exactly when
+the element renders live text instead — no `outline`, or the outliner declined
+and the compile fell back — or is not text; that is the host's glyph-cell case,
+and it keys its tier choice on it.
+
+**Shape**: `CaretStops { runs }`, one `StopRun { text, stops }` per outlined run
+in output order (a textbox's lines; a textpath's one run), with
+`text.chars().count() + 1` `CaretStop { top, bottom }`s: stop `i` sits before
+scalar `i`, the last after the run. `top` is `(x_i, baseline − ascent)` and
+`bottom` `(x_i, baseline + descent)` — the paragraph's `FontMetrics`, the same
+caret height §6 reports — **mapped through every field the run's path went
+through**. Coordinates are the user space of the `d` the compile emitted for
+that run, so a host maps them with the CTM of the element carrying the node's
+key, the frame it already uses for the other tiers. Stop `0` is the pen origin,
+not the first glyph's ink edge; consecutive stops differ by the outline font's
+own advances (`GlyphOutliner::advance_width` over prefixes, per Unicode scalar —
+a ligature's interior stops sit at the prefix advances).
+
+**Recorded, not recomputed.** The compile is the one source of these numbers:
+the outline branch of `write_area_text` knows each traced line's text, pen
+origin and baseline; `emit_warp` holds the field it bakes the `d`s through, built
+from the union ink bbox of *every* path child, siblings included; the text-on-path
+effects pick theirs in `path_effect_field`. A `caret_stops` query therefore
+compiles the element's top-level fragment once more into a scratch buffer with a
+recorder on the `Ctx` (`compile/stops.rs`): the outline branch records a run per
+traced line, every field maps the runs recorded beneath it (nested warps compose
+by construction), and the query keeps the runs whose span is the element's. An
+ordinary compile has no recorder — nothing is recorded, nothing is emitted, and
+the output is byte-identical to before the seam existed. Scratch serializations
+that harvest geometry rather than render the element (a referenced `x:` target,
+a boolean operand, a plugin's children, a linked file) suspend the recorder.
+
+**Pinned**: stop `0` of each line is the `M` of its emitted path; a `bend="0"`
+warp and an identity outer warp leave the stops equal to the flat box's; a bend
+moves them, keeps x monotone and every coordinate finite though the caret heads
+lie outside the ink bbox; a flat text-on-path run's stops advance by the
+outliner's widths from `run_offset`'s placement with the metrics about the
+path's y; two boxes in one warp answer separately; a boolean operand answers
+`None`.
+
+**Limits (v1)**: paragraph mode has no outline branch, so a box with `<x:p>`
+children never outlines and never has stops; per-scalar prefix advances shape
+the run once per character (`O(n²)` per line — fine per caret draw; a
+one-pass `advances` method on the outliner is the obvious upgrade if a host
+needs it); stops are per scalar, so a caret inside a ligature is honest only at
+cluster edges.
