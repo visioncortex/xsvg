@@ -160,6 +160,15 @@ type OtGlyphPath = { toPathData(fractionalDigits?: number): string };
 type OtFont = {
   getPath(t: string, x: number, y: number, size: number): OtGlyphPath;
   getAdvanceWidth(t: string, size: number): number;
+  /** Visits each shaped glyph with its pen x; returns the run's advance. */
+  forEachGlyph(
+    t: string,
+    x: number,
+    y: number,
+    size: number,
+    options: undefined,
+    cb: (glyph: unknown, x: number) => void,
+  ): number;
 };
 const outlineFonts = new Map<string, OtFont>();
 
@@ -293,18 +302,31 @@ function outline(
   return d;
 }
 
-// Advance width of a run per the outline font's own metrics — the browser adapter
-// for GlyphOutliner::advance_width. NaN when the family has no registered bytes
-// (→ Rust degrades). All §6.13 path-warp math itself runs natively in xsvg-core.
-function advanceWidth(
+// The pen x where each next character of a run begins, per the outline font's own
+// metrics — the browser adapter for GlyphOutliner::advances: one entry per
+// character, entry i the kerned origin of character i+1, the last the run's
+// width. One shaping pass when the glyphs map one-to-one onto the characters; a
+// ligature collapses characters, so then each prefix is measured on its own (the
+// stops inside a ligature sit at the prefix advances — docs/Incremental.md §7).
+// [] when the family has no registered bytes (→ Rust degrades). All §6.13
+// path-warp math itself runs natively in xsvg-core.
+function advances(
   text: string,
   family: string,
   _weight: string,
   _style: string,
   size: number,
-): number {
+): number[] {
   const font = lookupFont(family);
-  return font ? font.getAdvanceWidth(text, size) : NaN;
+  if (!font) return [];
+  const chars = Array.from(text);
+  if (chars.length === 0) return [];
+  const starts: number[] = [];
+  const total = font.forEachGlyph(text, 0, 0, size, undefined, (_glyph, x) => {
+    starts.push(x);
+  });
+  if (starts.length === chars.length) return [...starts.slice(1), total];
+  return chars.map((_c, i) => font.getAdvanceWidth(chars.slice(0, i + 1).join(""), size));
 }
 
 /**
@@ -478,7 +500,7 @@ function makeSession(
       plugins.beginCompile();
       try {
         const resolve = resolveFor(misses);
-        const markup = compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys);
+        const markup = compile_fragment_ext(src, quality, sourcemap, offset, measure, metrics, rasterize, outline, advances, resolve, base, plugins.element, plugins.generate, keys);
         return misses.size === 0 ? markup : null;
       } catch {
         // The offset is not a fragment unit (inter-element whitespace, the root
@@ -517,7 +539,7 @@ const probeSeams = {
   metrics: () => [10, 3, 7, 5],
   rasterize: () => [],
   outline: () => "",
-  advanceWidth: () => NaN,
+  advances: () => [],
 };
 
 // Safety bound on fixpoint rounds. Convergence needs at most link-depth rounds (the
@@ -578,14 +600,14 @@ async function compileFixpoint(
     const resolve = makeResolve(misses);
     if (probing) {
       plugins.beginCompile();
-      compile_ext(source, "fast", false, probeSeams.measure, probeSeams.metrics, probeSeams.rasterize, probeSeams.outline, probeSeams.advanceWidth, resolve, base, plugins.element, plugins.generate);
+      compile_ext(source, "fast", false, probeSeams.measure, probeSeams.metrics, probeSeams.rasterize, probeSeams.outline, probeSeams.advances, resolve, base, plugins.element, plugins.generate);
       if (misses.size === 0) {
         probing = false; // discovery converged → next round is the real one
         continue;
       }
     } else {
       plugins.beginCompile();
-      const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, keys);
+      const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advances, resolve, base, plugins.element, plugins.generate, keys);
       if (misses.size === 0) {
         // Converged: the cache now holds every dependency this document reaches,
         // so fragment re-emits can run against it without fetching.
@@ -601,7 +623,7 @@ async function compileFixpoint(
   // no session: discovery never closed, so a fragment re-emit could not be trusted to
   // resolve what this pass did.
   plugins.beginCompile();
-  return compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, makeResolve(new Set()), base, plugins.element, plugins.generate);
+  return compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advances, makeResolve(new Set()), base, plugins.element, plugins.generate);
 }
 
 /** The compiler's own element descriptions, parsed once. */
@@ -658,7 +680,7 @@ export async function compileXsvg(source: string, opts: CompileOptions = {}): Pr
     // Sync resolver (bundled/in-memory deps): the compiler links on demand, one pass.
     const resolve = opts.resolve;
     plugins.beginCompile();
-    const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advanceWidth, resolve, base, plugins.element, plugins.generate, opts.keys);
+    const svg = compile_ext(source, quality, sourcemap, measure, metrics, rasterize, outline, advances, resolve, base, plugins.element, plugins.generate, opts.keys);
     // This resolver answers on demand and never misses pending bytes, so a fragment
     // re-emit resolves exactly what the full compile did.
     opts.onSession?.(makeSession(source, quality, sourcemap, base, () => resolve, plugins, opts.keys));

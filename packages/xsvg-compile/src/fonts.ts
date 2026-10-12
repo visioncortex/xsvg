@@ -15,6 +15,15 @@ export interface Font {
   tables: { os2?: { sCapHeight?: number; sxHeight?: number; fsSelection?: number }; head?: { macStyle?: number } };
   names: { fontFamily?: Record<string, string>; preferredFamily?: Record<string, string> };
   getAdvanceWidth(text: string, fontSize: number): number;
+  /** Visits each shaped glyph with its pen x; returns the run's advance. */
+  forEachGlyph(
+    t: string,
+    x: number,
+    y: number,
+    size: number,
+    options: undefined,
+    cb: (glyph: unknown, x: number) => void,
+  ): number;
   getPath(text: string, x: number, y: number, fontSize: number): { toPathData(digits?: number): string };
 }
 

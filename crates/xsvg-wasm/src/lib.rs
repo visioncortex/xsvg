@@ -5,6 +5,7 @@
 //! outlines + advance widths) — and exposes the `compile*` entry points to JS.
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use xsvg_core::{
     compile_fragment_linked_impl, compile_fragment_platform_impl, compile_linked_impl,
     compile_platform_impl, dependents_impl, fragment_range_impl, imports_impl, node_spans_impl,
@@ -144,20 +145,23 @@ fn push_style_args(args: &js_sys::Array, style: &TextStyle, size: f64) {
 
 /// Browser-backed [`GlyphOutliner`]. `outline_run(text, family, weight, style, size, x,
 /// baseline) => d | ""` returns a glyph outline (opentype.js), or `""` when the font's
-/// bytes aren't available (→ fall back to live `<text>`). `advance_width(text, family,
-/// weight, style, size) => number | NaN` returns the run's advance per the same font.
+/// bytes aren't available (→ fall back to live `<text>`). `advances(text, family,
+/// weight, style, size) => number[]` returns where each next character of the run
+/// begins per the same font — one entry per character, entry i the kerned pen x of
+/// character i+1, the last the run's width — or `[]` when it cannot (a length
+/// mismatch is a decline).
 /// Path-warping itself is native (§6.13 runs through the core §7.1 bake).
 pub struct JsOutliner<'a> {
     outline_run: &'a js_sys::Function,
-    advance_width: &'a js_sys::Function,
+    advances: &'a js_sys::Function,
 }
 
 impl<'a> JsOutliner<'a> {
     /// For downstream wasm crates (xsvg-kit) reusing the browser seams.
-    pub fn new(outline_run: &'a js_sys::Function, advance_width: &'a js_sys::Function) -> Self {
+    pub fn new(outline_run: &'a js_sys::Function, advances: &'a js_sys::Function) -> Self {
         Self {
             outline_run,
-            advance_width,
+            advances,
         }
     }
 }
@@ -184,15 +188,21 @@ impl GlyphOutliner for JsOutliner<'_> {
         (!d.is_empty()).then_some(d)
     }
 
-    fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
+    fn advances(&self, text: &str, style: &TextStyle, size: f64) -> Option<Vec<f64>> {
         let args = js_sys::Array::new();
         args.push(&JsValue::from_str(text));
         push_style_args(&args, style, size);
-        self.advance_width
-            .apply(&JsValue::NULL, &args)
-            .ok()?
-            .as_f64()
-            .filter(|w| w.is_finite())
+        let v = self.advances.apply(&JsValue::NULL, &args).ok()?;
+        // a Float64Array or a plain array of numbers; anything else — `null`, `NaN`,
+        // a bare number, an array of the wrong length — is a decline
+        let out: Vec<f64> = if let Some(arr) = v.dyn_ref::<js_sys::Float64Array>() {
+            arr.to_vec()
+        } else if let Some(arr) = v.dyn_ref::<js_sys::Array>() {
+            arr.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect()
+        } else {
+            return None;
+        };
+        (out.len() == text.chars().count() && out.iter().all(|w| w.is_finite())).then_some(out)
     }
 }
 
@@ -244,7 +254,7 @@ pub fn compile(
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
-    advance_width: &js_sys::Function,
+    advances: &js_sys::Function,
     resolve: &js_sys::Function,
     base: &str,
 ) -> Result<String, JsError> {
@@ -252,7 +262,7 @@ pub fn compile(
     let shaper = JsShaper { rasterize };
     let outliner = JsOutliner {
         outline_run,
-        advance_width,
+        advances,
     };
     let resolver = JsResolver { resolve };
     compile_linked_impl(
@@ -276,7 +286,7 @@ pub fn compile_fragment(
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
-    advance_width: &js_sys::Function,
+    advances: &js_sys::Function,
     resolve: &js_sys::Function,
     base: &str,
 ) -> Result<String, JsError> {
@@ -284,7 +294,7 @@ pub fn compile_fragment(
     let shaper = JsShaper { rasterize };
     let outliner = JsOutliner {
         outline_run,
-        advance_width,
+        advances,
     };
     let resolver = JsResolver { resolve };
     compile_fragment_linked_impl(
@@ -484,7 +494,7 @@ pub fn compile_ext(
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
-    advance_width: &js_sys::Function,
+    advances: &js_sys::Function,
     resolve: &js_sys::Function,
     base: &str,
     plugin_element: &js_sys::Function,
@@ -495,7 +505,7 @@ pub fn compile_ext(
     let shaper = JsShaper { rasterize };
     let outliner = JsOutliner {
         outline_run,
-        advance_width,
+        advances,
     };
     let resolver = JsResolver { resolve };
     let generators = JsGeneratorHost {
@@ -532,7 +542,7 @@ pub fn compile_fragment_ext(
     metrics: &js_sys::Function,
     rasterize: &js_sys::Function,
     outline_run: &js_sys::Function,
-    advance_width: &js_sys::Function,
+    advances: &js_sys::Function,
     resolve: &js_sys::Function,
     base: &str,
     plugin_element: &js_sys::Function,
@@ -543,7 +553,7 @@ pub fn compile_fragment_ext(
     let shaper = JsShaper { rasterize };
     let outliner = JsOutliner {
         outline_run,
-        advance_width,
+        advances,
     };
     let resolver = JsResolver { resolve };
     let generators = JsGeneratorHost {

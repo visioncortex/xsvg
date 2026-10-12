@@ -25,7 +25,7 @@ interface WasmModule {
     metrics: Cb,
     rasterize: Cb,
     outlineRun: Cb,
-    advanceWidth: Cb,
+    advances: Cb,
     resolve: Cb,
     base: string,
     pluginElement: Cb,
@@ -42,7 +42,7 @@ interface WasmModule {
     metrics: Cb,
     rasterize: Cb,
     outlineRun: Cb,
-    advanceWidth: Cb,
+    advances: Cb,
     resolve: Cb,
     base: string,
     pluginElement: Cb,
@@ -105,6 +105,22 @@ function metrics(fonts: FontDb, fontCss: string): number[] {
   const ex = font.tables.os2?.sxHeight;
   // [ascent, descent(+), capHeight, xHeight]; 0/absent → the Rust side uses its defaults
   return [font.ascender * s, -font.descender * s, cap ? cap * s : 0, ex ? ex * s : 0];
+}
+
+// The pen x where each next character begins, per the outline font (GlyphOutliner::advances;
+// entry i is the kerned origin of character i+1, the last the run's width): one shaping pass
+// when glyphs map one-to-one onto characters, each prefix on its own when a ligature collapsed
+// some (stops inside a ligature sit at the prefix advances).
+function advances(font: Font | undefined, text: string, size: number): number[] {
+  if (!font) return [];
+  const chars = Array.from(text);
+  if (chars.length === 0) return [];
+  const starts: number[] = [];
+  const total = font.forEachGlyph(text, 0, 0, size, undefined, (_glyph, x) => {
+    starts.push(x);
+  });
+  if (starts.length === chars.length) return [...starts.slice(1), total];
+  return chars.map((_c, i) => font.getAdvanceWidth(chars.slice(0, i + 1).join(""), size));
 }
 
 function outlineRun(font: Font | undefined, text: string, size: number, x: number, baseline: number): string {
@@ -191,10 +207,8 @@ function session(source: string, opts: CompileOptions) {
     (d: unknown, rowH: unknown) => rasterize(d as string, rowH as number),
     (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown, x: unknown, b: unknown) =>
       outlineRun(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number, x as number, b as number),
-    (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown) => {
-      const font = fonts.resolve(firstFamily(fam as string), style as string);
-      return font ? font.getAdvanceWidth(text as string, size as number) : NaN;
-    },
+    (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown) =>
+      advances(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number),
     resolve,
   ] as const;
   const hosts = [

@@ -296,8 +296,10 @@ through**. Coordinates are the user space of the `d` the compile emitted for
 that run, so a host maps them with the CTM of the element carrying the node's
 key, the frame it already uses for the other tiers. Stop `0` is the pen origin,
 not the first glyph's ink edge; consecutive stops differ by the outline font's
-own advances (`GlyphOutliner::advance_width` over prefixes, per Unicode scalar —
-a ligature's interior stops sit at the prefix advances).
+own advances (`GlyphOutliner::advances`: the kerned pen x where each next
+scalar begins, one shaping pass per run, so a stop sits exactly at the origin
+of the glyph it precedes — a ligature's interior stops sit at the prefix
+advances).
 
 **Recorded, not recomputed.** The compile is the one source of these numbers:
 the outline branch of `write_area_text` knows each traced line's text, pen
@@ -322,8 +324,5 @@ path's y; two boxes in one warp answer separately; a boolean operand answers
 `None`.
 
 **Limits (v1)**: paragraph mode has no outline branch, so a box with `<x:p>`
-children never outlines and never has stops; per-scalar prefix advances shape
-the run once per character (`O(n²)` per line — fine per caret draw; a
-one-pass `advances` method on the outliner is the obvious upgrade if a host
-needs it); stops are per scalar, so a caret inside a ligature is honest only at
-cluster edges.
+children never outlines and never has stops; stops are per scalar, so a caret
+inside a ligature is honest only at cluster edges.

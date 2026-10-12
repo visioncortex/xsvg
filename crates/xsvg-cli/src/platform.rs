@@ -94,8 +94,21 @@ impl GlyphOutliner for Native {
         (!b.d.is_empty()).then_some(b.d)
     }
 
-    fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
-        self.advance(text, style, size)
+    fn advances(&self, text: &str, style: &TextStyle, size: f64) -> Option<Vec<f64>> {
+        let bytes = self.fonts.resolve(&style.family, &style.style)?;
+        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
+        let s = size / f.units_per_em() as f64;
+        let mut w = 0.0;
+        Some(
+            text.chars()
+                .map(|c| {
+                    if let Some(g) = f.glyph_index(c) {
+                        w += f.glyph_hor_advance(g).unwrap_or(0) as f64;
+                    }
+                    w * s
+                })
+                .collect(),
+        )
     }
 }
 

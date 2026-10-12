@@ -711,15 +711,10 @@ pub(super) fn write_area_text(
             if ctx.recording_stops() {
                 let metrics = m.font_metrics(style, layout.font_size);
                 for (text, start_x, baseline) in traced {
-                    if let Some(run) = stop_run(
-                        text,
-                        style,
-                        layout.font_size,
-                        start_x,
-                        baseline,
-                        &metrics,
-                        outliner,
-                    ) {
+                    let run = outliner
+                        .advances(text, style, layout.font_size)
+                        .and_then(|adv| stop_run(text, start_x, baseline, &metrics, &adv));
+                    if let Some(run) = run {
                         ctx.record_stops(span, run);
                     }
                 }

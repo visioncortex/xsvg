@@ -50,14 +50,18 @@ impl GlyphOutliner for NoOutliner {
 }
 
 /// Stub outliner: a deterministic 1×1 box path at the run origin (so outline
-/// emit paths can be exercised without a real font) and Mono-consistent advance
-/// widths (chars × 0.5 × size), matching the `Mono` measurer.
+/// emit paths can be exercised without a real font) and Mono-consistent advances
+/// (0.5 × size per char, cumulative), matching the `Mono` measurer.
 pub struct BoxOutliner;
 impl GlyphOutliner for BoxOutliner {
     fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
         Some(format!("M{x},{b} h1 v-1 h-1 Z"))
     }
-    fn advance_width(&self, text: &str, _s: &TextStyle, size: f64) -> Option<f64> {
-        Some(text.chars().count() as f64 * 0.5 * size)
+    fn advances(&self, text: &str, _s: &TextStyle, size: f64) -> Option<Vec<f64>> {
+        Some(
+            (1..=text.chars().count())
+                .map(|i| i as f64 * 0.5 * size)
+                .collect(),
+        )
     }
 }

@@ -23,6 +23,12 @@ partial one.
   they agree with the rendered geometry by construction; an ordinary compile is unchanged
   ([Incremental.md §7](docs/Incremental.md)).
 
+- **`GlyphOutliner::advances`** replaces `advance_width`: the outline seam now answers the
+  cumulative advance after each character of a run in one call (the last entry is the run's
+  width), so caret stops and text-on-path placement shape a run once. The browser callback
+  `advances(text, family, weight, style, size)` returns `number[]` (`[]` to decline) where
+  `advanceWidth` returned a number; both JS adapters make one `forEachGlyph` pass.
+
 - **Lists inside a textbox.** A `<x:list>` stands among a textbox's paragraphs as a block of the
   same stack: its items flow as paragraphs with the list's gutter and markers, under the box's
   shrink-to-fit, `valign` and padding — one box holds a heading, bullets and a closing paragraph

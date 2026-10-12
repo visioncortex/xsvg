@@ -32,12 +32,15 @@ pub trait GlyphOutliner {
         baseline: f64,
     ) -> Option<String>;
 
-    /// Advance width of `text` per the outline font's own metrics — the run width
-    /// that matches the geometry [`GlyphOutliner::outline`] traces (unlike the
+    /// Where each next Unicode scalar of `text` begins, per the outline font's own
+    /// metrics: `text.chars().count()` entries, entry `i` the pen x of scalar `i + 1`
+    /// with kerning applied, the last the run's width — the width that matches the
+    /// geometry [`GlyphOutliner::outline`] traces (unlike the
     /// [`super::measure::Measurer`], whose canvas metrics may differ slightly).
-    /// Used to place text-on-path runs (§6.13 `align`). Default: `None` (no font
-    /// bytes → the caller degrades).
-    fn advance_width(&self, _text: &str, _style: &TextStyle, _size: f64) -> Option<f64> {
+    /// Places text-on-path runs (§6.13 `align`) and puts each caret stop at the
+    /// origin of the glyph it precedes (`compile/stops.rs`); one call shapes the run
+    /// once. Default: `None` (no font bytes → the caller degrades).
+    fn advances(&self, _text: &str, _style: &TextStyle, _size: f64) -> Option<Vec<f64>> {
         None
     }
 }
@@ -53,7 +56,7 @@ impl<T: GlyphOutliner + ?Sized> GlyphOutliner for &T {
     ) -> Option<String> {
         (**self).outline(text, style, size, x, baseline)
     }
-    fn advance_width(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
-        (**self).advance_width(text, style, size)
+    fn advances(&self, text: &str, style: &TextStyle, size: f64) -> Option<Vec<f64>> {
+        (**self).advances(text, style, size)
     }
 }

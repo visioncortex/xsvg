@@ -72,8 +72,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     // "stair"/"follow" are live <text> by design — they never consult the outliner.
     if !matches!(fx.effect, "stair" | "follow") {
         let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
-        let advance = ctx.outliner.advance_width(&text, &style, style.size);
-        if let (Some(flat), Some(advance)) = (flat, advance) {
+        let advances = ctx.outliner.advances(&text, &style, style.size);
+        if let (Some(flat), Some(advances)) = (flat, advances) {
+            let advance = advances.last().copied().unwrap_or(0.0);
             // Refit is DISABLED (see §7.1): kurbo's fitter overshoots on dense
             // quantized glyph outlines (notches + hairline smears) and its Optimize
             // level dominates compile time. Polyline output at the graded tolerance
@@ -87,7 +88,15 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
                 false,
             ) {
                 if ctx.recording_stops() {
-                    record_textpath_stops(&text, &style, &fx, &path_d, advance, span_of(node), ctx);
+                    record_textpath_stops(
+                        &text,
+                        &style,
+                        &fx,
+                        &path_d,
+                        &advances,
+                        span_of(node),
+                        ctx,
+                    );
                 }
                 push_outline_group(out, fill, &stroke, &pos, &[d], ctx);
                 return;

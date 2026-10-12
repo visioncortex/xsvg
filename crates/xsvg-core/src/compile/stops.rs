@@ -124,33 +124,28 @@ pub(super) fn span_of(node: roxmltree::Node) -> (usize, usize) {
 }
 
 /// The stops of one flat run outlined at `(start_x, baseline)`: the pen origin,
-/// then the outline font's advance after each scalar — the same face that drew
-/// the glyphs, so stops sit between the outlined letters. `None` when the
-/// outliner cannot measure (no font bytes): then nothing is recorded.
+/// then the outline font's cumulative `advances` after each scalar — the same
+/// face that drew the glyphs, so stops sit between the outlined letters. `None`
+/// when the advances do not cover the text (the outliner declined or answered
+/// for a different string): then nothing is recorded.
 pub(super) fn stop_run(
     text: &str,
-    style: &TextStyle,
-    size: f64,
     start_x: f64,
     baseline: f64,
     metrics: &FontMetrics,
-    outliner: &dyn GlyphOutliner,
+    advances: &[f64],
 ) -> Option<StopRun> {
-    let mut stops = Vec::with_capacity(text.chars().count() + 1);
-    let mut push = |x: f64| {
-        stops.push(CaretStop {
-            top: (x, baseline - metrics.ascent),
-            bottom: (x, baseline + metrics.descent),
-        })
-    };
-    push(start_x);
-    for (i, c) in text.char_indices() {
-        let adv = outliner.advance_width(&text[..i + c.len_utf8()], style, size)?;
-        if !adv.is_finite() {
-            return None;
-        }
-        push(start_x + adv);
+    if advances.len() != text.chars().count() || advances.iter().any(|a| !a.is_finite()) {
+        return None;
     }
+    let stop = |x: f64| CaretStop {
+        top: (x, baseline - metrics.ascent),
+        bottom: (x, baseline + metrics.descent),
+    };
+    let stops = std::iter::once(start_x)
+        .chain(advances.iter().map(|a| start_x + a))
+        .map(stop)
+        .collect();
     Some(StopRun {
         text: text.to_string(),
         stops,
@@ -159,13 +154,13 @@ pub(super) fn stop_run(
 
 /// Record a text-on-path run's stops: the flat run at the origin, mapped through
 /// the same frame and effect field [`warp_text_on_path`] baked its outline with.
-#[allow(clippy::too_many_arguments)]
+/// `advances` is the outliner's answer the bake was placed by.
 pub(super) fn record_textpath_stops(
     text: &str,
     style: &TextStyle,
     fx: &crate::PathEffect,
     path_d: &str,
-    advance: f64,
+    advances: &[f64],
     span: (usize, usize),
     ctx: &Ctx,
 ) {
@@ -173,11 +168,12 @@ pub(super) fn record_textpath_stops(
     let Some(frame) = PathFrame::new(path_d, tolerance) else {
         return;
     };
+    let advance = advances.last().copied().unwrap_or(0.0);
     let Some(field) = path_effect_field(&frame, fx, advance) else {
         return;
     };
     let metrics = ctx.m.font_metrics(style, style.size);
-    if let Some(mut run) = stop_run(text, style, style.size, 0.0, 0.0, &metrics, ctx.outliner) {
+    if let Some(mut run) = stop_run(text, 0.0, 0.0, &metrics, advances) {
         run.map(field.as_ref());
         ctx.record_stops(span, run);
     }
