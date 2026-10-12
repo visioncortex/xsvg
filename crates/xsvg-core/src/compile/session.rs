@@ -30,6 +30,31 @@ pub(super) fn parse_document(input: &str) -> Result<roxmltree::Document<'_>, rox
     roxmltree::Document::parse(input)
 }
 
+/// Where the caret-stop scratch compile of `node` starts: the outermost ancestor
+/// whose lowering can change or claim its geometry — any element outside plain
+/// SVG (an `<x:warp>` maps the stops through its field, an `<x:boolean>` or a
+/// generator harvests them away, a foreign element drops them) or a `<use>` —
+/// else `node` itself. Above that, a plain SVG ancestor is passthrough: it
+/// neither moves the paths the element emits nor records anything, so the
+/// stops are exactly the ones its whole fragment would record. `None` under
+/// `x:hidden`, which compiles to nothing.
+fn stops_scope<'a, 'i>(node: roxmltree::Node<'a, 'i>) -> Option<roxmltree::Node<'a, 'i>> {
+    let mut scope = node;
+    for a in node.ancestors().filter(|a| a.is_element()) {
+        if a.parent_element().is_none() {
+            break; // the root element is never part of a fragment
+        }
+        if super::is_hidden(a) {
+            return None;
+        }
+        let plain = a.tag_name().namespace() == Some(super::SVG_NS) && a.tag_name().name() != "use";
+        if !plain {
+            scope = a;
+        }
+    }
+    Some(scope)
+}
+
 /// The whole-document work, done once: the parse and the pre-scans every
 /// compile over this text needs. Owned by a [`CompileSession`]; borrowed by
 /// each per-call [`Ctx`]. The `&dyn` entry points use it directly with a
@@ -151,11 +176,15 @@ impl<'a> Parsed<'a> {
     }
 
     /// Caret stops of the outlined text element starting at byte `offset`
-    /// (`stops.rs`). Its top-level fragment compiles once more into a scratch
-    /// buffer with the recorder on, so the stops come out of the same outline,
-    /// placement and fields the rendered paths did. `None` when nothing of that
-    /// element was outlined — it renders live text, which the host measures
-    /// itself.
+    /// (`stops.rs`). The element compiles once more into a scratch buffer with
+    /// the recorder on, so the stops come out of the same outline, placement and
+    /// fields the rendered paths did. `None` when nothing of that element was
+    /// outlined — it renders live text, which the host measures itself.
+    ///
+    /// The scratch compile starts at the element's [`stops_scope`], not its
+    /// top-level fragment: an editor asks on every keystroke, and the fragment
+    /// is often a whole artboard whose other content (an offset, a warp, a
+    /// table) has nothing to say about where this element's glyphs sit.
     pub(super) fn caret_stops(
         &self,
         offset: usize,
@@ -164,11 +193,22 @@ impl<'a> Parsed<'a> {
     ) -> Option<super::CaretStops> {
         let node = super::visible(self.doc.root())
             .find(|n| n.is_element() && n.range().start == offset)?;
-        let top = top_level_at(&self.doc, offset)?;
+        top_level_at(&self.doc, offset)?;
+        self.caret_stops_from(node, stops_scope(node)?, backend, quality)
+    }
+
+    /// The stops `node` records while `scope` (itself or an ancestor) compiles.
+    pub(super) fn caret_stops_from(
+        &self,
+        node: roxmltree::Node,
+        scope: roxmltree::Node,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Option<super::CaretStops> {
         let ctx = Ctx::new(backend, quality, false, "", self);
         *ctx.stops.borrow_mut() = Some(super::stops::StopRecorder::default());
         let mut scratch = String::new();
-        serialize(top, &mut scratch, false, &ctx);
+        serialize(scope, &mut scratch, false, &ctx);
         let span = super::stops::span_of(node);
         let runs: Vec<super::StopRun> = ctx
             .stops

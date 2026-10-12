@@ -12,7 +12,11 @@ export interface Font {
   unitsPerEm: number;
   ascender: number;
   descender: number;
-  tables: { os2?: { sCapHeight?: number; sxHeight?: number; fsSelection?: number }; head?: { macStyle?: number } };
+  tables: {
+    os2?: { sCapHeight?: number; sxHeight?: number; fsSelection?: number; yStrikeoutSize?: number; yStrikeoutPosition?: number };
+    head?: { macStyle?: number };
+    post?: { underlinePosition?: number; underlineThickness?: number };
+  };
   names: { fontFamily?: Record<string, string>; preferredFamily?: Record<string, string> };
   getAdvanceWidth(text: string, fontSize: number): number;
   /** Visits each shaped glyph with its pen x; returns the run's advance. */

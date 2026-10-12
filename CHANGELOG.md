@@ -26,7 +26,9 @@ partial one.
   `CompileSession::caret_stops`) returns the caret positions between the outlined glyphs of an
   `<x:textbox outline="true">` — through any `<x:warp>` it sits in — or an `<x:textpath>` effect,
   in the coordinates of the emitted paths. The compile records them as it traces and warps, so
-  they agree with the rendered geometry by construction; an ordinary compile is unchanged
+  they agree with the rendered geometry by construction; an ordinary compile is unchanged. A
+  query compiles only the element (or the warp it sits in), not its whole top-level fragment, so
+  asking on every keystroke costs the element, not its artboard
   ([Incremental.md §7](docs/Incremental.md)).
 
 - **`GlyphOutliner::advances`** replaces `advance_width`: the outline seam now answers the

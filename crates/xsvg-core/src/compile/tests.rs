@@ -5989,6 +5989,52 @@ fn caret_stops_are_per_element_and_skip_harvests() {
     assert!(at(offs[2]).is_none());
 }
 
+/// The scratch compile starts at the element (or its outermost non-plain-SVG
+/// ancestor), not its top-level fragment: on every dataset document, every
+/// element's stops equal what compiling its whole fragment records — the plain
+/// SVG above the scope neither moves nor claims them.
+#[test]
+fn caret_stops_scope_matches_the_whole_fragment() {
+    let platform = Platform::new(Mono, NoShaper, BoxOutliner);
+    let backend = platform.backend();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../dataset");
+    let mut outlined = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("xsvg") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        let parsed = session::Parsed::new(&src).unwrap();
+        // stops are only ever recorded for these two
+        let text = |n: &roxmltree::Node| {
+            n.tag_name().namespace() == Some(XSVG_NS)
+                && matches!(n.tag_name().name(), "textbox" | "textpath")
+        };
+        for node in parsed.doc.root_element().descendants().filter(text) {
+            let off = node.range().start;
+            let Some(top) = top_level_at(&parsed.doc, off) else {
+                continue;
+            };
+            let whole = parsed.caret_stops_from(node, top, &backend, QualityProfile::Balanced);
+            let scoped = parsed.caret_stops(off, &backend, QualityProfile::Balanced);
+            let doc_island = in_doc_island(node);
+            assert_eq!(
+                scoped,
+                if doc_island { None } else { whole },
+                "{}: <{}> at {off}",
+                path.display(),
+                node.tag_name().name()
+            );
+            outlined += scoped.is_some() as usize;
+        }
+    }
+    assert!(
+        outlined >= 40,
+        "the dataset exercises outlined text ({outlined})"
+    );
+}
+
 /// An outliner whose `advances` disagree with the text it is asked about — a
 /// stand-in for a host answering for the wrong string or with NaNs.
 struct BadAdvances;

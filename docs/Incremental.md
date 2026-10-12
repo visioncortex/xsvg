@@ -311,10 +311,16 @@ the outline branch of `write_area_text` knows each traced line's text, pen
 origin and baseline; `emit_warp` holds the field it bakes the `d`s through, built
 from the union ink bbox of *every* path child, siblings included; the text-on-path
 effects pick theirs in `path_effect_field`. A `caret_stops` query therefore
-compiles the element's top-level fragment once more into a scratch buffer with a
-recorder on the `Ctx` (`compile/stops.rs`): the outline branch records a run per
-traced line, every field maps the runs recorded beneath it (nested warps compose
-by construction), and the query keeps the runs whose span is the element's. An
+compiles the element once more into a scratch buffer with a recorder on the
+`Ctx` (`compile/stops.rs`): the outline branch records a run per traced line,
+every field maps the runs recorded beneath it (nested warps compose by
+construction), and the query keeps the runs whose span is the element's. The
+scratch compile starts at the element's outermost ancestor outside plain SVG (an
+`x:warp`, an `x:boolean`, a generator, a `<use>`), or at the element itself when
+it has none — not at its top-level fragment. A plain SVG ancestor neither moves
+the element's paths nor records anything, so the answer is the same, and an
+editor asking on every keystroke no longer recompiles a whole artboard (its
+offsets, warps and tables) to place one caret. An
 ordinary compile has no recorder — nothing is recorded, nothing is emitted, and
 the output is byte-identical to before the seam existed. Scratch serializations
 that harvest geometry rather than render the element (a referenced `x:` target,
