@@ -50,7 +50,9 @@ impl<'a> Parsed<'a> {
         let theme = Theme::load(&doc);
         let imports = load_imports(&doc);
         let mut ids = HashMap::new();
-        for n in doc.descendants() {
+        // an `<x:doc>` island's ids do not exist to the compiler (§4.4): they can be
+        // neither referenced nor shadow a real element's
+        for n in super::visible(doc.root()) {
             if let Some(id) = n.attribute("id") {
                 ids.entry(id.to_string()).or_insert_with(|| n.id());
             }
@@ -120,9 +122,7 @@ impl<'a> Parsed<'a> {
         backend: &Backend,
         quality: QualityProfile,
     ) -> Option<TextLayout> {
-        let node = self
-            .doc
-            .descendants()
+        let node = super::visible(self.doc.root())
             .find(|n| n.is_element() && n.range().start == offset)?;
         if node.tag_name().namespace() != Some(super::XSVG_NS)
             || node.tag_name().name() != "textbox"
@@ -144,9 +144,7 @@ impl<'a> Parsed<'a> {
         backend: &Backend,
         quality: QualityProfile,
     ) -> Option<super::CaretStops> {
-        let node = self
-            .doc
-            .descendants()
+        let node = super::visible(self.doc.root())
             .find(|n| n.is_element() && n.range().start == offset)?;
         let top = top_level_at(&self.doc, offset)?;
         let ctx = Ctx::new(backend, quality, false, "", self);
@@ -210,14 +208,14 @@ impl<'a> Parsed<'a> {
         // ids whose (compiled) geometry has changed; grows as dependents join
         let mut live: Vec<&str> = targets
             .iter()
-            .flat_map(|t| t.descendants().filter_map(|n| n.attribute("id")))
+            .flat_map(|t| super::visible(*t).filter_map(|n| n.attribute("id")))
             .collect();
         // Editing an <x:import> rebinds a whole namespace — every element in it lowers
         // through a different module, so all of them are dependents (§Extensibility §3).
         // This edge is by namespace rather than by id, so it can't live in `baked_refs`.
         let dirty_ns: Vec<&str> = targets
             .iter()
-            .flat_map(|t| t.descendants())
+            .flat_map(|t| super::visible(*t))
             .filter(|n| {
                 n.tag_name().namespace() == Some(super::XSVG_NS) && n.tag_name().name() == "import"
             })
@@ -238,7 +236,7 @@ impl<'a> Parsed<'a> {
                 if included[i] {
                     continue;
                 }
-                let refs_live = tl.descendants().any(|n| {
+                let refs_live = super::visible(*tl).any(|n| {
                     super::baked_refs(n, &self.ids)
                         .iter()
                         .any(|r| live.contains(&r.strip_prefix('#').unwrap_or(r)))
@@ -250,7 +248,7 @@ impl<'a> Parsed<'a> {
                     included[i] = true;
                     changed = true;
                     // its output changed, so ids it defines go live too
-                    for id in tl.descendants().filter_map(|n| n.attribute("id")) {
+                    for id in super::visible(*tl).filter_map(|n| n.attribute("id")) {
                         if !live.contains(&id) {
                             live.push(id);
                         }

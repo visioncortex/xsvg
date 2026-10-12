@@ -6057,3 +6057,45 @@ fn inherited_font_family_keeps_fragment_parity() {
         "fragment must be a byte-exact span of the full compile:\n{frag}\n---\n{full}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// <x:doc> is an island the compiler never reads (§4.4)
+
+#[test]
+fn doc_island_is_inert() {
+    // the island carries everything the compiler otherwise scans for — an id that
+    // clashes with a real element's (and comes first, so it would win the id table),
+    // a theme token, an import binding a namespace the body then uses, a textbox, a
+    // layer — and must change nothing: output, references, dependents, text layout
+    let island = r##"<x:doc><x:settings id="box" x:layer="hidden"/><x:theme><x:color name="leak" value="#f00"/></x:theme><x:import ns="urn:ed" src="ed.wasm"/><x:textbox id="hidden" x="0" y="0" width="50" height="20">never</x:textbox><ed:note xmlns:ed="urn:ed">ok</ed:note></x:doc>"##;
+    let body = r##"<rect id="box" x="0" y="0" width="40" height="40" fill="var(leak, #0f0)"/><x:textbox in="#box" font-size="10">words</x:textbox><ed:thing xmlns:ed="urn:ed"/>"##;
+    let with = format!("{XW}{island}{body}</svg>");
+    let without = format!("{XW}{body}</svg>");
+    let out = compile_test(&with);
+    assert_eq!(out, compile_test(&without), "{out}");
+    assert!(
+        out.contains(r##"fill="#0f0""##),
+        "the island's token must not resolve: {out}"
+    );
+    assert!(
+        out.contains("words"),
+        "the textbox must bind to the real rect: {out}"
+    );
+    assert!(!out.contains("never"), "{out}");
+    // a nested island is an island too (the serializer self-closes a <g> that was
+    // empty in the source but not one whose only child was dropped — cosmetic)
+    let nested = format!("{XW}<g>{island}</g>{body}</svg>");
+    assert_eq!(
+        compile_test(&nested).replace("<g></g>", "<g/>"),
+        compile_test(&format!("{XW}<g/>{body}</svg>"))
+    );
+    // editing inside the island invalidates nothing; editing the real rect still does
+    assert_eq!(
+        dependents_impl(&with, with.find("<x:settings").unwrap()),
+        Vec::<(usize, usize)>::new()
+    );
+    assert!(!dependents_impl(&with, with.find("<rect").unwrap()).is_empty());
+    // text that never renders has no layout
+    assert!(layout_at(&with, with.find(r#"<x:textbox id="hidden""#).unwrap()).is_none());
+    assert!(layout_at(&with, with.find(r##"<x:textbox in="#box""##).unwrap()).is_some());
+}

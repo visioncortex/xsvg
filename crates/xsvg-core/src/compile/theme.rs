@@ -31,8 +31,8 @@ impl Theme {
     /// Collect `<x:theme>`'s `<x:color>` / `<x:font>` tokens.
     pub(super) fn load(doc: &roxmltree::Document) -> Theme {
         let mut theme = Theme::default();
-        for th in doc
-            .descendants()
+        // tokens inside an `<x:doc>` island are the editor's, not the document's (§4.4)
+        for th in visible(doc.root())
             .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "theme")
         {
             for c in th.children().filter(|c| c.is_element()) {

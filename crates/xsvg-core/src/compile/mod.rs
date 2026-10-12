@@ -486,6 +486,24 @@ fn frame_attr(node: roxmltree::Node, ctx: &Ctx) -> String {
     )
 }
 
+/// Whether `node` lies in an `<x:doc>` island (§4.4): the element itself or any
+/// ancestor. The compiler never reads inside one — not to render, and not for the
+/// id table, theme tokens, imports, dependents or the editor seams either — so an
+/// editor's own structure can carry ids, themes and elements of its own without
+/// touching the compile. `ancestors()` starts at the node itself.
+pub(super) fn in_doc_island(node: roxmltree::Node) -> bool {
+    node.ancestors()
+        .any(|a| a.tag_name().namespace() == Some(XSVG_NS) && a.tag_name().name() == "doc")
+}
+
+/// The nodes of `t`'s subtree the compiler reads: `t` and its descendants, minus
+/// every `<x:doc>` island (§4.4).
+pub(super) fn visible<'a>(
+    t: roxmltree::Node<'a, 'a>,
+) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
+    t.descendants().filter(|n| !in_doc_island(*n))
+}
+
 /// The direct element child of the document root whose source byte range contains
 /// `offset` — the **fragment unit** of incremental compilation (docs/Incremental.md).
 fn top_level_at<'a>(

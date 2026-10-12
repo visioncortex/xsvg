@@ -266,6 +266,17 @@ ones. The compiler makes no promise about any child element here — `<x:artboar
 xsvg-kit editor's (`docs/Slides.md` in that repository), and a second tool may keep its own child
 beside it.
 
+**The compiler never reads inside `<x:doc>`.** That is the whole guarantee, and it covers every
+pass, not just rendering: an `id` inside the island does not exist to the compiler (it can be
+neither referenced nor shadow a real element's), an `<x:theme>` or `<x:import>` inside it binds
+nothing, an `<x:textbox>` inside it has no text layout or caret stops, and an edit inside it
+compiles to nothing and invalidates nothing ([Incremental.md](Incremental.md) §7) — an editor may
+skip the render outright. A tool may therefore give its island any structure it likes, ids
+included, with one constraint that is XML's rather than xsvg's: the island is parsed by the same
+parser as the document, so every prefix it uses must be declared (staying in `x:` avoids the
+question), it cannot hold raw `<` or `&` in text, and a malformed island fails the whole file. It is
+not a CDATA blob. A nested `<x:doc>` is dropped the same way.
+
 ## 5. Graphics elements (reused SVG) [implemented]
 
 `<g>`, `<path>`, basic shapes, gradients, `transform`, `fill`/`stroke` are normalized or passed

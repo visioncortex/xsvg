@@ -60,6 +60,11 @@ partial one.
 
 ### Changed
 
+- **`<x:doc>` is a sealed island.** The compiler already dropped the editor's settings element
+  from its output; now it never reads inside it at all: an `id` there cannot be referenced or
+  shadow a real element's, an `<x:theme>` or `<x:import>` there binds nothing, a textbox there has
+  no text layout, and an edit there invalidates nothing — a host can skip the render (§4.4).
+
 - **Compiled text inherits `font-family`.** A textbox, list, table, text on a path or `<textArea>`
   with no `font-family` of its own now takes the nearest ancestor's — a `<g font-family>`, a
   `<g x:font>` token, or the root `<svg>` — the way plain `<text>` always has in the browser, and

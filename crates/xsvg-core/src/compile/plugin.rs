@@ -165,8 +165,8 @@ impl ImportTable {
 /// in this scan and reported at the point of use — see [`check_import`].
 pub(super) fn load_imports(doc: &roxmltree::Document) -> ImportTable {
     let mut table: Vec<Import> = Vec::new();
-    for n in doc
-        .descendants()
+    // an `<x:import>` inside an `<x:doc>` island binds nothing (§4.4)
+    for n in super::visible(doc.root())
         .filter(|n| n.tag_name().namespace() == Some(XSVG_NS) && n.tag_name().name() == "import")
     {
         let (Some(ns), Some(src)) = (n.attribute("ns"), n.attribute("src")) else {
