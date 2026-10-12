@@ -82,6 +82,15 @@ partial one.
 
 ### Fixed
 
+- **Underline and strike-through rendered dashed under `letter-spacing` in Safari.** WebKit draws
+  SVG text decorations per glyph once letter-spacing is set, leaving every gap bare. A run's
+  decoration is now baked, like `x:highlight`: a `<rect>` per run per line in the run's own colour,
+  behind the text, as wide as the measured advance — letter-spacing and justified spacing included —
+  so it draws the same in every renderer. Position and thickness come from the font's own tables
+  where a measurer has them (the CLI, the Node package), else from where the font's underscore sits
+  (browser hosts probe it), else from proportions (§6.11). The `text-decoration` attribute is no
+  longer written on the output.
+
 - **Underline and strike-through on justified lines rendered dashed.** Justification lowered to
   `textLength` + `lengthAdjust="spacing"`, and renderers draw a stretched line's decorations per
   glyph, leaving the stretched gaps bare. A justified line now carries its slack as `word-spacing`

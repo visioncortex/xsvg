@@ -250,13 +250,14 @@ pub(super) fn emit_paragraphs(
         if shifted.is_empty() {
             continue;
         }
-        emit_highlights(
+        emit_run_backdrops(
             out,
             shifted,
             para.laid.anchor.svg(),
             para.laid.rtl,
             &para.laid.style,
             para.laid.style.size,
+            para.fill,
             &para.emits,
             m,
             ctx,
@@ -725,13 +726,14 @@ pub(super) fn write_area_text(
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    emit_highlights(
+    emit_run_backdrops(
         out,
         &layout.lines,
         layout.anchor.svg(),
         layout.rtl,
         style,
         layout.font_size,
+        fill,
         emits,
         m,
         ctx,
@@ -847,32 +849,42 @@ pub(super) fn justify_space(
     Some((w - natural) / spaces)
 }
 
-/// The `x:highlight` backgrounds of `lines` (§6.11): one `<rect>` per
-/// highlighted run per line, emitted BEFORE the `<text>` so it sits behind
-/// the glyphs. A run's box spans its advance (measured in the run's own
-/// style, stretched like the line when justified) from the line's start
-/// edge (`anchor` = the `<text>`'s text-anchor; under `rtl` the start edge
-/// is the right one and runs lay leftward), and the em box of its size
-/// (ascent above, descent below the baseline). Nothing is emitted for lines
-/// without a highlighted run, so plain output is byte-identical.
+/// The backdrops of a line's styled runs, drawn as `<rect>`s BEHIND the `<text>`:
+/// `x:highlight` fills the run's em box, and `text-decoration` draws the run's
+/// underline and line-through as rects of the run's own colour. Decorations are
+/// baked rather than left to the renderer because engines draw SVG decorations
+/// per glyph once `letter-spacing` (WebKit) or `textLength` (Chromium) is in
+/// play and leave the gaps bare — a dashed underline (found live) — and because
+/// a rect spans exactly the advance the compiler measured, letter-spacing and a
+/// justified line's widened spaces included, so it agrees with the glyphs, the
+/// caret and the highlight. Position and thickness are the font's own lines
+/// where a measurer has them ([`FontMetrics`]), proportions otherwise; a run's
+/// decoration being its own colour, behind the glyphs reads as over them. Each
+/// run is placed by walking the line from its start edge (`anchor` = the
+/// `<text>`'s text-anchor; under `rtl` the start edge is the right one and runs
+/// lay leftward); a raised or lowered run carries its backdrops with it.
+/// Nothing is emitted for lines without a highlighted or decorated run, so plain
+/// output is byte-identical.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn emit_highlights(
+pub(super) fn emit_run_backdrops(
     out: &mut String,
     lines: &[PlacedLine],
     anchor: &str,
     rtl: bool,
     style: &TextStyle,
     size: f64,
+    fill: &str,
     emits: &[EmitAttrs],
     m: &dyn Measurer,
     ctx: &Ctx,
 ) {
     let run_style = |a: &EmitAttrs| run_measure_style(a, style, size);
+    let has_backdrop = |a: &EmitAttrs| a.highlight.is_some() || a.decoration.is_some();
     for line in lines {
         if !line
             .runs
             .iter()
-            .any(|r| emits.get(r.style).is_some_and(|a| a.highlight.is_some()))
+            .any(|r| emits.get(r.style).is_some_and(has_backdrop))
         {
             continue;
         }
@@ -905,20 +917,47 @@ pub(super) fn emit_highlights(
             if rtl {
                 x -= w;
             }
-            if let Some(color) = a.and_then(|a| a.highlight.as_deref()) {
+            if let Some(a) = a.filter(|a| has_backdrop(a)) {
                 let fm = m.font_metrics(&st, rs);
-                // a raised or lowered run carries its highlight with it
+                // a raised or lowered run carries its backdrops with it
                 let shift = a
-                    .and_then(|a| a.shift.as_deref())
+                    .shift
+                    .as_deref()
                     .map_or(0.0, |v| baseline_shift_px(v, fm.ascent + fm.descent, rs));
-                out.push_str(&format!(
-                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
-                    fmt(x),
-                    fmt(line.baseline - shift - fm.ascent),
-                    fmt(w),
-                    fmt(fm.ascent + fm.descent),
-                    ctx.paint(color)
-                ));
+                let base = line.baseline - shift;
+                let rect = |out: &mut String, y: f64, h: f64, color: &str| {
+                    out.push_str(&format!(
+                        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+                        fmt(x),
+                        fmt(y),
+                        fmt(w),
+                        fmt(h),
+                        ctx.paint(color)
+                    ));
+                };
+                if let Some(color) = a.highlight.as_deref() {
+                    rect(out, base - fm.ascent, fm.ascent + fm.descent, color);
+                }
+                if let Some(d) = a.decoration.as_deref() {
+                    let color = a.fill.as_deref().unwrap_or(fill);
+                    for token in d.split_whitespace() {
+                        match token {
+                            "underline" => rect(
+                                out,
+                                base + fm.underline_position,
+                                fm.underline_thickness,
+                                color,
+                            ),
+                            "line-through" => rect(
+                                out,
+                                base - fm.strikeout_position - fm.strikeout_thickness / 2.0,
+                                fm.strikeout_thickness,
+                                color,
+                            ),
+                            _ => {}
+                        }
+                    }
+                }
             }
             if !rtl {
                 x += w;
@@ -995,7 +1034,6 @@ pub(super) fn emit_line(
                         };
                         out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
                     }
-                    emit_attr(out, "text-decoration", &a.decoration);
                     emit_attr(out, "baseline-shift", &a.shift);
                     out.push('>');
                     push_escaped(out, &run.text, false);

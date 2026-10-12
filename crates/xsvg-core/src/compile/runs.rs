@@ -178,7 +178,10 @@ pub(super) struct EmitAttrs {
 
 impl EmitAttrs {
     pub(super) fn is_empty(&self) -> bool {
-        self.paint_empty() && self.href.is_none() && self.highlight.is_none()
+        self.paint_empty()
+            && self.href.is_none()
+            && self.highlight.is_none()
+            && self.decoration.is_none()
     }
     /// No paint/style override — only (perhaps) a link.
     pub(super) fn paint_empty(&self) -> bool {
@@ -187,7 +190,6 @@ impl EmitAttrs {
             && self.style.is_none()
             && self.family.is_none()
             && self.size.is_none()
-            && self.decoration.is_none()
             && self.shift.is_none()
     }
 }

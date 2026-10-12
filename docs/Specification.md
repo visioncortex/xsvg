@@ -608,7 +608,7 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `fill` | per-run colour |
 | `font-weight`, `font-style` | e.g. bold / italic words |
 | `font-family` | per-run typeface |
-| `text-decoration` | `underline` / `line-through` / `overline`, or a space list of them — paint-only, emitted verbatim |
+| `text-decoration` | `underline` / `line-through`, or both — paint-only; **baked** as a `<rect>` per run per line in the run's colour behind the text (renderers draw SVG decorations per glyph under `letter-spacing` or `textLength` and leave the gaps bare), spanning exactly the measured advance; position and thickness are the font's own lines where the measurer has them, else where its underscore sits, else a tenth of an em down and 0.06 em thick, the strike centred at half the x-height. `overline` is ignored. |
 | `font-size` | per-run size: a length in user units, or `%` / `em` **of the paragraph's size** (nested runs resolve against the paragraph, not the enclosing run) |
 | `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
 | `href` | a hyperlink: the run lowers to an SVG `<a href>` around its text (paint overrides nest a `<tspan>` inside it); an authored `<a>` child of the box reads the same way. Authored, so it passes verbatim like every authored URL ([Sandbox.md](Sandbox.md) §1) |

@@ -89,11 +89,22 @@ function metrics(fontCss: string): number[] {
   const box = c.measureText("Hg");
   const cap = c.measureText("H");
   const ex = c.measureText("x");
+  // The underline sits where the font's underscore sits: its ink band below the
+  // baseline gives the underline's top and thickness (a canvas host has no font
+  // tables; the underscore tracks them within a few hundredths of an em for text
+  // faces, and a display face's slab underscore is clamped). Strike-through
+  // derives on the Rust side from the x-height and this thickness.
+  const us = c.measureText("_");
+  const size = parseFloat(/(\d+(?:\.\d+)?)px/.exec(fontCss)?.[1] ?? "0");
+  const top = -us.actualBoundingBoxAscent; // ink top, measured below the baseline
+  const thick = Math.min(Math.max(us.actualBoundingBoxDescent - top, 0.04 * size), 0.09 * size);
   return [
     box.fontBoundingBoxAscent,
     box.fontBoundingBoxDescent,
     cap.actualBoundingBoxAscent,
     ex.actualBoundingBoxAscent,
+    top > 0 ? top : 0,
+    size > 0 && top > 0 ? thick : 0,
   ];
 }
 

@@ -103,8 +103,16 @@ function metrics(fonts: FontDb, fontCss: string): number[] {
   const s = size / font.unitsPerEm;
   const cap = font.tables.os2?.sCapHeight;
   const ex = font.tables.os2?.sxHeight;
-  // [ascent, descent(+), capHeight, xHeight]; 0/absent → the Rust side uses its defaults
-  return [font.ascender * s, -font.descender * s, cap ? cap * s : 0, ex ? ex * s : 0];
+  // [ascent, descent(+), capHeight, xHeight, underlineTop(+ below), underlineThickness,
+  // strikeCenter(+ above), strikeThickness]; 0/absent → the Rust side uses its defaults.
+  // `post` gives the underline's top as a negative offset; OS/2 the strikeout's top.
+  const post = font.tables.post ?? {};
+  const ulTop = post.underlinePosition ? -post.underlinePosition * s : 0;
+  const ulThick = post.underlineThickness ? post.underlineThickness * s : 0;
+  const stSize = font.tables.os2?.yStrikeoutSize ?? 0;
+  const stTop = font.tables.os2?.yStrikeoutPosition ?? 0;
+  const stCenter = stTop && stSize ? (stTop - stSize / 2) * s : 0;
+  return [font.ascender * s, -font.descender * s, cap ? cap * s : 0, ex ? ex * s : 0, ulTop, ulThick, stCenter, stSize * s];
 }
 
 function outlineRun(font: Font | undefined, text: string, size: number, x: number, baseline: number): string {

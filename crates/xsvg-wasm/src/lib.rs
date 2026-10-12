@@ -51,12 +51,7 @@ impl Measurer for JsMeasurer<'_> {
     }
 
     fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
-        let default = FontMetrics {
-            ascent: 0.8 * size,
-            descent: 0.2 * size,
-            cap_height: 0.7 * size,
-            x_height: 0.5 * size,
-        };
+        let default = FontMetrics::proportional(size);
         let css = style.font_css(size);
         let Ok(v) = self.metrics.call1(&JsValue::NULL, &JsValue::from_str(&css)) else {
             return default;
@@ -68,11 +63,20 @@ impl Measurer for JsMeasurer<'_> {
                 .filter(|n| n.is_finite() && *n > 0.0)
                 .unwrap_or(d)
         };
+        // [ascent, descent, capHeight, xHeight, underlineTop, underlineThickness,
+        // strikeCenter, strikeThickness] — a host supplies what it can (font tables,
+        // or a canvas probe of the underscore); a missing or zero entry falls back
+        let x_height = get(3, default.x_height);
+        let underline_thickness = get(5, default.underline_thickness);
         FontMetrics {
             ascent: get(0, default.ascent),
             descent: get(1, default.descent),
             cap_height: get(2, default.cap_height),
-            x_height: get(3, default.x_height),
+            x_height,
+            underline_position: get(4, default.underline_position),
+            underline_thickness,
+            strikeout_position: get(6, x_height / 2.0),
+            strikeout_thickness: get(7, underline_thickness),
         }
     }
 }

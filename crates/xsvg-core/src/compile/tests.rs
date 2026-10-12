@@ -1483,11 +1483,16 @@ fn justified_decorations_and_highlights_follow_the_widened_spaces() {
     // a space sits past the widened space, not the natural one
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="40" height="200" align="justify" font-size="10"><tspan text-decoration="underline">aaa bb</tspan> cc dd ee ff</x:textbox><x:textbox x="0" y="100" width="40" height="200" align="justify" font-size="10">aaa <tspan x:highlight="#ff0">bb</tspan> cc dd ee ff</x:textbox></svg>"##;
     let out = compile_test(svg);
+    // the decoration is a rect (§6.11) as wide as the justified line — 30 natural
+    // plus the 10 of slack — a tenth of an em under the baseline, no attribute
     assert!(
-        out.contains(r#"<tspan text-decoration="underline">aaa bb</tspan>"#),
+        out.contains(r##"<rect x="0" y="8" width="40" height="0.6" fill="#000"/>"##),
         "{out}"
     );
-    assert!(!out.contains("textLength"), "{out}");
+    assert!(
+        !out.contains("text-decoration") && !out.contains("textLength"),
+        "{out}"
+    );
     // "aaa " is 20 wide naturally; its space widened by 10 puts "bb" at x = 30
     // (the rect's top is the baseline less the ascent)
     assert!(out.contains(r#"<rect x="30" y="99" width="10""#), "{out}");
@@ -1600,34 +1605,53 @@ fn styled_tspan_runs_emit_nested_tspans() {
 }
 
 #[test]
-fn text_decoration_runs_ride_to_the_output_without_moving_layout() {
-    // underline / line-through are paint-only: the run emits the attribute
-    // verbatim (space lists included) and the line geometry is byte-identical
-    // to the undecorated compile — decoration never touches advances.
+fn text_decoration_bakes_rects_without_moving_layout() {
+    // underline / line-through are paint-only: each becomes a rect behind the
+    // text in the run's colour (§6.11) and the text markup is byte-identical to
+    // the undecorated compile — decoration never touches advances or runs
     let plain = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship fast today</textArea></svg>"##;
     let deco = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline line-through">fast</tspan> today</textArea></svg>"##;
     let a = compile_test(plain);
     let b = compile_test(deco);
-    // the run ends at its last glyph: the following inter-word space is
-    // base-styled (a decorated space would draw the underline past the word)
-    assert!(
-        b.contains(r#"<tspan text-decoration="underline line-through">fast</tspan> today"#),
-        "{b}"
+    // "Ship " is 25 wide, "fast" 20; the run ends at its last glyph (the following
+    // inter-word space is base-styled, so the line stops at the word). Underline
+    // top = baseline 7 + 0.1 em; strike center 2.5 above, 0.06 em thick.
+    let underline = r##"<rect x="25" y="8" width="20" height="0.6" fill="#000"/>"##;
+    let strike = r##"<rect x="25" y="4.2" width="20" height="0.6" fill="#000"/>"##;
+    assert!(b.contains(&format!("{underline}{strike}<text")), "{b}");
+    assert!(!b.contains("text-decoration"), "{b}");
+    assert_eq!(
+        b.replace(underline, "").replace(strike, ""),
+        a,
+        "decoration must not move a single glyph"
     );
-    let strip = |s: &str| {
-        s.replace(
-            r#"<tspan text-decoration="underline line-through">fast</tspan>"#,
-            "fast",
-        )
-    };
-    assert_eq!(strip(&b), a, "decoration must not move a single glyph");
-    // between two words of ONE run the space stays in the run (continuous underline)
-    let two = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline">fast today</tspan></textArea></svg>"##;
+    // between two words of ONE run the space stays in the run: one continuous rect
+    let two = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><textArea x="0" y="0" width="500" font-size="10">Ship <tspan text-decoration="underline" fill="#f00">fast today</tspan></textArea></svg>"##;
+    let out = compile_test(two);
     assert!(
-        compile_test(two).contains(r#"<tspan text-decoration="underline">fast today</tspan>"#),
-        "{}",
-        compile_test(two)
+        out.contains(r##"<rect x="25" y="8" width="50" height="0.6" fill="#f00"/>"##),
+        "the run's own colour: {out}"
     );
+}
+
+#[test]
+fn decoration_rects_span_letter_spacing_and_follow_wrapped_lines() {
+    // letter-spacing 2 makes "ab" 12 wide and wraps the run word by word at 30:
+    // one rect per line the run touches, each on its own baseline, each as wide as
+    // the spaced advance — the case renderers draw dashed when left to them
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="30" height="60" font-size="10" letter-spacing="2" fill="#6366f1"><tspan text-decoration="underline">ab cd ef</tspan></x:textbox></svg>"##;
+    let out = compile_test(svg);
+    for (y, baseline) in [(8.0, 7.0), (20.0, 19.0), (32.0, 31.0)] {
+        assert!(
+            out.contains(&format!(
+                r##"<rect x="0" y="{y}" width="12" height="0.6" fill="#6366f1"/>"##
+            )),
+            "{out}"
+        );
+        assert!(out.contains(&format!(r#"y="{baseline}""#)), "{out}");
+    }
+    assert_eq!(out.matches("<rect").count(), 3, "{out}");
+    assert!(!out.contains("text-decoration"), "{out}");
 }
 
 #[test]

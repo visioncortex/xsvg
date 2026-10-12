@@ -55,6 +55,7 @@ pub(crate) mod test_support {
                 descent: 0.2 * size,
                 cap_height: 0.7 * size,
                 x_height: 0.5 * size,
+                ..FontMetrics::proportional(size)
             }
         }
     }

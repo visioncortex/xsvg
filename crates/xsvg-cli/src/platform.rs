@@ -33,12 +33,7 @@ impl Measurer for Native {
     }
 
     fn font_metrics(&self, style: &TextStyle, size: f64) -> FontMetrics {
-        let default = FontMetrics {
-            ascent: 0.8 * size,
-            descent: 0.2 * size,
-            cap_height: 0.7 * size,
-            x_height: 0.5 * size,
-        };
+        let default = FontMetrics::proportional(size);
         let Some(bytes) = self.fonts.resolve(&style.family, &style.style) else {
             return default;
         };
@@ -62,6 +57,28 @@ impl Measurer for Native {
                 .map(|v| v as f64 * s)
                 .filter(|v| *v > 0.0)
                 .unwrap_or(default.x_height),
+            // the font's own lines: `post` puts the underline's TOP at a negative
+            // offset below the baseline; OS/2 puts the strikeout's top above it
+            underline_position: f
+                .underline_metrics()
+                .map(|lm| -(lm.position as f64) * s)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(default.underline_position),
+            underline_thickness: f
+                .underline_metrics()
+                .map(|lm| lm.thickness as f64 * s)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(default.underline_thickness),
+            strikeout_position: f
+                .strikeout_metrics()
+                .map(|lm| (lm.position as f64 - lm.thickness as f64 / 2.0) * s)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(default.strikeout_position),
+            strikeout_thickness: f
+                .strikeout_metrics()
+                .map(|lm| lm.thickness as f64 * s)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(default.strikeout_thickness),
         }
     }
 }

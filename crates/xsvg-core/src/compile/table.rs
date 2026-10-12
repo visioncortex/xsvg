@@ -287,13 +287,14 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     rtl: false,
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
-                emit_highlights(
+                emit_run_backdrops(
                     out,
                     &layout.lines,
                     layout.anchor.svg(),
                     false,
                     &st,
                     layout.font_size,
+                    &fill,
                     &emits,
                     m,
                     ctx,

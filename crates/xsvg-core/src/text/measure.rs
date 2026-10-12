@@ -13,6 +13,34 @@ pub struct FontMetrics {
     pub cap_height: f64,
     /// Lowercase x-height.
     pub x_height: f64,
+    /// Top of the underline, below the baseline (positive down) — the font's
+    /// `post` table where a measurer has the bytes, else where its underscore
+    /// sits, else a tenth of an em.
+    pub underline_position: f64,
+    /// Thickness of the underline stroke.
+    pub underline_thickness: f64,
+    /// Center of the strike-through stroke, above the baseline (positive up) —
+    /// the font's OS/2 table where available, else half the x-height.
+    pub strikeout_position: f64,
+    /// Thickness of the strike-through stroke; the underline's when unknown.
+    pub strikeout_thickness: f64,
+}
+
+impl FontMetrics {
+    /// Typical proportions of a text face at `size`, for measurers without real
+    /// metrics and as the fallback for each field one cannot supply.
+    pub fn proportional(size: f64) -> Self {
+        Self {
+            ascent: 0.8 * size,
+            descent: 0.2 * size,
+            cap_height: 0.7 * size,
+            x_height: 0.5 * size,
+            underline_position: 0.1 * size,
+            underline_thickness: 0.06 * size,
+            strikeout_position: 0.25 * size,
+            strikeout_thickness: 0.06 * size,
+        }
+    }
 }
 
 /// Source of font metrics. The only platform-specific dependency of text layout —
@@ -25,12 +53,7 @@ pub trait Measurer {
     /// Vertical metrics at `size`. The default uses typical proportions; adapters
     /// with real metrics (canvas font/actual bounding box, or a fixture) override it.
     fn font_metrics(&self, _style: &TextStyle, size: f64) -> FontMetrics {
-        FontMetrics {
-            ascent: 0.8 * size,
-            descent: 0.2 * size,
-            cap_height: 0.7 * size,
-            x_height: 0.5 * size,
-        }
+        FontMetrics::proportional(size)
     }
 
     /// [`Measurer::measure`] for many runs at once, one result per item in order.

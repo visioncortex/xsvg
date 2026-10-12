@@ -61,6 +61,7 @@ impl Measurer for FixtureFont {
             descent: self.descent * k,
             cap_height: self.cap_height * k,
             x_height: self.x_height * k,
+            ..FontMetrics::proportional(size)
         }
     }
 }
