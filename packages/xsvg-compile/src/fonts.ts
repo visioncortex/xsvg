@@ -82,5 +82,23 @@ export function loadFontDir(dir: string): FontDb {
   };
 }
 
+/** The pen x where each next character of `text` begins, per the outline font — the
+ *  node adapter for `GlyphOutliner::advances` (xsvg docs/Incremental.md §7): one entry
+ *  per character, entry i the kerned origin of character i+1, the last the run's width.
+ *  One shaping pass when glyphs map one-to-one onto characters; a ligature collapses
+ *  characters, so then each prefix is measured on its own (the stops inside a ligature
+ *  sit at the prefix advances). `[]` without a font or for an empty run. */
+export function advancesOf(font: Font | undefined, text: string, size: number): number[] {
+  if (!font) return [];
+  const chars = Array.from(text);
+  if (chars.length === 0) return [];
+  const starts: number[] = [];
+  const total = font.forEachGlyph(text, 0, 0, size, undefined, (_glyph, x) => {
+    starts.push(x);
+  });
+  if (starts.length === chars.length) return [...starts.slice(1), total];
+  return chars.map((_c, i) => font.getAdvanceWidth(chars.slice(0, i + 1).join(""), size));
+}
+
 /** An empty db (no fonts): text falls back to default metrics and stays live `<text>`. */
 export const EMPTY_FONTS: FontDb = { resolve: () => undefined };

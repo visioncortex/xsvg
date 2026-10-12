@@ -85,6 +85,8 @@ jobs:
         run: npm run check:incremental
       - name: DOM patching
         run: npm run check:dom
+      - name: Outline seam advances
+        run: npm run check:advances
       - name: Mesh raster parity
         run: npm run check:mesh
 

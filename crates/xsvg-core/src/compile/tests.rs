@@ -5925,3 +5925,56 @@ fn caret_stops_are_per_element_and_skip_harvests() {
     // a boolean operand is harvested into a region, not rendered as itself
     assert!(at(offs[2]).is_none());
 }
+
+/// An outliner whose `advances` disagree with the text it is asked about — a
+/// stand-in for a host answering for the wrong string or with NaNs.
+struct BadAdvances;
+impl GlyphOutliner for BadAdvances {
+    fn outline(&self, _t: &str, _s: &TextStyle, _sz: f64, x: f64, b: f64) -> Option<String> {
+        Some(format!("M{x},{b} h1 v-1 h-1 Z"))
+    }
+    fn advances(&self, text: &str, _s: &TextStyle, size: f64) -> Option<Vec<f64>> {
+        // one entry short, and a NaN for good measure
+        let mut v: Vec<f64> = (1..text.chars().count())
+            .map(|i| i as f64 * 0.5 * size)
+            .collect();
+        if let Some(first) = v.first_mut() {
+            *first = f64::NAN;
+        }
+        Some(v)
+    }
+}
+
+#[test]
+fn caret_stops_decline_when_the_advances_do_not_cover_the_text() {
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="80" height="20" font-size="10" outline="true">hey</x:textbox></svg>"##
+    );
+    // the compile still outlines (the glyph paths need no advances) …
+    let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &BadAdvances).unwrap();
+    assert!(
+        out.contains("<path d=\"M") && !out.contains("<text"),
+        "{out}"
+    );
+    // … but a stop run that cannot sit between the glyphs is not reported at all,
+    // rather than reported short or with a NaN in it
+    let off = svg.find("<x:textbox").unwrap();
+    assert!(caret_stops_impl(&svg, off, "balanced", &Mono, &NoShaper, &BadAdvances).is_none());
+}
+
+#[test]
+fn caret_stops_record_a_referenced_box_once() {
+    // inside one top-level <g>, the outlined box renders in place AND is harvested
+    // as the region of a second box (`in="#t"` → x_output_geometry, outlining
+    // forced) during the same scratch compile; only its own rendering may record,
+    // so the query sees one run, not one per harvest
+    let svg = format!(
+        r##"{XW}<g><x:textbox id="t" x="0" y="0" width="80" height="20" font-size="10" outline="true">hi</x:textbox><x:textbox in="#t" font-size="4">tiny words here</x:textbox></g></svg>"##
+    );
+    let out = compile_impl(&svg, "balanced", false, &Mono, &BoxShaper, &BoxOutliner).unwrap();
+    assert!(out.contains("<path d=\"M"), "{out}");
+    let off = svg.find("<x:textbox").unwrap();
+    let cs = caret_stops_impl(&svg, off, "balanced", &Mono, &BoxShaper, &BoxOutliner).unwrap();
+    assert_eq!(cs.runs.len(), 1, "{cs:?}");
+    assert_eq!(cs.runs[0].text, "hi");
+}

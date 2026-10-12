@@ -11,7 +11,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
-import { EMPTY_FONTS, loadFontDir, type Font, type FontDb } from "./fonts.js";
+import { advancesOf, EMPTY_FONTS, loadFontDir, type Font, type FontDb } from "./fonts.js";
 import { rasterize } from "./rasterize.js";
 import { noPlugins, PluginRegistry, type ImportDecl } from "./plugins.js";
 
@@ -107,22 +107,6 @@ function metrics(fonts: FontDb, fontCss: string): number[] {
   return [font.ascender * s, -font.descender * s, cap ? cap * s : 0, ex ? ex * s : 0];
 }
 
-// The pen x where each next character begins, per the outline font (GlyphOutliner::advances;
-// entry i is the kerned origin of character i+1, the last the run's width): one shaping pass
-// when glyphs map one-to-one onto characters, each prefix on its own when a ligature collapsed
-// some (stops inside a ligature sit at the prefix advances).
-function advances(font: Font | undefined, text: string, size: number): number[] {
-  if (!font) return [];
-  const chars = Array.from(text);
-  if (chars.length === 0) return [];
-  const starts: number[] = [];
-  const total = font.forEachGlyph(text, 0, 0, size, undefined, (_glyph, x) => {
-    starts.push(x);
-  });
-  if (starts.length === chars.length) return [...starts.slice(1), total];
-  return chars.map((_c, i) => font.getAdvanceWidth(chars.slice(0, i + 1).join(""), size));
-}
-
 function outlineRun(font: Font | undefined, text: string, size: number, x: number, baseline: number): string {
   if (!font) return "";
   let d = font.getPath(text, x, baseline, size).toPathData(2);
@@ -208,7 +192,7 @@ function session(source: string, opts: CompileOptions) {
     (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown, x: unknown, b: unknown) =>
       outlineRun(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number, x as number, b as number),
     (text: unknown, fam: unknown, _w: unknown, style: unknown, size: unknown) =>
-      advances(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number),
+      advancesOf(fonts.resolve(firstFamily(fam as string), style as string), text as string, size as number),
     resolve,
   ] as const;
   const hosts = [
