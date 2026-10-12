@@ -549,11 +549,15 @@ value `justify` extends the SVG Tiny 1.2 `text-align` vocabulary with the CSS/SV
 
 An ellipsized line (§6.6) is never justified. Justified lines anchor at the **start** edge.
 
-**Lowering.** A justified line emits `textLength="<content-width>" lengthAdjust="spacing"` on its
-`<tspan>`; the renderer distributes the slack into the inter-glyph/word spacing (glyph shapes are not
-scaled — contrast `glyph-x-scale`, §6.7, which uses `spacingAndGlyphs`). On a line that would carry
-both, justification wins. v0 distributes slack uniformly across all gaps (not word-gaps-only); a
-word-spacing-only composer is a future refinement.
+**Lowering.** A justified line's slack — the content width less the line's natural advance, every
+run measured in its own style — is shared equally by its **spaces**: the line's `<tspan>` carries
+`word-spacing="<authored word-spacing + slack per space>"`, which its runs inherit, and nothing else
+changes (glyph shapes and letter gaps are untouched — contrast `glyph-x-scale`, §6.7). On a line
+that would carry both, justification wins. A line that is exactly full carries no attribute. This is
+what typesetting does, and it keeps text decorations whole: a `textLength`-stretched line (the v0
+lowering) had its underline and strike-through drawn per glyph with the stretched gaps bare, a
+dashed line. The layout seam reports each line's effective per-space advance
+([Incremental.md](Incremental.md) §6), so a caret on a justified line is exact prefix math.
 
 ### 6.10 Shape binding & region flow — `<x:textbox in="#id">` [implemented]
 

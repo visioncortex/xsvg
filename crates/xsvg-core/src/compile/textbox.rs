@@ -789,6 +789,64 @@ pub(super) fn baseline_shift_px(v: &str, em_box: f64, size: f64) -> f64 {
     }
 }
 
+/// The measuring style of a run: the base with the run's overrides folded in,
+/// its size riding the same fit scale as the base size.
+pub(super) fn run_measure_style(a: &EmitAttrs, style: &TextStyle, size: f64) -> (TextStyle, f64) {
+    let scale = if style.size > 0.0 {
+        size / style.size
+    } else {
+        1.0
+    };
+    let mut st = style.clone();
+    if let Some(w) = &a.weight {
+        st.weight = w.clone();
+    }
+    if let Some(s) = &a.style {
+        st.style = s.clone();
+    }
+    if let Some(f) = &a.family {
+        st.family = f.clone();
+    }
+    let rs = a.size.map(|s| s * scale).unwrap_or(size);
+    st.size = rs;
+    (st, rs)
+}
+
+fn spaces_in(text: &str) -> f64 {
+    text.matches(' ').count() as f64
+}
+
+/// The slack a justified line puts into each of its spaces (§6.9): the content
+/// width less the line's natural advance (every run measured in its own style),
+/// shared by the spaces. `None` when the line is not justified or has no space
+/// to widen. Emission, the highlight rects and the layout seam all read it, so
+/// the rendered line, its backdrops and the caret agree.
+pub(super) fn justify_space(
+    line: &PlacedLine,
+    style: &TextStyle,
+    size: f64,
+    emits: &[EmitAttrs],
+    m: &dyn Measurer,
+) -> Option<f64> {
+    let w = line.justify_width?;
+    let spaces = spaces_in(&line.text);
+    if spaces == 0.0 {
+        return None;
+    }
+    let natural: f64 = line
+        .runs
+        .iter()
+        .map(|r| {
+            let (st, rs) = emits
+                .get(r.style)
+                .map(|a| run_measure_style(a, style, size))
+                .unwrap_or((style.clone(), size));
+            line_advance(&r.text, &st, rs, m)
+        })
+        .sum();
+    Some((w - natural) / spaces)
+}
+
 /// The `x:highlight` backgrounds of `lines` (§6.11): one `<rect>` per
 /// highlighted run per line, emitted BEFORE the `<text>` so it sits behind
 /// the glyphs. A run's box spans its advance (measured in the run's own
@@ -809,27 +867,7 @@ pub(super) fn emit_highlights(
     m: &dyn Measurer,
     ctx: &Ctx,
 ) {
-    let scale = if style.size > 0.0 {
-        size / style.size
-    } else {
-        1.0
-    };
-    // the run's measuring style: the base with the run's overrides folded in
-    let run_style = |a: &EmitAttrs| -> (TextStyle, f64) {
-        let mut st = style.clone();
-        if let Some(w) = &a.weight {
-            st.weight = w.clone();
-        }
-        if let Some(s) = &a.style {
-            st.style = s.clone();
-        }
-        if let Some(f) = &a.family {
-            st.family = f.clone();
-        }
-        let rs = a.size.map(|s| s * scale).unwrap_or(size);
-        st.size = rs;
-        (st, rs)
-    };
+    let run_style = |a: &EmitAttrs| run_measure_style(a, style, size);
     for line in lines {
         if !line
             .runs
@@ -849,11 +887,9 @@ pub(super) fn emit_highlights(
                 line_advance(&r.text, &st, rs, m)
             })
             .sum();
-        let stretch = match line.justify_width {
-            Some(w) if natural > 0.0 => w / natural,
-            _ => 1.0,
-        };
-        let width = natural * stretch;
+        // a justified line widens its spaces, not its glyph gaps (§6.9)
+        let extra = justify_space(line, style, size, emits, m).unwrap_or(0.0);
+        let width = natural + spaces_in(&line.text) * extra;
         // the line's LEFT edge, whichever edge the anchor names
         let left = match (anchor, rtl) {
             ("middle", _) => line.x - width / 2.0,
@@ -865,7 +901,7 @@ pub(super) fn emit_highlights(
         for r in &line.runs {
             let a = emits.get(r.style);
             let (st, rs) = a.map(&run_style).unwrap_or((style.clone(), size));
-            let w = line_advance(&r.text, &st, rs, m) * stretch;
+            let w = line_advance(&r.text, &st, rs, m) + spaces_in(&r.text) * extra;
             if rtl {
                 x -= w;
             }
@@ -891,8 +927,8 @@ pub(super) fn emit_highlights(
     }
 }
 
-/// Emit one line as an outer positioning `<tspan x y>` (carrying justify/glyph-scale
-/// `textLength`) whose children are the line's styled runs — a bare string for base
+/// Emit one line as an outer positioning `<tspan x y>` (carrying the justify
+/// `word-spacing` or the glyph-scale `textLength`) whose children are the line's styled runs — a bare string for base
 /// runs, an inner `<tspan>` with the run's overrides for the rest.
 pub(super) fn emit_line(
     out: &mut String,
@@ -908,13 +944,20 @@ pub(super) fn emit_line(
         fmt(line.x),
         fmt(line.baseline)
     ));
-    if let Some(w) = line.justify_width {
-        // Justification: stretch inter-word/glyph spacing (not glyph shapes) to fill
-        // the content width. Takes precedence over glyph-x-scale on this line.
-        out.push_str(&format!(
-            " textLength=\"{}\" lengthAdjust=\"spacing\"",
-            fmt(w)
-        ));
+    if line.justify_width.is_some() {
+        // Justification (§6.9): the slack goes into the spaces, as `word-spacing`
+        // on the line — renderers draw a `textLength`-stretched line's decorations
+        // per glyph and leave the stretched gaps bare (a dashed underline), and
+        // widening the spaces is what typesetting does anyway. Inner runs inherit
+        // it. Takes precedence over glyph-x-scale on this line.
+        if let Some(extra) = justify_space(line, style, size, emits, m) {
+            if extra.abs() > 1e-9 {
+                out.push_str(&format!(
+                    " word-spacing=\"{}\"",
+                    fmt(style.word_spacing + extra)
+                ));
+            }
+        }
     } else if glyph_x_scale > 0.0 && (glyph_x_scale - 1.0).abs() > 1e-6 && !line.text.is_empty() {
         // A non-positive scale is meaningless (would emit a zero/negative textLength);
         // treat it as "no scaling" rather than emitting invalid SVG.
@@ -1101,8 +1144,13 @@ pub struct TextLayoutLine {
     /// The line's rendered font size — its largest run's (§6.11 mixed sizes);
     /// the paragraph `style.size` for a plain line. A caret on it is this tall.
     pub size: f64,
-    /// Justified lines render stretched to this width (SVG `textLength`).
+    /// Justified lines span this width: their slack went into `word_spacing`.
     pub justify_width: Option<f64>,
+    /// The per-space advance the line renders with — the paragraph's
+    /// `word_spacing`, plus a justified line's share of slack per space. Caret x
+    /// on any line is the prefix advance with this per space: exact, not an
+    /// interpolation.
+    pub word_spacing: f64,
     /// `[start, end)` into the paragraph's [`TextLayoutPara::words`]. Wrapping
     /// never splits a word, so the range is exact even for clipped-away
     /// neighbors; when `text` differs from `words[start..end].join(" ")` the
@@ -1191,7 +1239,7 @@ pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLay
         let words: Vec<String> = text.split_whitespace().map(str::to_string).collect();
         return Some(TextLayout {
             content: (b.x + pad, b.y + pad, b.w - 2.0 * pad, b.h - 2.0 * pad),
-            paras: vec![para_info(node, &style, &layout, words, ctx.m)],
+            paras: vec![para_info(node, &style, &layout, words, &[], ctx.m)],
         });
     }
 
@@ -1208,7 +1256,7 @@ pub(super) fn area_layout_info(
     spec: &AreaSpec,
     m: &dyn Measurer,
 ) -> TextLayout {
-    let (segments, styles, _) = collect_runs(node, style);
+    let (segments, styles, emits) = collect_runs(node, style);
     let measured = measure_runs(&segments, &styles, m);
     let words: Vec<String> = measured
         .words
@@ -1224,7 +1272,7 @@ pub(super) fn area_layout_info(
             spec.width - 2.0 * p,
             spec.height - 2.0 * p,
         ),
-        paras: vec![para_info(node, style, &layout, words, m)],
+        paras: vec![para_info(node, style, &layout, words, &emits, m)],
     }
 }
 
@@ -1258,6 +1306,9 @@ pub(super) fn paragraphs_layout_info(
                     baseline: l.baseline,
                     size: l.size,
                     justify_width: l.justify_width,
+                    word_spacing: para.laid.style.word_spacing
+                        + justify_space(l, &para.laid.style, para.laid.style.size, &para.emits, m)
+                            .unwrap_or(0.0),
                     words: l.words,
                 })
                 .collect();
@@ -1291,6 +1342,7 @@ pub(super) fn para_info(
     style: &TextStyle,
     layout: &AreaLayout,
     words: Vec<String>,
+    emits: &[EmitAttrs],
     m: &dyn Measurer,
 ) -> TextLayoutPara {
     let mut rendered = style.clone();
@@ -1311,6 +1363,8 @@ pub(super) fn para_info(
                 baseline: l.baseline,
                 size: l.size,
                 justify_width: l.justify_width,
+                word_spacing: style.word_spacing
+                    + justify_space(l, style, layout.font_size, emits, m).unwrap_or(0.0),
                 words: l.words,
             })
             .collect(),

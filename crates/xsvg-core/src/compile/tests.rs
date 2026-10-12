@@ -1429,29 +1429,68 @@ fn word_spacing_affects_layout_and_is_emitted() {
 }
 
 #[test]
-fn justify_emits_textlength_spacing_on_full_lines() {
-    // Mono: char = 0.5 × size. Wraps to several lines at width 40, size 10.
-    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" font-size="10" text-align="justify">aa bb cc dd ee ff</textArea></svg>"#;
+fn justify_widens_the_spaces_of_full_lines() {
+    // Mono: char = 0.5 × size. At width 40, size 10: "aaa bb" (30 wide, one space,
+    // so 10 of slack into it), "cc dd ee" (exactly full: nothing to add), "ff" last.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><textArea x="0" y="0" width="40" font-size="10" text-align="justify">aaa bb cc dd ee ff</textArea></svg>"#;
     let out = compile_test(svg);
     assert!(out.contains(r#"text-anchor="start""#), "{out}");
+    assert!(out.contains(r#" word-spacing="10">aaa bb"#), "{out}");
     assert!(
-        out.contains(r#"textLength="40" lengthAdjust="spacing""#),
-        "expected justified full lines: {out}"
+        out.contains(r#"<tspan x="0" y="18">cc dd ee"#),
+        "an exactly full line needs no widening: {out}"
     );
-    // start alignment (no justify) emits no textLength
+    assert!(
+        out.contains(r#"<tspan x="0" y="29">ff"#),
+        "the last line stays ragged: {out}"
+    );
+    // no textLength anywhere: a stretched line's decorations render per glyph,
+    // dashed across the stretched gaps (found live)
+    assert!(!out.contains("textLength"), "{out}");
+    // an authored word-spacing is the base the slack adds to
+    let spaced = svg.replace(r#"font-size="10""#, r#"font-size="10" word-spacing="4""#);
+    let out = compile_test(&spaced);
+    assert!(
+        out.contains(r#" word-spacing="10">aaa bb"#),
+        "4 authored + 6 slack: {out}"
+    );
+    // start alignment (no justify) emits no per-line word-spacing
     let plain = svg.replace(" text-align=\"justify\"", "");
-    assert!(!compile_test(&plain).contains("textLength"));
+    assert!(!compile_test(&plain).contains("word-spacing"));
 }
 
 #[test]
 fn justify_on_textbox_uses_content_width() {
-    // width 60, padding 10 → content width 40 is the justify target.
-    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="60" height="200" padding="10" align="justify" font-size="10">aa bb cc dd ee ff</x:textbox></svg>"#;
+    // width 60, padding 10 → content width 40 is the justify target: "aaa bb" is
+    // 30 wide with one space, so that space takes the 10 of slack
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="60" height="200" padding="10" align="justify" font-size="10">aaa bb cc dd ee ff</x:textbox></svg>"#;
+    let out = compile_test(svg);
+    assert!(out.contains(r#" word-spacing="10">aaa bb"#), "{out}");
+    assert!(!out.contains("textLength"), "{out}");
+    // the layout seam reports the per-space advance the line renders with, so a
+    // caret on a justified line is exact prefix math
+    let tl = layout_at(svg, svg.find("<x:textbox").unwrap()).unwrap();
+    let lines = &tl.paras[0].lines;
+    assert_eq!(lines[0].word_spacing, 10.0, "{lines:?}");
+    assert_eq!(lines[1].word_spacing, 0.0, "{lines:?}");
+    assert_eq!(lines[2].word_spacing, 0.0, "{lines:?}");
+}
+
+#[test]
+fn justified_decorations_and_highlights_follow_the_widened_spaces() {
+    // an underlined run spanning the justified line stays ONE tspan with no
+    // textLength (the decoration draws continuously), and a highlight rect after
+    // a space sits past the widened space, not the natural one
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org"><x:textbox x="0" y="0" width="40" height="200" align="justify" font-size="10"><tspan text-decoration="underline">aaa bb</tspan> cc dd ee ff</x:textbox><x:textbox x="0" y="100" width="40" height="200" align="justify" font-size="10">aaa <tspan x:highlight="#ff0">bb</tspan> cc dd ee ff</x:textbox></svg>"##;
     let out = compile_test(svg);
     assert!(
-        out.contains(r#"textLength="40" lengthAdjust="spacing""#),
+        out.contains(r#"<tspan text-decoration="underline">aaa bb</tspan>"#),
         "{out}"
     );
+    assert!(!out.contains("textLength"), "{out}");
+    // "aaa " is 20 wide naturally; its space widened by 10 puts "bb" at x = 30
+    // (the rect's top is the baseline less the ascent)
+    assert!(out.contains(r#"<rect x="30" y="99" width="10""#), "{out}");
 }
 
 #[test]

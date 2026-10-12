@@ -82,6 +82,13 @@ partial one.
 
 ### Fixed
 
+- **Underline and strike-through on justified lines rendered dashed.** Justification lowered to
+  `textLength` + `lengthAdjust="spacing"`, and renderers draw a stretched line's decorations per
+  glyph, leaving the stretched gaps bare. A justified line now carries its slack as `word-spacing`
+  on the line — spaces widen, glyph gaps and shapes stay — so decorations draw whole, highlight
+  rects land on the widened spaces, and a caret on a justified line is exact (§6.9). Output of
+  justified text changes accordingly.
+
 - **Paragraph mode ignored `text-overflow="ellipsis"`.** A textbox with `<x:p>` children
   dropped the lines that fell past its bottom but never marked the cut, so a truncated
   card read as complete. The block's last rendered line now ends in `…`, whichever

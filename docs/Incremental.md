@@ -252,9 +252,12 @@ whole box, or one `<x:p>` in paragraph mode §6.16), carrying its source byte
   when clipping drops leading lines (`valign="bottom"` overflow), pinned by
   `text_layout_valign_bottom_clip_keeps_exact_word_ranges`.
 - Caret x within a line = prefix advance of `line.text` measured in the para's
-  rendered style **plus** `letter-spacing` per grapheme gap and `word-spacing`
-  per space — exactly the renderer's `line_advance` math, interpreted through
-  `anchor` (start/middle/end from the line's `x`).
+  rendered style **plus** `letter-spacing` per grapheme gap and the LINE's
+  `word_spacing` per space — exactly the renderer's `line_advance` math,
+  interpreted through `anchor` (start/middle/end from the line's `x`). A
+  justified line's `word_spacing` includes its share of slack (§6.9 lowers
+  justification as `word-spacing`), so its caret is exact too; `justify_width`
+  is the width it spans.
 - Word → source offsets is the host's job: the words are its own text content
   split on whitespace, the same walk in both places.
 - `text-overflow="ellipsis"` rewrites a line's `text` but not its `words`
