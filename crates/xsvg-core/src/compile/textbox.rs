@@ -1007,6 +1007,82 @@ pub(super) fn line_increment_attr(node: roxmltree::Node, size: f64) -> LineIncre
 }
 
 // ============================================================================
+// Textbox measurement for editors (docs/Incremental.md §8; consumer: xsvg-kit's
+// paste and auto-size): how big a box must be to hold what is in it.
+
+/// The size a rectangular `<x:textbox>` needs for its content, laid out at the
+/// authored width with height unbounded, `valign` top, no shrink and no ellipsis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextboxSize {
+    /// Outer height that just holds every line: the cap band of the stacked
+    /// blocks — the first baseline sits at cap height below the top, the last
+    /// line's descent at the bottom — plus padding above and below. Compiled at
+    /// this height the box renders every line, unclipped and unshrunk, with the
+    /// descenders inside the box (§6.5 clips by baseline, so a box up to one
+    /// descent shorter still shows every line, hanging its last descenders out).
+    pub height: f64,
+    /// Outer width the content uses: the widest line plus padding on both sides,
+    /// at most the authored width. Lines are measured in their paragraph's style
+    /// at the line's size, so a line whose runs change weight or family is
+    /// approximate; the height is exact.
+    pub width: f64,
+}
+
+pub(super) fn measure_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextboxSize> {
+    let style = style_from(node, ctx);
+    let geom = match node.attribute("in") {
+        // curved region flow has no height to grow into: not measurable
+        Some(r) => ctx
+            .resolve_ref(node, r)
+            .filter(|t| t.tag_name().name() == "rect")?,
+        None => node,
+    };
+    let mut spec = textbox_area_spec(node, geom);
+    // the question is how tall the box must be, so lay it out unbounded, from the
+    // top, at the authored size — the same tall stand-in `stack_paragraphs` uses
+    spec.height = 1e5;
+    spec.valign = VAlign::Top;
+    spec.fit = Fit::None;
+    spec.text_overflow = TextOverflow::Clip;
+    let m = ctx.m;
+    let pad = spec.padding;
+    let top = spec.y + pad;
+    // the bottom of the last line and the widest line, over whatever the box holds;
+    // `shift` is where the lines' frame sits (paragraph plans are relative to the
+    // block top, a single flow is absolute)
+    let mut bottom: Option<f64> = None;
+    let mut widest = 0.0f64;
+    let mut take = |lines: &[PlacedLine], pstyle: &TextStyle, shift: f64| {
+        for l in lines {
+            widest = widest.max(line_advance(&l.text, pstyle, l.size, m));
+        }
+        if let Some(l) = lines.last() {
+            bottom = Some(shift + l.baseline + m.font_metrics(pstyle, l.size).descent);
+        }
+    };
+    let paras = blocks_of(node);
+    if !paras.is_empty() {
+        let (items, _) = plan_paragraphs(node, &paras, &style, "", &spec, m);
+        for it in &items {
+            take(&it.laid.lines, &it.laid.style, top);
+        }
+    } else {
+        let (segments, styles, _) = collect_runs(node, &style);
+        let layout = layout_area_runs(&segments, &styles, &spec, m);
+        take(&layout.lines, &style, 0.0);
+    }
+    // an empty box is one line tall: cap height plus descent at its own size
+    let bottom = bottom.unwrap_or_else(|| {
+        let fm = m.font_metrics(&style, style.size);
+        top + fm.cap_height + fm.descent
+    });
+    Some(TextboxSize {
+        height: bottom - spec.y + pad,
+        width: (widest + 2.0 * pad).min(spec.width),
+    })
+}
+
+// ============================================================================
 // Text-layout seam for editors (docs/Incremental.md §6; consumer: xsvg-kit).
 // The compiler computes every PlacedLine it renders and used to discard them;
 // this seam returns the same geometry so an editing host can draw a caret

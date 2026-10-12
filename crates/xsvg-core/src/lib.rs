@@ -30,9 +30,9 @@ pub use compile::{
     compile_fragment_linked_impl, compile_fragment_linked_keyed_impl,
     compile_fragment_platform_impl, compile_impl, compile_keyed_impl, compile_linked_impl,
     compile_linked_keyed_impl, compile_platform_impl, compile_with, dependents_impl,
-    dependents_multi_impl, fragment_range_impl, node_spans_impl, text_layout_impl, CaretStop,
-    CaretStops, CompileSession, Host, NoKeys, NoResolver, NodeKeys, Options, Platform, Resolver,
-    StopRun, TextLayout, TextLayoutLine, TextLayoutPara,
+    dependents_multi_impl, fragment_range_impl, measure_textbox_impl, node_spans_impl,
+    text_layout_impl, CaretStop, CaretStops, CompileSession, Host, NoKeys, NoResolver, NodeKeys,
+    Options, Platform, Resolver, StopRun, TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.

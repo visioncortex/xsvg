@@ -16,6 +16,12 @@ partial one.
 
 ### Added
 
+- **Sizing a textbox to its content** for editing hosts. `measure_textbox_impl` (and
+  `CompileSession::measure_textbox`) returns the height a textbox needs to hold its paragraphs and
+  lists at its authored width — the cap band of the stacked blocks plus padding — and the width its
+  content actually uses, through the same engine that renders it, so a pasted block can be given a
+  box that just fits ([Incremental.md §8](docs/Incremental.md)).
+
 - **Caret stops on outlined text** for editing hosts. `caret_stops_impl` (and
   `CompileSession::caret_stops`) returns the caret positions between the outlined glyphs of an
   `<x:textbox outline="true">` — through any `<x:warp>` it sits in — or an `<x:textpath>` effect,

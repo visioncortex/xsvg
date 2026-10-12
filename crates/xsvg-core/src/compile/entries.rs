@@ -9,7 +9,9 @@
 //! dependents) and the text-layout seam are here too, as one-shot sessions.
 
 use super::session::Parsed;
-use super::{CaretStops, CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout};
+use super::{
+    CaretStops, CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout, TextboxSize,
+};
 use super::{NodeKeys, Resolver};
 use crate::{GlyphOutliner, Measurer, Shaper};
 
@@ -405,4 +407,26 @@ pub fn caret_stops_impl(
         .session(input, quality, false, "")
         .ok()?
         .caret_stops(offset)
+}
+
+/// How big the `<x:textbox>` whose source range starts at byte `offset` must be
+/// to hold its content (docs/Incremental.md §8; consumer: xsvg-kit): laid out at
+/// its authored width with height unbounded, `valign` top, no shrink and no
+/// ellipsis, the outer height is the cap band of the stacked blocks plus padding
+/// and the outer width the widest line plus padding (at most the authored width).
+/// An editor pastes a block with `width` set and a placeholder `height`, asks,
+/// and writes the answer back in the same transaction. `None` when the offset is
+/// not a rectangular textbox (curved region flow has no height to grow into).
+pub fn measure_textbox_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Option<TextboxSize> {
+    Platform::new(m, shaper, outliner)
+        .session(input, quality, false, "")
+        .ok()?
+        .measure_textbox(offset)
 }

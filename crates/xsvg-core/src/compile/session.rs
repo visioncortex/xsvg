@@ -132,6 +132,24 @@ impl<'a> Parsed<'a> {
         super::layout_textbox(node, &Ctx::new(backend, quality, false, "", self))
     }
 
+    /// The size the `<x:textbox>` starting at byte `offset` needs for its content
+    /// (`measure_textbox`). `None` when the offset is not a rectangular textbox.
+    pub(super) fn measure_textbox(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Option<super::TextboxSize> {
+        let node = super::visible(self.doc.root())
+            .find(|n| n.is_element() && n.range().start == offset)?;
+        if node.tag_name().namespace() != Some(super::XSVG_NS)
+            || node.tag_name().name() != "textbox"
+        {
+            return None;
+        }
+        super::measure_textbox(node, &Ctx::new(backend, quality, false, "", self))
+    }
+
     /// Caret stops of the outlined text element starting at byte `offset`
     /// (`stops.rs`). Its top-level fragment compiles once more into a scratch
     /// buffer with the recorder on, so the stops come out of the same outline,
@@ -355,6 +373,14 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
         self.parsed
             .text_layout(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// How big the `<x:textbox>` at byte `offset` must be to hold its content —
+    /// the same answer as [`super::measure_textbox_impl`]. `None` when the offset
+    /// is not a rectangular textbox.
+    pub fn measure_textbox(&self, offset: usize) -> Option<super::TextboxSize> {
+        self.parsed
+            .measure_textbox(offset, &self.platform.backend(), self.quality)
     }
 
     /// Caret stops on the outlined text element at byte `offset` — the same

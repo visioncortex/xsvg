@@ -6099,3 +6099,97 @@ fn doc_island_is_inert() {
     assert!(layout_at(&with, with.find(r#"<x:textbox id="hidden""#).unwrap()).is_none());
     assert!(layout_at(&with, with.find(r##"<x:textbox in="#box""##).unwrap()).is_some());
 }
+
+// ---------------------------------------------------------------------------
+// measure_textbox: how big a box must be for its content (Incremental.md §8)
+
+fn measure_at(svg: &str, needle: &str) -> Option<TextboxSize> {
+    let off = svg.find(needle).unwrap();
+    measure_textbox_impl(svg, off, "balanced", &Mono, &BoxShaper, &NoOutliner)
+}
+
+fn tspans(out: &str) -> usize {
+    out.matches("<tspan").count()
+}
+
+#[test]
+fn measure_textbox_is_the_cap_band_plus_padding() {
+    // Mono: 5 per char at size 10; content width 50 → "alpha beta" | "gamma" | "delta"
+    let svg = format!(
+        r##"{XW}<x:textbox x="4" y="9" width="56" height="5" padding="3" font-size="10" text-overflow="ellipsis">alpha beta gamma delta</x:textbox></svg>"##
+    );
+    let fm = Mono.font_metrics(&TextStyle::default(), 10.0);
+    let size = measure_at(&svg, "<x:textbox").unwrap();
+    // cap of the first line, two more advances of size × line-height, the last descent
+    let band = fm.cap_height + 2.0 * 12.0 + fm.descent;
+    assert!((size.height - (band + 6.0)).abs() < 1e-9, "{size:?}");
+    assert!(
+        (size.width - 56.0).abs() < 1e-9,
+        "the widest line fills the box: {size:?}"
+    );
+    // compiled at that height the box holds every line unclipped; a hair less loses one
+    let at = |h: f64| compile_test(&svg.replace(r#"height="5""#, &format!(r#"height="{h}""#)));
+    let fits = at(size.height);
+    assert_eq!(tspans(&fits), 3, "{fits}");
+    assert!(!fits.contains('…'), "{fits}");
+    // §6.5 clips by BASELINE, so the box may lose up to the last descent before a
+    // line goes; one hair under that and it does
+    let tight = at(size.height - fm.descent - 0.5);
+    assert!(tspans(&tight) < 3 || tight.contains('…'), "{tight}");
+}
+
+#[test]
+fn measure_textbox_width_is_the_content_and_empty_is_one_line() {
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="5" padding="3" font-size="10">hi</x:textbox><x:textbox x="0" y="0" width="200" height="5" font-size="10"></x:textbox></svg>"##
+    );
+    let short = measure_at(&svg, "<x:textbox").unwrap();
+    assert!(
+        (short.width - 16.0).abs() < 1e-9 && (short.height - 15.0).abs() < 1e-9,
+        "{short:?}"
+    );
+    let off = svg.rfind("<x:textbox").unwrap();
+    let empty = measure_textbox_impl(&svg, off, "balanced", &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert!(
+        (empty.height - 9.0).abs() < 1e-9 && empty.width == 0.0,
+        "cap + descent: {empty:?}"
+    );
+}
+
+#[test]
+fn measure_textbox_stacks_paragraphs_and_lists() {
+    let svg = format!(
+        r##"{XW}<x:textbox x="10" y="20" width="100" height="5" padding="2" font-size="10"><x:p>intro words</x:p><x:list><x:li>first</x:li><x:li>second</x:li></x:list><x:p>outro</x:p></x:textbox></svg>"##
+    );
+    let size = measure_at(&svg, "<x:textbox").unwrap();
+    let with = |h: f64| svg.replace(r#"height="5""#, &format!(r#"height="{h}""#));
+    // every block's lines render at the measured height, and the layout seam puts
+    // the last line's descent exactly on the padded bottom edge
+    let fits = compile_test(&with(size.height));
+    assert_eq!(tspans(&fits), 4, "{fits}");
+    let tl = layout_at(&with(size.height), svg.find("<x:textbox").unwrap()).unwrap();
+    let last = tl.paras.last().unwrap().lines.last().unwrap();
+    let fm = Mono.font_metrics(&TextStyle::default(), 10.0);
+    assert!(
+        (last.baseline + fm.descent - (20.0 + size.height - 2.0)).abs() < 1e-9,
+        "{tl:?}"
+    );
+    assert!(tspans(&compile_test(&with(size.height - fm.descent - 0.5))) < 4);
+    // the same answer when the geometry is a referenced rect
+    let via_rect = format!(
+        r##"{XW}<rect id="r" x="10" y="20" width="100" height="5"/><x:textbox in="#r" padding="2" font-size="10"><x:p>intro words</x:p><x:list><x:li>first</x:li><x:li>second</x:li></x:list><x:p>outro</x:p></x:textbox></svg>"##
+    );
+    assert_eq!(measure_at(&via_rect, "<x:textbox"), Some(size));
+}
+
+#[test]
+fn measure_textbox_none_off_a_rectangular_box() {
+    let svg = format!(
+        r##"{XW}<circle id="c" cx="30" cy="30" r="30"/><x:textbox in="#c" font-size="10">curved</x:textbox><rect x="0" y="0" width="1" height="1"/></svg>"##
+    );
+    assert!(
+        measure_at(&svg, "<x:textbox").is_none(),
+        "curved region flow has no height to grow"
+    );
+    assert!(measure_at(&svg, "<rect").is_none());
+}

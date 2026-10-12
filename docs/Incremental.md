@@ -328,3 +328,42 @@ path's y; two boxes in one warp answer separately; a boolean operand answers
 **Limits (v1)**: paragraph mode has no outline branch, so a box with `<x:p>`
 children never outlines and never has stops; stops are per scalar, so a caret
 inside a ligature is honest only at cluster edges.
+
+## 8. Sizing a textbox to its content (`measure_textbox_impl`, shipped)
+
+An editor that pastes a block of formatted text — paragraphs, a list — knows the
+width it may use (the canvas bounds it) and needs the height that just holds the
+content. `measure_textbox_impl(input, offset, quality, measurer, shaper,
+outliner)` answers for the `<x:textbox>` whose source range starts at byte
+`offset` (the §6 convention), laid out through the real engine with the real
+seams: `TextboxSize { height, width }`.
+
+**Semantics.** The box is laid out at its authored `width` (its own, or its
+`in="#rect"`'s) with height unbounded, `valign` forced to top, `fit="shrink"`
+and `text-overflow` ignored — the question is how tall the box must be, not how
+the content squeezes into the box it has. Everything else is the real stack:
+`<x:p>` gaps, `<x:list>` blocks with their markers and gutters, `text-indent`,
+mixed run sizes, the inherited `font-family` and theme tokens, which is why the
+box is measured **in place** in the document rather than on a scratch copy.
+`height` is the cap band of the stacked blocks — the first baseline at cap
+height below the top, the last line's descent at the bottom — plus padding
+above and below; compiled at that height the box renders every line with its
+descenders inside the box (§6.5 clips by baseline, so a box up to one descent
+shorter still shows every line, hanging the last descenders out). An empty box
+is one line tall. `width` is the widest line plus padding, at most the authored
+width, so a short paste can take a narrower box; lines are measured in their
+paragraph's style at the line's size, so a line whose runs change weight or
+family is approximate while the height is exact. `None` when the offset is not
+a rectangular textbox: curved region flow has no height to grow into.
+
+**The editor's flow**, one transaction and one undo step: insert
+`<x:textbox x y width="{max}" height="1">…</x:textbox>`, call `measureTextbox`
+mid-transaction (legal, like `textLayout`), then set `height` — and `width`, if
+a narrower box is wanted — on the same node.
+
+**Pinned**: the single-flow height is cap + (n − 1) advances + descent plus
+padding and one descent less loses a line; a paragraph-and-list box compiled at
+the measured height renders every block and the layout seam puts the last
+descent exactly on the padded bottom edge; a referenced rect gives the same
+answer as the box's own geometry; a short line reports its own width and an
+empty box one line; a circle-bound box answers `None`.

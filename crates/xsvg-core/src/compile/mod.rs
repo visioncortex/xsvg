@@ -1277,7 +1277,7 @@ mod runs;
 use runs::*;
 mod textbox;
 use textbox::*;
-pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara};
+pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize};
 mod stops;
 mod textpath;
 use stops::{record_textpath_stops, span_of, stop_run};
