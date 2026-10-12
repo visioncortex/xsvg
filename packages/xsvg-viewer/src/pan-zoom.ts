@@ -27,6 +27,8 @@ export interface Insets {
   bottom: number;
 }
 
+export type WheelMode = "zoom" | "scroll";
+
 export interface PanZoom {
   /** The covered edges (see `Insets`); partial updates keep the rest. */
   setInsets(insets: Partial<Insets>): void;
@@ -36,6 +38,11 @@ export interface PanZoom {
    *  while on, for the cursor. */
   setHandMode(on: boolean): void;
   handMode(): boolean;
+  /** What a plain wheel does: `zoom` (the viewer's default) zooms toward the
+   *  cursor; `scroll` (an editor's) pans, vertically, ⇧ horizontally, and only
+   *  ⌥ zooms. A trackpad pinch (a ctrl+wheel) zooms in both modes. */
+  setWheelMode(mode: WheelMode): void;
+  wheelMode(): WheelMode;
   /** Center the content at 1:1. */
   reset(): void;
   /** Put content point (cx, cy) at the viewport center, at 1:1 — 1:1 on a
@@ -80,6 +87,7 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   const bgClickListeners = new Set<() => void>();
   const inset: Insets = { left: 0, top: 0, right: 0, bottom: 0 };
   let hand = false;
+  let wheel: WheelMode = "zoom";
   // the uncovered part of the viewport: origin and size
   const visible = () => ({
     x: inset.left,
@@ -124,7 +132,23 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     const rect = viewport.getBoundingClientRect();
-    zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top);
+    // a line- or page-based delta (some mice) in pixels
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewport.clientHeight : 1;
+    if (wheel === "zoom" || e.altKey || e.ctrlKey) {
+      // ⌥ zooms in scroll mode; ctrl is the trackpad's pinch
+      // (a pinch's small deltas get a livelier rate in scroll mode, where it is
+      // the only gesture zoom; the viewer's wheel keeps its own)
+      zoomBy(Math.exp(-e.deltaY * unit * (wheel === "scroll" && e.ctrlKey ? 0.01 : 0.0015)), e.clientX - rect.left, e.clientY - rect.top);
+      return;
+    }
+    // scroll mode pans: a trackpad moves both ways; ⇧ turns a mouse wheel
+    // sideways (macOS already does, as deltaX, for most mice)
+    let dx = e.deltaX * unit;
+    let dy = e.deltaY * unit;
+    if (e.shiftKey && dx === 0) { dx = dy; dy = 0; }
+    tx -= dx;
+    ty -= dy;
+    apply();
   };
 
   const onPointerDown = (e: PointerEvent) => {
@@ -160,8 +184,11 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
     if (e.button === 1) e.preventDefault();
   };
 
+  // a field keeps its own Space; an element marked data-canvas-keys stands
+  // in for the canvas (an editor's hidden clipboard field) and does not
   const editable = (el: Element | null): boolean =>
     !!el &&
+    !el.hasAttribute("data-canvas-keys") &&
     (el.tagName === "INPUT" ||
       el.tagName === "TEXTAREA" ||
       (el as HTMLElement).isContentEditable);
@@ -267,6 +294,10 @@ export function createPanZoom(viewport: HTMLElement, content: HTMLElement): PanZ
       hand = on;
       viewport.classList.toggle("hand", on);
     },
+    setWheelMode: (mode) => {
+      wheel = mode;
+    },
+    wheelMode: () => wheel,
     handMode: () => hand,
     reset,
     resetTo,
