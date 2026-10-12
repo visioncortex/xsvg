@@ -5978,3 +5978,82 @@ fn caret_stops_record_a_referenced_box_once() {
     assert_eq!(cs.runs.len(), 1, "{cs:?}");
     assert_eq!(cs.runs[0].text, "hi");
 }
+
+// ---------------------------------------------------------------------------
+// font-family inheritance into compiled text (§4.1)
+
+/// The `font-family="…"` each `<text>` in `out` carries, in document order.
+fn text_families(out: &str) -> Vec<String> {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    doc.descendants()
+        .filter(|n| n.tag_name().name() == "text")
+        .map(|n| n.attribute("font-family").unwrap_or("").to_string())
+        .collect()
+}
+
+#[test]
+fn compiled_text_inherits_font_family_from_ancestors() {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" font-family="Root">
+<x:theme><x:font name="tok" font-family="Token" font-size="40"/></x:theme>
+<x:textbox x="0" y="0" width="80" height="20" font-size="10">root</x:textbox>
+<g font-family="Group"><x:textbox x="0" y="0" width="80" height="20" font-size="10">group</x:textbox></g>
+<g font-family="Group"><x:textbox x="0" y="0" width="80" height="20" font-size="10" font-family="Own">own</x:textbox></g>
+<g font-family="Group"><x:textbox x="0" y="0" width="80" height="20" font-size="10" x:font="tok">own token</x:textbox></g>
+<g x:font="tok"><x:textbox x="0" y="0" width="80" height="20" font-size="10">group token</x:textbox></g>
+<g font-family="Group" x:font="tok"><x:textbox x="0" y="0" width="80" height="20" font-size="10">attr beats token</x:textbox></g>
+<g font-family="Outer"><g><x:textbox x="0" y="0" width="80" height="20" font-size="10">nearest</x:textbox></g></g>
+<x:list x="0" y="0" width="80" font-size="10"><x:li>list</x:li></x:list>
+<textArea x="0" y="0" width="80" height="20" font-size="10">area</textArea>
+</svg>"##;
+    let out = compile_test(svg);
+    assert_eq!(
+        text_families(&out),
+        ["Root", "Group", "Own", "Token", "Token", "Group", "Outer", "Root", "Root"],
+        "{out}"
+    );
+    // the layout seam measures in the same family it will render in
+    let off = svg.find("<g font-family=\"Group\">").unwrap();
+    let tl = layout_at(svg, svg[off..].find("<x:textbox").unwrap() + off).unwrap();
+    assert_eq!(tl.paras[0].style.family, "Group");
+}
+
+#[test]
+fn only_font_family_inherits() {
+    // a group's size and a root token's size never reach a box; the box keeps its
+    // own size (here the default 16), so nothing above it can reflow it
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" x:font="body">
+<x:theme><x:font name="body" font-family="Body" font-size="40" font-weight="bold"/></x:theme>
+<g font-size="30" font-weight="bold" font-style="italic"><x:textbox x="0" y="0" width="200" height="40">words</x:textbox></g>
+</svg>"##;
+    let out = compile_test(svg);
+    assert_eq!(text_families(&out), ["Body"], "{out}");
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let text = doc
+        .descendants()
+        .find(|n| n.tag_name().name() == "text")
+        .unwrap();
+    assert_eq!(text.attribute("font-size"), Some("16"), "{out}");
+    assert_eq!(text.attribute("font-weight"), Some("normal"), "{out}");
+    assert_eq!(text.attribute("font-style"), Some("normal"), "{out}");
+    // the token still lands whole on the root's output, where plain text inherits it
+    assert!(out.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" font-family="Body" font-size="40" font-weight="bold">"#), "{out}");
+}
+
+#[test]
+fn inherited_font_family_keeps_fragment_parity() {
+    // a fragment compiles against the whole parsed document, so the box inside the
+    // group sees the root's family exactly as in the full compile
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" font-family="Root">
+<rect width="10" height="10"/>
+<g><x:textbox x="0" y="0" width="80" height="20" font-size="10">inside</x:textbox></g>
+</svg>"##;
+    let full = compile_test(svg);
+    let off = svg.find("<g>").unwrap();
+    let frag =
+        compile_fragment_impl(svg, "balanced", false, off, &Mono, &NoShaper, &NoOutliner).unwrap();
+    assert!(frag.contains(r#"font-family="Root""#), "{frag}");
+    assert!(
+        full.contains(&frag),
+        "fragment must be a byte-exact span of the full compile:\n{frag}\n---\n{full}"
+    );
+}

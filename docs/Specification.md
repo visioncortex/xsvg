@@ -129,9 +129,21 @@ resolve live.
   dangling CSS variable).
 - **Font tokens** — `<x:font name font-family font-size font-weight font-style line-height
   letter-spacing word-spacing>`, a named CSS-`font`-shorthand-like bundle. Applied by
-  **`x:font="name"`** on any text element (`<text>`, `<textArea>`, `<x:textbox>`, `<x:list>`, and
-  inherited by `<g x:font>`). It is an **overridable base**: the element's own `font-*` attributes
-  win over the token; unset ones fall to the token, then to the built-in defaults.
+  **`x:font="name"`** on any element: the token's properties are written onto that element's
+  output, so plain `<text>` beneath a `<g x:font>` (or the root) inherits them in the browser as
+  SVG always has. On a text element it is an **overridable base**: the element's own `font-*`
+  attributes win over the token; unset ones fall to the token, then to the built-in defaults.
+- **Font resolution for compiled text.** Compiled text (`<x:textbox>`, `<x:list>`, `<x:table>`,
+  `<x:textpath>`, `<textArea>`) is laid out at compile time, so the compiler resolves its
+  `font-family` ahead of the browser, by the rule the cascade would apply: the element's own
+  `font-family`, else its own token's, else the nearest ancestor's (attribute, then token) up to
+  the document root, else `sans-serif`. It measures in that family and writes it on the output, so
+  what renders is what was measured. Every other font property (`font-size`, `font-weight`,
+  `font-style`, `line-height`, `letter-spacing`, `word-spacing`) is the element's own — attribute,
+  then token, then the built-in default; ancestors are never consulted, so nothing above a box can
+  reflow it. A `font-family` on the root `<svg>` is therefore the document's typeface in one
+  place; a root token's other properties reach plain text through the browser and compiled text
+  not at all. Resolution stays within one document: a linked file resolves against its own root.
 
 `<x:theme>` itself compiles to nothing (definitions), and `x:font` is stripped on emit — so an
 uncompiled document degrades cleanly (§3): a plain viewer just sees whatever literal fills/fonts the

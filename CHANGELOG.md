@@ -58,6 +58,17 @@ partial one.
   now lowers that rect itself, as the group's first child, mapped through the group's
   transform so a placed slide gets it at its own origin (§5.2). The deck sample uses it.
 
+### Changed
+
+- **Compiled text inherits `font-family`.** A textbox, list, table, text on a path or `<textArea>`
+  with no `font-family` of its own now takes the nearest ancestor's — a `<g font-family>`, a
+  `<g x:font>` token, or the root `<svg>` — the way plain `<text>` always has in the browser, and
+  measures in it (§4.1). Before, it was measured and rendered in `sans-serif` whatever the document
+  said, so a deck's root `font-family` reached its plain text but none of its boxes. Only the
+  family inherits; `font-size` and the other font properties stay the element's own, so nothing
+  above a box can reflow it. Documents that set a root `font-family` will see their compiled text
+  switch to it.
+
 ### Fixed
 
 - **Paragraph mode ignored `text-overflow="ellipsis"`.** A textbox with `<x:p>` children

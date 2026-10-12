@@ -93,6 +93,24 @@ pub(super) fn style_from(node: roxmltree::Node, ctx: &Ctx) -> TextStyle {
     let tok = ctx.font_props(node).unwrap_or_default();
     let t = |k: &str| tok.iter().find(|(p, _)| p == k).map(|(_, v)| v.as_str());
     let s = |k: &str, d: &str| node.attribute(k).or_else(|| t(k)).unwrap_or(d).to_string();
+    // `font-family` alone resolves the way the browser's cascade would for plain
+    // text — the element's own attribute, else its own token's, else the nearest
+    // ancestor's (attribute, then token), else `sans-serif` — because compiled text
+    // is measured before the browser can inherit anything, and the measured family
+    // is then pinned on the output (§4.1). Every other property stays the element's
+    // own: nothing above a box may reflow it. `ancestors()` starts at the node, and
+    // ends at this document's root, so a linked file never sees its host's family.
+    let family = node
+        .ancestors()
+        .find_map(|a| {
+            a.attribute("font-family").map(str::to_string).or_else(|| {
+                ctx.font_props(a)?
+                    .into_iter()
+                    .find(|(p, _)| p == "font-family")
+                    .map(|(_, v)| v)
+            })
+        })
+        .unwrap_or_else(|| "sans-serif".to_string());
     let num = |k: &str, d: f64| {
         node.attribute(k)
             .and_then(parse_num)
@@ -105,7 +123,7 @@ pub(super) fn style_from(node: roxmltree::Node, ctx: &Ctx) -> TextStyle {
         Some(v) => parse_num(v).unwrap_or(0.0),
     };
     TextStyle {
-        family: s("font-family", "sans-serif"),
+        family,
         size: num("font-size", 16.0),
         weight: s("font-weight", "normal"),
         style: s("font-style", "normal"),
