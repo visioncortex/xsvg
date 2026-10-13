@@ -6310,11 +6310,39 @@ fn unit_platform() -> Platform<&'static Mono, &'static BoxShaper, &'static BoxOu
     Platform::new(&Mono, &BoxShaper, &BoxOutliner)
 }
 
-#[test]
-fn units_are_verbatim_slices_of_their_fragment_over_the_dataset() {
-    // THE §9 invariant, over every sample: each unit's span in its fragment's
-    // output is byte-identical to the unit compiled alone, the spans are in
-    // output order and never overlap, and `unit_range` names the same unit.
+/// Top-level elements in the order the root writes them: source order unless a
+/// child carries `x:layer`/`x:order`, then stable-sorted by (band, order) as
+/// `emit_passthrough` does (§5.1).
+fn output_order<'a>(tops: &[roxmltree::Node<'a, 'a>]) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..tops.len()).collect();
+    if tops.iter().any(|c| {
+        c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()
+    }) {
+        idx.sort_by(|&a, &b| {
+            let k = |n: roxmltree::Node| (layer_band(n).unwrap_or(0), attr_num_ns(n, "order", 0.0));
+            let (ka, kb) = (k(tops[a]), k(tops[b]));
+            ka.0.cmp(&kb.0)
+                .then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal))
+                .then(a.cmp(&b))
+        });
+    }
+    idx
+}
+
+/// Index keys: every element named by its document-order index, so the same
+/// element keeps its key across an edit that only shifts bytes (what the kit's
+/// serializer supplies). Generated ids then seed on keys and stay put.
+fn index_keys(src: &str) -> MapKeys {
+    MapKeys(
+        node_spans_impl(src)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (start, _))| (start, format!("k{i}")))
+            .collect(),
+    )
+}
+
+fn dataset_files() -> Vec<std::path::PathBuf> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../dataset");
     let mut files: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
@@ -6323,14 +6351,31 @@ fn units_are_verbatim_slices_of_their_fragment_over_the_dataset() {
         .collect();
     files.sort();
     assert!(files.len() > 40, "{}", files.len());
+    files
+}
+
+#[test]
+fn units_are_verbatim_slices_of_their_fragment_over_the_dataset() {
+    // THE §9 invariant, over every sample: each unit's span in its fragment's
+    // output is byte-identical to the unit compiled alone, the spans are in
+    // output order and never overlap, `unit_range` names the same unit — and
+    // each fragment is a slice of the full compile, so the chain unit ⊂ fragment
+    // ⊂ full is complete in-process.
     let p = unit_platform();
     let (mut units, mut containers) = (0, 0);
-    for path in &files {
+    for path in &dataset_files() {
         let src = std::fs::read_to_string(path).unwrap();
         let doc = roxmltree::Document::parse(&src).unwrap();
+        let tops: Vec<roxmltree::Node> = doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .collect();
         for sourcemap in [false, true] {
-            for top in doc.root_element().children().filter(|c| c.is_element()) {
-                let off = top.range().start;
+            let full = compile_platform_impl(&src, "balanced", sourcemap, "", &p).unwrap();
+            let mut in_full = 0;
+            for &ti in &output_order(&tops) {
+                let off = tops[ti].range().start;
                 let (frag, spans) =
                     compile_fragment_spans_platform_impl(&src, "balanced", sourcemap, off, "", &p)
                         .unwrap();
@@ -6340,6 +6385,12 @@ fn units_are_verbatim_slices_of_their_fragment_over_the_dataset() {
                         .unwrap(),
                     "{path:?}: the spans compile is the fragment compile"
                 );
+                if !frag.is_empty() {
+                    let at = full[in_full..]
+                        .find(&frag)
+                        .unwrap_or_else(|| panic!("{path:?}: fragment not found in order"));
+                    in_full += at + frag.len();
+                }
                 if !spans.is_empty() {
                     containers += 1;
                 }
@@ -6479,4 +6530,151 @@ fn unit_dependents_see_inside_a_container() {
     assert!(tops[0].0 < offsets[1] && offsets[1] < tops[0].1);
     // and nothing when the seed is the plain rect
     assert!(unit_dependents_impl(&svg, &[svg.find("<rect").unwrap()]).is_empty());
+}
+
+/// A small edit inside the unit at `span`, as an editor would make one: a
+/// character appended to its first real text node, else one of its own numeric
+/// geometry attributes bumped. `None` for a unit nothing of the kind applies to.
+fn synthetic_edit(
+    src: &str,
+    doc: &roxmltree::Document,
+    span: (usize, usize),
+) -> Option<(String, usize)> {
+    let unit = doc
+        .descendants()
+        .find(|n| n.is_element() && n.range().start == span.0)?;
+    if unit.tag_name().namespace() == Some(XSVG_NS)
+        && matches!(unit.tag_name().name(), "theme" | "doc" | "import")
+    {
+        return None; // declarations: the protocol falls back to a full compile
+    }
+    if let Some(t) = unit
+        .descendants()
+        .find(|n| n.is_text() && n.text().is_some_and(|t| !t.trim().is_empty()))
+    {
+        let end = t.range().end;
+        return Some((format!("{}x{}", &src[..end], &src[end..]), end));
+    }
+    let tag_end = span.0 + src[span.0..span.1].find('>')?;
+    let tag = &src[span.0..tag_end];
+    for name in ["width", "height", "r", "cx", "cy", "x", "y"] {
+        let needle = format!(" {name}=\"");
+        if let Some(i) = tag.find(&needle) {
+            let vs = span.0 + i + needle.len();
+            let ve = vs + src[vs..].find('"')?;
+            let v: f64 = src[vs..ve].parse().ok()?;
+            let bumped = fmt(v + 1.0);
+            return Some((format!("{}{}{}", &src[..vs], bumped, &src[ve..]), vs));
+        }
+    }
+    None
+}
+
+#[test]
+fn unit_patches_equal_a_full_recompile_over_the_dataset() {
+    // THE §9 edit oracle: for every unit of every sample, make a small edit inside
+    // it, then rebuild the document the way a host would — the edited unit and
+    // every `unit_dependents` unit recompiled alone and spliced over their old
+    // spans, everything else kept verbatim — and demand the result be
+    // byte-identical to a full compile of the edited source. A missing dependency
+    // edge, or a unit that is not really independent of its neighbours, fails here.
+    // Keyed and with the sourcemap on, as a host compiles: generated ids then seed
+    // on keys, so an untouched unit's bytes survive the edit shifting its offset.
+    let (mut edits, mut with_deps) = (0, 0);
+    for path in &dataset_files() {
+        let src = std::fs::read_to_string(path).unwrap();
+        let doc = roxmltree::Document::parse(&src).unwrap();
+        let p = unit_platform().with_keys(index_keys(&src));
+        let full = compile_platform_impl(&src, "balanced", true, "", &p).unwrap();
+        // every top-level element's fragment, where it sits in the full output (the
+        // root's own order), and its unit spans
+        let tops: Vec<roxmltree::Node> = doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .collect();
+        let order = output_order(&tops);
+        let mut frags: Vec<(usize, String, Vec<UnitSpan>)> = Vec::new();
+        let mut cursor = 0;
+        for &ti in &order {
+            let (frag, spans) = compile_fragment_spans_platform_impl(
+                &src,
+                "balanced",
+                true,
+                tops[ti].range().start,
+                "",
+                &p,
+            )
+            .unwrap();
+            let start = if frag.is_empty() {
+                cursor
+            } else {
+                cursor + full[cursor..].find(&frag).unwrap()
+            };
+            cursor = start + frag.len();
+            frags.push((start, frag, spans));
+        }
+        for oi in 0..order.len() {
+            let spans = frags[oi].2.clone();
+            for (si, span) in spans.iter().enumerate() {
+                let Some((edited, at)) = synthetic_edit(&src, &doc, span.source) else {
+                    continue;
+                };
+                let delta = edited.len() as isize - src.len() as isize;
+                let shift = |off: usize| {
+                    if off > at {
+                        (off as isize + delta) as usize
+                    } else {
+                        off
+                    }
+                };
+                let pe = unit_platform().with_keys(index_keys(&edited));
+                let fresh_full = compile_platform_impl(&edited, "balanced", true, "", &pe).unwrap();
+                let deps = unit_dependents_impl(&edited, &[shift(span.source.0)]);
+                with_deps += usize::from(!deps.is_empty());
+                let mut patched = String::new();
+                let mut cur = 0;
+                for (oj, (start, frag, spans_j)) in frags.iter().enumerate() {
+                    patched.push_str(&full[cur..*start]);
+                    cur = start + frag.len();
+                    let top_now = shift(tops[order[oj]].range().start);
+                    let mut frag_now = frag.clone();
+                    if spans_j.is_empty() {
+                        // its own unit: refreshed only when it is a dependent
+                        if deps.iter().any(|d| d.0 == top_now) {
+                            frag_now = compile_fragment_platform_impl(
+                                &edited, "balanced", true, top_now, "", &pe,
+                            )
+                            .unwrap();
+                        }
+                    } else {
+                        // the edited unit and the dependent units, spliced last to first
+                        for (sj, s) in spans_j.iter().enumerate().rev() {
+                            let now = shift(s.source.0);
+                            if (oj == oi && sj == si) || deps.iter().any(|d| d.0 == now) {
+                                let fresh = compile_unit_platform_impl(
+                                    &edited, "balanced", true, now, "", &pe,
+                                )
+                                .unwrap();
+                                frag_now.replace_range(s.output.0..s.output.1, &fresh);
+                            }
+                        }
+                    }
+                    patched.push_str(&frag_now);
+                }
+                patched.push_str(&full[cur..]);
+                assert_eq!(
+                    patched, fresh_full,
+                    "{path:?}: editing the unit at {} and patching it with its dependents {deps:?} does not match a full recompile",
+                    span.source.0
+                );
+                edits += 1;
+            }
+        }
+    }
+    eprintln!("unit edit oracle: {edits} edits, {with_deps} with dependents");
+    assert!(
+        edits > 100 && with_deps > 5,
+        "edits {edits}, with dependents {with_deps}"
+    );
 }

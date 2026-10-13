@@ -419,11 +419,18 @@ fragment with spans (it changes the backdrop, the order, or what every child inh
 added with an `id` forces a full render, as a top-level element with one does. The §2 fallbacks
 apply unchanged.
 
-**Invariant, pinned over every dataset sample** with the sourcemap off and on
-(`units_are_verbatim_slices_of_their_fragment_over_the_dataset`): each unit's span in its fragment
-equals the unit compiled alone, spans are in output order and disjoint, and `unit_range` names the
-same unit; plus the hidden, restacked, filtered, `<text>`-with-tspans and own-tag cases, and the
-offset→warp dependency the top-level scan misses.
+**Invariants, pinned over every dataset sample.** The structural one
+(`units_are_verbatim_slices_of_their_fragment_over_the_dataset`, sourcemap off and on): each unit's
+span in its fragment equals the unit compiled alone, spans are in output order and disjoint,
+`unit_range` names the same unit, and each fragment is a slice of the full compile — unit ⊂
+fragment ⊂ full, in-process. The **edit oracle**
+(`unit_patches_equal_a_full_recompile_over_the_dataset`, keyed, sourcemap on): for every unit, a
+small edit inside it — a character appended to its text, or a geometry attribute bumped — then the
+document rebuilt as the host protocol says, the edited unit and its `unit_dependents` recompiled
+alone and spliced over their old spans with everything else kept verbatim, must equal a full
+compile of the edited source byte for byte. A missing dependency edge or a unit that leans on a
+neighbour fails there. Plus the hidden, restacked, filtered, `<text>`-with-tspans and own-tag
+cases, and the offset→warp dependency the top-level scan misses.
 
 **Known limit.** `Ctx` carries a per-call reference budget (`fuel`); a unit compiled alone starts
 with a full one and could differ from its in-fragment output only when a pathological reference
