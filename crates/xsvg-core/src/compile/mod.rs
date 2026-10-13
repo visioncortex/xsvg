@@ -12,7 +12,7 @@ pub(crate) use crate::{
     BendField, BoolOp, BoolOperand, Chain, DisplayAlign, EnvelopePreset, Field, Fit, FontMetrics,
     FreeDistort, GlyphOutliner, Homography, LineIncrement, Measurer, ParaLines, ParaUnit,
     PathEffect, PathFrame, PlacedLine, QualityProfile, RegionSpec, RoughenField, Shaper, Taper,
-    TextAlign, TextAreaSpec, TextOverflow, TextStyle, VAlign, WarpAxis,
+    TextAlign, TextAreaSpec, TextOverflow, TextStyle, TextTransform, VAlign, WarpAxis,
 };
 
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
@@ -818,7 +818,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     if !node.is_element() {
         if node.is_text() {
             if let Some(t) = node.text() {
-                push_escaped(out, t, false);
+                push_escaped(out, &text_case_at(node, ctx).apply(t), false);
             }
         }
         return; // comments, PIs, etc. are dropped
@@ -1168,6 +1168,12 @@ pub(super) const FONT_PARAMS: &[xsvg_schema::ParamSpec] = &[
         doc: Some("extra space at each word gap; `normal` means none"),
         ..ParamSpec::new("word-spacing", xsvg_schema::ParamKind::Text)
     },
+    ParamSpec {
+        default: Some("none"),
+        values: &["none", "uppercase", "lowercase"],
+        doc: Some("the case the text renders in, whatever case it was typed in"),
+        ..ParamSpec::new("text-transform", xsvg_schema::ParamKind::Enum)
+    },
 ];
 
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
@@ -1201,6 +1207,38 @@ pub(super) fn esc(v: &str) -> String {
     out
 }
 
+/// The case a passthrough text node renders in (§6.18): the `text-transform` of
+/// the nearest `<tspan>` / `<textPath>` / `<a>` / `<text>` around it that sets one
+/// (its attribute, then its `x:font` token's), up to the `<text>` itself. The
+/// compiler bakes it into the characters — as an attribute SVG ignores it — and
+/// copies no `text-transform` attribute out ([`copy_attrs`]).
+fn text_case_at(node: roxmltree::Node, ctx: &Ctx) -> TextTransform {
+    for a in node.ancestors().skip(1) {
+        let name = a.tag_name().name();
+        if a.tag_name().namespace() != Some(SVG_NS)
+            || !matches!(name, "text" | "tspan" | "textPath" | "a")
+        {
+            break;
+        }
+        let set = a
+            .attribute("text-transform")
+            .map(str::to_string)
+            .or_else(|| {
+                ctx.font_props(a)?
+                    .into_iter()
+                    .find(|(p, _)| p == "text-transform")
+                    .map(|(_, v)| v)
+            });
+        if let Some(tf) = set.as_deref().and_then(TextTransform::parse) {
+            return tf;
+        }
+        if name == "text" {
+            break;
+        }
+    }
+    TextTransform::None
+}
+
 /// Copy a node's attributes, normalizing namespaces: `x:` attrs are consumed (not
 /// copied), `xlink:*` modernizes to the unprefixed SVG 2 form (`xlink:href` →
 /// `href` — supported by every current renderer, and we declare no xlink xmlns),
@@ -1209,7 +1247,8 @@ pub(super) fn esc(v: &str) -> String {
 /// by local name.
 fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx) {
     for attr in node.attributes() {
-        if skip.contains(&attr.name()) {
+        // baked into the characters (§6.18); as an attribute SVG ignores it
+        if skip.contains(&attr.name()) || attr.name() == "text-transform" {
             continue;
         }
         // event handlers are outside the static subset (§9, Plan R6)
@@ -1237,7 +1276,10 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx)
     // harmless on non-text elements, which ignore font-*.)
     if let Some(props) = ctx.font_props(node) {
         for (k, v) in props {
-            if node.attribute(k.as_str()).is_none() && !skip.contains(&k.as_str()) {
+            if node.attribute(k.as_str()).is_none()
+                && !skip.contains(&k.as_str())
+                && k != "text-transform"
+            {
                 out.push(' ');
                 out.push_str(&k);
                 out.push_str("=\"");

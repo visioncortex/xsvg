@@ -6678,3 +6678,137 @@ fn unit_patches_equal_a_full_recompile_over_the_dataset() {
         "edits {edits}, with dependents {with_deps}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// text-transform (§6.18): the case text renders in, baked before layout
+
+/// Capitals twice as wide as anything else, so a case change moves a line break.
+struct Caps;
+impl Measurer for Caps {
+    fn measure(&self, text: &str, _style: &TextStyle, size: f64) -> f64 {
+        text.chars()
+            .map(|c| if c.is_uppercase() { size } else { 0.5 * size })
+            .sum()
+    }
+}
+
+fn caps(svg: &str) -> String {
+    compile_impl(svg, "balanced", false, &Caps, &NoShaper, &BoxOutliner).unwrap()
+}
+
+#[test]
+fn text_transform_uppercases_what_renders_and_what_wraps() {
+    // "ab cd ef" is 40 wide and fits 60; "AB CD EF" is 70 and must wrap
+    let box_ = |tf: &str| {
+        format!(
+            r#"{XW}<x:textbox x="0" y="0" width="60" height="80" font-size="10"{tf}>ab cd ef</x:textbox></svg>"#
+        )
+    };
+    let plain = caps(&box_(""));
+    assert!(plain.contains("ab cd ef"), "{plain}");
+    let up = caps(&box_(r#" text-transform="uppercase""#));
+    assert!(!up.contains("ab") && up.contains("AB CD"), "{up}");
+    assert!(
+        up.contains(">EF<"),
+        "the capitals' width wraps the last word: {up}"
+    );
+    assert!(
+        !up.contains("text-transform"),
+        "baked, never copied out: {up}"
+    );
+    // and back down
+    let low = caps(&format!(
+        r#"{XW}<x:textbox x="0" y="0" width="60" height="80" font-size="10" text-transform="lowercase">AB CD EF</x:textbox></svg>"#
+    ));
+    assert!(low.contains("ab cd ef"), "{low}");
+}
+
+#[test]
+fn text_transform_cascades_box_paragraph_run() {
+    let out = caps(&format!(
+        r#"{XW}<x:textbox x="0" y="0" width="400" height="80" font-size="10" text-transform="uppercase"><x:p>one <tspan text-transform="none" font-weight="700">two</tspan> three</x:p><x:p text-transform="lowercase">FOUR <tspan text-transform="uppercase">five</tspan></x:p></x:textbox></svg>"#
+    ));
+    for want in ["ONE", "two", "THREE", "four", "FIVE"] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    // a run that differs only in case is the base run: no tspan for it
+    assert!(!out.contains("<tspan>FIVE"), "{out}");
+}
+
+#[test]
+fn text_transform_reaches_lists_tables_tokens_and_plain_text() {
+    let out = caps(&format!(
+        r##"{XW}<x:theme><x:font name="eyebrow" font-size="9" text-transform="uppercase"/></x:theme>
+<x:list x="0" y="0" font-size="10" text-transform="uppercase"><x:li>alpha</x:li><x:li text-transform="none">beta</x:li></x:list>
+<x:table x="0" y="100" width="200"><x:col text-transform="uppercase"/><x:col/><x:tr><x:td>gamma</x:td><x:td>delta</x:td></x:tr></x:table>
+<x:textbox x="0" y="200" width="200" height="20" x:font="eyebrow">epsilon</x:textbox>
+<text x="0" y="300" text-transform="uppercase">zeta <tspan text-transform="lowercase">ETA</tspan> theta</text>
+<text x="0" y="320" x:font="eyebrow">iota</text>
+<g text-transform="uppercase"><text x="0" y="340">kappa</text></g>
+<textArea x="0" y="360" width="200" height="40" text-transform="uppercase">lambda <tspan font-weight="700">mu</tspan></textArea>
+<text x="0" y="420" inline-size="200" text-transform="uppercase">nu xi</text></svg>"##
+    ));
+    for want in [
+        "ALPHA", "beta", "GAMMA", "delta", "EPSILON", "ZETA", "eta", "THETA", "IOTA", "LAMBDA",
+        "MU", "NU XI",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    // like every font property but the family, it is the text element's own (§4.1)
+    assert!(out.contains("kappa"), "{out}");
+    assert!(!out.contains("text-transform"), "{out}");
+}
+
+#[test]
+fn text_transform_shapes_outlines_layout_and_caret_stops() {
+    // text on a path: the run outlined, measured and stopped is the capitals
+    let svg = format!(
+        r##"{XW}<path id="p" d="M0,50 C40,0 80,100 120,50"/><x:textpath in="#p" effect="rainbow" text-transform="uppercase" font-size="10">skew</x:textpath></svg>"##
+    );
+    let off = svg.find("<x:textpath").unwrap();
+    let stops = caret_stops_impl(&svg, off, "balanced", &Caps, &NoShaper, &BoxOutliner).unwrap();
+    assert_eq!(stops.runs[0].text, "SKEW");
+    assert_eq!(
+        stops.runs[0].stops.len(),
+        5,
+        "one stop per source character, and the end"
+    );
+    // the editor's layout seam reports the rendered lines and words
+    let svg = format!(
+        r#"{XW}<x:textbox x="0" y="0" width="60" height="80" font-size="10" text-transform="uppercase">ab cd ef</x:textbox></svg>"#
+    );
+    let tl = text_layout_impl(
+        &svg,
+        svg.find("<x:textbox").unwrap(),
+        "balanced",
+        &Caps,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    let p = &tl.paras[0];
+    assert_eq!(p.style.text_transform, TextTransform::Uppercase);
+    assert_eq!(p.words, ["AB", "CD", "EF"]);
+    assert_eq!(p.lines.len(), 2, "{:?}", p.lines);
+    assert_eq!(p.lines[1].text, "EF");
+    // and sizing to content counts the capitals: two lines, not one
+    let size = measure_textbox_impl(
+        &svg,
+        svg.find("<x:textbox").unwrap(),
+        "balanced",
+        &Caps,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    let one = measure_textbox_impl(
+        &svg.replace(r#" text-transform="uppercase""#, ""),
+        svg.find("<x:textbox").unwrap(),
+        "balanced",
+        &Caps,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    assert!(size.height > one.height, "{size:?} vs {one:?}");
+}

@@ -81,6 +81,10 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let item_size = attr_pos(li, "font-size", size);
         let item_style = TextStyle {
             size: item_size,
+            text_transform: li
+                .attribute("text-transform")
+                .and_then(TextTransform::parse)
+                .unwrap_or(style.text_transform),
             ..style.clone()
         };
         // an item is a real run leaf: <tspan> styling and <tbreak/> forced

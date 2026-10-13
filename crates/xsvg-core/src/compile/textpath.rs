@@ -25,7 +25,7 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
         align: tp.align.as_str(),
         start: tp.start,
     };
-    let text = collect_text(node);
+    let text = collect_text_as(node, &style);
 
     let Some(reference) = node.attribute("in") else {
         out.push_str("<!-- xsvg: <x:textpath> requires in=\"#path\" -->");

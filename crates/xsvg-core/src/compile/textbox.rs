@@ -14,10 +14,15 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     let y = attr_num(node, "y", 0.0);
     let max_w = attr_num(node, "inline-size", 0.0);
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
-    let lines = layout_flow(&collect_text(node), &style, x, y, max_w, m);
+    let lines = layout_flow(&collect_text_as(node, &style), &style, x, y, max_w, m);
 
     out.push_str("<text");
-    copy_attrs(node, out, &["inline-size", "line-height"], ctx);
+    copy_attrs(
+        node,
+        out,
+        &["inline-size", "line-height", "text-transform"],
+        ctx,
+    );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     let base = [EmitAttrs::default()];
@@ -134,7 +139,13 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
             text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
         };
-        let layout = layout_region(&collect_text(node), &style, &region, &spec, ctx.m);
+        let layout = layout_region(
+            &collect_text_as(node, &style),
+            &style,
+            &region,
+            &spec,
+            ctx.m,
+        );
         write_area_text(
             out,
             &layout,
@@ -370,6 +381,9 @@ pub(super) fn plan_paragraphs<'a>(
         if let Some(v) = p.attribute("font-style") {
             st.style = v.to_string();
         }
+        if let Some(v) = p.attribute("text-transform").and_then(TextTransform::parse) {
+            st.text_transform = v;
+        }
         if let Some(v) = p
             .attribute("line-height")
             .and_then(parse_num)
@@ -484,6 +498,9 @@ pub(super) fn plan_paragraphs<'a>(
                 Some(l) => {
                     let mut st = para_style(l);
                     st.size = attr_pos(p, "font-size", st.size);
+                    if let Some(v) = p.attribute("text-transform").and_then(TextTransform::parse) {
+                        st.text_transform = v;
+                    }
                     st
                 }
                 None => para_style(p),
@@ -1270,7 +1287,7 @@ pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLay
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
             text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
         };
-        let text = collect_text(node);
+        let text = collect_text_as(node, &style);
         let layout = layout_region(&text, &style, &region, &spec, ctx.m);
         let b = crate::Region::bounds(&region);
         let pad = spec.padding;
@@ -1332,7 +1349,12 @@ pub(super) fn paragraphs_layout_info(
         .iter()
         .zip(&visible)
         .map(|(para, shown)| {
-            let words: Vec<String> = collect_text(para.src)
+            // in the case each run renders (§6.18), like the lines below
+            let (segments, _, _) = collect_runs(para.src, &para.laid.style);
+            let words: Vec<String> = segments
+                .iter()
+                .map(|(t, _)| t.as_str())
+                .collect::<String>()
                 .split_whitespace()
                 .map(str::to_string)
                 .collect();

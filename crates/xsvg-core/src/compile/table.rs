@@ -142,6 +142,11 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-style") {
             st.style = v.to_string();
         }
+        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "text-transform")
+            .and_then(TextTransform::parse)
+        {
+            st.text_transform = v;
+        }
         if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "line-height")
             .and_then(parse_num)
             .filter(|n| *n > 0.0)

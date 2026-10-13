@@ -17,7 +17,7 @@ pub(super) struct Theme {
 }
 
 /// The font-ish properties an `<x:font>` token may carry.
-pub(super) const FONT_PROPS: [&str; 7] = [
+pub(super) const FONT_PROPS: [&str; 8] = [
     "font-family",
     "font-size",
     "font-weight",
@@ -25,6 +25,7 @@ pub(super) const FONT_PROPS: [&str; 7] = [
     "line-height",
     "letter-spacing",
     "word-spacing",
+    "text-transform",
 ];
 
 impl Theme {

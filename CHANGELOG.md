@@ -16,6 +16,14 @@ partial one.
 
 ### Added
 
+- **`text-transform` — render text in capitals (or small letters) whatever case it was typed in.**
+  `uppercase` / `lowercase` / `none` on any text element the compiler emits, on `<tspan>` runs, and
+  in an `<x:font>` token; it cascades within a text element (box › paragraph › run) like the font
+  properties. The compiler applies it before layout, so wrapping, fitting, outlines and caret
+  stops measure the capitals that render, and bakes the mapped characters into the output (SVG has
+  no such attribute). The mapping is one character to one, so a caret offset in the source is the
+  same offset in the output; `ß` becomes `ẞ` (§6.18).
+
 - **Units: incremental compilation one level down** for editing hosts. A direct child of a
   top-level passthrough container (an artboard's `<g>`) is now a unit of its own: `compile_unit`
   compiles it alone, byte-identical to its span in the parent's fragment; `compile_fragment_spans`

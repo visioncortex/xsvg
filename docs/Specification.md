@@ -985,6 +985,40 @@ so an editing host offers them like any other. They carry their namespace in the
 they are `border-width` *in the xsvg namespace*, and a host spells them with whatever prefix the
 document binds — see docs/Extensibility.md §10.3.
 
+### 6.18 Case — `text-transform` [implemented]
+
+CSS's `text-transform`, its case-mapping subset: the text **renders** in capitals (or small
+letters) whatever case it was typed in. The source keeps what the author wrote, so the editable
+value never changes; turning it off brings the typed case back. Unprefixed — an existing CSS name (§3).
+
+| Attr | Values | Initial | Effect |
+|---|---|---|---|
+| `text-transform` | `none` \| `uppercase` \| `lowercase` | `none` | the case every character renders in |
+
+**Where.** On every text element the compiler lays out or emits — `<x:textbox>`, `<x:p>`,
+`<x:list>` / `<x:li>`, `<x:table>` (and its cells through the cell › row › column › table
+cascade, §6.15), `<x:textpath>`, `<text inline-size>`, `<textArea>`, plain `<text>` — and on a
+`<tspan>` run; an `<x:font>` token may carry it (§4.1), so an *eyebrow* style can be one token.
+Inside a text element it cascades like the font properties do (box › paragraph › run, list ›
+item, `<text>` › `<tspan>`; `none` switches it back off); across elements it does not — like every
+font property but the family (§4.1), it is the text element's own, and a `<g text-transform>`
+does nothing.
+
+**Baked before layout (normative).** The compiler applies the mapping to each run's characters
+*before* it measures them, so wrapping, shrink-to-fit, ellipsis, justification, decorations,
+outlines (§6.12, §6.13) and the editor seams (`text_layout`, `caret_stops`, `measure_textbox`)
+all see the glyphs that render. The output carries the mapped characters and **no**
+`text-transform` attribute — SVG has no such presentation attribute, and a renderer that applied
+one after layout would draw text wider than it was measured.
+
+**One character to one character (normative).** Every rendered character is the mapping of
+exactly one source character, so a caret offset in the source is the same offset in the output.
+A character whose full Unicode case mapping is several characters keeps its own form (`ﬁ`, `ŉ`),
+with one exception: `ß` capitalizes to `ẞ` (U+1E9E), where CSS would write `SS`. Mapping uses
+Unicode's default casing; language-sensitive rules (Turkish dotted *i*) are not applied.
+`capitalize` and the other CSS values are not in the subset: an unknown value is ignored, so the
+text keeps the case it inherits.
+
 ## 7. Geometry transforms — a generic deformation pipeline [implemented: first slice]
 
 Pillar 2. SVG's `transform` is **affine-only** (`matrix` has an implicit `[0 0 1]` row), so perspective,

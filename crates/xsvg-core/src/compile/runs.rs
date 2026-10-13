@@ -130,11 +130,26 @@ pub(super) fn style_from(node: roxmltree::Node, ctx: &Ctx) -> TextStyle {
         line_height: num("line-height", 1.2),
         letter_spacing: spacing("letter-spacing"),
         word_spacing: spacing("word-spacing"),
+        text_transform: node
+            .attribute("text-transform")
+            .or_else(|| t("text-transform"))
+            .and_then(TextTransform::parse)
+            .unwrap_or_default(),
     }
 }
 
-/// Concatenate all descendant text content (styling flattened away). Used by the
-/// single-style paths: `<text inline-size>` and curved-shape region flow.
+/// Concatenate all descendant text content (styling flattened away), in the case
+/// `style` renders it (§6.18). Used by the single-style paths: `<text
+/// inline-size>`, curved-shape region flow and text on a path.
+pub(super) fn collect_text_as(node: roxmltree::Node, style: &TextStyle) -> String {
+    let text = collect_text(node);
+    match style.text_transform.apply(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(t) => t,
+    }
+}
+
+/// Concatenate all descendant text content (styling flattened away), as authored.
 pub(super) fn collect_text(node: roxmltree::Node) -> String {
     let mut s = String::new();
     for d in node.descendants() {
@@ -174,6 +189,10 @@ pub(super) struct EmitAttrs {
     /// word-processor highlighter). SVG text has no background, so it bakes
     /// to a `<rect>` per run per line BEHIND the `<text>`; never a tspan attr.
     pub(super) highlight: Option<String>,
+    /// `text-transform` on a run: applied to its text as the walk collects it
+    /// (§6.18), so it never reaches the run table — two runs differing only in
+    /// case share one style.
+    pub(super) transform: Option<TextTransform>,
 }
 
 impl EmitAttrs {
@@ -243,7 +262,8 @@ pub(super) fn walk_runs(
             if let Some(t) = child.text() {
                 if !t.is_empty() {
                     let sid = intern_run(ctx, base, styles, emits);
-                    segments.push((t.to_string(), sid));
+                    let tf = ctx.transform.unwrap_or(base.text_transform);
+                    segments.push((tf.apply(t).into_owned(), sid));
                 }
             }
         } else if child.is_element() {
@@ -264,6 +284,12 @@ pub(super) fn walk_runs(
                     set(&mut c.shift, child.attribute("baseline-shift"));
                     set(&mut c.href, child.attribute("href"));
                     set(&mut c.highlight, child.attribute((XSVG_NS, "highlight")));
+                    if let Some(tf) = child
+                        .attribute("text-transform")
+                        .and_then(TextTransform::parse)
+                    {
+                        c.transform = Some(tf);
+                    }
                     if let Some(s) = child
                         .attribute("font-size")
                         .and_then(|v| run_size(v, base.size))
@@ -308,6 +334,7 @@ pub(super) fn intern_run(
         shift: ctx.shift.clone(),
         href: ctx.href.clone(),
         highlight: ctx.highlight.clone(),
+        transform: None,
     };
     if norm.is_empty() {
         return 0;
