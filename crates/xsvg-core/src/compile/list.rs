@@ -212,7 +212,17 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 })
                 .collect();
             emit_run_backdrops(
-                &mut body, &shifted, "start", false, &it.style, it.size, fill, &it.emits, m, ctx,
+                &mut body,
+                &shifted,
+                "start",
+                false,
+                &it.style,
+                it.size,
+                fill,
+                &it.emits,
+                Backdrops::All,
+                m,
+                ctx,
             );
             body.push_str("<text text-anchor=\"start\"");
             push_font_attrs(&mut body, &it.style, it.size, fill, ctx);

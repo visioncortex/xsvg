@@ -1433,6 +1433,22 @@ survive; the v1 vocabulary is pointwise, so nothing bleeds further), one primiti
 — lowered output matches live browser rendering. The element's `filter` attribute is rewritten to
 `url(#…)`.
 
+**On text.** The same lowering applies to every text element the compiler emits — `<text>`,
+`<text inline-size>`, `<textArea>`, `<x:textbox>` (single flow, paragraphs, `in=` regions,
+outlined) and `<x:textpath>` (every effect). The filter feeds the glyph alpha, so each glyph
+casts its own shadow — the slide-tool look — with no per-glyph markup. An element that compiles
+to one `<text>` carries `filter="url(#…)"` itself; one that compiles to several (a textbox's
+paragraphs, list markers, baked decorations, outline paths) gets one `<g filter="url(#…)">`
+around everything glyph-like — one filter surface, not one per element. **Highlights
+(`x:highlight`) stay outside the group**, drawn before it: a highlight is a background, and a
+background that casts a shadow reads as a sticker, not as text. The region is `userSpaceOnUse`
+from where the glyphs land — the laid-out lines' extents and em boxes for flowed text, an
+estimate from pen positions and measured advances for a live `<text>` (`x`/`y` reset the pen,
+`dx`/`dy` nudge it, the text-anchor shifts the chunk), the path's bbox grown by two ems for live
+text on a path, the baked path for outlined text — padded by an em all round because the
+renderer's font need not be the measurer's, then grown by the spill exactly as a shape's is.
+Text without a `filter` compiles byte-for-byte as before.
+
 **What passes through untouched:** `filter="url(#…)"` references, `none`, and any list the parser
 declines — an unknown function or an invalid argument — mirroring CSS's
 whole-declaration-invalid rule; browsers still honor those live.
@@ -1565,7 +1581,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:boolean>` operands by reference — `<use href>` children borrow geometry without consuming it (full `transform` + `x`/`y`) | implemented |
 | Reference resolution hardening — target `transform` honored, group targets, evenodd resolve, referenced-text auto-outline, fuel bound, reasoned markers (§4) | implemented |
 | Pixel adjustments — CSS filter functions lowered to `<filter>` graphs (sRGB, ordered primitives); `-x-curve` tone curves (§8) | implemented |
-| Pixel adjustments — `blur()` / `drop-shadow()` (exact userSpaceOnUse regions on shapes) + `-x-levels()` | implemented |
+| Pixel adjustments — `blur()` / `drop-shadow()` (exact userSpaceOnUse regions on shapes and text) + `-x-levels()` | implemented |
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |

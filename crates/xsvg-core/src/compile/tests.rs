@@ -2711,6 +2711,164 @@ fn filter_references_and_unknown_functions_pass_through() {
 }
 
 #[test]
+fn filters_on_text_get_a_region_from_where_the_glyphs_land() {
+    // §8 on text: a live <text> used to take the ±50% fallback region, which a
+    // single line's height cannot hold a shadow in. The region is now userSpace,
+    // from the pen positions and measured advances (Mono: 0.5em per character,
+    // em box 0.8 above / 0.2 below), padded by an em, grown by the spill.
+    // "abcd" at 10px from (10, 20): [10, 30] × [12, 22]; pad 10; margin
+    // 0.5 + 3·4 + max(2, 3) = 15.5 → x = -15.5, y = -13.5, w = 71, h = 61
+    let svg = format!(
+        r##"{XW}<text x="10" y="20" font-size="10" filter="drop-shadow(2 3 4 #123456)">abcd</text></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("filterUnits=\"userSpaceOnUse\""), "{out}");
+    assert!(
+        out.contains("x=\"-15.5\" y=\"-13.5\" width=\"71\" height=\"61\""),
+        "{out}"
+    );
+    assert!(!out.contains("-50%"), "{out}");
+    assert!(
+        out.contains("<text x=\"10\" y=\"20\" font-size=\"10\" filter=\"url(#x-flt-"),
+        "{out}"
+    );
+    // the anchor shifts the chunk back: centred on 10, it spans [0, 20]
+    let svg = format!(
+        r##"{XW}<text x="10" y="20" font-size="10" text-anchor="middle" filter="drop-shadow(2 3 4 #123456)">abcd</text></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("x=\"-25.5\" y=\"-13.5\" width=\"71\""),
+        "{out}"
+    );
+    // a <tspan dx> moves the pen: "ab" at [0, 10], "cd" at [110, 120] → w = 120 + 51
+    let svg = format!(
+        r##"{XW}<text x="0" y="20" font-size="10" filter="drop-shadow(2 3 4 #123456)">ab<tspan dx="100">cd</tspan></text></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("x=\"-25.5\" y=\"-13.5\" width=\"171\""),
+        "{out}"
+    );
+    // <text inline-size> lowered its filter to nothing before (copied verbatim)
+    let svg = format!(
+        r##"{XW}<text x="5" y="10" font-size="10" inline-size="40" filter="drop-shadow(1 1 1 #000)">one two six</text></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("<filter id=\"x-flt-"), "{out}");
+    assert!(!out.contains("inline-size"), "{out}");
+    assert!(out.contains("filter=\"url(#x-flt-"), "{out}");
+    assert!(!out.contains("drop-shadow("), "{out}");
+    // what the parser declines still passes through as authored
+    let svg = format!(
+        r##"{XW}<text x="5" y="10" font-size="10" inline-size="40" filter="url(#soft)">one two</text></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("filter=\"url(#soft)\""), "{out}");
+    assert!(!out.contains("<filter id="), "{out}");
+}
+
+#[test]
+fn a_filtered_textbox_wraps_its_glyphs_and_leaves_highlights_outside() {
+    // §8 on text: a textbox's filter — dropped before — lowers like a shape's,
+    // the def before the element, one <g filter> around the glyphs and their
+    // decorations, the highlight rect before the group (a background that
+    // casts a shadow reads as a sticker). Region from the line: "ab cd ef" is
+    // 40 wide from x = 0 → x = -25.5, w = 91 (pad 10, margin 15.5 each side)
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-size="10" filter="drop-shadow(2 3 4 #123456)">ab <tspan x:highlight="#ff0">cd</tspan> <tspan text-decoration="underline">ef</tspan></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(out.matches("<filter id=\"x-flt-").count(), 1, "{out}");
+    assert!(
+        out.contains("filterUnits=\"userSpaceOnUse\" x=\"-25.5\""),
+        "{out}"
+    );
+    assert!(out.contains("width=\"91\""), "{out}");
+    let def_end = out.find("</filter>").unwrap();
+    let group = out.find("<g filter=\"url(#x-flt-").expect(&out);
+    let highlight = out.find("fill=\"#ff0\"").expect(&out);
+    let text = out.find("<text ").expect(&out);
+    let underline = out.rfind("<rect ").expect(&out);
+    assert!(def_end < highlight && highlight < group, "{out}");
+    assert!(group < underline && underline < text, "{out}");
+    assert!(out.ends_with("</text></g></svg>"), "{out}");
+    // no decorations: the group holds the <text> alone
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-size="10" filter="blur(2)">ab <tspan x:highlight="#ff0">cd</tspan></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("fill=\"#ff0\"/><g filter=\"url(#x-flt-"),
+        "{out}"
+    );
+    assert!(out.contains("\"><text text-anchor"), "{out}");
+    // paragraph mode: the def precedes the keyed <g>, the filter group sits inside it
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="60" font-size="10" filter="drop-shadow(0 2 3 #0008)"><x:p>ab</x:p><x:p>cd</x:p></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("</filter><g><g filter=\"url(#x-flt-"), "{out}");
+    assert_eq!(out.matches("<text ").count(), 2, "{out}");
+    assert!(out.ends_with("</text></g></g></svg>"), "{out}");
+    // outlined: the group wraps the path group, region from the lines
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-size="10" outline="true" filter="drop-shadow(2 3 4 #123456)">abcd</x:textbox></svg>"##
+    );
+    let out = compile_outlined(&svg);
+    assert!(out.contains("<g filter=\"url(#x-flt-"), "{out}");
+    assert!(out.contains("\"><g fill=\"#000\""), "{out}");
+    assert!(out.contains("<path d="), "{out}");
+    assert!(out.ends_with("</g></g></svg>"), "{out}");
+    // a textbox without a filter is untouched: no group, no def
+    let svg = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-size="10">ab <tspan text-decoration="underline">ef</tspan></x:textbox></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(!out.contains("<g"), "{out}");
+    assert!(!out.contains("<filter"), "{out}");
+}
+
+#[test]
+fn a_filtered_textpath_shadows_every_effect() {
+    // §8 on text, on a path: live forms carry the filter on their <text>, the
+    // region the path's bbox grown by two ems; outlined effects wrap their
+    // path group, the region the baked glyphs' own bbox
+    let follow = format!(
+        r##"{XW}<path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="follow" font-size="20" filter="drop-shadow(2 3 4 #123456)">wave</x:textpath></svg>"##
+    );
+    let out = compile_test(&follow);
+    assert!(out.contains("filterUnits=\"userSpaceOnUse\""), "{out}");
+    // bbox [0,120]×[20,20] grown by 40 then the 15.5 margin → x = -55.5, w = 231
+    assert!(out.contains("x=\"-55.5\""), "{out}");
+    assert!(out.contains("width=\"231\""), "{out}");
+    assert!(out.contains("filter=\"url(#x-flt-"), "{out}");
+    assert!(out.contains("><textPath href=\"#p\""), "{out}");
+    let stair = format!(
+        r##"{XW}<path id="p" d="M0,20 L120,20" fill="none"/><x:textpath in="#p" effect="stair" font-size="20" filter="blur(2)">wave</x:textpath></svg>"##
+    );
+    let out = compile_test(&stair);
+    assert_eq!(out.matches("<filter id=").count(), 1, "{out}");
+    assert!(out.contains("filter=\"url(#x-flt-"), "{out}");
+    let skew = format!(
+        r##"{XW}<path id="p" d="M0,20 C40,0 80,40 120,20" fill="none"/><x:textpath in="#p" effect="skew" font-size="20" fill="#111" filter="drop-shadow(2 3 4 #123456)">wave</x:textpath></svg>"##
+    );
+    let out = compile_outlined(&skew);
+    assert!(out.contains("<g filter=\"url(#x-flt-"), "{out}");
+    assert!(out.contains("\"><g fill=\"#111\""), "{out}");
+    assert!(!out.contains("<text"), "{out}");
+}
+
+#[test]
+fn an_unmeasured_advance_is_replaced_by_a_wide_guess() {
+    // a measurer without the font advances nothing; a region as wide as
+    // nothing would clip the shadow to a sliver
+    assert_eq!(unmeasured_advance("abc", 0.0, 10.0), 18.0);
+    assert_eq!(unmeasured_advance("abc", 7.0, 10.0), 7.0);
+    assert_eq!(unmeasured_advance("  ", 0.0, 10.0), 0.0);
+}
+
+#[test]
 fn mesh_lowers_to_a_texel_aligned_image() {
     // one smooth quad -> one region -> one clipped tiny-PNG image whose
     // placement OVERHANGS the mesh bbox (the texel-center construction)

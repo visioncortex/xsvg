@@ -301,6 +301,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     layout.font_size,
                     &fill,
                     &emits,
+                    Backdrops::All,
                     m,
                     ctx,
                 );

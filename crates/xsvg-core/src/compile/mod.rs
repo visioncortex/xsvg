@@ -15,6 +15,8 @@ pub(crate) use crate::{
     TextAlign, TextAreaSpec, TextOverflow, TextStyle, TextTransform, VAlign, WarpAxis,
 };
 
+use crate::kurbo::Rect;
+
 const XSVG_NS: &str = "https://xsvg.visioncortex.org";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
@@ -636,6 +638,11 @@ fn baked_refs<'a>(
 /// live, mirroring CSS's whole-declaration-invalid rule. sRGB interpolation is
 /// pinned so lowered output matches live browser rendering; the region gets
 /// the ±10% margin so strokes outside the fill bbox survive.
+/// Text takes the same lowering (§8, *text*): the filter feeds the glyph alpha, so
+/// every glyph casts its own shadow — the slide-tool look — with no per-glyph
+/// elements; what text needs is a region that holds the spill, which the text
+/// emitters supply from where their lines land ([`lines_bbox`],
+/// [`text_bbox_estimate`]). `bbox` is consulted only for a bleeding list.
 /// Seed for generated def ids (`x-flt-…`, `x-mesh-…`, `x-mgc-…`): the host key
 /// when one is provided (offset-independent, see [`NodeKeys`]), else the node's
 /// byte start — the legacy form, byte-for-byte.
@@ -651,18 +658,23 @@ fn gen_id_seed(node: roxmltree::Node, ctx: &Ctx) -> String {
     }
 }
 
-fn lower_filter_attr(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> Option<String> {
+fn lower_filter_attr(
+    node: roxmltree::Node,
+    out: &mut String,
+    ctx: &Ctx,
+    bbox: impl FnOnce() -> Option<Rect>,
+) -> Option<String> {
     let fns = parse_filter_functions(node.attribute("filter")?)?;
     let id = format!("x-flt-{}", gen_id_seed(node, ctx));
     // pointwise functions need only the stroke margin. Blur/drop-shadow spill:
-    // on a plain shape the spill is computed EXACTLY (3σ per blur + the shadow
-    // offset + half the stroke width) as a userSpaceOnUse region; on
-    // unmeasurable content (groups) the region falls back to ±50% of the bbox
-    // — the one bound a bbox-relative region can express.
+    // on measured content the spill is computed EXACTLY (3σ per blur + the
+    // shadow offset + half the stroke width) past the bbox as a userSpaceOnUse
+    // region; on unmeasurable content (groups) the region falls back to ±50% of
+    // the bbox — the one bound a bbox-relative region can express.
     let bleeds = fns.iter().any(|f| f.bleeds());
     let region = if !bleeds {
         " x=\"-10%\" y=\"-10%\" width=\"120%\" height=\"120%\"".to_string()
-    } else if let Some(bb) = shape_to_path_d(node).and_then(|d| svg_path_bbox(&d)) {
+    } else if let Some(bb) = bbox() {
         let mut m = attr_num(node, "stroke-width", 1.0) / 2.0;
         for f in &fns {
             m += match f {
@@ -686,6 +698,17 @@ fn lower_filter_attr(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> Opti
         filter_primitives(&fns)
     ));
     Some(format!(" filter=\"url(#{id})\""))
+}
+
+/// Where a passthrough element draws, for its filter region: a shape's exact
+/// path bbox; a live `<text>`'s estimated extent. `None` for anything else
+/// (groups), which takes the relative fallback.
+fn passthrough_bbox(node: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
+    if node.tag_name().name() == "text" {
+        text_bbox_estimate(node, ctx)
+    } else {
+        shape_to_path_d(node).and_then(|d| svg_path_bbox(&d))
+    }
 }
 
 /// The compile-time z-band of a layer (§5.1): `x:layer="background"` sinks
@@ -961,7 +984,7 @@ fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root
     let filter_sub = if is_root {
         None
     } else {
-        lower_filter_attr(node, out, ctx)
+        lower_filter_attr(node, out, ctx, || passthrough_bbox(node, ctx))
     };
     out.push('<');
     out.push_str(name);
@@ -1051,7 +1074,9 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let w = attr_num(node, "width", 0.0);
     let h = attr_num(node, "height", 0.0);
 
-    let filter_sub = lower_filter_attr(node, out, ctx);
+    let filter_sub = lower_filter_attr(node, out, ctx, || {
+        shape_to_path_d(node).and_then(|d| svg_path_bbox(&d))
+    });
     out.push_str("<path");
     match &filter_sub {
         Some(sub) => {

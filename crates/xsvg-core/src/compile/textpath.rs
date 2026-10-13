@@ -42,6 +42,14 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
         }
     };
 
+    // the element's filter (§8, *text*) on live output: the glyphs ride the
+    // path, so its bbox grown by two ems (ascent, descent, the baseline shift,
+    // and the measurer-vs-renderer slack) holds them
+    let live_bbox = || {
+        let pad = 2.0 * style.size + fx.baseline_shift.abs();
+        svg_path_bbox(&path_d).map(|b| b.inflate(pad, pad))
+    };
+
     // "follow" (§6.13.5) lowers to SVG's own <textPath> — live, selectable text
     // that follows the curve without deforming; no font bytes needed, only the
     // path's arc length for align placement.
@@ -49,9 +57,13 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
         if let Some(frame) = PathFrame::new(&path_d, ctx.quality.text_tolerance()) {
             let advance = line_advance(&text, &style, style.size, ctx.m);
             let offset = run_offset(frame.len(), advance, fx.align, fx.start);
+            let filter = lower_filter_attr(node, out, ctx, live_bbox);
             out.push_str("<text");
             push_font_attrs(out, &style, style.size, fill, ctx);
             out.push_str(&pos);
+            if let Some(f) = &filter {
+                out.push_str(f);
+            }
             out.push_str("><textPath href=\"#");
             push_escaped(out, reference.strip_prefix('#').unwrap_or(reference), true);
             out.push('"');
@@ -98,7 +110,11 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
                         ctx,
                     );
                 }
+                // the baked glyphs are the exact region
+                let filter = lower_filter_attr(node, out, ctx, || svg_path_bbox(&d));
+                open_filter_group(out, filter.as_deref());
                 push_outline_group(out, fill, &stroke, &pos, &[d], ctx);
+                close_filter_group(out, filter.as_deref());
                 return;
             }
         }
@@ -106,9 +122,21 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
 
     // Stair Step — authored (§6.13.3), or as the degradation of the height-profile
     // effects (skew, ribbon) without an outline font — when the profile can be
-    // sampled; anything else → straight <text> at the element's x/y.
+    // sampled; anything else → straight <text> at the element's x/y. One def
+    // serves both: the fallback stays near the path too.
+    let filter = lower_filter_attr(node, out, ctx, live_bbox);
     if matches!(fx.effect, "stair" | "skew" | "ribbon")
-        && stepped_text(out, &text, &style, &fx, &path_d, fill, &pos, ctx)
+        && stepped_text(
+            out,
+            &text,
+            &style,
+            &fx,
+            &path_d,
+            fill,
+            &pos,
+            filter.as_deref(),
+            ctx,
+        )
     {
         return;
     }
@@ -117,6 +145,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     push_font_attrs(out, &style, style.size, fill, ctx);
     out.push_str(&format!(" x=\"{}\" y=\"{}\"", fmt(x), fmt(y)));
     out.push_str(&pos);
+    if let Some(f) = &filter {
+        out.push_str(f);
+    }
     out.push('>');
     push_escaped(out, &text, false);
     out.push_str("</text>");
@@ -137,6 +168,7 @@ pub(super) fn stepped_text(
     path_d: &str,
     fill: &str,
     pos: &str,
+    filter: Option<&str>,
     ctx: &Ctx,
 ) -> bool {
     let text = text.trim();
@@ -172,6 +204,9 @@ pub(super) fn stepped_text(
     out.push_str("<text");
     push_font_attrs(out, style, style.size, fill, ctx);
     out.push_str(pos);
+    if let Some(f) = filter {
+        out.push_str(f);
+    }
     // absolute per-glyph positions — spacing is baked in, so no spacing attrs
     let xs: Vec<String> = advances.iter().map(|a| fmt(x0 + a)).collect();
     let ys: Vec<String> = advances

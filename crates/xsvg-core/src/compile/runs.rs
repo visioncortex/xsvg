@@ -45,6 +45,84 @@ pub(super) fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
     s
 }
 
+/// Where a live `<text>` draws, estimated for its filter region (§8, *text*):
+/// each chunk — the characters at one pen position — spans its measured advance
+/// from the pen, which `x`/`y` on the `<text>` or a `<tspan>` reset and `dx`/`dy`
+/// nudge, shifted back by the text-anchor in force; vertically the em box of
+/// the chunk's style. Padded by an em all round, because the renderer's font
+/// need not be the measurer's and a shadow clipped at the edge is worse than a
+/// region a little large. `None` when the element has no text.
+pub(super) fn text_bbox_estimate(node: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
+    let first_num = |v: &str| {
+        v.split(|c: char| c == ',' || c.is_whitespace())
+            .find(|t| !t.is_empty())
+            .and_then(parse_num)
+    };
+    let base = style_from(node, ctx);
+    let mut pen = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    let mut bb: Option<Rect> = None;
+    let mut pad = 0.0f64;
+    for d in node.descendants().skip(1) {
+        if d.is_element() {
+            if let Some(x) = d.attribute("x").and_then(first_num) {
+                pen.0 = x;
+            }
+            if let Some(y) = d.attribute("y").and_then(first_num) {
+                pen.1 = y;
+            }
+            pen.0 += d.attribute("dx").and_then(first_num).unwrap_or(0.0);
+            pen.1 += d.attribute("dy").and_then(first_num).unwrap_or(0.0);
+            continue;
+        }
+        let Some(text) = d.text() else { continue };
+        let chunk = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if chunk.is_empty() {
+            continue;
+        }
+        // SVG inherits the font down a live <text>: the chunk's style is the
+        // element's, with what its <tspan>s declare on the way down
+        let el = d.parent().filter(|p| p.is_element()).unwrap_or(node);
+        let own = |name: &str| {
+            el.ancestors()
+                .take_while(|a| *a != node)
+                .find_map(|a| a.attribute(name))
+        };
+        let mut style = base.clone();
+        if let Some(v) = own("font-weight") {
+            style.weight = v.to_string();
+        }
+        if let Some(v) = own("font-style") {
+            style.style = v.to_string();
+        }
+        if let Some(v) = own("font-family") {
+            style.family = v.to_string();
+        }
+        if let Some(v) = own("font-size").and_then(parse_num) {
+            style.size = v;
+        }
+        let w = unmeasured_advance(
+            &chunk,
+            line_advance(&chunk, &style, style.size, ctx.m),
+            style.size,
+        );
+        let anchor = el
+            .ancestors()
+            .find_map(|a| a.attribute("text-anchor"))
+            .unwrap_or("start");
+        let left = match anchor {
+            "middle" => pen.0 - w / 2.0,
+            "end" => pen.0 - w,
+            _ => pen.0,
+        };
+        let fm = ctx.m.font_metrics(&style, style.size);
+        let r = Rect::new(left, pen.1 - fm.ascent, left + w, pen.1 + fm.descent);
+        bb = Some(bb.map_or(r, |b| b.union(r)));
+        pad = pad.max(style.size);
+        pen.0 += w;
+    }
+    bb.map(|b| b.inflate(pad, pad))
+}
+
 /// Emit an outlined text group: `<g fill=… stroke=…><path d="…"/>…</g>` — the shared
 /// output of create-outlines (§6.12) and text-on-path (§6.13). `paths` are the glyph
 /// path `d` strings (one per line for a box, one for a warped run).

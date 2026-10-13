@@ -15,21 +15,139 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     let max_w = attr_num(node, "inline-size", 0.0);
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
     let lines = layout_flow(&collect_text_as(node, &style), &style, x, y, max_w, m);
+    let base = [EmitAttrs::default()];
 
+    let anchor = node.attribute("text-anchor").unwrap_or("start");
+    let filter = lower_filter_attr(node, out, ctx, || {
+        lines_bbox(&lines, anchor, false, &style, style.size, &base, m)
+    });
     out.push_str("<text");
     copy_attrs(
         node,
         out,
-        &["inline-size", "line-height", "text-transform"],
+        &["inline-size", "line-height", "text-transform", "filter"],
         ctx,
     );
+    if let Some(f) = &filter {
+        out.push_str(f);
+    } else if let Some(f) = node.attribute("filter") {
+        // as authored: `none`, a url() reference, a list the parser declines
+        out.push_str(" filter=\"");
+        push_escaped(out, &ctx.resolve_var(f), true);
+        out.push('"');
+    }
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
-    let base = [EmitAttrs::default()];
     for line in &lines {
         emit_line(out, line, &style, style.size, gx, m, &base);
     }
     out.push_str("</text>");
+}
+
+/// Which of a run's backdrops [`emit_run_backdrops`] draws. A filtered text
+/// element (§8, *text*) draws its highlights first, outside the filter group,
+/// and its decorations inside it with the glyphs: a highlight is a background,
+/// and a background that casts a shadow reads as a sticker, not as text.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Backdrops {
+    All,
+    Highlights,
+    Decorations,
+}
+
+/// Open the `<g filter="url(#…)">` a filtered multi-element text emitter wraps
+/// its glyph output in — nothing when the element carries no lowered filter, so
+/// plain output is byte-identical.
+pub(super) fn open_filter_group(out: &mut String, filter: Option<&str>) {
+    if let Some(f) = filter {
+        out.push_str("<g");
+        out.push_str(f);
+        out.push('>');
+    }
+}
+
+pub(super) fn close_filter_group(out: &mut String, filter: Option<&str>) {
+    if filter.is_some() {
+        out.push_str("</g>");
+    }
+}
+
+/// The left edge, width and per-space justify slack of a laid-out line, from
+/// the anchor the `<text>` will carry: the measured advance of its runs plus a
+/// justified line's widened spaces (§6.9).
+fn line_extent(
+    line: &PlacedLine,
+    anchor: &str,
+    rtl: bool,
+    style: &TextStyle,
+    size: f64,
+    emits: &[EmitAttrs],
+    m: &dyn Measurer,
+) -> (f64, f64, f64) {
+    let natural: f64 = line
+        .runs
+        .iter()
+        .map(|r| {
+            let (st, rs) = emits
+                .get(r.style)
+                .map(|a| run_measure_style(a, style, size))
+                .unwrap_or((style.clone(), size));
+            line_advance(&r.text, &st, rs, m)
+        })
+        .sum();
+    // a justified line widens its spaces, not its glyph gaps (§6.9)
+    let extra = justify_space(line, style, size, emits, m).unwrap_or(0.0);
+    let width = natural + spaces_in(&line.text) * extra;
+    // the line's LEFT edge, whichever edge the anchor names
+    let left = match (anchor, rtl) {
+        ("middle", _) => line.x - width / 2.0,
+        ("end", false) | ("start", true) => line.x - width,
+        _ => line.x,
+    };
+    (left, width, extra)
+}
+
+/// A measurer without the font — the CLI without `--font-directory` — advances
+/// nothing, and a filter region as wide as nothing clips the shadow to a sliver:
+/// a zero advance on text that is not empty is replaced by a wide proportional
+/// guess, 0.6 em per character, so the region holds the glyphs a renderer with
+/// the font draws.
+pub(super) fn unmeasured_advance(text: &str, advance: f64, size: f64) -> f64 {
+    if advance <= 0.0 && !text.trim().is_empty() {
+        text.chars().count() as f64 * 0.6 * size
+    } else {
+        advance
+    }
+}
+
+/// Where laid-out lines draw, for a filter region (§8, *text*): the union of
+/// each line's extent and em box, padded by an em all round — the renderer's
+/// font need not be the measurer's, and a shadow clipped at the edge is worse
+/// than a region a little large. `None` for no lines.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn lines_bbox(
+    lines: &[PlacedLine],
+    anchor: &str,
+    rtl: bool,
+    style: &TextStyle,
+    size: f64,
+    emits: &[EmitAttrs],
+    m: &dyn Measurer,
+) -> Option<Rect> {
+    let mut bb: Option<Rect> = None;
+    for line in lines {
+        let (left, width, _) = line_extent(line, anchor, rtl, style, size, emits, m);
+        let width = unmeasured_advance(&line.text, width, line.size);
+        let fm = m.font_metrics(style, line.size);
+        let r = Rect::new(
+            left,
+            line.baseline - fm.ascent,
+            left + width,
+            line.baseline + fm.descent,
+        );
+        bb = Some(bb.map_or(r, |b| b.union(r)));
+    }
+    bb.map(|b| b.inflate(size, size))
 }
 
 /// `<x:textbox>` (Rung 3): explicit `align`/`valign`/`padding`/`fit`, or — with
@@ -74,16 +192,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         };
         if let Some(geom) = geom {
             let spec = textbox_area_spec(node, geom);
-            // one keyed <g> wraps the per-paragraph <text>s: the TEXTBOX keeps a
-            // rendered identity (and so a real bbox) of its own — the paragraphs
-            // carry only their own <x:p> keys (found live: a multi-paragraph
-            // textbox had no element to select, and its paragraphs were promoted
-            // to free-standing objects)
-            out.push_str("<g");
-            out.push_str(&pos);
-            out.push('>');
-            emit_paragraphs(node, &paras, &style, fill, gx, &spec, out, ctx);
-            out.push_str("</g>");
+            emit_paragraphs(node, &paras, &style, fill, gx, &spec, &pos, out, ctx);
             return;
         }
     }
@@ -98,6 +207,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let spec = textbox_area_spec(node, target);
             let (segments, styles, emits) = collect_runs(node, &style);
             let layout = layout_area_runs(&segments, &styles, &spec, ctx.m);
+            let filter = lower_text_filter(node, &layout, &style, &emits, out, ctx);
             write_area_text(
                 out,
                 &layout,
@@ -110,6 +220,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 &pos,
                 span_of(node),
                 outline,
+                filter.as_deref(),
                 ctx.outliner,
                 ctx,
             );
@@ -146,6 +257,8 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             &spec,
             ctx.m,
         );
+        let base = [EmitAttrs::default()];
+        let filter = lower_text_filter(node, &layout, &style, &base, out, ctx);
         write_area_text(
             out,
             &layout,
@@ -154,10 +267,11 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             &stroke,
             gx,
             ctx.m,
-            &[EmitAttrs::default()],
+            &base,
             &pos,
             span_of(node),
             outline,
+            filter.as_deref(),
             ctx.outliner,
             ctx,
         );
@@ -167,6 +281,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let spec = textbox_area_spec(node, node);
     let (segments, styles, emits) = collect_runs(node, &style);
     let layout = layout_area_runs(&segments, &styles, &spec, ctx.m);
+    let filter = lower_text_filter(node, &layout, &style, &emits, out, ctx);
     write_area_text(
         out,
         &layout,
@@ -179,9 +294,34 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         &pos,
         span_of(node),
         outline,
+        filter.as_deref(),
         ctx.outliner,
         ctx,
     );
+}
+
+/// A textbox's `filter` (§8, *text*), lowered against the laid-out lines it is
+/// about to write: the def goes before the element, the returned attribute on
+/// the group [`write_area_text`] wraps the glyphs in.
+fn lower_text_filter(
+    node: roxmltree::Node,
+    layout: &AreaLayout,
+    style: &TextStyle,
+    emits: &[EmitAttrs],
+    out: &mut String,
+    ctx: &Ctx,
+) -> Option<String> {
+    lower_filter_attr(node, out, ctx, || {
+        lines_bbox(
+            &layout.lines,
+            layout.anchor.svg(),
+            layout.rtl,
+            style,
+            layout.font_size,
+            emits,
+            ctx.m,
+        )
+    })
 }
 
 /// Paragraph flow (§6.16): lay each `<x:p>` as its own wrapped block, stacked
@@ -197,6 +337,7 @@ pub(super) fn emit_paragraphs(
     base_fill: &str,
     gx: f64,
     spec: &AreaSpec,
+    pos: &str,
     out: &mut String,
     ctx: &Ctx,
 ) {
@@ -245,6 +386,59 @@ pub(super) fn emit_paragraphs(
             }
         }
     }
+    // pass 2: the lines the box shows, placed and truncated as its text-overflow
+    // asks; one <text> per paragraph
+    let visible = visible_paragraph_lines(&items, block_top, cy, ch, spec.text_overflow, m);
+    let backdrops = |out: &mut String, which: Backdrops| {
+        for (para, shifted) in items.iter().zip(&visible) {
+            emit_run_backdrops(
+                out,
+                shifted,
+                para.laid.anchor.svg(),
+                para.laid.rtl,
+                &para.laid.style,
+                para.laid.style.size,
+                para.fill,
+                &para.emits,
+                which,
+                m,
+                ctx,
+            );
+        }
+    };
+
+    // the textbox's filter (§8, *text*): its region is where the paragraphs land
+    let filter = lower_filter_attr(node, out, ctx, || {
+        let mut bb: Option<Rect> = None;
+        for (para, shifted) in items.iter().zip(&visible) {
+            let r = lines_bbox(
+                shifted,
+                para.laid.anchor.svg(),
+                para.laid.rtl,
+                &para.laid.style,
+                para.laid.style.size,
+                &para.emits,
+                m,
+            );
+            bb = match (bb, r) {
+                (Some(a), Some(b)) => Some(a.union(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        bb
+    });
+    // one keyed <g> wraps the per-paragraph <text>s: the TEXTBOX keeps a
+    // rendered identity (and so a real bbox) of its own — the paragraphs
+    // carry only their own <x:p> keys (found live: a multi-paragraph
+    // textbox had no element to select, and its paragraphs were promoted
+    // to free-standing objects)
+    out.push_str("<g");
+    out.push_str(pos);
+    out.push('>');
+    if filter.is_some() {
+        backdrops(out, Backdrops::Highlights);
+    }
+    open_filter_group(out, filter.as_deref());
     out.push_str(&shapes);
     if !markers.is_empty() {
         out.push_str("<text text-anchor=\"start\"");
@@ -253,10 +447,6 @@ pub(super) fn emit_paragraphs(
         out.push_str(&markers);
         out.push_str("</text>");
     }
-
-    // pass 2: the lines the box shows, placed and truncated as its text-overflow
-    // asks; one <text> per paragraph
-    let visible = visible_paragraph_lines(&items, block_top, cy, ch, spec.text_overflow, m);
     for (para, shifted) in items.iter().zip(&visible) {
         if shifted.is_empty() {
             continue;
@@ -270,6 +460,11 @@ pub(super) fn emit_paragraphs(
             para.laid.style.size,
             para.fill,
             &para.emits,
+            if filter.is_some() {
+                Backdrops::Decorations
+            } else {
+                Backdrops::All
+            },
             m,
             ctx,
         );
@@ -293,6 +488,8 @@ pub(super) fn emit_paragraphs(
         }
         out.push_str("</text>");
     }
+    close_filter_group(out, filter.as_deref());
+    out.push_str("</g>");
 }
 
 /// Pass 2 of paragraph flow: the engine's [`clip_paragraphs`] over the plan.
@@ -660,6 +857,7 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
     let outline = node.attribute((XSVG_NS, "outline")) == Some("true");
     let (segments, styles, emits) = collect_runs(node, &style);
     let layout = layout_text_area_runs(&segments, &styles, &spec, m);
+    let filter = lower_text_filter(node, &layout, &style, &emits, out, ctx);
     write_area_text(
         out,
         &layout,
@@ -672,6 +870,7 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         &pos_attr(node, ctx),
         span_of(node),
         outline,
+        filter.as_deref(),
         ctx.outliner,
         ctx,
     );
@@ -690,6 +889,7 @@ pub(super) fn write_area_text(
     pos: &str,
     span: (usize, usize),
     outline: bool,
+    filter: Option<&str>,
     outliner: &dyn GlyphOutliner,
     ctx: &Ctx,
 ) {
@@ -737,23 +937,40 @@ pub(super) fn write_area_text(
                     }
                 }
             }
+            open_filter_group(out, filter);
             push_outline_group(out, fill, stroke, pos, &paths, ctx);
+            close_filter_group(out, filter);
             return;
         }
         // else: outliner unavailable → fall through to live <text> below
     }
 
-    emit_run_backdrops(
+    let backdrops = |out: &mut String, which: Backdrops| {
+        emit_run_backdrops(
+            out,
+            &layout.lines,
+            layout.anchor.svg(),
+            layout.rtl,
+            style,
+            layout.font_size,
+            fill,
+            emits,
+            which,
+            m,
+            ctx,
+        );
+    };
+    if filter.is_some() {
+        backdrops(out, Backdrops::Highlights);
+    }
+    open_filter_group(out, filter);
+    backdrops(
         out,
-        &layout.lines,
-        layout.anchor.svg(),
-        layout.rtl,
-        style,
-        layout.font_size,
-        fill,
-        emits,
-        m,
-        ctx,
+        if filter.is_some() {
+            Backdrops::Decorations
+        } else {
+            Backdrops::All
+        },
     );
     out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
     push_font_attrs(out, style, layout.font_size, fill, ctx);
@@ -776,6 +993,7 @@ pub(super) fn write_area_text(
         emit_line(out, line, style, layout.font_size, glyph_x_scale, m, emits);
     }
     out.push_str("</text>");
+    close_filter_group(out, filter);
 }
 
 /// How far a `baseline-shift` value raises a run, in user units (positive = up).
@@ -881,7 +1099,8 @@ pub(super) fn justify_space(
 /// `<text>`'s text-anchor; under `rtl` the start edge is the right one and runs
 /// lay leftward); a raised or lowered run carries its backdrops with it.
 /// Nothing is emitted for lines without a highlighted or decorated run, so plain
-/// output is byte-identical.
+/// output is byte-identical. `which` selects highlights, decorations or both
+/// ([`Backdrops`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_run_backdrops(
     out: &mut String,
@@ -892,11 +1111,16 @@ pub(super) fn emit_run_backdrops(
     size: f64,
     fill: &str,
     emits: &[EmitAttrs],
+    which: Backdrops,
     m: &dyn Measurer,
     ctx: &Ctx,
 ) {
     let run_style = |a: &EmitAttrs| run_measure_style(a, style, size);
-    let has_backdrop = |a: &EmitAttrs| a.highlight.is_some() || a.decoration.is_some();
+    let highlights = which != Backdrops::Decorations;
+    let decorations = which != Backdrops::Highlights;
+    let has_backdrop = |a: &EmitAttrs| {
+        (highlights && a.highlight.is_some()) || (decorations && a.decoration.is_some())
+    };
     for line in lines {
         if !line
             .runs
@@ -905,26 +1129,7 @@ pub(super) fn emit_run_backdrops(
         {
             continue;
         }
-        let natural: f64 = line
-            .runs
-            .iter()
-            .map(|r| {
-                let (st, rs) = emits
-                    .get(r.style)
-                    .map(&run_style)
-                    .unwrap_or((style.clone(), size));
-                line_advance(&r.text, &st, rs, m)
-            })
-            .sum();
-        // a justified line widens its spaces, not its glyph gaps (§6.9)
-        let extra = justify_space(line, style, size, emits, m).unwrap_or(0.0);
-        let width = natural + spaces_in(&line.text) * extra;
-        // the line's LEFT edge, whichever edge the anchor names
-        let left = match (anchor, rtl) {
-            ("middle", _) => line.x - width / 2.0,
-            ("end", false) | ("start", true) => line.x - width,
-            _ => line.x,
-        };
+        let (left, width, extra) = line_extent(line, anchor, rtl, style, size, emits, m);
         // runs lay out from the start edge: rightward in ltr, leftward in rtl
         let mut x = if rtl { left + width } else { left };
         for r in &line.runs {
@@ -952,10 +1157,10 @@ pub(super) fn emit_run_backdrops(
                         ctx.paint(color)
                     ));
                 };
-                if let Some(color) = a.highlight.as_deref() {
+                if let Some(color) = a.highlight.as_deref().filter(|_| highlights) {
                     rect(out, base - fm.ascent, fm.ascent + fm.descent, color);
                 }
-                if let Some(d) = a.decoration.as_deref() {
+                if let Some(d) = a.decoration.as_deref().filter(|_| decorations) {
                     let color = a.fill.as_deref().unwrap_or(fill);
                     for token in d.split_whitespace() {
                         match token {

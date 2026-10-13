@@ -99,6 +99,14 @@ partial one.
 
 ### Fixed
 
+- **Drop shadows (and every other `filter` function) on text.** `filter="drop-shadow(…)"` was
+  dropped from `<x:textbox>`, copied through unlowered on `<text inline-size>`, and clipped on a
+  live `<text>` (the ±50 % fallback region is shorter than a shadow on a single line). Every text
+  element now takes the §8 lowering: the def before the element, the filter on the `<text>` or on
+  one `<g>` around everything glyph-like (paragraphs, markers, baked decorations, outlines), the
+  region computed from where the glyphs land, so each glyph casts its own shadow as in a slide
+  tool. Highlights stay outside the filter. Text on a path included, every effect.
+
 - **Underline and strike-through rendered dashed under `letter-spacing` in Safari.** WebKit draws
   SVG text decorations per glyph once letter-spacing is set, leaving every gap bare. A run's
   decoration is now baked, like `x:highlight`: a `<rect>` per run per line in the run's own colour,
