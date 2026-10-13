@@ -16,6 +16,13 @@ partial one.
 
 ### Added
 
+- **Units: incremental compilation one level down** for editing hosts. A direct child of a
+  top-level passthrough container (an artboard's `<g>`) is now a unit of its own: `compile_unit`
+  compiles it alone, byte-identical to its span in the parent's fragment; `compile_fragment_spans`
+  returns the fragment with every unit's span in output order; `unit_dependents` finds dependents
+  inside the same container, which the top-level scan could not — a keystroke in a slide's textbox
+  no longer re-bakes the slide's warps ([Incremental.md §9](docs/Incremental.md)).
+
 - **Sizing a textbox to its content** for editing hosts. `measure_textbox_impl` (and
   `CompileSession::measure_textbox`) returns the height a textbox needs to hold its paragraphs and
   lists at its authored width — the cap band of the stacked blocks plus padding — and the width its

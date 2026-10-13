@@ -28,11 +28,14 @@ pub use boolean::*;
 pub use compile::{
     caret_stops_impl, compile_fragment_impl, compile_fragment_keyed_impl,
     compile_fragment_linked_impl, compile_fragment_linked_keyed_impl,
-    compile_fragment_platform_impl, compile_impl, compile_keyed_impl, compile_linked_impl,
-    compile_linked_keyed_impl, compile_platform_impl, compile_with, dependents_impl,
-    dependents_multi_impl, fragment_range_impl, measure_textbox_impl, node_spans_impl,
-    text_layout_impl, CaretStop, CaretStops, CompileSession, Host, NoKeys, NoResolver, NodeKeys,
-    Options, Platform, Resolver, StopRun, TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize,
+    compile_fragment_platform_impl, compile_fragment_spans_linked_keyed_impl,
+    compile_fragment_spans_platform_impl, compile_impl, compile_keyed_impl, compile_linked_impl,
+    compile_linked_keyed_impl, compile_platform_impl, compile_unit_linked_keyed_impl,
+    compile_unit_platform_impl, compile_with, dependents_impl, dependents_multi_impl,
+    fragment_range_impl, measure_textbox_impl, node_spans_impl, text_layout_impl,
+    unit_dependents_impl, unit_range_impl, CaretStop, CaretStops, CompileSession, Host, NoKeys,
+    NoResolver, NodeKeys, Options, Platform, Resolver, StopRun, TextLayout, TextLayoutLine,
+    TextLayoutPara, TextboxSize, UnitSpan,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.

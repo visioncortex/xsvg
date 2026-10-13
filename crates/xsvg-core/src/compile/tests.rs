@@ -6302,3 +6302,181 @@ fn measure_textbox_none_off_a_rectangular_box() {
     );
     assert!(measure_at(&svg, "<rect").is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Units: incremental compilation one level below the top (Incremental.md §9)
+
+fn unit_platform() -> Platform<&'static Mono, &'static BoxShaper, &'static BoxOutliner> {
+    Platform::new(&Mono, &BoxShaper, &BoxOutliner)
+}
+
+#[test]
+fn units_are_verbatim_slices_of_their_fragment_over_the_dataset() {
+    // THE §9 invariant, over every sample: each unit's span in its fragment's
+    // output is byte-identical to the unit compiled alone, the spans are in
+    // output order and never overlap, and `unit_range` names the same unit.
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../dataset");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "xsvg"))
+        .collect();
+    files.sort();
+    assert!(files.len() > 40, "{}", files.len());
+    let p = unit_platform();
+    let (mut units, mut containers) = (0, 0);
+    for path in &files {
+        let src = std::fs::read_to_string(path).unwrap();
+        let doc = roxmltree::Document::parse(&src).unwrap();
+        for sourcemap in [false, true] {
+            for top in doc.root_element().children().filter(|c| c.is_element()) {
+                let off = top.range().start;
+                let (frag, spans) =
+                    compile_fragment_spans_platform_impl(&src, "balanced", sourcemap, off, "", &p)
+                        .unwrap();
+                assert_eq!(
+                    frag,
+                    compile_fragment_platform_impl(&src, "balanced", sourcemap, off, "", &p)
+                        .unwrap(),
+                    "{path:?}: the spans compile is the fragment compile"
+                );
+                if !spans.is_empty() {
+                    containers += 1;
+                }
+                let mut cursor = 0;
+                for span in &spans {
+                    assert!(
+                        span.output.0 >= cursor && span.output.1 >= span.output.0,
+                        "{path:?} {span:?}"
+                    );
+                    cursor = span.output.1;
+                    let alone = compile_unit_platform_impl(
+                        &src,
+                        "balanced",
+                        sourcemap,
+                        span.source.0,
+                        "",
+                        &p,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        &frag[span.output.0..span.output.1],
+                        alone,
+                        "{path:?}: unit at {} differs when compiled alone",
+                        span.source.0
+                    );
+                    assert_eq!(
+                        unit_range_impl(&src, span.source.0),
+                        Some(span.source),
+                        "{path:?}"
+                    );
+                    units += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        units > 100 && containers > 10,
+        "units {units}, containers {containers}"
+    );
+}
+
+#[test]
+fn unit_at_follows_the_serializer() {
+    let svg = format!(
+        r##"{XW}<g id="board" font-family="Root"><rect id="r" x="0" y="0" width="10" height="10"/><x:textbox x="0" y="20" width="80" height="20" font-size="10">words</x:textbox></g><g x:hidden="true"><rect x="0" y="0" width="10" height="10"/></g><g><rect x:hidden="true" x="0" y="0" width="10" height="10"/><circle cx="5" cy="5" r="2"/></g><text x="0" y="50"><tspan>plain</tspan></text><g><rect x:order="2" x="0" y="0" width="1" height="1"/><rect x:order="1" x="2" y="0" width="1" height="1"/></g><g><rect filter="blur(2)" x="0" y="0" width="10" height="10"/></g></svg>"##
+    );
+    let p = unit_platform();
+    let at = |needle: &str| svg.find(needle).unwrap();
+    // inside a container: the child; in the container's own tag: the container
+    let tb = at("<x:textbox");
+    assert_eq!(
+        unit_range_impl(&svg, tb),
+        Some((
+            tb,
+            tb + svg[tb..].find("</x:textbox>").unwrap() + "</x:textbox>".len()
+        ))
+    );
+    let board = at(r#"<g id="board""#);
+    assert_eq!(unit_range_impl(&svg, board + 3).map(|r| r.0), Some(board));
+    // the unit sees its ancestors: the inherited family is in its own output
+    let alone = compile_unit_platform_impl(&svg, "balanced", false, tb, "", &p).unwrap();
+    assert!(alone.contains(r#"font-family="Root""#), "{alone}");
+    // a hidden container compiles to nothing, so it is its own (empty) unit
+    let hidden = at(r#"<g x:hidden="true">"#);
+    assert_eq!(
+        unit_range_impl(&svg, hidden + 30).map(|r| r.0),
+        Some(hidden)
+    );
+    let (frag, spans) =
+        compile_fragment_spans_platform_impl(&svg, "balanced", false, hidden, "", &p).unwrap();
+    assert!(frag.is_empty() && spans.is_empty(), "{frag} {spans:?}");
+    // a hidden child is a unit that compiles to nothing: an empty span, in place
+    let hidden_rect = at(r#"<rect x:hidden="true""#);
+    let g3 = svg[..hidden_rect].rfind("<g>").unwrap();
+    let (_, spans) =
+        compile_fragment_spans_platform_impl(&svg, "balanced", false, g3, "", &p).unwrap();
+    assert_eq!(spans.len(), 2, "{spans:?}");
+    assert_eq!(spans[0].output.0, spans[0].output.1, "{spans:?}");
+    assert_eq!(
+        compile_unit_platform_impl(&svg, "balanced", false, hidden_rect, "", &p).unwrap(),
+        ""
+    );
+    // text content is not a container: the <text> is its own unit, the tspan nothing's
+    let text = at("<text ");
+    let tspan = at("<tspan>");
+    assert_eq!(unit_range_impl(&svg, tspan).map(|r| r.0), Some(text));
+    let (_, spans) =
+        compile_fragment_spans_platform_impl(&svg, "balanced", false, text, "", &p).unwrap();
+    assert!(spans.is_empty(), "{spans:?}");
+    // a restacked container lists its units in OUTPUT order, not source order
+    let ordered = at(r#"<rect x:order="2""#);
+    let g4 = svg[..ordered].rfind("<g>").unwrap();
+    let (frag, spans) =
+        compile_fragment_spans_platform_impl(&svg, "balanced", false, g4, "", &p).unwrap();
+    assert_eq!(spans.len(), 2);
+    assert!(
+        spans[0].source.0 > spans[1].source.0,
+        "output order: {spans:?}"
+    );
+    assert!(
+        frag[spans[0].output.0..spans[0].output.1].contains("M2,0"),
+        "{frag}"
+    );
+    // a filter def is written before its element, inside the element's own span
+    let filtered = at(r#"<rect filter="#);
+    let g5 = svg[..filtered].rfind("<g>").unwrap();
+    let (frag, spans) =
+        compile_fragment_spans_platform_impl(&svg, "balanced", false, g5, "", &p).unwrap();
+    let span = &frag[spans[0].output.0..spans[0].output.1];
+    assert!(span.starts_with("<filter"), "{span}");
+    assert_eq!(
+        span,
+        compile_unit_platform_impl(&svg, "balanced", false, filtered, "", &p).unwrap()
+    );
+}
+
+#[test]
+fn unit_dependents_see_inside_a_container() {
+    // the deck's case: an outlined word inside a warp, traced by an <x:offset>
+    // beside it in the same artboard. Editing the word is editing the warp's
+    // unit; the offset bakes the warp's geometry, so it must re-emit — and the
+    // top-level scan, which only looks between artboards, cannot say so.
+    let svg = format!(
+        r##"{XW}<g x:artboard="1"><x:warp id="w" field="arch" bend="30"><x:textbox id="archword" x="0" y="0" width="80" height="20" font-size="10" outline="true">ARCH</x:textbox></x:warp><x:offset in="#w" d="3"/><rect x="0" y="0" width="5" height="5"/></g><g x:artboard="2"><x:offset in="#w" d="5"/></g>"##
+    ) + "</svg>";
+    let word = svg.find("<x:textbox").unwrap();
+    let offsets: Vec<usize> = svg.match_indices("<x:offset").map(|(i, _)| i).collect();
+    let deps = unit_dependents_impl(&svg, &[word]);
+    let starts: Vec<usize> = deps.iter().map(|d| d.0).collect();
+    assert_eq!(
+        starts, offsets,
+        "both offsets, the sibling one included: {deps:?}"
+    );
+    // the top-level scan reports only the other artboard
+    let tops = dependents_impl(&svg, word);
+    assert_eq!(tops.len(), 1, "{tops:?}");
+    assert!(tops[0].0 < offsets[1] && offsets[1] < tops[0].1);
+    // and nothing when the seed is the plain rect
+    assert!(unit_dependents_impl(&svg, &[svg.find("<rect").unwrap()]).is_empty());
+}

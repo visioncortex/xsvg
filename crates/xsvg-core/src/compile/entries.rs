@@ -11,6 +11,7 @@
 use super::session::Parsed;
 use super::{
     CaretStops, CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout, TextboxSize,
+    UnitSpan,
 };
 use super::{NodeKeys, Resolver};
 use crate::{GlyphOutliner, Measurer, Shaper};
@@ -333,6 +334,95 @@ pub fn compile_fragment_platform_impl(
 pub fn node_spans_impl(input: &str) -> Vec<(usize, usize)> {
     Parsed::new(input)
         .map(|p| p.node_spans())
+        .unwrap_or_default()
+}
+
+/// Compile one incremental **unit** (docs/Incremental.md §9): the direct child of a
+/// top-level passthrough container containing `offset`, else the top-level element
+/// itself. Byte-identical to the unit's span in its fragment's output.
+pub fn compile_unit_platform_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    base: &str,
+    platform: &impl Host,
+) -> Result<String, String> {
+    CompileSession::new(platform, input, quality, sourcemap, base)?.compile_unit(offset)
+}
+
+/// [`compile_unit_platform_impl`] over the `&dyn` seams a wasm host binds.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_unit_linked_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
+    keys: &dyn NodeKeys,
+) -> Result<String, String> {
+    compile_unit_platform_impl(
+        input,
+        quality,
+        sourcemap,
+        offset,
+        base,
+        &borrowed(m, shaper, outliner, resolver, keys),
+    )
+}
+
+/// The fragment containing `offset` plus where each of its units landed in it
+/// (docs/Incremental.md §9), in output order. The span list is empty when the
+/// top-level element is its own unit.
+pub fn compile_fragment_spans_platform_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    base: &str,
+    platform: &impl Host,
+) -> Result<(String, Vec<UnitSpan>), String> {
+    CompileSession::new(platform, input, quality, sourcemap, base)?.compile_fragment_spans(offset)
+}
+
+/// [`compile_fragment_spans_platform_impl`] over the `&dyn` seams a wasm host binds.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_fragment_spans_linked_keyed_impl(
+    input: &str,
+    quality: &str,
+    sourcemap: bool,
+    offset: usize,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+    resolver: &dyn Resolver,
+    base: &str,
+    keys: &dyn NodeKeys,
+) -> Result<(String, Vec<UnitSpan>), String> {
+    compile_fragment_spans_platform_impl(
+        input,
+        quality,
+        sourcemap,
+        offset,
+        base,
+        &borrowed(m, shaper, outliner, resolver, keys),
+    )
+}
+
+/// Source byte range of the unit containing `offset` (docs/Incremental.md §9).
+pub fn unit_range_impl(input: &str, offset: usize) -> Option<(usize, usize)> {
+    Parsed::new(input).ok()?.unit_range(offset)
+}
+
+/// [`dependents_multi_impl`] at unit granularity: seeds and results are unit
+/// source ranges, so a dependent inside the same container is reported.
+pub fn unit_dependents_impl(input: &str, seeds: &[usize]) -> Vec<(usize, usize)> {
+    Parsed::new(input)
+        .map(|p| p.unit_dependents(seeds))
         .unwrap_or_default()
 }
 

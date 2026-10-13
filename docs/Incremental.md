@@ -176,8 +176,9 @@ in Node.
 
 ## 5. Known limits (v1)
 
-- **Granularity** is the top-level element: editing a node nested in a deep passthrough `<g>`
-  re-emits the whole top-level group. Acceptable; refine later if profiling demands.
+- ~~**Granularity** is the top-level element~~ — **units (§9) go one level down**: a direct child of
+  a top-level passthrough container compiles and patches on its own. Deeper nesting still re-emits
+  its unit; refine further if profiling demands.
 - ~~Dependency scan is one hop~~ — **the scan is now a transitive closure.** Since composition by
   reference shipped (Specification.md §4 *Reference resolution*), an `x:` element can itself be an
   `in`-target: editing `#a` re-emits `<x:warp id="b" in="#a">`, whose changed output re-emits
@@ -376,3 +377,54 @@ the measured height renders every block and the layout seam puts the last
 descent exactly on the padded bottom edge; a referenced rect gives the same
 answer as the box's own geometry; a short line reports its own width and an
 empty box one line; a circle-bound box answers `None`.
+
+## 9. Units: incremental compilation one level down (shipped)
+
+A deck is a list of artboards, each a top-level `<g>` holding its slide: text, warps, tables,
+offsets. §2's unit was the top-level element, so a keystroke in one textbox re-emitted the whole
+artboard — every warp and boolean on the slide baked again to place one word. A **unit** is now a
+direct child of a top-level element whose parent is a **passthrough container**: a plain SVG
+container (`g`, `a`, `defs`, `symbol`, `marker`, `pattern`, `mask`, `clipPath`, `switch`) that is
+not hidden. The serializer copies such a parent through — attributes, an artboard backdrop, then its
+children, restacked by `x:layer`/`x:order` when any child asks — and nothing of the parent's reaches
+a child's output, so a child compiled alone is byte-identical to its span in the parent's fragment.
+Everything a unit *does* depend on is read from the whole parsed document: inherited `font-family`,
+theme tokens, `in="#id"` targets anywhere, imports.
+
+**One predicate.** `is_passthrough_container` is read by three things that must agree: `serialize`
+routes those elements to its copy-through branch by it; `unit_at(offset)` partitions a top-level
+element by it; the caret-stop scope climbs by it. A top-level element that is not such a container
+(an `<x:warp>`, a `<text>` with its tspans, a hidden group) is its own unit, as before.
+
+**API** (`CompileSession` and the `*_impl` entries):
+
+- `unit_range(offset) → (start, end)`: the unit containing a byte — the child, or the top-level
+  element when the offset lies in its own tag, when it is not a container, or when it is hidden.
+- `compile_unit(offset) → String`: the unit alone — a **run of output nodes**, since marker
+  comments and a `filter` def precede the element inside its own output; a hidden child is `""`.
+- `compile_fragment_spans(offset) → (fragment, [UnitSpan { source, output }])`: the fragment plus
+  where each unit landed in it, **in output order**, from the serializer's own child loop (the
+  recorder is `None` on every other compile). Empty when the top-level element is its own unit. The
+  bytes between spans are the container's own — its tag, backdrop, inter-child whitespace, closing
+  tag — and a host leaves them alone.
+- `unit_dependents(seeds) → [unit ranges]`: `dependents` at unit granularity. The top-level scan
+  only looks *between* top-level elements, so it could not say that `<x:offset in="#w">` beside the
+  `<x:warp id="w">` it traces must re-emit when the warp's word changes; the unit scan does. Ids
+  inside an included unit go live, the `<x:import>` namespace edge holds, seeds are excluded.
+
+**Host protocol.** An edit inside a unit: `compile_unit` it and splice its span, then `unit_dependents`
+and splice those. An edit to the container's own tag or attributes — `x:layer`/`x:order` on a child,
+`x:hidden`, `x:fill`, `font-family`, `x:font`, `transform` — re-assembles the parent: compile the
+fragment with spans (it changes the backdrop, the order, or what every child inherits). A unit
+added with an `id` forces a full render, as a top-level element with one does. The §2 fallbacks
+apply unchanged.
+
+**Invariant, pinned over every dataset sample** with the sourcemap off and on
+(`units_are_verbatim_slices_of_their_fragment_over_the_dataset`): each unit's span in its fragment
+equals the unit compiled alone, spans are in output order and disjoint, and `unit_range` names the
+same unit; plus the hidden, restacked, filtered, `<text>`-with-tspans and own-tag cases, and the
+offset→warp dependency the top-level scan misses.
+
+**Known limit.** `Ctx` carries a per-call reference budget (`fuel`); a unit compiled alone starts
+with a full one and could differ from its in-fragment output only when a pathological reference
+graph exhausts it, which the host's verify oracle would catch.

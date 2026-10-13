@@ -142,6 +142,10 @@ struct Ctx<'a> {
     /// [`CompileSession::caret_stops`] query's scratch compile. An ordinary
     /// compile never records and emits exactly what it did before.
     stops: std::cell::RefCell<Option<stops::StopRecorder>>,
+    /// The unit-span recorder: `Some` only inside a `compile_fragment_spans`
+    /// call, where the passthrough child loop of the top-level element notes
+    /// where each child's output landed (docs/Incremental.md §9).
+    unit_spans: std::cell::RefCell<Option<Vec<UnitSpan>>>,
 }
 
 /// The borrowed view of a platform a compile runs against — what [`Ctx`] is built
@@ -329,6 +333,7 @@ impl<'a> Ctx<'a> {
             ids: &parsed.ids,
             in_plugin: std::cell::Cell::new(false),
             stops: std::cell::RefCell::new(None),
+            unit_spans: std::cell::RefCell::new(None),
         }
     }
 
@@ -502,6 +507,44 @@ pub(super) fn visible<'a>(
     t: roxmltree::Node<'a, 'a>,
 ) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
     t.descendants().filter(|n| !in_doc_island(*n))
+}
+
+/// Whether `node` is a plain SVG container the serializer copies through — its
+/// element children lower independently (in restacked order, behind an artboard
+/// backdrop at most) and nothing of the parent's reaches their output. This is
+/// the one definition of a **unit boundary** (docs/Incremental.md §9): `serialize`
+/// routes these elements to [`emit_passthrough`] by it, `unit_at` partitions a
+/// top-level element by it, and the caret-stop scope climbs by it, so the three
+/// cannot drift. The set is the SVG structural containers; text content
+/// elements copy their children through too, but a `<tspan>` is a unit of
+/// nothing. A hidden container compiles to nothing, so it is not one either.
+pub(super) fn is_passthrough_container(node: roxmltree::Node) -> bool {
+    node.is_element()
+        && node.tag_name().namespace() == Some(SVG_NS)
+        && matches!(
+            node.tag_name().name(),
+            "g" | "a" | "defs" | "symbol" | "marker" | "pattern" | "mask" | "clipPath" | "switch"
+        )
+        && !is_hidden(node)
+}
+
+/// A direct child of a top-level element (`node.parent_element()` is the root),
+/// in the entry document.
+fn is_top_level(node: roxmltree::Node, ctx: &Ctx) -> bool {
+    std::ptr::eq(node.document(), ctx.doc)
+        && node
+            .parent_element()
+            .is_some_and(|p| p.parent_element().is_none())
+}
+
+/// Where one unit of a top-level element landed in that element's fragment
+/// output (docs/Incremental.md §9): its source byte span and the byte range of
+/// everything the serializer wrote for it — marker comments and a filter def
+/// included, since they precede the element inside its own run of output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnitSpan {
+    pub source: (usize, usize),
+    pub output: (usize, usize),
 }
 
 /// The direct element child of the document root whose source byte range contains
@@ -787,6 +830,15 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    // A plain SVG container copies its children through — the unit boundary of
+    // incremental compilation (docs/Incremental.md §9), routed here by the same
+    // predicate `unit_at` partitions by. Byte-identical to the fallthrough below:
+    // none of the branches between apply to these elements.
+    if !is_root && is_passthrough_container(node) {
+        emit_passthrough(node, node.tag_name().name(), out, false, ctx);
+        return;
+    }
+
     // xsvg extension elements.
     if node.tag_name().namespace() == Some(XSVG_NS) {
         match node.tag_name().name() {
@@ -895,6 +947,17 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    emit_passthrough(node, name, out, is_root, ctx);
+}
+
+/// Copy a plain SVG element through: its attributes (theme vars resolved, a
+/// `filter` lowered to a def written just before it), its identity, an artboard
+/// backdrop, then its children — restacked by `x:layer`/`x:order` when any child
+/// asks (§5.1), else in source order with the whitespace between them. The
+/// child loop is where unit spans are recorded (docs/Incremental.md §9): each
+/// element child of the top-level element, in the order it was written, with
+/// the bytes it wrote.
+fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root: bool, ctx: &Ctx) {
     let filter_sub = if is_root {
         None
     } else {
@@ -925,6 +988,24 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         if let Some(backdrop) = backdrop {
             out.push_str(&backdrop);
         }
+        // units are the element children of a top-level CONTAINER (a top-level
+        // <text> copies its tspans through here too, but they are units of nothing)
+        let record = ctx.unit_spans.borrow().is_some()
+            && is_top_level(node, ctx)
+            && is_passthrough_container(node);
+        let emit_child = |child: roxmltree::Node, out: &mut String| {
+            let start = out.len();
+            serialize(child, out, false, ctx);
+            if record && child.is_element() {
+                if let Some(spans) = ctx.unit_spans.borrow_mut().as_mut() {
+                    let r = child.range();
+                    spans.push(UnitSpan {
+                        source: (r.start, r.end),
+                        output: (start, out.len()),
+                    });
+                }
+            }
+        };
         let elems: Vec<roxmltree::Node> = node.children().filter(|c| c.is_element()).collect();
         let restack = elems.iter().any(|c| {
             c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()
@@ -950,11 +1031,11 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
                     .then(a.cmp(&b))
             });
             for &i in &idx {
-                serialize(elems[i], out, false, ctx);
+                emit_child(elems[i], out);
             }
         } else {
             for child in node.children() {
-                serialize(child, out, false, ctx);
+                emit_child(child, out);
             }
         }
         out.push_str(&format!("</{name}>"));

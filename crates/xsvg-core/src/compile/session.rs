@@ -47,8 +47,7 @@ fn stops_scope<'a, 'i>(node: roxmltree::Node<'a, 'i>) -> Option<roxmltree::Node<
         if super::is_hidden(a) {
             return None;
         }
-        let plain = a.tag_name().namespace() == Some(super::SVG_NS) && a.tag_name().name() != "use";
-        if !plain {
+        if !super::is_passthrough_container(a) {
             scope = a;
         }
     }
@@ -137,6 +136,77 @@ impl<'a> Parsed<'a> {
             &Ctx::new(backend, quality, sourcemap, base, self),
         );
         Ok(out)
+    }
+
+    /// The incremental **unit** at `offset` (docs/Incremental.md §9): the direct
+    /// child of a top-level passthrough container that contains the offset, else
+    /// the top-level element itself — when it is not such a container, when it
+    /// is hidden, or when the offset lies in its own tag rather than in a child.
+    pub(super) fn unit_at<'s>(&'s self, offset: usize) -> Option<roxmltree::Node<'s, 's>> {
+        let top = top_level_at(&self.doc, offset)?;
+        if !super::is_passthrough_container(top) {
+            return Some(top);
+        }
+        Some(
+            top.children()
+                .filter(|c| c.is_element())
+                .find(|c| {
+                    let r = c.range();
+                    r.start <= offset && offset < r.end
+                })
+                .unwrap_or(top),
+        )
+    }
+
+    pub(super) fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
+        self.unit_at(offset).map(|n| {
+            let r = n.range();
+            (r.start, r.end)
+        })
+    }
+
+    /// Compile one unit on its own: byte-identical to its span in its fragment's
+    /// output (the §9 invariant), as a fragment is to its span in the full one.
+    pub(super) fn compile_unit(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<String, String> {
+        let unit = self
+            .unit_at(offset)
+            .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
+        let mut out = String::new();
+        serialize(
+            unit,
+            &mut out,
+            false,
+            &Ctx::new(backend, quality, sourcemap, base, self),
+        );
+        Ok(out)
+    }
+
+    /// The fragment at `offset` plus where each of its units landed in it, in
+    /// output order (restacked when the container restacks). Empty for a
+    /// top-level element that is not a passthrough container: it is its own unit.
+    pub(super) fn compile_fragment_spans(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<(String, Vec<super::UnitSpan>), String> {
+        let node = top_level_at(&self.doc, offset)
+            .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
+        let ctx = Ctx::new(backend, quality, sourcemap, base, self);
+        *ctx.unit_spans.borrow_mut() = Some(Vec::new());
+        let mut out = String::new();
+        serialize(node, &mut out, false, &ctx);
+        let spans = ctx.unit_spans.take().unwrap_or_default();
+        Ok((out, spans))
     }
 
     /// Caret geometry for the `<x:textbox>` starting at byte `offset`. Layout does
@@ -249,10 +319,49 @@ impl<'a> Parsed<'a> {
     /// reported. Seeds are excluded; results are in document order.
     pub(super) fn dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
         let doc = &self.doc;
+        let tops: Vec<roxmltree::Node> = doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .collect();
+        self.dependents_among(seeds, |off| top_level_at(doc, off), tops)
+    }
+
+    /// [`Parsed::dependents`] one level down (docs/Incremental.md §9): seeds and
+    /// results are **units**, so a sibling unit inside the same container that
+    /// bakes a seed's geometry is reported — `<x:offset in="#w">` beside the
+    /// `<x:warp id="w">` it traces, which the top-level scan never sees.
+    pub(super) fn unit_dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
+        let units: Vec<roxmltree::Node> = self
+            .doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .flat_map(|t| {
+                if super::is_passthrough_container(t) {
+                    t.children().filter(|c| c.is_element()).collect::<Vec<_>>()
+                } else {
+                    vec![t]
+                }
+            })
+            .collect();
+        self.dependents_among(seeds, |off| self.unit_at(off), units)
+    }
+
+    /// The transitive closure over compile-time-baked references, among
+    /// `candidates`: the seeds' own candidates (`unit_of`) are excluded, ids they
+    /// define go live, and any candidate baking a live id — or lowering through a
+    /// namespace whose `<x:import>` is a seed — joins and makes its own ids live.
+    fn dependents_among<'s>(
+        &'s self,
+        seeds: &[usize],
+        unit_of: impl Fn(usize) -> Option<roxmltree::Node<'s, 's>>,
+        candidates: Vec<roxmltree::Node<'s, 's>>,
+    ) -> Vec<(usize, usize)> {
         let targets: Vec<roxmltree::Node> = {
             let mut v: Vec<roxmltree::Node> = Vec::new();
             for &off in seeds {
-                if let Some(t) = top_level_at(doc, off) {
+                if let Some(t) = unit_of(off) {
                     if !v.iter().any(|u| u.range() == t.range()) {
                         v.push(t);
                     }
@@ -282,10 +391,9 @@ impl<'a> Parsed<'a> {
         if live.is_empty() && dirty_ns.is_empty() {
             return Vec::new();
         }
-        let tops: Vec<roxmltree::Node> = doc
-            .root_element()
-            .children()
-            .filter(|c| c.is_element() && !targets.iter().any(|t| t.range() == c.range()))
+        let tops: Vec<roxmltree::Node> = candidates
+            .into_iter()
+            .filter(|c| !targets.iter().any(|t| t.range() == c.range()))
             .collect();
         let mut included = vec![false; tops.len()];
         loop {
@@ -399,6 +507,47 @@ impl<'a, P: Host> CompileSession<'a, P> {
             self.sourcemap,
             &self.base,
         )
+    }
+
+    /// Source byte range of the incremental unit containing `offset`
+    /// (docs/Incremental.md §9): a direct child of a top-level passthrough
+    /// container, else the top-level element itself.
+    pub fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
+        self.parsed.unit_range(offset)
+    }
+
+    /// Compile the unit containing `offset` on its own — byte-identical to its
+    /// span in its fragment's output.
+    pub fn compile_unit(&self, offset: usize) -> Result<String, String> {
+        self.parsed.compile_unit(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// The fragment containing `offset` plus where each of its units landed in
+    /// it, in output order; the span list is empty when the top-level element is
+    /// its own unit.
+    pub fn compile_fragment_spans(
+        &self,
+        offset: usize,
+    ) -> Result<(String, Vec<super::UnitSpan>), String> {
+        self.parsed.compile_fragment_spans(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// [`CompileSession::dependents`] at unit granularity: seeds and results are
+    /// unit source ranges, so dependents inside the same container are found.
+    pub fn unit_dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
+        self.parsed.unit_dependents(seeds)
     }
 
     /// Baked-reference dependents of the fragments at `seeds` — the same answer as
