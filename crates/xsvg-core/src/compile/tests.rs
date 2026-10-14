@@ -3786,6 +3786,44 @@ fn text_border_strokes_behind_the_fill() {
 }
 
 #[test]
+fn text_border_lowers_on_plain_svg_text() {
+    // the same lowering on a passthrough <text> and on a <tspan> run: paint only,
+    // nothing to lay out, so nothing about the text's own positioning matters
+    let out = compile_fast(&format!(
+        r##"{XW}<text x="10" y="40" font-size="24" fill="#fff" x:border-width="3" x:border-color="#000">bordered <tspan x:border-color="#f00">red</tspan></text><text x="10" y="80" dx="1 2 3" rotate="5">plain</text></svg>"##
+    ));
+    assert!(
+        out.contains(r##"fill="#fff" stroke="#000" stroke-width="6" paint-order="stroke" stroke-linejoin="round">bordered"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<tspan stroke="#f00" stroke-width="6" paint-order="stroke" stroke-linejoin="round">red"##),
+        "a run's border, width defaulted: {out}"
+    );
+    assert!(
+        !out.contains("border-"),
+        "the x: attributes are consumed: {out}"
+    );
+    // without a border the text is untouched
+    assert!(
+        out.contains(r#"<text x="10" y="80" dx="1 2 3" rotate="5">plain"#),
+        "{out}"
+    );
+    // a border replaces any hand-written stroke — never a duplicate attribute
+    let out = compile_fast(&format!(
+        r##"{XW}<text x="0" y="20" stroke="#0f0" stroke-width="1" paint-order="normal" x:border-width="2">t</text></svg>"##
+    ));
+    assert_eq!(out.matches("stroke=").count(), 1, "{out}");
+    assert_eq!(out.matches("stroke-width=").count(), 1, "{out}");
+    assert_eq!(out.matches("paint-order=").count(), 1, "{out}");
+    assert!(
+        out.contains(r##"stroke="#000000" stroke-width="4""##),
+        "{out}"
+    );
+    roxmltree::Document::parse(&out[out.find("<svg").unwrap()..]).expect("well-formed");
+}
+
+#[test]
 fn external_use_source_map_points_at_the_use_not_the_dependency() {
     // A linked dependency's element ranges index the *dependency* file, not the entry
     // document the viewer maps against — so baked content must carry no data-xsvg-pos,

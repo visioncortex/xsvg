@@ -993,8 +993,11 @@ otherwise hand-tune (double the stroke, push it behind the fill, round the joins
 It compiles to `stroke` / `stroke-width` / `paint-order="stroke"` / `stroke-linejoin="round"` on the
 emitted `<text>` (or on the outlined `<g>` under create-outlines, §6.12). The emitted `stroke-width`
 is **doubled**, because a centered stroke is half-hidden by the fill — so `x:border-width="4"` shows
-`4` units of border. Applies to `<x:textbox>`, `<x:textpath>` (§6.13), and outlined text (§6.12). Any
-raw SVG `stroke*` attributes still pass through unchanged when no `x:border-*` is present.
+`4` units of border. Applies to `<x:textbox>`, `<x:textpath>` (§6.13), `<textArea>`, outlined text
+(§6.12), and plain SVG `<text>`, `<tspan>` and `<textPath>` — where it is paint only, so it needs
+nothing of the text's positioning (a run's own border is its `<tspan>`'s). With `x:border-*`
+present the border **is** the stroke: hand-written `stroke*` and `paint-order` attributes on that
+element are not emitted. Without it they pass through unchanged.
 
 These are **declared** parameters (`describe()` reports them on `<x:textbox>` and `<x:textpath>`),
 so an editing host offers them like any other. They carry their namespace in the declaration:

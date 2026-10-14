@@ -15,7 +15,7 @@ pub(super) fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
         .attribute((XSVG_NS, "border-width"))
         .and_then(parse_num);
     let bc = node.attribute((XSVG_NS, "border-color"));
-    if bw.is_some() || bc.is_some() {
+    if has_text_border(node) {
         let w = bw.unwrap_or(3.0).max(0.0);
         let color = ctx.paint(bc.unwrap_or("#000000"));
         let mut s = format!(
@@ -29,15 +29,7 @@ pub(super) fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
     }
     // Raw passthrough of hand-written stroke attributes.
     let mut s = String::new();
-    for name in [
-        "stroke",
-        "stroke-width",
-        "stroke-linejoin",
-        "stroke-linecap",
-        "stroke-dasharray",
-        "stroke-opacity",
-        "paint-order",
-    ] {
+    for name in RAW_STROKE_ATTRS {
         if let Some(v) = node.attribute(name) {
             s.push_str(&format!(" {name}=\"{}\"", ctx.paint(v)));
         }
@@ -121,6 +113,24 @@ pub(super) fn text_bbox_estimate(node: roxmltree::Node, ctx: &Ctx) -> Option<Rec
         pen.0 += w;
     }
     bb.map(|b| b.inflate(pad, pad))
+}
+
+/// The hand-written stroke attributes a text border (§6.17) replaces: with
+/// `x:border-*` present none of them is emitted, so the border is the stroke.
+pub(super) const RAW_STROKE_ATTRS: [&str; 7] = [
+    "stroke",
+    "stroke-width",
+    "stroke-linejoin",
+    "stroke-linecap",
+    "stroke-dasharray",
+    "stroke-opacity",
+    "paint-order",
+];
+
+/// Whether `node` asks for a text border (§6.17): either `x:border-*` attribute.
+pub(super) fn has_text_border(node: roxmltree::Node) -> bool {
+    node.attribute((XSVG_NS, "border-width")).is_some()
+        || node.attribute((XSVG_NS, "border-color")).is_some()
 }
 
 /// Emit an outlined text group: `<g fill=… stroke=…><path d="…"/>…</g>` — the shared

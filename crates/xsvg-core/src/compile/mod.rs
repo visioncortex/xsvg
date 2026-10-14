@@ -991,12 +991,23 @@ fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root
     if is_root {
         out.push_str(&format!(" xmlns=\"{SVG_NS}\""));
     }
-    match &filter_sub {
-        Some(sub) => {
-            copy_attrs(node, out, &["filter"], ctx);
-            out.push_str(sub);
-        }
-        None => copy_attrs(node, out, &[], ctx),
+    // a border on live SVG text (§6.17) — `<text>`, `<tspan>`, `<textPath>` —
+    // lowers as on a textbox: paint only, nothing to lay out, and it replaces
+    // whatever hand-written stroke the element carries
+    let border = !is_root && matches!(name, "text" | "tspan" | "textPath") && has_text_border(node);
+    let mut skip: Vec<&str> = Vec::new();
+    if filter_sub.is_some() {
+        skip.push("filter");
+    }
+    if border {
+        skip.extend(RAW_STROKE_ATTRS);
+    }
+    copy_attrs(node, out, &skip, ctx);
+    if let Some(sub) = &filter_sub {
+        out.push_str(sub);
+    }
+    if border {
+        out.push_str(&text_border_attrs(node, ctx));
     }
     out.push_str(&pos_attr(node, ctx));
     let backdrop = if is_root {

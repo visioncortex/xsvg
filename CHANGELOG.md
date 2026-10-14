@@ -107,6 +107,11 @@ partial one.
 
 ### Fixed
 
+- **`x:border-*` on plain `<text>`, `<tspan>` and `<textPath>`** lowers to the bordered-text stroke
+  as on a textbox; it was dropped with the other `x:` attributes of passthrough text, so white text
+  meant to sit on a black border rendered as plain white. With a border, the element's own
+  `stroke*` attributes give way to it (§6.17).
+
 - **Drop shadows (and every other `filter` function) on text.** `filter="drop-shadow(…)"` was
   dropped from `<x:textbox>`, copied through unlowered on `<text inline-size>`, and clipped on a
   live `<text>` (the ±50 % fallback region is shorter than a shadow on a single line). Every text
