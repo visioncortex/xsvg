@@ -16,6 +16,14 @@ partial one.
 
 ### Added
 
+- **`overflow="visible"` on `<x:textbox>` and `<textArea>`** — nothing cropped: every line
+  renders where layout placed it (`valign` placement kept, so middle-aligned overflow spills both
+  ways), `text-overflow` has nothing to act on, and curved region flow continues past the shape at
+  its bounding-box width. In editor output the lines a cropping box would drop are stamped
+  `data-xsvg-overflow="1"` (tspans, outline paths, highlight and decoration rects, list markers),
+  and `text_layout` flags them `overflow: true`, so an editor can show a box's hidden text as a
+  ghost while it is edited — through a render override, without writing to the document (§6.6).
+
 - **`text-transform` — render text in capitals (or small letters) whatever case it was typed in.**
   `uppercase` / `lowercase` / `none` on any text element the compiler emits, on `<tspan>` runs, and
   in an `<x:font>` token; it cascades within a text element (box › paragraph › run) like the font

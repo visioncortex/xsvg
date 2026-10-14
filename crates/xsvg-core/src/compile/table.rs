@@ -309,7 +309,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 push_font_attrs(out, &st, layout.font_size, &fill, ctx);
                 out.push('>');
                 for line in &layout.lines {
-                    emit_line(out, line, &st, layout.font_size, 1.0, m, &emits);
+                    emit_line(out, line, &st, layout.font_size, 1.0, m, &emits, ctx);
                 }
                 out.push_str("</text>");
             }

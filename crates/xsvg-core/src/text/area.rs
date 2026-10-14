@@ -147,6 +147,10 @@ pub struct PlacedLine {
     ///
     /// [`Measured`]: super::measure::Measured
     pub words: (usize, usize),
+    /// Under `overflow="visible"` (§6.6): the box would have cropped this line —
+    /// its block position falls outside the content area. Always `false` when
+    /// the box crops, since such lines are dropped instead.
+    pub overflow: bool,
 }
 
 /// Merge a line's pieces into `(full_text, runs)`, coalescing adjacent same-style
@@ -326,6 +330,7 @@ fn place_lines(
             justify_width,
             runs,
             words,
+            overflow: false,
         });
     }
     // a line is kept by its baseline (its block position), not its ink band
@@ -486,6 +491,7 @@ pub fn layout_flow(
                 justify_width: None,
                 runs,
                 words,
+                overflow: false,
             }
         })
         .collect()
@@ -522,6 +528,7 @@ pub fn layout_flow_runs(
                 justify_width: None,
                 runs,
                 words,
+                overflow: false,
             }
         })
         .collect()

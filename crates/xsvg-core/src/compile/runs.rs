@@ -131,16 +131,19 @@ pub(super) fn push_outline_group(
     fill: &str,
     stroke: &str,
     pos: &str,
-    paths: &[String],
+    paths: &[(String, bool)],
     ctx: &Ctx,
 ) {
     // `stroke` is the attribute string text_border_attrs built, values already
-    // resolved and escaped; `fill` is a bare value.
+    // resolved and escaped; `fill` is a bare value. Each path's flag: its line
+    // lies outside a box that shows its overflow (§6.6).
     out.push_str(&format!("<g fill=\"{}\"{stroke}{pos}>", ctx.paint(fill)));
-    for d in paths {
+    for (d, overflow) in paths {
         out.push_str("<path d=\"");
         push_escaped(out, d, true);
-        out.push_str("\"/>");
+        out.push('"');
+        out.push_str(overflow_stamp(*overflow, ctx));
+        out.push_str("/>");
     }
     out.push_str("</g>");
 }

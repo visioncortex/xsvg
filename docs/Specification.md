@@ -387,6 +387,7 @@ Flowed text in a region, per the SVG Tiny 1.2 Recommendation.
 | `text-align` | `start` \| `end` \| `center` \| `justify` | `start` | inline alignment (`justify` extends Tiny 1.2 — §6.9) |
 | `display-align` | `auto` \| `before` \| `center` \| `after` | `auto` (= `before`) | block alignment |
 | `line-increment` | `auto` \| `<number>` | `auto` | line-box height; `auto` = 1.1 × font-size |
+| `overflow` | `hidden` \| `visible` | `hidden` | `visible` renders every line past an explicit `height` (§6.6) |
 
 **Layout.** Wrap to the width (or not, if `auto`). Baselines **step by `line-increment`** (the SVG Tiny
 1.2 line-box height). `display-align` then positions the **cap-height ink band** (§6.5) —
@@ -419,6 +420,7 @@ spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-al
 | `fit` | `none` \| `shrink` | `none` | shrink-to-fit (§6.1) |
 | `transform` | SVG transform list | — | passes through to the element the box lowers to (the `<text>`, or the paragraph `<g>`): glyphs are laid out in the box's own user space, so rotating or scaling the box is this transform, as on a raw `<text>` |
 | `fit-min` | length | 6 | font-size floor for `shrink` |
+| `overflow` | `hidden` \| `visible` | `hidden` | `visible` renders every line, none cropped at the box (§6.6) |
 | `line-height` | number | 1.2 | line advance multiplier |
 | `text-indent` | length | 0 | first-line indent — the first line wraps to `width − indent` and is placed that far in from the start edge; **negative outdents** (a hanging first line). Applies to `start`/`justify` alignment |
 | `direction` | `ltr` \| `rtl` | `ltr` | paragraph direction. Under `rtl` the `start` edge is the RIGHT edge (so `align="start"` right-aligns, `end` left-aligns, the indent insets from the right) and the emitted `<text>` carries `direction="rtl"`, leaving the glyph order of each line's logical string to the renderer's bidi algorithm (wrapping is on logical words either way). An `<x:p>` may set its own (§6.16). **v0:** lists and tables stay left-to-right; inline bidi is the renderer's (deterministic bidi is the Typography roadmap's) |
@@ -442,6 +444,20 @@ Applies to box-bound text (`<textArea>`, `<x:textbox>`); not to point text or `i
 
 - **`text-overflow`** : `clip` *(initial)* | `ellipsis`. Unprefixed (CSS/SVG 2 name). `clip` is the
   default and reproduces SVG Tiny 1.2 behavior.
+- **`overflow`** : `hidden` *(initial for these elements)* | `visible`. Unprefixed (CSS/SVG name).
+  CSS's initial value is `visible`; a box crops by default, as SVG's UA stylesheet hides overflow on
+  the viewport elements. Under **`visible`** nothing is cropped: every line renders where layout
+  placed it — the block keeps its `valign` / `display-align` placement, so middle-aligned overflow
+  spills both ways and bottom-aligned overflow spills upward, and nothing moves when cropping is
+  lifted — and `text-overflow` has nothing to act on, block or inline (no ellipsis), as CSS's
+  `text-overflow` acts only on clipped content. Curved region flow (§6.10) continues past the
+  shape at its bounding-box width. The box itself is unchanged: its frame, `data-xsvg-frame`, and
+  `fit` (which still runs first). In **editor output** (the source map on) each piece of a line
+  that `hidden` would have dropped — its `<tspan>`, its outline `<path>`, its highlight and
+  decoration rects, a list item's marker — carries **`data-xsvg-overflow="1"`**, so an editor
+  can draw it differently (a ghost while the box is edited) without the document saying so;
+  `text_layout` reports the same lines with `overflow: true`. An exported document carries no
+  stamp, and the attribute itself is never copied to the output.
 
 **Overflow axes.** *Block:* more wrapped lines than fit the content height. *Inline:* a line wider
 than the content width (an unbreakable token).

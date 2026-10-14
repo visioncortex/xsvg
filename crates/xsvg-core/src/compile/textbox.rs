@@ -39,7 +39,7 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     for line in &lines {
-        emit_line(out, line, &style, style.size, gx, m, &base);
+        emit_line(out, line, &style, style.size, gx, m, &base, ctx);
     }
     out.push_str("</text>");
 }
@@ -248,7 +248,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             padding: attr_num(node, "padding", 0.0),
             align: Align::parse(node.attribute("align").unwrap_or("start")),
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
-            text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+            text_overflow: overflow_mode(node),
         };
         let layout = layout_region(
             &collect_text_as(node, &style),
@@ -357,25 +357,24 @@ pub(super) fn emit_paragraphs(
         let Some(first) = para.laid.lines.first().map(|l| l.baseline + block_top) else {
             continue;
         };
-        if first < cy - 1e-6 || first > cy + ch + 1e-6 {
+        let outside = first < cy - 1e-6 || first > cy + ch + 1e-6;
+        if outside && spec.text_overflow != TextOverflow::Visible {
             continue; // the item's first row is clipped: no marker
         }
+        let stamp = overflow_stamp(outside, ctx);
         let fm = m.font_metrics(&para.laid.style, para.laid.style.size);
         match &mk.kind {
             super::list::Marker::None => {}
             super::list::Marker::Shape(tok) => {
                 let cyy = first - fm.x_height * 0.5;
-                shapes.push_str(&super::list::shape_marker(
-                    tok,
-                    mk.col,
-                    cyy,
-                    mk.r,
-                    &ctx.paint(&mk.fill),
-                ));
+                shapes.push_str(
+                    &super::list::shape_marker(tok, mk.col, cyy, mk.r, &ctx.paint(&mk.fill))
+                        .replacen("/>", &format!("{stamp}/>"), 1),
+                );
             }
             super::list::Marker::Text(t) => {
                 markers.push_str(&format!(
-                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\" font-size=\"{}\">",
+                    "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\" font-size=\"{}\"{stamp}>",
                     fmt(mk.col),
                     fmt(first),
                     ctx.paint(&mk.fill),
@@ -484,6 +483,7 @@ pub(super) fn emit_paragraphs(
                 gx,
                 m,
                 &para.emits,
+                ctx,
             );
         }
         out.push_str("</text>");
@@ -831,9 +831,38 @@ pub(super) fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) ->
             elements::FitParam::Shrink => Fit::Shrink { min: opts.fit_min },
             elements::FitParam::None => Fit::None,
         },
-        text_overflow: TextOverflow::parse(opts.text_overflow.as_str()),
+        text_overflow: match opts.overflow {
+            elements::OverflowVisibility::Visible => TextOverflow::Visible,
+            elements::OverflowVisibility::Hidden => {
+                TextOverflow::parse(opts.text_overflow.as_str())
+            }
+        },
         text_indent: opts.text_indent,
         rtl: node.attribute("direction") == Some("rtl"),
+    }
+}
+
+/// ` data-xsvg-overflow="1"` on what renders for a line the box would have
+/// cropped (§6.6, `overflow="visible"`) — its `<tspan>`, its outline `<path>`,
+/// its highlight and decoration rects, its list marker — in editor output only
+/// (the source map is on). The compiler only marks; the host chooses the look
+/// (a ghost while editing). An exported document carries no stamp.
+pub(super) fn overflow_stamp(overflow: bool, ctx: &Ctx) -> &'static str {
+    if overflow && ctx.sourcemap.get() {
+        " data-xsvg-overflow=\"1\""
+    } else {
+        ""
+    }
+}
+
+/// The truncation a box's `overflow` / `text-overflow` select (§6.6):
+/// `overflow="visible"` crops nothing, whatever `text-overflow` says — CSS's
+/// `text-overflow` acts only on content the box clips.
+pub(super) fn overflow_mode(node: roxmltree::Node) -> TextOverflow {
+    if node.attribute("overflow").map(str::trim) == Some("visible") {
+        TextOverflow::Visible
+    } else {
+        TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip"))
     }
 }
 
@@ -851,7 +880,7 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         text_align: TextAlign::parse(node.attribute("text-align").unwrap_or("start")),
         display_align: DisplayAlign::parse(node.attribute("display-align").unwrap_or("auto")),
         line_increment: line_increment_attr(node, style.size),
-        text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+        text_overflow: overflow_mode(node),
     };
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
     let outline = node.attribute((XSVG_NS, "outline")) == Some("true");
@@ -914,7 +943,7 @@ pub(super) fn write_area_text(
             };
             match outliner.outline(&line.text, style, layout.font_size, start_x, line.baseline) {
                 Some(d) => {
-                    paths.push(d);
+                    paths.push((d, line.overflow));
                     traced.push((line.text.as_str(), start_x, line.baseline));
                 }
                 None => {
@@ -990,7 +1019,16 @@ pub(super) fn write_area_text(
     }
     out.push('>');
     for line in &layout.lines {
-        emit_line(out, line, style, layout.font_size, glyph_x_scale, m, emits);
+        emit_line(
+            out,
+            line,
+            style,
+            layout.font_size,
+            glyph_x_scale,
+            m,
+            emits,
+            ctx,
+        );
     }
     out.push_str("</text>");
     close_filter_group(out, filter);
@@ -1149,12 +1187,13 @@ pub(super) fn emit_run_backdrops(
                 let base = line.baseline - shift;
                 let rect = |out: &mut String, y: f64, h: f64, color: &str| {
                     out.push_str(&format!(
-                        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+                        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"{}/>",
                         fmt(x),
                         fmt(y),
                         fmt(w),
                         fmt(h),
-                        ctx.paint(color)
+                        ctx.paint(color),
+                        overflow_stamp(line.overflow, ctx)
                     ));
                 };
                 if let Some(color) = a.highlight.as_deref().filter(|_| highlights) {
@@ -1191,6 +1230,7 @@ pub(super) fn emit_run_backdrops(
 /// Emit one line as an outer positioning `<tspan x y>` (carrying the justify
 /// `word-spacing` or the glyph-scale `textLength`) whose children are the line's styled runs — a bare string for base
 /// runs, an inner `<tspan>` with the run's overrides for the rest.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_line(
     out: &mut String,
     line: &PlacedLine,
@@ -1199,11 +1239,13 @@ pub(super) fn emit_line(
     glyph_x_scale: f64,
     m: &dyn Measurer,
     emits: &[EmitAttrs],
+    ctx: &Ctx,
 ) {
     out.push_str(&format!(
-        "<tspan x=\"{}\" y=\"{}\"",
+        "<tspan x=\"{}\" y=\"{}\"{}",
         fmt(line.x),
-        fmt(line.baseline)
+        fmt(line.baseline),
+        overflow_stamp(line.overflow, ctx)
     ));
     if line.justify_width.is_some() {
         // Justification (§6.9): the slack goes into the spaces, as `word-spacing`
@@ -1417,6 +1459,9 @@ pub struct TextLayoutLine {
     /// line was rewritten by `text-overflow="ellipsis"` and carets must not be
     /// mapped through it.
     pub words: (usize, usize),
+    /// The line renders outside its box (§6.6, `overflow="visible"`): a
+    /// cropping box would have dropped it. The editor ghosts what it draws.
+    pub overflow: bool,
 }
 
 /// One paragraph flow of a textbox: the whole box for plain / `in=` boxes,
@@ -1490,7 +1535,7 @@ pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLay
             padding: attr_num(node, "padding", 0.0),
             align: Align::parse(node.attribute("align").unwrap_or("start")),
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
-            text_overflow: TextOverflow::parse(node.attribute("text-overflow").unwrap_or("clip")),
+            text_overflow: overflow_mode(node),
         };
         let text = collect_text_as(node, &style);
         let layout = layout_region(&text, &style, &region, &spec, ctx.m);
@@ -1575,6 +1620,7 @@ pub(super) fn paragraphs_layout_info(
                         + justify_space(l, &para.laid.style, para.laid.style.size, &para.emits, m)
                             .unwrap_or(0.0),
                     words: l.words,
+                    overflow: l.overflow,
                 })
                 .collect();
             let r = para.src.range();
@@ -1631,6 +1677,7 @@ pub(super) fn para_info(
                 word_spacing: style.word_spacing
                     + justify_space(l, style, layout.font_size, emits, m).unwrap_or(0.0),
                 words: l.words,
+                overflow: l.overflow,
             })
             .collect(),
         style: rendered,

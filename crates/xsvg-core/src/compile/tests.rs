@@ -6970,3 +6970,149 @@ fn text_transform_shapes_outlines_layout_and_caret_stops() {
     .unwrap();
     assert!(size.height > one.height, "{size:?} vs {one:?}");
 }
+
+// ---------------------------------------------------------------------------
+// overflow="visible" (§6.6): nothing cropped, the cropped lines stamped
+
+const STAMP: &str = r#"data-xsvg-overflow="1""#;
+
+fn editor(svg: &str) -> String {
+    compile_impl(svg, "balanced", true, &Mono, &BoxShaper, &BoxOutliner).unwrap()
+}
+
+/// A 12-tall box at font-size 10 shows one line of the three this text wraps to.
+fn short_box(extra: &str) -> String {
+    format!(
+        r#"{XW}<x:textbox x="0" y="0" width="60" height="12" font-size="10"{extra}>alpha beta gamma delta epsilon zeta</x:textbox></svg>"#
+    )
+}
+
+#[test]
+fn overflow_visible_renders_every_line_and_stamps_the_cropped_ones() {
+    let lines = |out: &str| out.matches("<tspan x=").count();
+    assert_eq!(lines(&editor(&short_box(""))), 1, "a box crops by default");
+    let out = editor(&short_box(r#" overflow="visible""#));
+    assert_eq!(lines(&out), 3, "{out}");
+    assert_eq!(
+        out.matches(STAMP).count(),
+        2,
+        "the two lines a box would drop: {out}"
+    );
+    assert!(out.contains("zeta"), "{out}");
+    // text-overflow has nothing to act on: no ellipsis, block or inline
+    let out = editor(&short_box(
+        r#" overflow="visible" text-overflow="ellipsis""#,
+    ));
+    assert!(!out.contains('…') && out.contains("zeta"), "{out}");
+    // the stamp is editor output only; the attribute is never copied out
+    let export = compile_impl(
+        &short_box(r#" overflow="visible""#),
+        "balanced",
+        false,
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert_eq!(lines(&export), 3);
+    assert!(
+        !export.contains("data-xsvg-overflow") && !export.contains("overflow="),
+        "{export}"
+    );
+}
+
+#[test]
+fn overflow_visible_keeps_the_valign_placement() {
+    // middle-aligned overflow spills both ways: lines above the box and below
+    let svg = short_box(r#" overflow="visible" valign="middle""#);
+    let tl = text_layout_impl(
+        &svg,
+        svg.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    let ls = &tl.paras[0].lines;
+    assert_eq!(ls.len(), 3);
+    assert!(ls[0].baseline < 0.0 && ls[0].overflow, "{ls:?}");
+    assert!(
+        !ls[1].overflow,
+        "the middle line is the one the box shows: {ls:?}"
+    );
+    assert!(ls[2].baseline > 12.0 && ls[2].overflow, "{ls:?}");
+    // and the same box cropping shows exactly the unflagged line, where it was
+    let hidden = short_box(r#" valign="middle""#);
+    let tl = text_layout_impl(
+        &hidden,
+        hidden.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    assert_eq!(tl.paras[0].lines.len(), 1);
+    assert_eq!(tl.paras[0].lines[0].baseline, ls[1].baseline);
+}
+
+#[test]
+fn overflow_visible_stamps_outlines_backdrops_and_markers() {
+    // outlined: one path per line, the cropped ones stamped
+    let out = editor(&short_box(r#" overflow="visible" outline="true""#));
+    assert_eq!(out.matches("<path").count(), 3, "{out}");
+    assert_eq!(out.matches(STAMP).count(), 2, "{out}");
+    // a highlighted run's rect on a cropped line carries the stamp too
+    let out = editor(&format!(
+        r##"{XW}<x:textbox x="0" y="0" width="60" height="12" font-size="10" overflow="visible">alpha beta gamma <tspan x:highlight="#ff0">delta</tspan></x:textbox></svg>"##
+    ));
+    assert!(
+        out.contains(&format!(r##"fill="#ff0" {STAMP}/>"##)),
+        "{out}"
+    );
+    // paragraph mode: an item below the box keeps its marker, stamped
+    let out = editor(&format!(
+        r#"{XW}<x:textbox x="0" y="0" width="200" height="12" font-size="10" overflow="visible"><x:p>one</x:p><x:list><x:li>two</x:li></x:list></x:textbox></svg>"#
+    ));
+    assert!(out.contains("two"), "{out}");
+    assert!(
+        out.matches(STAMP).count() >= 2,
+        "the item's line and its marker: {out}"
+    );
+    let cropped = editor(&format!(
+        r#"{XW}<x:textbox x="0" y="0" width="200" height="12" font-size="10"><x:p>one</x:p><x:list><x:li>two</x:li></x:list></x:textbox></svg>"#
+    ));
+    assert!(
+        !cropped.contains("two") && !cropped.contains("data-xsvg-overflow"),
+        "{cropped}"
+    );
+}
+
+#[test]
+fn overflow_visible_flows_on_past_a_region_and_a_text_area() {
+    // region flow (the 60×60 BoxShaper region): lines past the shape continue at
+    // its bounding-box width
+    let words = "one two three four five six seven eight nine ten eleven twelve thirteen";
+    let region = |extra: &str| {
+        format!(
+            r##"{XW}<rect id="r" x="0" y="0" width="60" height="60"/><x:textbox in="#r" font-size="10"{extra}>{words}</x:textbox></svg>"##
+        )
+    };
+    let cropped = editor(&region(""));
+    let shown = editor(&region(r#" overflow="visible""#));
+    assert!(
+        !cropped.contains("thirteen") && shown.contains("thirteen"),
+        "{shown}"
+    );
+    assert!(shown.contains(STAMP) && !cropped.contains(STAMP), "{shown}");
+    // <textArea>: its own ink-band rule, the same switch
+    let area = |extra: &str| {
+        format!(
+            r#"{XW}<textArea x="0" y="0" width="60" height="12" font-size="10"{extra}>alpha beta gamma delta epsilon zeta</textArea></svg>"#
+        )
+    };
+    assert!(!editor(&area("")).contains("zeta"));
+    let out = editor(&area(r#" overflow="visible""#));
+    assert!(out.contains("zeta") && out.contains(STAMP), "{out}");
+}

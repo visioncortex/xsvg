@@ -13,7 +13,7 @@ use super::{
     area::{layout_area_runs, Align, Anchor, AreaSpec, Fit, PlacedLine, VAlign},
     measure::Measurer,
     style::TextStyle,
-    truncate::{apply_ellipsis, split_visible, TextOverflow},
+    truncate::{apply_ellipsis, mark_overflow, split_visible, TextOverflow},
 };
 
 /// One block of the stack, resolved and at the scale being tried: its styled
@@ -188,9 +188,12 @@ pub fn clip_paragraphs<'a>(
                 ..l.clone()
             })
             .collect();
-        let (lines, cut) = split_visible(placed, |l| {
-            l.baseline >= cy - 1e-6 && l.baseline <= cy + ch + 1e-6
-        });
+        let inside = |l: &PlacedLine| l.baseline >= cy - 1e-6 && l.baseline <= cy + ch + 1e-6;
+        if overflow == TextOverflow::Visible {
+            per.push(mark_overflow(placed, inside));
+            continue;
+        }
+        let (lines, cut) = split_visible(placed, inside);
         dropped |= cut;
         per.push(lines);
     }

@@ -14,6 +14,11 @@ pub enum TextOverflow {
     Clip,
     /// Mark cut content with an ellipsis on the last/over-long line.
     Ellipsis,
+    /// `overflow="visible"` (§6.6): nothing is cropped or cut — every line
+    /// renders where layout placed it, and the lines a cropping box would have
+    /// dropped carry [`PlacedLine::overflow`]. Not a `text-overflow` keyword:
+    /// `overflow` selects it, overriding `text-overflow` as in CSS.
+    Visible,
 }
 
 impl TextOverflow {
@@ -142,6 +147,21 @@ pub fn split_visible(
     (kept, dropped)
 }
 
+/// Under `overflow="visible"`: every line, each flagged with whether the box's
+/// block rule would have dropped it.
+pub fn mark_overflow(
+    lines: Vec<PlacedLine>,
+    inside: impl Fn(&PlacedLine) -> bool,
+) -> Vec<PlacedLine> {
+    lines
+        .into_iter()
+        .map(|l| PlacedLine {
+            overflow: !inside(&l),
+            ..l
+        })
+        .collect()
+}
+
 /// [`split_visible`] followed by the overflow rule (§6.6): under `ellipsis` the
 /// last line that shows is marked when any was dropped, and any line wider than
 /// `max_width` is cut to fit; under `clip` the remainder is simply gone. One
@@ -156,6 +176,9 @@ pub fn clip_lines(
     size: f64,
     m: &dyn Measurer,
 ) -> Vec<PlacedLine> {
+    if overflow == TextOverflow::Visible {
+        return mark_overflow(lines, inside);
+    }
     let (mut kept, dropped) = split_visible(lines, inside);
     if overflow == TextOverflow::Ellipsis {
         apply_ellipsis(&mut kept, dropped, max_width, style, size, m);

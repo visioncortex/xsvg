@@ -204,6 +204,7 @@ pub fn layout_text_area_runs(
             justify_width,
             runs,
             words,
+            overflow: false,
         });
     }
     // a line is kept by its ink band [cap-top, baseline + descent] (SVG Tiny 1.2),

@@ -229,7 +229,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
             body.push('>');
             for l in &shifted {
-                emit_line(&mut body, l, &it.style, it.size, 1.0, m, &it.emits);
+                emit_line(&mut body, l, &it.style, it.size, 1.0, m, &it.emits, ctx);
             }
             body.push_str("</text>");
         }

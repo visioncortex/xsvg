@@ -295,6 +295,15 @@ pub(super) enum PathAlignParam {
 }
 
 #[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum OverflowVisibility {
+    /// Lines past the box are cropped, then `text-overflow` acts.
+    #[default]
+    Hidden,
+    /// Every line renders, past the box if it must.
+    Visible,
+}
+
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
 pub(super) enum OverflowParam {
     #[default]
     Clip,
@@ -343,6 +352,8 @@ pub(super) struct Textbox {
     pub fit_min: f64,
     #[param(name = "text-overflow")]
     pub text_overflow: OverflowParam,
+    #[param(doc = "visible: every line renders, none cropped at the box")]
+    pub overflow: OverflowVisibility,
     #[param(default = 0.0, min = -400.0, max = 400.0, doc = "first-line indent")]
     pub text_indent: f64,
     #[param(default = false, doc = "bake the glyphs to paths instead of live text")]

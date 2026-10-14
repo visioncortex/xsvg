@@ -264,6 +264,10 @@ whole box, or one `<x:p>` in paragraph mode §6.16), carrying its source byte
 - `text-overflow="ellipsis"` rewrites a line's `text` but not its `words`
   range; `text != words[range].join(" ")` is the truncation test, and carets
   must not be mapped through such a line.
+- Under `overflow="visible"` (Specification §6.6) every line is reported,
+  and `overflow: true` marks the ones a cropping box would have dropped —
+  the lines the editor output stamps `data-xsvg-overflow`. They map like any
+  other line; the flag says how they look, not whether a caret may stand there.
 
 **No drift**: rectangular and paragraph flows share their layout code with
 emission (`plan_paragraphs`, `layout_area_measured`), the dispatch mirrors

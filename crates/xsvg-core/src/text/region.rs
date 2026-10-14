@@ -153,15 +153,26 @@ pub fn layout_region(
         let mut y = start_y;
         let mut dropped = false;
         while i < measured.words.len() {
-            if line_h <= 0.0 || y + line_h > content_bottom + 1e-6 {
+            // past the shape's bottom: dropped, or under `overflow="visible"`
+            // (§6.6) flowed on at the region's bounding-box width and flagged
+            let below = y + line_h > content_bottom + 1e-6;
+            if line_h <= 0.0 || (below && spec.text_overflow != TextOverflow::Visible) {
                 dropped = true;
                 break;
             }
-            let span = region
-                .span(y, y + line_h)
-                .map(|(l, r)| (l.max(content_left), r.min(content_right)))
-                .filter(|(l, r)| r - l > 1e-6);
+            let span = if below {
+                Some((content_left, content_right))
+            } else {
+                region
+                    .span(y, y + line_h)
+                    .map(|(l, r)| (l.max(content_left), r.min(content_right)))
+            }
+            .filter(|(l, r)| r - l > 1e-6);
             let Some((l, r)) = span else {
+                if below {
+                    dropped = true; // no width to flow into at all
+                    break;
+                }
                 y += line_h; // band too narrow here — try the next one down
                 continue;
             };
@@ -180,6 +191,7 @@ pub fn layout_region(
                 justify_width: None,
                 runs,
                 words: (i, next),
+                overflow: below,
             });
             widths.push(r - l);
             i = next;

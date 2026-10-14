@@ -113,7 +113,7 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
                 // the baked glyphs are the exact region
                 let filter = lower_filter_attr(node, out, ctx, || svg_path_bbox(&d));
                 open_filter_group(out, filter.as_deref());
-                push_outline_group(out, fill, &stroke, &pos, &[d], ctx);
+                push_outline_group(out, fill, &stroke, &pos, &[(d, false)], ctx);
                 close_filter_group(out, filter.as_deref());
                 return;
             }
