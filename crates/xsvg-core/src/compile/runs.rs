@@ -11,21 +11,13 @@ use super::*;
 /// visible outside each glyph (the emitted `stroke-width` is doubled, since the fill covers
 /// the inner half). Otherwise raw SVG stroke attributes pass through unchanged.
 pub(super) fn text_border_attrs(node: roxmltree::Node, ctx: &Ctx) -> String {
-    let bw = node
-        .attribute((XSVG_NS, "border-width"))
-        .and_then(parse_num);
-    let bc = node.attribute((XSVG_NS, "border-color"));
     if has_text_border(node) {
-        let w = bw.unwrap_or(3.0).max(0.0);
-        let color = ctx.paint(bc.unwrap_or("#000000"));
-        let mut s = format!(
-            " stroke=\"{color}\" stroke-width=\"{}\" paint-order=\"stroke\" stroke-linejoin=\"round\"",
-            fmt(w * 2.0)
+        return border_attrs(
+            node.attribute((XSVG_NS, "border-width")),
+            node.attribute((XSVG_NS, "border-color")),
+            node.attribute((XSVG_NS, "border-opacity")),
+            ctx,
         );
-        if let Some(op) = node.attribute((XSVG_NS, "border-opacity")) {
-            s.push_str(&format!(" stroke-opacity=\"{}\"", esc(op)));
-        }
-        return s;
     }
     // Raw passthrough of hand-written stroke attributes.
     let mut s = String::new();
@@ -113,6 +105,27 @@ pub(super) fn text_bbox_estimate(node: roxmltree::Node, ctx: &Ctx) -> Option<Rec
         pen.0 += w;
     }
     bb.map(|b| b.inflate(pad, pad))
+}
+
+/// The bordered-text stroke (§6.17) for an `x:border-width` / `x:border-color` /
+/// `x:border-opacity` triple — each value resolved by the caller, which may
+/// have inherited it attribute by attribute (a textpath's runs, §6.13).
+pub(super) fn border_attrs(
+    width: Option<&str>,
+    color: Option<&str>,
+    opacity: Option<&str>,
+    ctx: &Ctx,
+) -> String {
+    let w = width.and_then(parse_num).unwrap_or(3.0).max(0.0);
+    let color = ctx.paint(color.unwrap_or("#000000"));
+    let mut s = format!(
+        " stroke=\"{color}\" stroke-width=\"{}\" paint-order=\"stroke\" stroke-linejoin=\"round\"",
+        fmt(w * 2.0)
+    );
+    if let Some(op) = opacity {
+        s.push_str(&format!(" stroke-opacity=\"{}\"", esc(op)));
+    }
+    s
 }
 
 /// The hand-written stroke attributes a text border (§6.17) replaces: with

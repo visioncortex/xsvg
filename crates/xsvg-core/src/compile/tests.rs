@@ -7154,3 +7154,168 @@ fn overflow_visible_flows_on_past_a_region_and_a_text_area() {
     let out = editor(&area(r#" overflow="visible""#));
     assert!(out.contains("zeta") && out.contains(STAMP), "{out}");
 }
+
+// ---------------------------------------------------------------------------
+// Paint runs on text on a path (§6.13): fill and border per <tspan>
+
+fn tp(effect: &str, body: &str) -> String {
+    format!(
+        r##"{XW}<path id="p" d="M0,50 L300,50"/><x:textpath in="#p" effect="{effect}" font-size="10">{body}</x:textpath></svg>"##
+    )
+}
+
+const RUNS: &str =
+    r##"skew<tspan fill="#f00">red</tspan> <tspan x:border-color="#00f">blue</tspan>"##;
+
+#[test]
+fn textpath_outlines_each_paint_run_at_its_pen_position() {
+    let out = compile_impl(
+        &tp("skew", RUNS),
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    // one piece per painted stretch (the lone space draws nothing), each traced
+    // where the whole string puts it — BoxOutliner advances 5 per character —
+    // in two layers: every border, then every fill
+    let glyphs = &out[out.find("<g").unwrap()..];
+    assert!(
+        glyphs.starts_with(r##"<g fill="#000"><g fill="none"><path d="M40,50"##),
+        "the border layer first, holding only the bordered run: {out}"
+    );
+    let borders = &glyphs[..glyphs.find("</g>").unwrap()];
+    assert_eq!(borders.matches("<path").count(), 1, "{out}");
+    assert!(
+        borders.contains(r##"stroke="#00f" stroke-width="6""##),
+        "{out}"
+    );
+    let fills: Vec<&str> = glyphs[glyphs.find("</g>").unwrap()..]
+        .split("<path d=\"")
+        .skip(1)
+        .collect();
+    assert_eq!(fills.len(), 3, "{out}");
+    assert!(
+        fills[0].starts_with("M0,50") && !fills[0].contains("fill="),
+        "{out}"
+    );
+    assert!(
+        fills[1].starts_with("M20,50") && fills[1].contains(r##"fill="#f00""##),
+        "{out}"
+    );
+    assert!(
+        fills[2].starts_with("M40,50") && !fills[2].contains("stroke"),
+        "{out}"
+    );
+    // the stops still cover the whole string, one per character and the end
+    let svg = tp("rainbow", RUNS);
+    let off = svg.find("<x:textpath").unwrap();
+    let stops = caret_stops_impl(&svg, off, "balanced", &Mono, &NoShaper, &BoxOutliner).unwrap();
+    assert_eq!(stops.runs[0].text, "skewred blue");
+    assert_eq!(stops.runs[0].stops.len(), 13);
+}
+
+#[test]
+fn textpath_run_borders_inherit_attribute_by_attribute() {
+    // the element's border is every run's; a run naming only a colour keeps
+    // the element's width, and a fill-only run keeps the element's border whole
+    let svg = tp("skew", RUNS).replace(
+        r#"font-size="10">"#,
+        r##"font-size="10" x:border-width="2" x:border-color="#000">"##,
+    );
+    let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap();
+    let borders = &out[out.find(r#"<g fill="none">"#).unwrap()..];
+    let borders = &borders[..borders.find("</g>").unwrap()];
+    assert_eq!(
+        borders.matches("<path").count(),
+        3,
+        "every piece is bordered: {out}"
+    );
+    assert_eq!(
+        borders
+            .matches(r##"stroke="#000" stroke-width="4""##)
+            .count(),
+        2,
+        "{out}"
+    );
+    assert!(
+        borders.contains(r##"stroke="#00f" stroke-width="4""##),
+        "the run's colour, the element's width: {out}"
+    );
+    // nothing on the outer group strokes over the fills
+    assert!(
+        !out[out.find("<g").unwrap()..].starts_with(r##"<g fill="#000" stroke"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn textpath_live_effects_keep_paint_runs_as_tspans() {
+    // follow: the runs ride inside SVG's own <textPath>; the element's border
+    // reaches the live <text> too
+    let out = compile_fast(&tp("follow", RUNS).replace(
+        r#"font-size="10">"#,
+        r##"font-size="10" x:border-width="2">"##,
+    ));
+    assert!(
+        out.contains(r##"stroke="#000000" stroke-width="4""##),
+        "the element's border on the <text>: {out}"
+    );
+    assert!(
+        out.contains(
+            r##">skew<tspan fill="#f00">red</tspan> <tspan stroke="#00f" stroke-width="4""##
+        ),
+        "a run restates only a border that differs, its width inherited: {out}"
+    );
+    // stair: the <text>'s per-glyph lists position characters inside the runs;
+    // edge whitespace trims across them
+    let out = compile_fast(&tp("stair", &format!("  {RUNS}  ")));
+    assert!(
+        out.contains(r##">skew<tspan fill="#f00">red</tspan> <tspan"##),
+        "{out}"
+    );
+    assert!(out.contains(">blue</tspan></text>"), "{out}");
+    let xs = out
+        .split(" x=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert_eq!(xs.split(' ').count(), "skewred blue".len(), "{out}");
+}
+
+#[test]
+fn textpath_typography_runs_stay_one_run() {
+    // weight, size, family: the element's for every run — no tspan, and the
+    // output is the unstyled element's byte for byte
+    let plain = compile_impl(
+        &tp("skew", "skew red"),
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    let typo = compile_impl(
+        &tp(
+            "skew",
+            r#"skew <tspan font-weight="700" font-size="30">red</tspan>"#,
+        ),
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert_eq!(plain, typo);
+    let follow = compile_fast(&tp(
+        "follow",
+        r#"skew <tspan font-weight="700">red</tspan>"#,
+    ));
+    assert!(follow.contains(">skew red</textPath>"), "{follow}");
+}

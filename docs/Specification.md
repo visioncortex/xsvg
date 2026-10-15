@@ -726,7 +726,16 @@ of per-point, on live `<text>` (§6.13.3).
 - **`start`** — an absolute head-start (user units) added after `align`: x units under skew, arc
   length under rainbow (default `0`).
 - Standard text attributes apply: `font-*`, `fill`, `stroke*` (the emitted outline carries them, §6.12),
-  `letter-spacing`, `word-spacing`.
+  `letter-spacing`, `word-spacing`, the border (§6.17) on every effect, `text-transform` (§6.18).
+- **Paint runs.** A `<tspan>` may repaint part of the run: its `fill` and its border
+  (`x:border-width` / `x:border-color` / `x:border-opacity`, each inherited from the enclosing
+  `<tspan>` or the element when the run does not set it). Paint only — the run's **typography** stays
+  the element's (`font-*` and `font-size` on a `<tspan>` are ignored), since paint moves no glyph: the
+  run is shaped and placed exactly as without runs. Outlined effects trace each painted stretch at its
+  pen position in the whole string (kerning across the boundary kept) and bend it by the same field,
+  one `<path>` per stretch; with a border in play the pieces paint in **two layers**, every border and
+  then every fill, so a run's border never covers its neighbour's glyphs. Live effects (`follow`,
+  `stair`, the straight fallback) write the stretches as `<tspan>`s carrying their paint.
 - **Single line only** — a path is a 1-D track, so `inline-size`/wrapping do not apply; a run longer than
   the path's x-extent is clipped at the end.
 

@@ -16,6 +16,12 @@ partial one.
 
 ### Added
 
+- **Paint runs on text on a path.** A `<tspan>` inside `<x:textpath>` now repaints its stretch —
+  its `fill` and its border (`x:border-*`, inherited attribute by attribute from the element) — on
+  every effect; the run's typography stays the element's, so nothing moves. Outlined effects emit one
+  path per stretch, traced where the whole string puts it, all borders behind all fills. Also: the
+  element's own border now reaches live `follow` / `stair` text, where it was dropped (§6.13).
+
 - **`overflow="visible"` on `<x:textbox>` and `<textArea>`** — nothing cropped: every line
   renders where layout placed it (`valign` placement kept, so middle-aligned overflow spills both
   ways), `text-overflow` has nothing to act on, and curved region flow continues past the shape at
