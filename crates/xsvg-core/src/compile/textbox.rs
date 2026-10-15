@@ -6,7 +6,32 @@
 use super::*;
 use crate::text::fit::bisect_fit;
 
+/// A curved region flow's layout (§6.10) and its run table: styled `<tspan>`s
+/// flow as runs (§6.11) — paint, typography, highlights — and text without any
+/// takes the single-style path it always has.
+fn region_layout(
+    node: roxmltree::Node,
+    style: &TextStyle,
+    region: &dyn crate::Region,
+    spec: &RegionSpec,
+    m: &dyn Measurer,
+) -> (AreaLayout, Vec<EmitAttrs>) {
+    let (segments, styles, emits) = collect_runs(node, style);
+    if emits.len() > 1 {
+        (
+            layout_region_runs(&segments, &styles, region, spec, m),
+            emits,
+        )
+    } else {
+        let text = collect_text_as(node, style);
+        (layout_region(&text, style, region, spec, m), emits)
+    }
+}
+
 /// `<text inline-size="W">…</text>` → `<text>` with one `<tspan>` per wrapped line.
+/// Styled `<tspan>`s flow as runs (§6.11), their highlights and decorations
+/// baked behind the text as in a box; text without any takes the single-style
+/// flow it always has.
 pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let m = ctx.m;
     let style = style_from(node, ctx);
@@ -14,13 +39,53 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     let y = attr_num(node, "y", 0.0);
     let max_w = attr_num(node, "inline-size", 0.0);
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
-    let lines = layout_flow(&collect_text_as(node, &style), &style, x, y, max_w, m);
-    let base = [EmitAttrs::default()];
+    let (segments, styles, emits) = collect_runs(node, &style);
+    let lines = if emits.len() > 1 {
+        // each forced flow wraps alone; the next starts one advance below the
+        // last line of the one before
+        let mut lines: Vec<PlacedLine> = Vec::new();
+        let mut first = y;
+        for flow in split_flows(&segments) {
+            let mut ls = layout_flow_runs(&flow, &styles, x, first, max_w, m);
+            if ls.is_empty() {
+                ls.push(PlacedLine {
+                    text: String::new(),
+                    x,
+                    baseline: first,
+                    size: style.size,
+                    justify_width: None,
+                    runs: Vec::new(),
+                    words: (0, 0),
+                    overflow: false,
+                });
+            }
+            let last = ls.last().expect("one line at least");
+            first = last.baseline + last.size * style.line_height;
+            lines.extend(ls);
+        }
+        lines
+    } else {
+        layout_flow(&collect_text_as(node, &style), &style, x, y, max_w, m)
+    };
 
     let anchor = node.attribute("text-anchor").unwrap_or("start");
     let filter = lower_filter_attr(node, out, ctx, || {
-        lines_bbox(&lines, anchor, false, &style, style.size, &base, m)
+        lines_bbox(&lines, anchor, false, &style, style.size, &emits, m)
     });
+    // a run's highlight and decoration bake behind the text, as in a box
+    emit_run_backdrops(
+        out,
+        &lines,
+        anchor,
+        false,
+        &style,
+        style.size,
+        node.attribute("fill").unwrap_or("#000"),
+        &emits,
+        Backdrops::All,
+        m,
+        ctx,
+    );
     out.push_str("<text");
     copy_attrs(
         node,
@@ -39,7 +104,7 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
     for line in &lines {
-        emit_line(out, line, &style, style.size, gx, m, &base, ctx);
+        emit_line(out, line, &style, style.size, gx, m, &emits, ctx);
     }
     out.push_str("</text>");
 }
@@ -250,15 +315,8 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
             text_overflow: overflow_mode(node),
         };
-        let layout = layout_region(
-            &collect_text_as(node, &style),
-            &style,
-            &region,
-            &spec,
-            ctx.m,
-        );
-        let base = [EmitAttrs::default()];
-        let filter = lower_text_filter(node, &layout, &style, &base, out, ctx);
+        let (layout, emits) = region_layout(node, &style, &region, &spec, ctx.m);
+        let filter = lower_text_filter(node, &layout, &style, &emits, out, ctx);
         write_area_text(
             out,
             &layout,
@@ -267,7 +325,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             &stroke,
             gx,
             ctx.m,
-            &base,
+            &emits,
             &pos,
             span_of(node),
             outline,
@@ -1598,14 +1656,16 @@ pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLay
             valign: VAlign::parse(node.attribute("valign").unwrap_or("top")),
             text_overflow: overflow_mode(node),
         };
-        let text = collect_text_as(node, &style);
-        let layout = layout_region(&text, &style, &region, &spec, ctx.m);
+        let (layout, emits) = region_layout(node, &style, &region, &spec, ctx.m);
         let b = crate::Region::bounds(&region);
         let pad = spec.padding;
-        let words: Vec<String> = text.split_whitespace().map(str::to_string).collect();
+        let words: Vec<String> = collect_text_as(node, &style)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         return Some(TextLayout {
             content: (b.x + pad, b.y + pad, b.w - 2.0 * pad, b.h - 2.0 * pad),
-            paras: vec![para_info(node, &style, &layout, words, &[], ctx.m)],
+            paras: vec![para_info(node, &style, &layout, words, &emits, ctx.m)],
         });
     }
 

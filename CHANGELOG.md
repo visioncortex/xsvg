@@ -16,6 +16,11 @@ partial one.
 
 ### Added
 
+- **Runs in curved region flow and `<text inline-size>`.** Both flattened their `<tspan>`s to the
+  base style, losing fill and border along with weight, size and family. They now flow styled runs
+  like a box — highlights and decorations baked behind `<text inline-size>`, an outlined region flow
+  traced run by run — and text without runs compiles byte-identically (§6.11).
+
 - **A run's border, and outlined runs' paint.** `x:border-*` on a `<tspan>` in `<x:textbox>`,
   `<textArea>`, a paragraph, list item or table cell now borders that run — each attribute it leaves
   out inherited from the enclosing run or the box, so a run naming only a colour keeps the box's

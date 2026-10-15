@@ -7427,3 +7427,65 @@ fn outlined_box_runs_trace_their_paint_in_two_layers() {
         "{warped}"
     );
 }
+
+#[test]
+fn inline_size_text_flows_its_runs() {
+    let out = compile_fast(&format!(
+        r##"{XW}<text x="0" y="20" inline-size="300" font-size="10">plain <tspan fill="#f00">red</tspan> <tspan x:border-color="#00f">blue</tspan> <tspan x:highlight="#ff0" font-weight="700">marked</tspan></text></svg>"##
+    ));
+    assert!(out.contains(r##"<tspan fill="#f00">red</tspan>"##), "{out}");
+    assert!(
+        out.contains(r##"<tspan stroke="#00f" stroke-width="6""##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<tspan font-weight="700">marked</tspan>"##),
+        "typography too: {out}"
+    );
+    // the highlight bakes behind the text, as in a box
+    let rect = out.find(r##"<rect"##).unwrap_or_else(|| panic!("{out}"));
+    assert!(
+        rect < out.find("<text").unwrap() && out.contains(r##"fill="#ff0""##),
+        "{out}"
+    );
+    assert!(!out.contains("x:") && !out.contains("highlight="), "{out}");
+}
+
+#[test]
+fn region_flow_paints_its_runs_live_and_outlined() {
+    let svg = format!(
+        r##"{XW}<rect id="r" x="0" y="0" width="60" height="60"/><x:textbox in="#r" font-size="10">aa <tspan fill="#f00">bb</tspan> <tspan x:border-color="#00f">cc</tspan></x:textbox></svg>"##
+    );
+    let live = compile_impl(&svg, "balanced", false, &Mono, &BoxShaper, &NoOutliner).unwrap();
+    assert!(
+        live.contains(r##"<tspan fill="#f00">bb</tspan>"##),
+        "{live}"
+    );
+    assert!(live.contains(r##"<tspan stroke="#00f""##), "{live}");
+    // the editor's layout seam reports the same line, its runs intact
+    let tl = text_layout_impl(
+        &svg,
+        svg.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &BoxShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    assert_eq!(tl.paras[0].lines[0].text, "aa bb cc");
+    // outlined: one piece per painted stretch, two layers
+    let out = compile_impl(
+        &svg.replace(r#"font-size="10">"#, r#"font-size="10" outline="true">"#),
+        "balanced",
+        false,
+        &Mono,
+        &BoxShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert!(out.contains(r#"<g fill="none">"#), "{out}");
+    assert!(
+        out.contains(r##"fill="#f00""##) && out.contains(r##"stroke="#00f""##),
+        "{out}"
+    );
+}

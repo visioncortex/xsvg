@@ -651,11 +651,16 @@ wins). `<tbreak/>` still breaks across runs.
 nested `<tspan>` carrying only the attributes that differ from the base `<text>`. So a plain paragraph
 emits exactly as before (no nested spans). Ellipsis truncates from the last run inward.
 
-**v0 limits.** Styled runs apply to the rectangular box front-ends (`<textArea>`, `<x:textbox>` — incl.
-`in="#rect"`); curved-shape region flow (§6.10) and `<text inline-size>` flatten runs to the base
-style. A `<textArea>` measures runs at their sizes but steps by `line-increment` regardless (SVG Tiny
-semantics); only `<x:textbox>` (and its paragraphs) steps mixed sizes per line. Per-run `stroke` is
-future work.
+**Where.** Styled runs apply on every laid-out text front-end: `<textArea>`, `<x:textbox>` (incl.
+`in="#rect"`, its paragraphs and lists), curved-shape region flow (§6.10), and `<text inline-size>`
+(each `<tbreak/>` starting a new flow one advance below the last); `<x:list>` items and `<x:table>`
+cells; and — paint only — `<x:textpath>` (§6.13) and outlined text (§6.12). Highlights and
+decorations bake behind `<text inline-size>` as behind a box.
+
+**v0 limits.** A `<textArea>` measures runs at their sizes but steps by `line-increment` regardless (SVG
+Tiny semantics), and curved region flow samples its rows at the base line height; only `<x:textbox>`
+(and its paragraphs) steps mixed sizes per line. A run's hand-written `stroke*` is not lowered — its
+border is the run-level stroke.
 
 ### 6.12 Create outlines — `outline="true"` [implemented]
 

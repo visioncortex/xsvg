@@ -10,7 +10,7 @@
 //! browser); tests use analytic regions or browser-generated raster fixtures.
 
 use super::area::{merge_pieces, Align, AreaLayout, PlacedLine, VAlign};
-use super::measure::{line_advance, measure_words, Measurer};
+use super::measure::{line_advance, measure_runs, measure_words, Measured, Measurer};
 use super::style::TextStyle;
 use super::truncate::{ellipsize_placed, TextOverflow};
 use super::wrap::fill_line;
@@ -131,6 +131,36 @@ pub fn layout_region(
     spec: &RegionSpec,
     m: &dyn Measurer,
 ) -> AreaLayout {
+    layout_region_measured(&measure_words(text, style, m), style, region, spec, m)
+}
+
+/// [`layout_region`] over styled segments (§6.11): words measured in their runs'
+/// styles, each line's [`PlacedLine::runs`] keeping the run boundaries, so the
+/// emitter paints them as a box's runs. Rows still step by the BASE line height
+/// (`styles[0]`): a curved region's rows are sampled at one pitch.
+pub fn layout_region_runs(
+    segments: &[(String, usize)],
+    styles: &[TextStyle],
+    region: &dyn Region,
+    spec: &RegionSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
+    layout_region_measured(
+        &measure_runs(segments, styles, m),
+        &styles[0],
+        region,
+        spec,
+        m,
+    )
+}
+
+fn layout_region_measured(
+    measured: &Measured,
+    style: &TextStyle,
+    region: &dyn Region,
+    spec: &RegionSpec,
+    m: &dyn Measurer,
+) -> AreaLayout {
     let b = region.bounds();
     let pad = spec.padding;
     let content_top = b.y + pad;
@@ -141,7 +171,6 @@ pub fn layout_region(
     let size = style.size;
     let line_h = size * style.line_height;
     let fm = m.font_metrics(style, size);
-    let measured = measure_words(text, style, m);
     let anchor = spec.align.anchor();
 
     // One flow pass starting at `start_y`; returns placed lines, their span widths,
@@ -176,7 +205,7 @@ pub fn layout_region(
                 y += line_h; // band too narrow here — try the next one down
                 continue;
             };
-            let (pieces, next) = fill_line(&measured, i, r - l, 1.0);
+            let (pieces, next) = fill_line(measured, i, r - l, 1.0);
             let (text, runs) = merge_pieces(pieces);
             let ax = match spec.align {
                 Align::Center => (l + r) / 2.0,
