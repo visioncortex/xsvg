@@ -16,6 +16,13 @@ partial one.
 
 ### Added
 
+- **A run's border, and outlined runs' paint.** `x:border-*` on a `<tspan>` in `<x:textbox>`,
+  `<textArea>`, a paragraph, list item or table cell now borders that run — each attribute it leaves
+  out inherited from the enclosing run or the box, so a run naming only a colour keeps the box's
+  width (§6.11). An outlined box (`outline="true"`, warped or not) honours its runs' fill and border:
+  a painted line is traced run by run where the whole line puts each piece, all borders behind all
+  fills (§6.12). Typography still stays the box's; unpainted boxes compile byte-identically.
+
 - **Paint runs on text on a path.** A `<tspan>` inside `<x:textpath>` now repaints its stretch —
   its `fill` and its border (`x:border-*`, inherited attribute by attribute from the element) — on
   every effect; the run's typography stays the element's, so nothing moves. Outlined effects emit one

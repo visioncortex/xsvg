@@ -931,6 +931,13 @@ pub(super) fn write_area_text(
         let mut paths = Vec::new();
         let mut traced = Vec::new(); // (text, start_x, baseline) of each traced line
         let mut ok = true;
+        // a run's paint — its fill, its border — splits its line into pieces
+        // (§6.12); its typography does not: the line keeps the box's style
+        let painted = |l: &PlacedLine| {
+            l.runs
+                .iter()
+                .any(|r| emits.get(r.style).is_some_and(EmitAttrs::paints))
+        };
         for line in &layout.lines {
             if line.text.is_empty() {
                 continue; // blank line (e.g. from <tbreak/>) → nothing to trace
@@ -941,16 +948,26 @@ pub(super) fn write_area_text(
                 Anchor::Middle => line.x - w / 2.0,
                 Anchor::End => line.x - w,
             };
-            match outliner.outline(&line.text, style, layout.font_size, start_x, line.baseline) {
-                Some(d) => {
-                    paths.push((d, line.overflow));
-                    traced.push((line.text.as_str(), start_x, line.baseline));
-                }
-                None => {
-                    ok = false;
-                    break;
-                }
+            let traced_ok = if painted(line) {
+                trace_runs(line, style, layout.font_size, start_x, emits, outliner, ctx)
+                    .map(|pieces| paths.extend(pieces))
+            } else {
+                outliner
+                    .outline(&line.text, style, layout.font_size, start_x, line.baseline)
+                    .map(|d| {
+                        paths.push(PaintedPath {
+                            d,
+                            fill: None,
+                            border: None,
+                            overflow: line.overflow,
+                        })
+                    })
+            };
+            if traced_ok.is_none() {
+                ok = false;
+                break;
             }
+            traced.push((line.text.as_str(), start_x, line.baseline));
         }
         if ok {
             // a caret_stops query is listening: the stops of each traced line, at
@@ -967,7 +984,13 @@ pub(super) fn write_area_text(
                 }
             }
             open_filter_group(out, filter);
-            push_outline_group(out, fill, stroke, pos, &paths, ctx);
+            if paths.iter().any(|p| p.fill.is_some() || p.border.is_some()) {
+                push_painted_paths(out, &paths, fill, stroke, pos, ctx);
+            } else {
+                let paths: Vec<(String, bool)> =
+                    paths.into_iter().map(|p| (p.d, p.overflow)).collect();
+                push_outline_group(out, fill, stroke, pos, &paths, ctx);
+            }
             close_filter_group(out, filter);
             return;
         }
@@ -1032,6 +1055,41 @@ pub(super) fn write_area_text(
     }
     out.push_str("</text>");
     close_filter_group(out, filter);
+}
+
+/// An outlined line's runs traced one by one (§6.12): each at its pen position
+/// in the whole line — the line's own `advances`, so kerning across a run
+/// boundary is kept and the pieces sit where one trace would put them — with
+/// the paint it overrides. Whitespace-only runs draw nothing and are skipped.
+/// `None` when the outliner declines any of it; the caller degrades.
+#[allow(clippy::too_many_arguments)]
+fn trace_runs(
+    line: &PlacedLine,
+    style: &TextStyle,
+    size: f64,
+    start_x: f64,
+    emits: &[EmitAttrs],
+    outliner: &dyn GlyphOutliner,
+    ctx: &Ctx,
+) -> Option<Vec<PaintedPath>> {
+    let adv = outliner.advances(&line.text, style, size)?;
+    let mut pieces = Vec::new();
+    let mut at = 0usize;
+    for r in &line.runs {
+        let n = r.text.chars().count();
+        if !r.text.trim().is_empty() {
+            let x = start_x + if at == 0 { 0.0 } else { *adv.get(at - 1)? };
+            let a = emits.get(r.style);
+            pieces.push(PaintedPath {
+                d: outliner.outline(&r.text, style, size, x, line.baseline)?,
+                fill: a.and_then(|a| a.fill.clone()),
+                border: a.and_then(|a| a.border.as_ref()).map(|b| b.attrs(ctx)),
+                overflow: line.overflow,
+            });
+        }
+        at += n;
+    }
+    Some(pieces)
 }
 
 /// How far a `baseline-shift` value raises a run, in user units (positive = up).
@@ -1299,6 +1357,9 @@ pub(super) fn emit_line(
                         out.push_str(&format!(" font-size=\"{}\"", fmt(s * scale)));
                     }
                     emit_attr(out, "baseline-shift", &a.shift);
+                    if let Some(b) = &a.border {
+                        out.push_str(&b.attrs(ctx));
+                    }
                     out.push('>');
                     push_escaped(out, &run.text, false);
                     out.push_str("</tspan>");

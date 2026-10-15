@@ -128,6 +128,69 @@ pub(super) fn border_attrs(
     s
 }
 
+/// One traced piece of outlined text (§6.12, §6.13): a run's glyphs, with the
+/// paint it overrides — its fill, and its border's stroke attributes where they
+/// differ from the element's — and whether its line lies outside a box that
+/// shows its overflow (§6.6).
+pub(super) struct PaintedPath {
+    pub(super) d: String,
+    pub(super) fill: Option<String>,
+    pub(super) border: Option<String>,
+    pub(super) overflow: bool,
+}
+
+/// Outlined text split into painted pieces, one `<g>` keyed as the element.
+/// Without a border in play the pieces are one layer of paths, each overriding
+/// the group's fill. With one — the element's (`stroke`) or a run's — they
+/// paint in TWO layers, every border and then every fill: the order one path
+/// gives. Stroked one after another, a later piece's border would cover the
+/// edge of the glyph before it.
+pub(super) fn push_painted_paths(
+    out: &mut String,
+    pieces: &[PaintedPath],
+    fill: &str,
+    stroke: &str,
+    pos: &str,
+    ctx: &Ctx,
+) {
+    let path = |out: &mut String, p: &PaintedPath, attrs: &str| {
+        out.push_str("<path d=\"");
+        push_escaped(out, &p.d, true);
+        out.push('"');
+        out.push_str(attrs);
+        out.push_str(overflow_stamp(p.overflow, ctx));
+        out.push_str("/>");
+    };
+    let fill_of = |p: &PaintedPath| {
+        p.fill
+            .as_deref()
+            .map(|f| format!(" fill=\"{}\"", ctx.paint(f)))
+            .unwrap_or_default()
+    };
+    if stroke.is_empty() && pieces.iter().all(|p| p.border.is_none()) {
+        out.push_str(&format!("<g fill=\"{}\"{pos}>", ctx.paint(fill)));
+        for p in pieces {
+            path(out, p, &fill_of(p));
+        }
+        out.push_str("</g>");
+        return;
+    }
+    out.push_str(&format!("<g fill=\"{}\"{pos}>", ctx.paint(fill)));
+    out.push_str(&format!("<g fill=\"none\"{stroke}>"));
+    for p in pieces {
+        match &p.border {
+            Some(b) => path(out, p, b),
+            None if !stroke.is_empty() => path(out, p, ""),
+            None => {}
+        }
+    }
+    out.push_str("</g>");
+    for p in pieces {
+        path(out, p, &fill_of(p));
+    }
+    out.push_str("</g>");
+}
+
 /// The hand-written stroke attributes a text border (§6.17) replaces: with
 /// `x:border-*` present none of them is emitted, so the border is the stroke.
 pub(super) const RAW_STROKE_ATTRS: [&str; 7] = [
@@ -293,6 +356,11 @@ pub(super) struct EmitAttrs {
     /// word-processor highlighter). SVG text has no background, so it bakes
     /// to a `<rect>` per run per line BEHIND the `<text>`; never a tspan attr.
     pub(super) highlight: Option<String>,
+    /// A run's own border (§6.17): set when a `<tspan>` on its chain names any
+    /// `x:border-*`, each attribute it leaves out taken from the enclosing
+    /// `<tspan>`, else from the nearest bordered container (the box). Lowered
+    /// on the run's `<tspan>` (live) or its traced piece (outlined).
+    pub(super) border: Option<RunBorder>,
     /// `text-transform` on a run: applied to its text as the walk collects it
     /// (§6.18), so it never reaches the run table — two runs differing only in
     /// case share one style.
@@ -314,6 +382,48 @@ impl EmitAttrs {
             && self.family.is_none()
             && self.size.is_none()
             && self.shift.is_none()
+            && self.border.is_none()
+    }
+
+    /// The run's paint the outlined forms honour (§6.12): its fill or border.
+    pub(super) fn paints(&self) -> bool {
+        self.fill.is_some() || self.border.is_some()
+    }
+}
+
+/// `x:border-width` / `-color` / `-opacity` as resolved for one run.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub(super) struct RunBorder {
+    pub(super) width: Option<String>,
+    pub(super) color: Option<String>,
+    pub(super) opacity: Option<String>,
+}
+
+impl RunBorder {
+    /// The border `node` itself names, over `self` attribute by attribute;
+    /// `None` when it names none.
+    fn over(&self, node: roxmltree::Node) -> Option<Self> {
+        let get = |k: &str| node.attribute((XSVG_NS, k)).map(str::to_string);
+        let (w, c, o) = (
+            get("border-width"),
+            get("border-color"),
+            get("border-opacity"),
+        );
+        (w.is_some() || c.is_some() || o.is_some()).then(|| RunBorder {
+            width: w.or_else(|| self.width.clone()),
+            color: c.or_else(|| self.color.clone()),
+            opacity: o.or_else(|| self.opacity.clone()),
+        })
+    }
+
+    /// The stroke attributes, as [`text_border_attrs`] writes them.
+    pub(super) fn attrs(&self, ctx: &Ctx) -> String {
+        border_attrs(
+            self.width.as_deref(),
+            self.color.as_deref(),
+            self.opacity.as_deref(),
+            ctx,
+        )
     }
 }
 
@@ -342,10 +452,17 @@ pub(super) fn collect_runs(
     let mut segments = Vec::new();
     let mut styles = vec![base.clone()];
     let mut emits = vec![EmitAttrs::default()];
+    // the border a run's own `x:border-*` completes: the nearest bordered
+    // container's — the box around a paragraph, item or cell included
+    let outer = node
+        .ancestors()
+        .find_map(|a| RunBorder::default().over(a))
+        .unwrap_or_default();
     walk_runs(
         node,
         &EmitAttrs::default(),
         base,
+        &outer,
         &mut segments,
         &mut styles,
         &mut emits,
@@ -353,10 +470,11 @@ pub(super) fn collect_runs(
     (segments, styles, emits)
 }
 
-pub(super) fn walk_runs(
+fn walk_runs(
     node: roxmltree::Node,
     ctx: &EmitAttrs,
     base: &TextStyle,
+    outer: &RunBorder,
     segments: &mut Vec<(String, usize)>,
     styles: &mut Vec<TextStyle>,
     emits: &mut Vec<EmitAttrs>,
@@ -394,13 +512,16 @@ pub(super) fn walk_runs(
                     {
                         c.transform = Some(tf);
                     }
+                    if let Some(b) = c.border.as_ref().unwrap_or(outer).over(child) {
+                        c.border = Some(b);
+                    }
                     if let Some(s) = child
                         .attribute("font-size")
                         .and_then(|v| run_size(v, base.size))
                     {
                         c.size = Some(s);
                     }
-                    walk_runs(child, &c, base, segments, styles, emits);
+                    walk_runs(child, &c, base, outer, segments, styles, emits);
                 }
                 // an authored SVG <a> around text: its href becomes the runs' link
                 "a" => {
@@ -411,9 +532,9 @@ pub(super) fn walk_runs(
                     {
                         c.href = Some(h.to_string());
                     }
-                    walk_runs(child, &c, base, segments, styles, emits);
+                    walk_runs(child, &c, base, outer, segments, styles, emits);
                 }
-                _ => walk_runs(child, ctx, base, segments, styles, emits),
+                _ => walk_runs(child, ctx, base, outer, segments, styles, emits),
             }
         }
     }
@@ -438,6 +559,7 @@ pub(super) fn intern_run(
         shift: ctx.shift.clone(),
         href: ctx.href.clone(),
         highlight: ctx.highlight.clone(),
+        border: ctx.border.clone(),
         transform: None,
     };
     if norm.is_empty() {

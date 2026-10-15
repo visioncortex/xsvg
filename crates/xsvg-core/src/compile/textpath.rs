@@ -133,7 +133,18 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
                 });
                 open_filter_group(out, filter.as_deref());
                 if styled {
-                    push_run_paths(out, &runs, &pieces, fill, &stroke, &pos, ctx);
+                    let pieces: Vec<PaintedPath> = pieces
+                        .into_iter()
+                        .map(|(d, r)| PaintedPath {
+                            d,
+                            fill: r.and_then(|r| r.fill.clone()),
+                            border: r
+                                .filter(|r| r.border != runs.base_border)
+                                .and_then(|r| r.border.clone()),
+                            overflow: false,
+                        })
+                        .collect();
+                    push_painted_paths(out, &pieces, fill, &stroke, &pos, ctx);
                 } else {
                     let paths: Vec<(String, bool)> =
                         pieces.into_iter().map(|(d, _)| (d, false)).collect();
@@ -318,60 +329,6 @@ fn push_runs(out: &mut String, runs: &PaintRuns, a: usize, b: usize, ctx: &Ctx) 
         }
         at += n;
     }
-}
-
-/// The outlined runs' paths, one `<g>` keyed as the element. Fill-only runs
-/// are one layer of paths, each overriding the group's fill. With a border in
-/// play the pieces paint in TWO layers — every border, then every fill — the
-/// order one path gives: stroked one after another, a later run's border would
-/// cover the edge of the glyph before it.
-fn push_run_paths(
-    out: &mut String,
-    runs: &PaintRuns,
-    pieces: &[(String, Option<&PaintRun>)],
-    fill: &str,
-    stroke: &str,
-    pos: &str,
-    ctx: &Ctx,
-) {
-    let path = |out: &mut String, d: &str, attrs: &str| {
-        out.push_str("<path d=\"");
-        push_escaped(out, d, true);
-        out.push('"');
-        out.push_str(attrs);
-        out.push_str("/>");
-    };
-    let bordered = pieces
-        .iter()
-        .any(|(_, r)| r.is_some_and(|r| r.border.is_some()));
-    if !bordered {
-        out.push_str(&format!("<g fill=\"{}\"{stroke}{pos}>", ctx.paint(fill)));
-        for (d, r) in pieces {
-            let mut attrs = String::new();
-            if let Some(r) = r {
-                runs.push_paint(r, &mut attrs, ctx);
-            }
-            path(out, d, &attrs);
-        }
-        out.push_str("</g>");
-        return;
-    }
-    out.push_str(&format!("<g fill=\"{}\"{pos}>", ctx.paint(fill)));
-    out.push_str("<g fill=\"none\">");
-    for (d, r) in pieces {
-        if let Some(b) = r.and_then(|r| r.border.as_deref()) {
-            path(out, d, b);
-        }
-    }
-    out.push_str("</g>");
-    for (d, r) in pieces {
-        let fill = r
-            .and_then(|r| r.fill.as_deref())
-            .map(|f| format!(" fill=\"{}\"", ctx.paint(f)))
-            .unwrap_or_default();
-        path(out, d, &fill);
-    }
-    out.push_str("</g>");
 }
 
 /// Each run's glyphs traced at its pen position in the whole string (from the

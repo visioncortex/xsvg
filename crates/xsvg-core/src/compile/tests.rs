@@ -7226,7 +7226,10 @@ fn textpath_run_borders_inherit_attribute_by_attribute() {
         r##"font-size="10" x:border-width="2" x:border-color="#000">"##,
     );
     let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap();
-    let borders = &out[out.find(r#"<g fill="none">"#).unwrap()..];
+    // the border layer states the element's border once; every piece sits in
+    // it, and only the run that differs restates its own
+    let layer = r##"<g fill="none" stroke="#000" stroke-width="4" paint-order="stroke" stroke-linejoin="round">"##;
+    let borders = &out[out.find(layer).unwrap_or_else(|| panic!("{out}"))..];
     let borders = &borders[..borders.find("</g>").unwrap()];
     assert_eq!(
         borders.matches("<path").count(),
@@ -7234,11 +7237,9 @@ fn textpath_run_borders_inherit_attribute_by_attribute() {
         "every piece is bordered: {out}"
     );
     assert_eq!(
-        borders
-            .matches(r##"stroke="#000" stroke-width="4""##)
-            .count(),
+        borders.matches("stroke=").count(),
         2,
-        "{out}"
+        "the layer and the blue run: {out}"
     );
     assert!(
         borders.contains(r##"stroke="#00f" stroke-width="4""##),
@@ -7318,4 +7319,111 @@ fn textpath_typography_runs_stay_one_run() {
         r#"skew <tspan font-weight="700">red</tspan>"#,
     ));
     assert!(follow.contains(">skew red</textPath>"), "{follow}");
+}
+
+// ---------------------------------------------------------------------------
+// Paint runs in boxes: a run's border (live), fill and border (outlined)
+
+const BOX_RUNS: &str =
+    r##"plain <tspan fill="#f00">red</tspan> <tspan x:border-color="#00f">blue</tspan>"##;
+
+#[test]
+fn box_runs_carry_their_border_on_live_text() {
+    for (open, close) in [
+        (
+            r#"<x:textbox x="0" y="0" width="300" height="40" font-size="10""#,
+            "</x:textbox>",
+        ),
+        (
+            r#"<textArea x="0" y="0" width="300" height="40" font-size="10""#,
+            "</textArea>",
+        ),
+    ] {
+        let out = compile_fast(&format!("{XW}{open}>{BOX_RUNS}{close}</svg>"));
+        assert!(
+            out.contains(r##"<tspan stroke="#00f" stroke-width="6" paint-order="stroke" stroke-linejoin="round">blue"##),
+            "{out}"
+        );
+        assert!(!out.contains("border-"), "{out}");
+        // inside a bordered box a run naming only its colour keeps the box's width
+        let out = compile_fast(&format!(
+            r##"{XW}{open} x:border-width="2" x:border-color="#000">{BOX_RUNS}{close}</svg>"##
+        ));
+        assert!(
+            out.contains(r##"<tspan stroke="#00f" stroke-width="4""##),
+            "{out}"
+        );
+        assert!(
+            out.contains(r##"<tspan fill="#f00">red"##),
+            "a fill-only run restates no border: {out}"
+        );
+    }
+    // a paragraph's runs complete their border from the box around it
+    let out = compile_fast(&format!(
+        r##"{XW}<x:textbox x="0" y="0" width="300" height="40" font-size="10" x:border-width="2"><x:p>{BOX_RUNS}</x:p></x:textbox></svg>"##
+    ));
+    assert!(
+        out.contains(r##"<tspan stroke="#00f" stroke-width="4""##),
+        "{out}"
+    );
+}
+
+#[test]
+fn outlined_box_runs_trace_their_paint_in_two_layers() {
+    let svg = format!(
+        r#"{XW}<x:textbox x="0" y="0" width="300" height="40" font-size="10" outline="true">{BOX_RUNS}</x:textbox></svg>"#
+    );
+    let out = compile_impl(&svg, "balanced", false, &Mono, &NoShaper, &BoxOutliner).unwrap();
+    // the pieces sit where the whole line puts them (5 per character): "plain "
+    // at 0, "red" at 30, "blue" at 50; the lone space draws nothing
+    let g = &out[out
+        .find(r##"<g fill="#000">"##)
+        .unwrap_or_else(|| panic!("{out}"))..];
+    let (layer, fills) = g.split_once("</g>").unwrap();
+    assert_eq!(
+        layer.matches("<path").count(),
+        1,
+        "only blue is bordered: {out}"
+    );
+    assert!(
+        layer.contains(r#"<path d="M50,"#) && layer.contains(r##"stroke="#00f""##),
+        "{out}"
+    );
+    let fills: Vec<&str> = fills.split("<path d=\"").skip(1).collect();
+    assert_eq!(fills.len(), 3, "{out}");
+    assert!(fills[0].starts_with("M0,"), "{out}");
+    assert!(
+        fills[1].starts_with("M30,") && fills[1].contains(r##"fill="#f00""##),
+        "{out}"
+    );
+    assert!(
+        fills[2].starts_with("M50,") && !fills[2].contains("stroke"),
+        "{out}"
+    );
+    // an unpainted outlined box keeps its one path per line
+    let plain = compile_impl(
+        &svg.replace(BOX_RUNS, "plain red blue"),
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert_eq!(plain.matches("<path").count(), 1, "{plain}");
+    // and the pieces bend with a warp like any other path
+    let warped = compile_impl(
+        &svg.replace("<x:textbox", r#"<x:warp field="arch" bend="40"><x:textbox"#)
+            .replace("</x:textbox>", "</x:textbox></x:warp>"),
+        "balanced",
+        false,
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert!(
+        warped.contains(r##"fill="#f00""##) && warped.contains(r##"stroke="#00f""##),
+        "{warped}"
+    );
 }

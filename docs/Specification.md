@@ -629,6 +629,7 @@ element (§3, reuse-unprefixed) — the same `<tspan>` the compiler emits, now a
 | `baseline-shift` | `super` / `sub` / a length or percentage — a raised or lowered run (super/subscript with a smaller `font-size`), emitted verbatim |
 | `href` | a hyperlink: the run lowers to an SVG `<a href>` around its text (paint overrides nest a `<tspan>` inside it); an authored `<a>` child of the box reads the same way. Authored, so it passes verbatim like every authored URL ([Sandbox.md](Sandbox.md) §1) |
 | `x:highlight` | a background colour behind the run (the highlighter). SVG text has no background, so it **bakes to a `<rect>` per run per line before the `<text>`**: the run's advance (in its own style, stretched with a justified line) by the em box of its size (ascent above, descent below the baseline), moved with the run's `baseline-shift` (a length exactly; `super`/`sub`/`%` by Chromium's measured model, ± half the em box and % of the run's size, so another renderer may set a sub/superscript slightly apart from its box). Under `direction="rtl"` highlights lay leftward from the start edge in logical order, which is right for right-to-left text; **mixed bidi is not handled in v0**: an embedded left-to-right word or number is reordered by the renderer and its highlight lands on the wrong glyphs. Plain output is untouched |
+| `x:border-width` / `x:border-color` / `x:border-opacity` | the run's own border (§6.17), lowered on its `<tspan>`; each attribute the run leaves out is taken from the enclosing `<tspan>`, else from the nearest bordered container — the box around a paragraph, item or cell included — so a run naming only a colour keeps the box's width |
 
 **Model (normative).** Runs affect a word's **advance** (weight/style/family/size change glyph
 widths), so each word is measured in its own run style and wrapping stays correct; a run boundary
@@ -691,9 +692,18 @@ anywhere, with no font install or `@font-face` embed, at the cost of selectable 
 layer for searchability is future work, §G). This is also the prerequisite for the *text-as-vector-art*
 effects of the remaining pillars (§7): geometry warp/envelope and mesh-fill applied to glyph outlines.
 
-**v0 limits.** Outline mode uses the base style per line: per-run styling (§6.11), `justify` (§6.9),
-`glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing` (§6.8) do not apply to the traced path, and
-curved-shape region flow (§6.10) keeps its own per-line placement. Per-run outlining is future work.
+**Paint runs.** A run's **paint** — its `fill` and its border (§6.11, §6.17) — does apply: a line
+holding a painted run is traced run by run, each piece at its pen position in the whole line (the
+line's own advances, so kerning across a run boundary is kept and the pieces sit where one trace
+would), one `<path>` per piece carrying the paint it overrides. With a border in play — the
+element's or a run's — the pieces paint in **two layers**, every border and then every fill (the
+order a single path gives), so a run's border never covers its neighbour's glyphs. Whitespace-only
+runs draw nothing. A warp (§7.3) bends the pieces like any other path.
+
+**v0 limits.** Outline mode uses the base style per line: per-run **typography** (§6.11 weight,
+style, family, size), `justify` (§6.9), `glyph-x-scale` (§6.7), and `letter-spacing`/`word-spacing`
+(§6.8) do not apply to the traced path, and curved-shape region flow (§6.10) keeps its own per-line
+placement.
 
 ### 6.13 Text on a path — `<x:textpath>` [implemented: skew, rainbow]
 
