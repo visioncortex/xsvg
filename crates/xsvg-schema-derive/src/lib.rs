@@ -351,7 +351,12 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             (None, true) => quote!(<#base as ::xsvg_schema::ParamEnum>::VALUES),
             _ => quote!(&[]),
         };
-        let default_tokens = opt_str(&opts.default);
+        // an enum field with no explicit default reads as its type's `#[default]`
+        // variant (`unwrap_or_default` above), so that is the declared default
+        let default_tokens = match (&opts.default, is_enum_field(base) && !optional) {
+            (None, true) => quote!(<#base as ::xsvg_schema::ParamEnum>::DEFAULT),
+            _ => opt_str(&opts.default),
+        };
         let doc_tokens = opt_str(&opts.doc);
         let superseded = &opts.superseded_by;
         let read_only = opt_str(&opts.read_only);
@@ -483,6 +488,9 @@ fn expand_param_enum(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
     };
     let mut names = Vec::new();
     let mut idents = Vec::new();
+    // the `#[default]` variant's spelling: what a missing attribute reads as
+    // (`unwrap_or_default`), so what the spec declares
+    let mut default = None;
     for v in &data.variants {
         if !matches!(v.fields, Fields::Unit) {
             return err(v.ident.span(), "ParamEnum variants must be unit variants");
@@ -497,13 +505,18 @@ fn expand_param_enum(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
                 }
             }
         }
+        if v.attrs.iter().any(|a| a.path().is_ident("default")) {
+            default = Some(spelling.clone());
+        }
         names.push(spelling);
         idents.push(&v.ident);
     }
     let ty = &ast.ident;
+    let default = opt_str(&default);
     Ok(quote! {
         impl ::xsvg_schema::ParamEnum for #ty {
             const VALUES: &'static [&'static str] = &[#(#names),*];
+            const DEFAULT: ::core::option::Option<&'static str> = #default;
             fn parse(s: &str) -> ::core::option::Option<Self> {
                 match s.trim() {
                     #(#names => ::core::option::Option::Some(Self::#idents),)*

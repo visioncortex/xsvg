@@ -122,38 +122,10 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     // per-cell text style: the table style, with `<x:th>` defaulting to bold,
     // then the column's, the row's and the cell's own font-* in turn.
-    let cell_style = |cell: roxmltree::Node, row: roxmltree::Node, ci: usize| {
-        let mut st = style.clone();
-        if cell.tag_name().name() == "th" {
-            st.weight = "700".to_string();
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-family") {
-            st.family = v.to_string();
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-size")
-            .and_then(parse_num)
-            .filter(|n| *n > 0.0)
-        {
-            st.size = v;
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-weight") {
-            st.weight = v.to_string();
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "font-style") {
-            st.style = v.to_string();
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "text-transform")
-            .and_then(TextTransform::parse)
-        {
-            st.text_transform = v;
-        }
-        if let Some(v) = cell_prop(cell, row, col_styles.get(ci).copied(), "line-height")
-            .and_then(parse_num)
-            .filter(|n| *n > 0.0)
-        {
-            st.line_height = v;
-        }
-        st
+    // a cell's style: cell › row › column › a header cell's bold › the table
+    // (query.rs, the same levels a query reads)
+    let cell_style = |cell: roxmltree::Node, row: roxmltree::Node, _ci: usize| {
+        overlay(&cell_levels(cell, row, node), &style)
     };
     // content width available for a cell's text
     let content_w = |ci: usize| (colw[ci] - 2.0 * pad).max(0.0);
@@ -269,7 +241,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let (segments, styles, emits) = collect_runs(cell, &st);
             let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
             if !plain.trim().is_empty() {
-                let fill = cell_prop(cell, *row, col_styles.get(ci).copied(), "fill")
+                let fill = level_value(&cell_levels(cell, *row, node), "fill")
                     .map(|v| ctx.resolve_var(v).into_owned())
                     .unwrap_or_else(|| text_fill.clone());
                 let spec = AreaSpec {

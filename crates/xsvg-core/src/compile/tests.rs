@@ -7489,3 +7489,392 @@ fn region_flow_paints_its_runs_live_and_outlined() {
         "{out}"
     );
 }
+
+// ---- document queries (query.rs; xsvg-kit docs/Queries.md) -----------------
+
+/// Byte offset of the `nth` occurrence of `needle` in `src`.
+fn nth_at(src: &str, needle: &str, nth: usize) -> usize {
+    src.match_indices(needle).nth(nth).expect(needle).0
+}
+
+#[test]
+fn resolved_walks_the_cascade_the_emitters_lay_out_from() {
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:theme><x:font name="body" font-family="Inter" font-size="14" font-weight="500"/><x:color name="accent" value="#6366f1"/></x:theme>
+<g font-family="Lora">
+<x:textbox x="0" y="0" width="200" height="200" x:font="body" font-size="18" fill="var(accent)">
+<x:p font-size="30">Title</x:p>
+<x:p>Body</x:p>
+<x:list font-weight="700" fill="#f00"><x:li font-size="11">one</x:li></x:list>
+</x:textbox>
+<x:textbox x="0" y="300" width="200" height="40" font-size="0">bad size</x:textbox>
+</g>
+</svg>"##;
+    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+    let s = platform.session(src, "balanced", false, "").unwrap();
+    let props = [
+        "font-family",
+        "font-size",
+        "font-weight",
+        "fill",
+        "line-height",
+    ];
+    let get = |off: usize| s.resolved(off, &props).unwrap();
+    let boxo = nth_at(src, "<x:textbox", 0);
+    let g = nth_at(src, "<g ", 0);
+
+    // the box: own size, its token's weight and family over the ancestor's
+    let b = get(boxo);
+    assert_eq!(b[0].value.as_deref(), Some("Inter"));
+    assert_eq!(b[0].source, Source::Token("body".into()));
+    assert_eq!(b[1].value.as_deref(), Some("18"));
+    assert_eq!(b[1].source, Source::Own);
+    assert_eq!(b[2].value.as_deref(), Some("500"));
+    assert_eq!(b[3].value.as_deref(), Some("var(accent)"));
+    assert_eq!(b[3].computed.as_deref(), Some("#6366f1"));
+    assert_eq!(b[4].value.as_deref(), Some("1.2"));
+    assert_eq!(b[4].source, Source::Initial);
+
+    // a paragraph: its own size, the rest from its box (the token named there)
+    let p = get(nth_at(src, "<x:p", 0));
+    assert_eq!(p[1].value.as_deref(), Some("30"));
+    assert_eq!(p[1].source, Source::Own);
+    assert_eq!(
+        p[0].source,
+        Source::Inherited {
+            from: boxo,
+            token: Some("body".into())
+        }
+    );
+    let p2 = get(nth_at(src, "<x:p", 1));
+    assert_eq!(p2[1].value.as_deref(), Some("18"));
+    assert_eq!(
+        p2[1].source,
+        Source::Inherited {
+            from: boxo,
+            token: None
+        }
+    );
+
+    // an item in a box: its size, its list's weight and colour, the box's family
+    let list = nth_at(src, "<x:list", 0);
+    let li = get(nth_at(src, "<x:li ", 0));
+    assert_eq!(li[1].value.as_deref(), Some("11"));
+    assert_eq!(li[2].value.as_deref(), Some("700"));
+    assert_eq!(
+        li[2].source,
+        Source::Inherited {
+            from: list,
+            token: None
+        }
+    );
+    assert_eq!(li[3].value.as_deref(), Some("#f00"));
+    assert_eq!(li[0].value.as_deref(), Some("Inter"));
+
+    // an invalid value does not count: the cascade falls through (CSS's rule)
+    let bad = get(nth_at(src, "<x:textbox", 1));
+    assert_eq!(bad[1].value.as_deref(), Some("16"));
+    assert_eq!(bad[1].source, Source::Initial);
+    // no token on the second box: the family comes from the <g>
+    assert_eq!(bad[0].value.as_deref(), Some("Lora"));
+    assert_eq!(
+        bad[0].source,
+        Source::Inherited {
+            from: g,
+            token: None
+        }
+    );
+
+    // what the query says is what was laid out: the paragraph renders at 30
+    let out = compile_test(src);
+    assert!(out.contains("font-size=\"30\""), "{out}");
+    assert!(
+        s.resolved(boxo + 1, &props).is_none(),
+        "no element starts there"
+    );
+}
+
+#[test]
+fn resolved_cells_and_standalone_lists_and_declared_defaults() {
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:q="https://xsvg.visioncortex.org">
+<q:table x="0" y="0" width="200" font-size="12">
+<q:col font-size="20"/><q:col/>
+<q:tr><q:th>A</q:th><q:th font-weight="300">B</q:th></q:tr>
+<q:tr font-style="italic"><q:td>a</q:td><q:td fill="#0a0">b</q:td></q:tr>
+</q:table>
+<q:list x="0" y="200" width="200" font-size="10"><q:li font-size="8" fill="#f00">x</q:li></q:list>
+<q:textbox x="0" y="300" width="100" height="30" q:border-width="2">t</q:textbox>
+</svg>"##;
+    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+    let s = platform.session(src, "balanced", false, "").unwrap();
+    let props = ["font-size", "font-weight", "font-style", "fill"];
+    let get = |off: usize| s.resolved(off, &props).unwrap();
+    let col0 = nth_at(src, "<q:col", 0);
+    let row1 = nth_at(src, "<q:tr", 1);
+
+    // a header cell: the column's size, bold implied
+    let th = get(nth_at(src, "<q:th", 0));
+    assert_eq!(th[0].value.as_deref(), Some("20"));
+    assert_eq!(
+        th[0].source,
+        Source::Inherited {
+            from: col0,
+            token: None
+        }
+    );
+    assert_eq!(th[1].value.as_deref(), Some("700"));
+    assert_eq!(th[1].source, Source::Implied);
+    // a header cell's own weight beats the implied bold
+    assert_eq!(
+        get(nth_at(src, "<q:th", 1))[1].value.as_deref(),
+        Some("300")
+    );
+    // a body cell: the row's style, the table's declared text colour
+    let td = get(nth_at(src, "<q:td", 0));
+    assert_eq!(td[2].value.as_deref(), Some("italic"));
+    assert_eq!(
+        td[2].source,
+        Source::Inherited {
+            from: row1,
+            token: None
+        }
+    );
+    assert_eq!(td[3].value.as_deref(), Some("#0f172a"));
+    assert_eq!(td[3].source, Source::Initial);
+    assert_eq!(
+        get(nth_at(src, "<q:td", 1))[3].value.as_deref(),
+        Some("#0a0")
+    );
+
+    // a standalone list's item: its size, but its colour is the list's
+    let li = get(nth_at(src, "<q:li ", 0));
+    assert_eq!(li[0].value.as_deref(), Some("8"));
+    assert_eq!(li[3].value.as_deref(), Some("#111827"));
+    assert_eq!(li[3].source, Source::Initial);
+
+    // any other attribute: own (x: names the namespace, whatever its prefix),
+    // else the element's declared default
+    let tb = nth_at(src, "<q:textbox", 0);
+    let r = s
+        .resolved(tb, &["x:border-width", "align", "x:nonsense"])
+        .unwrap();
+    assert_eq!(r[0].value.as_deref(), Some("2"));
+    assert_eq!(r[0].source, Source::Own);
+    assert_eq!(r[1].value.as_deref(), Some("start"));
+    assert_eq!(r[1].source, Source::Initial);
+    assert_eq!(r[2].value, None);
+}
+
+#[test]
+fn the_initial_style_is_the_declared_font_defaults() {
+    // the font block every text element declares (describe()) and the style
+    // the compiler starts from must be one set of values
+    let init = super::query::initial_style();
+    let declared = |name: &str| {
+        FONT_PARAMS
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.default)
+    };
+    assert_eq!(declared("font-family"), Some(init.family.as_str()));
+    assert_eq!(declared("font-size").and_then(parse_num), Some(init.size));
+    assert_eq!(declared("font-weight"), Some(init.weight.as_str()));
+    assert_eq!(declared("font-style"), Some(init.style.as_str()));
+    assert_eq!(
+        declared("line-height").and_then(parse_num),
+        Some(init.line_height)
+    );
+    assert_eq!(
+        declared("text-transform").and_then(TextTransform::parse),
+        Some(init.text_transform)
+    );
+}
+
+#[test]
+fn resolved_agrees_with_the_emitters_over_the_dataset() {
+    // for every element of every sample, the style `resolved` reports parses to
+    // the style the element's emitter lays its text out in
+    let props = super::query::STYLE_PROPS;
+    let mut checked = 0;
+    for path in dataset_files() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+        let Ok(s) = platform.session(&src, "balanced", false, "") else {
+            continue;
+        };
+        let doc = &s.parsed().doc;
+        let theme = &s.parsed().theme;
+        for node in super::visible(doc.root()).filter(|n| n.is_element()) {
+            let Some(r) = s.resolved(node.range().start, &props) else {
+                continue;
+            };
+            let v = |i: usize| r[i].value.clone().unwrap();
+            let spacing = |v: String| {
+                if v == "normal" {
+                    0.0
+                } else {
+                    parse_num(&v).unwrap()
+                }
+            };
+            let reported = TextStyle {
+                family: v(0),
+                size: parse_num(&v(1)).unwrap(),
+                weight: v(2),
+                style: v(3),
+                line_height: parse_num(&v(4)).unwrap(),
+                letter_spacing: spacing(v(5)),
+                word_spacing: spacing(v(6)),
+                text_transform: TextTransform::parse(&v(7)).unwrap(),
+            };
+            // the emitters: a block over its text element's style, an element
+            // over the initial style
+            let laid = match super::query::block_levels(node) {
+                Some((levels, base)) => super::query::overlay(
+                    &levels,
+                    &super::query::overlay(
+                        &super::query::element_levels(base, theme),
+                        &super::query::initial_style(),
+                    ),
+                ),
+                None => super::query::overlay(
+                    &super::query::element_levels(node, theme),
+                    &super::query::initial_style(),
+                ),
+            };
+            assert_eq!(reported, laid, "{}: {:?}", path.display(), node.range());
+            checked += 1;
+        }
+    }
+    assert!(checked > 1000, "{checked}");
+}
+
+#[test]
+fn text_style_reports_pieces_in_utf16_over_the_text_content() {
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="200" height="100" font-size="10" fill="#111" text-transform="uppercase">ß😀 <tspan font-weight="700" text-decoration="underline">bold</tspan><tbreak/><tspan x:highlight="#ff0" href="https://e.x">hi</tspan> end</x:textbox>
+<x:textpath in="#p" font-size="20">a<tspan font-weight="700" fill="#f00" x:border-width="1">b</tspan></x:textpath>
+<path id="p" d="M0,0 L100,0"/>
+<text x="0" y="0">plain<tspan fill="#f00">x</tspan></text>
+</svg>"##;
+    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+    let s = platform.session(src, "balanced", false, "").unwrap();
+    let pieces = s.text_style(nth_at(src, "<x:textbox", 0)).unwrap();
+    // "ß😀 " is 4 UTF-16 units (the emoji is two), uppercasing keeps the count
+    let spans: Vec<_> = pieces.iter().map(|p| (p.start, p.end)).collect();
+    assert_eq!(
+        spans,
+        vec![(0, 4), (4, 8), (8, 9), (9, 11), (11, 15)],
+        "{pieces:?}"
+    );
+    assert_eq!(pieces[0].weight, "normal");
+    assert_eq!(pieces[0].fill, "#111");
+    assert_eq!(pieces[1].weight, "700");
+    assert_eq!(pieces[1].decoration.as_deref(), Some("underline"));
+    assert_eq!(pieces[3].highlight.as_deref(), Some("#ff0"));
+    assert_eq!(pieces[3].href.as_deref(), Some("https://e.x"));
+    assert_eq!(pieces[4].size, 10.0);
+    // text on a path draws paint runs only: the run's weight is not reported
+    let tp = s.text_style(nth_at(src, "<x:textpath", 0)).unwrap();
+    assert_eq!(tp.len(), 2, "{tp:?}");
+    assert_eq!(tp[1].weight, "normal");
+    assert_eq!(tp[1].fill, "#f00");
+    assert_eq!(
+        tp[1].border.as_ref().and_then(|b| b.width.as_deref()),
+        Some("1")
+    );
+    // a plain <text> passes through: nothing of a run is the compiler's to draw
+    let plain = s.text_style(nth_at(src, "<text", 0)).unwrap();
+    assert!(plain.iter().all(|p| p.fill == "#000"), "{plain:?}");
+    assert!(s.text_style(nth_at(src, "<path", 0)).is_none());
+}
+
+#[test]
+fn blocks_and_run_support_follow_the_emitters() {
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="200" height="200"><x:p>a</x:p><x:list list="number"><x:li>b</x:li><x:li indent="1" list="bullet">c</x:li></x:list><x:p>d</x:p></x:textbox>
+<x:list x="0" y="300" width="100"><x:li>e</x:li></x:list>
+<x:textbox x="0" y="400" width="100" height="20">flow</x:textbox>
+<text x="0" y="0" inline-size="50">w</text><text x="0" y="0">t</text>
+<x:textpath in="#p">p</x:textpath><path id="p" d="M0,0 L9,0"/>
+<x:table x="0" y="0" width="90"><x:tr><x:td>c</x:td></x:tr></x:table>
+</svg>"##;
+    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+    let s = platform.session(src, "balanced", false, "").unwrap();
+    let list = nth_at(src, "<x:list", 0);
+    let b = s.blocks(nth_at(src, "<x:textbox", 0)).unwrap();
+    let kinds: Vec<_> = b.iter().map(|b| b.kind.clone()).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            BlockKind::Paragraph,
+            BlockKind::Item {
+                level: 0,
+                list,
+                marker: "number".into()
+            },
+            BlockKind::Item {
+                level: 1,
+                list,
+                marker: "bullet".into()
+            },
+            BlockKind::Paragraph,
+        ]
+    );
+    assert_eq!(b[0].start, nth_at(src, "<x:p", 0));
+    assert_eq!(&src[b[3].start..b[3].end], "<x:p>d</x:p>");
+    assert_eq!(s.blocks(nth_at(src, "<x:list", 1)).unwrap().len(), 1);
+    assert_eq!(s.blocks(nth_at(src, "<x:textbox", 1)).unwrap(), vec![]);
+    assert!(s.blocks(nth_at(src, "<text", 0)).is_none());
+
+    let all = RunSupport {
+        typography: true,
+        fill: true,
+        border: true,
+        highlight: true,
+        decoration: true,
+        shift: true,
+        href: true,
+    };
+    let sup = |needle: &str, nth: usize| s.run_support(nth_at(src, needle, nth));
+    for (needle, nth) in [
+        ("<x:textbox", 0),
+        ("<x:p", 0),
+        ("<x:li>", 0),
+        ("<x:list", 1),
+        ("<text", 0),
+        ("<x:td", 0),
+    ] {
+        assert_eq!(sup(needle, nth), Some(all), "{needle}");
+    }
+    assert_eq!(sup("<text", 1), Some(RunSupport::default()));
+    let tp = sup("<x:textpath", 0).unwrap();
+    assert!(tp.fill && tp.border && !tp.typography && !tp.highlight && !tp.decoration);
+    assert_eq!(sup("<path", 0), None);
+}
+
+#[test]
+fn theme_tokens_come_in_document_order_without_the_doc_island() {
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:theme><x:color name="a" value="#111"/><x:color name="b" value="#222"/><x:font name="h" font-size="30" font-family="Inter" data-x="ignored"/></x:theme>
+<x:doc><x:theme><x:color name="island" value="#999"/></x:theme></x:doc>
+<x:theme><x:color name="a" value="#333"/></x:theme>
+</svg>"##;
+    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+    let s = platform.session(src, "balanced", false, "").unwrap();
+    let t = s.theme();
+    assert_eq!(
+        t.colors,
+        vec![("b".into(), "#222".into()), ("a".into(), "#333".into())]
+    );
+    // a font token carries the token properties, in their order, nothing else
+    assert_eq!(
+        t.fonts,
+        vec![(
+            "h".into(),
+            vec![
+                ("font-family".into(), "Inter".into()),
+                ("font-size".into(), "30".into())
+            ]
+        )]
+    );
+}

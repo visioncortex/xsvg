@@ -291,6 +291,38 @@ impl<'a> Parsed<'a> {
         (!runs.is_empty()).then_some(super::CaretStops { runs })
     }
 
+    /// The element starting at byte `offset`, outside any `<x:doc>` island.
+    fn element_at<'s>(&'s self, offset: usize) -> Option<roxmltree::Node<'s, 's>> {
+        super::visible(self.doc.root()).find(|n| n.is_element() && n.range().start == offset)
+    }
+
+    /// Document queries (query.rs): the element at `offset`, asked of this parse.
+    pub(super) fn resolved(
+        &self,
+        offset: usize,
+        properties: &[&str],
+    ) -> Option<Vec<super::Resolved>> {
+        let node = self.element_at(offset)?;
+        Some(
+            properties
+                .iter()
+                .map(|p| super::query::resolved(node, p, &self.theme))
+                .collect(),
+        )
+    }
+
+    pub(super) fn text_pieces(&self, offset: usize) -> Option<Vec<super::TextPiece>> {
+        super::query::text_pieces(self.element_at(offset)?, &self.theme)
+    }
+
+    pub(super) fn blocks(&self, offset: usize) -> Option<Vec<super::Block>> {
+        super::query::blocks(self.element_at(offset)?)
+    }
+
+    pub(super) fn run_support(&self, offset: usize) -> Option<super::RunSupport> {
+        super::run_support(self.element_at(offset)?)
+    }
+
     /// Source byte range of every element in document order, the root included.
     pub(super) fn node_spans(&self) -> Vec<(usize, usize)> {
         self.doc
@@ -486,6 +518,12 @@ impl<'a, P: Host> CompileSession<'a, P> {
         })
     }
 
+    /// The retained parse, for tests that walk the document the session holds.
+    #[cfg(test)]
+    pub(super) fn parsed(&self) -> &Parsed<'a> {
+        &self.parsed
+    }
+
     /// The whole document — byte-identical to [`super::compile_platform_impl`].
     pub fn compile(&self) -> Result<String, String> {
         self.parsed.compile(
@@ -577,6 +615,45 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
         self.parsed
             .caret_stops(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// The effective value of each of `properties` on the element starting at
+    /// byte `offset`, by the rules its emitter applies (xsvg-kit
+    /// docs/Queries.md): a style property ([`super::query::STYLE_PROPS`]) walks
+    /// the element's cascade — its own attribute and `<x:font>` token, the box
+    /// over a paragraph, the list over an item, the row, column and table over a
+    /// cell, the ancestors for `font-family` — and reports where the value came
+    /// from; any other attribute (`x:` naming the xsvg namespace) is the
+    /// element's own, else the default its element declares. `None` when no
+    /// element starts there.
+    pub fn resolved(&self, offset: usize, properties: &[&str]) -> Option<Vec<super::Resolved>> {
+        self.parsed.resolved(offset, properties)
+    }
+
+    /// The document's `<x:color>` and `<x:font>` tokens, as the compiler loaded
+    /// them: in document order, a later token of a name replacing an earlier
+    /// one, nothing inside `<x:doc>`.
+    pub fn theme(&self) -> super::ThemeTokens {
+        super::query::theme_tokens(&self.parsed.theme)
+    }
+
+    /// The styled pieces of the text of the element starting at `offset`, each
+    /// in the style it renders in, offsets in UTF-16 code units of the element's
+    /// text content. `None` when the element holds no text element.
+    pub fn text_style(&self, offset: usize) -> Option<Vec<super::TextPiece>> {
+        self.parsed.text_pieces(offset)
+    }
+
+    /// The block leaves — paragraphs and list items — of the box or list
+    /// starting at `offset`, in reading order. `None` for anything else.
+    pub fn blocks(&self, offset: usize) -> Option<Vec<super::Block>> {
+        self.parsed.blocks(offset)
+    }
+
+    /// What a run inside the text of the element starting at `offset` may carry
+    /// and see drawn. `None` when the element holds no text.
+    pub fn run_support(&self, offset: usize) -> Option<super::RunSupport> {
+        self.parsed.run_support(offset)
     }
 
     /// Source byte range of every element, in document order — the same answer as

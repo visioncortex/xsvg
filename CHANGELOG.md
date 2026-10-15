@@ -16,6 +16,16 @@ partial one.
 
 ### Added
 
+- **Document queries for editors.** `CompileSession` answers what the compiler does with a node,
+  from the parse it compiles from: `resolved(offset, properties)` (the effective value of each
+  property and where it came from — own, token, inherited from the box, list, row, column, table
+  or an ancestor, implied, initial), `theme()` (the tokens in document order, `x:doc` excluded),
+  `text_style(offset)` (an element's text as pieces in the style each renders in, UTF-16 offsets),
+  `blocks(offset)` (a box's paragraphs and list items) and `run_support(offset)` (which run
+  attributes the element's text draws). The text cascade is now data the emitters compute from
+  and the queries report, so the two cannot disagree; pinned over the dataset
+  (Incremental.md §10).
+
 - **Runs in curved region flow and `<text inline-size>`.** Both flattened their `<tspan>`s to the
   base style, losing fill and border along with weight, size and family. They now flow styled runs
   like a box — highlights and decorations baked behind `<text inline-size>`, an outlined region flow
@@ -109,6 +119,11 @@ partial one.
 
 ### Changed
 
+- **An invalid text style value falls through.** A `letter-spacing`, `word-spacing` or
+  `text-transform` the compiler cannot read on an element now gives way to its `<x:font>` token's
+  value, as an invalid `font-size` or `line-height` already did and as CSS ignores an invalid
+  declaration (§4.1). Previously such a value read as the initial one and hid the token.
+
 - **`<x:doc>` is a sealed island.** The compiler already dropped the editor's settings element
   from its output; now it never reads inside it at all: an `id` there cannot be referenced or
   shadow a real element's, an `<x:theme>` or `<x:import>` there binds nothing, a textbox there has
@@ -124,6 +139,11 @@ partial one.
   switch to it.
 
 ### Fixed
+
+- **`describe()` declares enum parameters' defaults.** An enum parameter with no explicit default
+  (`align`, `valign`, `fit`, `text-overflow`, a list's `list`, …) reads as its type's `#[default]`
+  variant, but its spec said it had none; `ParamEnum` now carries a `DEFAULT` and the derive
+  declares it.
 
 - **`x:border-*` on plain `<text>`, `<tspan>` and `<textPath>`** lowers to the bordered-text stroke
   as on a textbox; it was dropped with the other `x:` attributes of passthrough text, so white text

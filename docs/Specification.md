@@ -144,6 +144,11 @@ resolve live.
   reflow it. A `font-family` on the root `<svg>` is therefore the document's typeface in one
   place; a root token's other properties reach plain text through the browser and compiled text
   not at all. Resolution stays within one document: a linked file resolves against its own root.
+  A value counts only when it is valid for its property — a positive `font-size` or
+  `line-height`, `normal` or a number for the spacings, a known `text-transform` — else
+  resolution falls through to the next source, as CSS ignores an invalid declaration. An editor
+  asks for the resolved values, and where each came from, through the session's queries
+  ([Incremental.md](Incremental.md) §10) rather than re-deriving them.
 
 `<x:theme>` itself compiles to nothing (definitions), and `x:font` is stripped on emit — so an
 uncompiled document degrades cleanly (§3): a plain viewer just sees whatever literal fills/fonts the

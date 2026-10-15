@@ -439,3 +439,44 @@ cases, and the offset→warp dependency the top-level scan misses.
 **Known limit.** `Ctx` carries a per-call reference budget (`fuel`); a unit compiled alone starts
 with a full one and could differ from its in-fragment output only when a pathological reference
 graph exhausts it, which the host's verify oracle would catch.
+
+## 10. Document queries (`CompileSession`, shipped)
+
+An editor's chrome asks the document questions on every render — the font at the caret, a
+paragraph's size, which run controls do anything on this element — and the answers are the
+compiler's to give: inheritance, theme tokens, the sealed `x:doc`, a box's block structure and
+which run attributes an emitter draws are all rules it applies while compiling. Copies of those
+rules in the editor drift (xsvg-kit `docs/Queries.md` §2.2 lists three that already had). So the
+session answers them from the parse it compiles from, by the same functions the emitters call:
+
+| `CompileSession::` | Answer |
+|---|---|
+| `resolved(offset, &[property])` | each property's effective value on the element at `offset`, as authored and with theme colours substituted (`computed`), and its `Source`: `Own`, `Token(name)`, `Inherited { from, token }` (an enclosing node's source offset), `Implied` (a header cell's bold) or `Initial` (the element's declared default, else the compiler's) |
+| `theme()` | the `<x:color>` and `<x:font>` tokens in document order, a redeclared name at its last place, nothing inside `x:doc` |
+| `text_style(offset)` | the element's text as pieces, each in the style it renders in, offsets in UTF-16 code units of the text content (each `<tbreak/>` one) |
+| `blocks(offset)` | a box's paragraphs and list items (level, list, marker kind), or a list's items, in reading order |
+| `run_support(offset)` | which run attributes the element's text draws: typography, fill, border, highlight, decoration, baseline-shift, links |
+
+**One cascade.** Style properties — the eight `<x:font>` token properties and `fill` — come from
+an ordered list of **levels** (`query.rs`): the element's own attributes, then its token, then each
+ancestor's `font-family` (§4.1); a paragraph or list in front of its box's, an item in front of its
+list's, a cell in front of its row's, its column's, a header cell's implied bold and the table's.
+`style_from`, the paragraph planner, the list and table emitters and `resolved` all compute from
+the same levels, so the style a query reports is the style that was laid out
+(`resolved_agrees_with_the_emitters_over_the_dataset` pins it on every element of every sample).
+A value counts at a level only when it is valid for the property — a positive size, `normal` or a
+number for spacing, a known `text-transform` — else the cascade falls through, as CSS ignores an
+invalid declaration. Any other attribute (`x:` naming the xsvg namespace, whatever prefix the
+document binds) is the element's own, else the default its element declares in `describe()`.
+
+**Runs.** A run's properties do not follow the element cascade: they compose from the enclosing
+`<tspan>`s inward over the element's style, a run's `font-size` is taken against its paragraph's,
+and its border completes from the nearest bordered container (§6.11, §6.17). So runs are answered
+by `text_style`, through the run walker the emitters use (`collect_runs`), never by `resolved`.
+What a piece reports is filtered by `run_support`: text on a path reports paint only, a plain
+`<text>` reports its runs in the element's own style.
+
+**Host protocol.** The answers are a function of the session's text, so a host keeps the session
+of its last flush and asks it; when the document has changed since, it re-serializes and parses
+once before the next answer (a flush does that anyway). Offsets are source byte starts, as for
+units (§9). The kit wraps these as its `queries` (xsvg-kit `docs/Queries.md`).

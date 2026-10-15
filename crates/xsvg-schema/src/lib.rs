@@ -210,6 +210,9 @@ pub trait Params: Sized {
 /// A parameter type with a closed set of spellings.
 pub trait ParamEnum: Sized {
     const VALUES: &'static [&'static str];
+    /// The spelling of the variant a missing attribute reads as (the type's
+    /// `Default`), when it has one — the default its parameters declare.
+    const DEFAULT: Option<&'static str> = None;
     fn parse(s: &str) -> Option<Self>;
     fn as_str(&self) -> &'static str;
 }

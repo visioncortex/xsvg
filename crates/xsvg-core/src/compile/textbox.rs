@@ -617,37 +617,9 @@ pub(super) fn plan_paragraphs<'a>(
     // authored paragraph-spacing (zero included) wins
     let default_spacing = attr_num(node, "paragraph-spacing", base_style.size * 0.35);
 
-    // per-paragraph style: the box style, with any font-* on the `<x:p>` overriding
-    let para_style = |p: roxmltree::Node| {
-        let mut st = base_style.clone();
-        if let Some(v) = p.attribute("font-family") {
-            st.family = v.to_string();
-        }
-        if let Some(v) = p
-            .attribute("font-size")
-            .and_then(parse_num)
-            .filter(|n| *n > 0.0)
-        {
-            st.size = v;
-        }
-        if let Some(v) = p.attribute("font-weight") {
-            st.weight = v.to_string();
-        }
-        if let Some(v) = p.attribute("font-style") {
-            st.style = v.to_string();
-        }
-        if let Some(v) = p.attribute("text-transform").and_then(TextTransform::parse) {
-            st.text_transform = v;
-        }
-        if let Some(v) = p
-            .attribute("line-height")
-            .and_then(parse_num)
-            .filter(|n| *n > 0.0)
-        {
-            st.line_height = v;
-        }
-        st
-    };
+    // per-block style and fill: the box's, with what the `<x:p>` — or the item,
+    // then its `<x:list>` — sets over it (query.rs, the same levels a query reads)
+    let levels = |p: roxmltree::Node<'a, 'a>| block_levels(p).map(|(l, _)| l).unwrap_or_default();
 
     // pass 1 at a given SCALE (fit="shrink" searches it below): every text
     // metric — the font sizes, the paragraph gaps, the first-line indent —
@@ -748,18 +720,9 @@ pub(super) fn plan_paragraphs<'a>(
         for (i, u) in units.iter().enumerate() {
             let p = u.src;
             // an item takes the list's style (font-* on <x:list>) under the
-            // box's, then its own font-size; a paragraph its own font-*
-            let mut pstyle = match u.list {
-                Some(l) => {
-                    let mut st = para_style(l);
-                    st.size = attr_pos(p, "font-size", st.size);
-                    if let Some(v) = p.attribute("text-transform").and_then(TextTransform::parse) {
-                        st.text_transform = v;
-                    }
-                    st
-                }
-                None => para_style(p),
-            };
+            // box's, then its own font-size and case; a paragraph its own font-*
+            let block = levels(p);
+            let mut pstyle = overlay(&block, base_style);
             pstyle.size *= scale;
             // spacing: between items of one list its item-spacing; into the
             // first item, and around a paragraph, the paragraph gaps; the gap
@@ -826,10 +789,7 @@ pub(super) fn plan_paragraphs<'a>(
                     * u.list
                         .map_or(1.0, |l| attr_num(l, "marker-size", 1.0).max(0.0)),
             });
-            let fill = p
-                .attribute("fill")
-                .or_else(|| u.list.and_then(|l| l.attribute("fill")))
-                .unwrap_or(base_fill);
+            let fill = level_value(&block, "fill").unwrap_or(base_fill);
             extra.push((fill, emits, marker, pstyle));
         }
         let (laid, block_h) = stack_paragraphs(&blocks, cx, cw, m);

@@ -1438,8 +1438,14 @@ use runs::*;
 mod textbox;
 use textbox::*;
 pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize};
+mod query;
 mod stops;
 mod textpath;
+use query::*;
+pub use query::{
+    run_support, Block, BlockKind, PieceBorder, Resolved, RunSupport, Source, TextPiece,
+    ThemeTokens,
+};
 use stops::{record_textpath_stops, span_of, stop_run};
 pub use stops::{CaretStop, CaretStops, StopRun};
 use textpath::*;

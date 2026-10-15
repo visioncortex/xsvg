@@ -14,6 +14,9 @@ use super::*;
 pub(super) struct Theme {
     pub(super) colors: std::collections::HashMap<String, String>,
     pub(super) fonts: std::collections::HashMap<String, Vec<(String, String)>>,
+    /// Token names in document order, a redeclared name at its last place.
+    pub(super) color_order: Vec<String>,
+    pub(super) font_order: Vec<String>,
 }
 
 /// The font-ish properties an `<x:font>` token may carry.
@@ -42,6 +45,8 @@ impl Theme {
                         if let (Some(name), Some(val)) = (c.attribute("name"), c.attribute("value"))
                         {
                             theme.colors.insert(name.to_string(), val.to_string());
+                            theme.color_order.retain(|n| n != name);
+                            theme.color_order.push(name.to_string());
                         }
                     }
                     "font" => {
@@ -53,6 +58,8 @@ impl Theme {
                                 })
                                 .collect();
                             theme.fonts.insert(name.to_string(), props);
+                            theme.font_order.retain(|n| n != name);
+                            theme.font_order.push(name.to_string());
                         }
                     }
                     _ => {}

@@ -78,15 +78,11 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let col = x + inset - marker_gap; // markers' right-edge column
                                           // an <x:li> may override the font size (e.g. a smaller sub-point); it
                                           // inherits the list's size otherwise, keeping the list's line-height
-        let item_size = attr_pos(li, "font-size", size);
-        let item_style = TextStyle {
-            size: item_size,
-            text_transform: li
-                .attribute("text-transform")
-                .and_then(TextTransform::parse)
-                .unwrap_or(style.text_transform),
-            ..style.clone()
-        };
+        let item_style = overlay(
+            &block_levels(li).map(|(l, _)| l).unwrap_or_default(),
+            &style,
+        );
+        let item_size = item_style.size;
         // an item is a real run leaf: <tspan> styling and <tbreak/> forced
         // breaks ('\n' in the stream) flow through the walker every box uses
         let (segments, styles, emits) = collect_runs(li, &item_style);
