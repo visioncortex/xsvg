@@ -471,150 +471,26 @@ impl<'a> Parsed<'a> {
     }
 }
 
-/// One document, parsed and pre-scanned once, ready to compile any number of its
-/// fragments on a [`Platform`](super::Platform) (docs/Compile Session.md).
+/// A document parsed and pre-scanned once — the XML tree, the `<x:theme>`
+/// tokens, the `<x:import>` bindings, the id table — **borrowing** its text.
+/// It answers the document queries (xsvg-kit docs/Queries.md; Incremental.md
+/// §10) and compiles through [`CompileSession::from_parsed`].
 ///
-/// Created by [`Platform::session`](super::Platform::session) at the top of a render flush over the text the
-/// embedder just serialized, used for every compile that flush needs, and dropped
-/// with it: the session borrows the input, so a stale parse cannot be held. It
-/// retains exactly what the pure entries recompute per call — the parse, the
-/// `<x:theme>` tokens, the `<x:import>` bindings, the id table and the quality
-/// profile — and nothing per compile: each call builds a fresh [`Ctx`] with its own
-/// memo, cycle guard and fuel, so degradation behaviour is unchanged.
-///
-/// `P` is the platform's concrete type, so a session is `Send` exactly when the
-/// platform is `Sync` — true of any platform over thread-safe adapters, with
-/// nothing asserted — and a document may then be parsed off the thread that
-/// compiles it. A session is not `Sync`, and need not be.
-///
-/// Every byte a session emits is a byte the pure entry emits for the same input:
-/// `compile_fragment(offset)` equals `compile_fragment_platform_impl(input, …,
-/// offset, base, platform)`, and likewise for the other methods.
-pub struct CompileSession<'a, P: Host> {
-    parsed: Parsed<'a>,
-    platform: &'a P,
-    quality: QualityProfile,
-    sourcemap: bool,
-    base: String,
+/// The core owns no text and keeps no state between calls: a host that wants a
+/// parse to outlive one call owns the text and pairs it with this (a
+/// self-referential cell, since the tree borrows the text). `ParsedDocument` is
+/// covariant in `'a`, which such a cell requires.
+pub struct ParsedDocument<'a> {
+    pub(super) parsed: Parsed<'a>,
 }
 
-impl<'a, P: Host> CompileSession<'a, P> {
-    /// Parse once, pre-scan once. Fails exactly where the pure entries fail
-    /// (nesting depth, XML parse error), with the same message. Usually reached
-    /// as [`Platform::session`](super::Platform::session).
-    pub fn new(
-        platform: &'a P,
-        input: &'a str,
-        quality: &str,
-        sourcemap: bool,
-        base: &str,
-    ) -> Result<Self, String> {
+impl<'a> ParsedDocument<'a> {
+    /// Parse once, pre-scan once. Fails exactly where a compile fails (nesting
+    /// depth, XML parse error), with the same message.
+    pub fn new(input: &'a str) -> Result<Self, String> {
         Ok(Self {
             parsed: Parsed::new(input)?,
-            platform,
-            quality: QualityProfile::parse(quality),
-            sourcemap,
-            base: base.to_string(),
         })
-    }
-
-    /// The retained parse, for tests that walk the document the session holds.
-    #[cfg(test)]
-    pub(super) fn parsed(&self) -> &Parsed<'a> {
-        &self.parsed
-    }
-
-    /// The whole document — byte-identical to [`super::compile_platform_impl`].
-    pub fn compile(&self) -> Result<String, String> {
-        self.parsed.compile(
-            &self.platform.backend(),
-            self.quality,
-            self.sourcemap,
-            &self.base,
-        )
-    }
-
-    /// The top-level element containing byte `offset` — byte-identical to
-    /// [`super::compile_fragment_platform_impl`], and so to that element's span in
-    /// [`Self::compile`] (the fragment invariant, docs/Incremental.md).
-    pub fn compile_fragment(&self, offset: usize) -> Result<String, String> {
-        self.parsed.compile_fragment(
-            offset,
-            &self.platform.backend(),
-            self.quality,
-            self.sourcemap,
-            &self.base,
-        )
-    }
-
-    /// Source byte range of the incremental unit containing `offset`
-    /// (docs/Incremental.md §9): a direct child of a top-level passthrough
-    /// container, else the top-level element itself.
-    pub fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
-        self.parsed.unit_range(offset)
-    }
-
-    /// Compile the unit containing `offset` on its own — byte-identical to its
-    /// span in its fragment's output.
-    pub fn compile_unit(&self, offset: usize) -> Result<String, String> {
-        self.parsed.compile_unit(
-            offset,
-            &self.platform.backend(),
-            self.quality,
-            self.sourcemap,
-            &self.base,
-        )
-    }
-
-    /// The fragment containing `offset` plus where each of its units landed in
-    /// it, in output order; the span list is empty when the top-level element is
-    /// its own unit.
-    pub fn compile_fragment_spans(
-        &self,
-        offset: usize,
-    ) -> Result<(String, Vec<super::UnitSpan>), String> {
-        self.parsed.compile_fragment_spans(
-            offset,
-            &self.platform.backend(),
-            self.quality,
-            self.sourcemap,
-            &self.base,
-        )
-    }
-
-    /// [`CompileSession::dependents`] at unit granularity: seeds and results are
-    /// unit source ranges, so dependents inside the same container are found.
-    pub fn unit_dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
-        self.parsed.unit_dependents(seeds)
-    }
-
-    /// Baked-reference dependents of the fragments at `seeds` — the same answer as
-    /// [`super::dependents_multi_impl`], from the retained parse.
-    pub fn dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
-        self.parsed.dependents(seeds)
-    }
-
-    /// Caret geometry for the `<x:textbox>` starting at byte `offset` — the same
-    /// answer as [`super::text_layout_impl`]. `None` when the offset is not a
-    /// textbox or the box resolves to nothing renderable.
-    pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
-        self.parsed
-            .text_layout(offset, &self.platform.backend(), self.quality)
-    }
-
-    /// How big the `<x:textbox>` at byte `offset` must be to hold its content —
-    /// the same answer as [`super::measure_textbox_impl`]. `None` when the offset
-    /// is not a rectangular textbox.
-    pub fn measure_textbox(&self, offset: usize) -> Option<super::TextboxSize> {
-        self.parsed
-            .measure_textbox(offset, &self.platform.backend(), self.quality)
-    }
-
-    /// Caret stops on the outlined text element at byte `offset` — the same
-    /// answer as [`super::caret_stops_impl`]. `None` when nothing there outlines.
-    pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
-        self.parsed
-            .caret_stops(offset, &self.platform.backend(), self.quality)
     }
 
     /// The effective value of each of `properties` on the element starting at
@@ -655,16 +531,208 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn run_support(&self, offset: usize) -> Option<super::RunSupport> {
         self.parsed.run_support(offset)
     }
+}
+
+/// Compile-time proof that a host may shorten the lifetime of a parse — what a
+/// self-referential cell pairing it with its text needs. Fails to build if a
+/// field ever makes `ParsedDocument` invariant.
+#[allow(dead_code)]
+fn parsed_document_is_covariant<'long: 'short, 'short>(
+    d: ParsedDocument<'long>,
+) -> ParsedDocument<'short> {
+    d
+}
+
+/// The parse a session compiles from: its own, or the host's.
+enum Held<'a> {
+    Owned(Box<ParsedDocument<'a>>),
+    Borrowed(&'a ParsedDocument<'a>),
+}
+
+/// One document, parsed and pre-scanned once, ready to compile any number of its
+/// fragments on a [`Platform`](super::Platform) (docs/Compile Session.md).
+///
+/// Created by [`Platform::session`](super::Platform::session) at the top of a render flush over the text the
+/// embedder just serialized, used for every compile that flush needs, and dropped
+/// with it: the session borrows the input, so a stale parse cannot be held. It
+/// retains exactly what the pure entries recompute per call — the parse, the
+/// `<x:theme>` tokens, the `<x:import>` bindings, the id table and the quality
+/// profile — and nothing per compile: each call builds a fresh [`Ctx`] with its own
+/// memo, cycle guard and fuel, so degradation behaviour is unchanged.
+///
+/// `P` is the platform's concrete type, so a session is `Send` exactly when the
+/// platform is `Sync` — true of any platform over thread-safe adapters, with
+/// nothing asserted — and a document may then be parsed off the thread that
+/// compiles it. A session is not `Sync`, and need not be.
+///
+/// Every byte a session emits is a byte the pure entry emits for the same input:
+/// `compile_fragment(offset)` equals `compile_fragment_platform_impl(input, …,
+/// offset, base, platform)`, and likewise for the other methods.
+pub struct CompileSession<'a, P: Host> {
+    doc: Held<'a>,
+    platform: &'a P,
+    quality: QualityProfile,
+    sourcemap: bool,
+    base: String,
+}
+
+impl<'a, P: Host> CompileSession<'a, P> {
+    /// Parse once, pre-scan once. Fails exactly where the pure entries fail
+    /// (nesting depth, XML parse error), with the same message. Usually reached
+    /// as [`Platform::session`](super::Platform::session).
+    pub fn new(
+        platform: &'a P,
+        input: &'a str,
+        quality: &str,
+        sourcemap: bool,
+        base: &str,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            doc: Held::Owned(Box::new(ParsedDocument::new(input)?)),
+            platform,
+            quality: QualityProfile::parse(quality),
+            sourcemap,
+            base: base.to_string(),
+        })
+    }
+
+    /// A session over a document the host already parsed — no parse of its own.
+    /// A host keeps the [`ParsedDocument`] of its current text between flushes
+    /// (paired with the text it borrows, which the host owns), answers queries
+    /// from it, and compiles from it here while the text is unchanged: one
+    /// parse per change, shared by the flush and every query. Every byte is the
+    /// byte [`Self::new`] over the same text would emit.
+    pub fn from_parsed(
+        platform: &'a P,
+        doc: &'a ParsedDocument<'a>,
+        quality: &str,
+        sourcemap: bool,
+        base: &str,
+    ) -> Self {
+        Self {
+            doc: Held::Borrowed(doc),
+            platform,
+            quality: QualityProfile::parse(quality),
+            sourcemap,
+            base: base.to_string(),
+        }
+    }
+
+    /// The parsed document this session compiles: its queries
+    /// ([`ParsedDocument::resolved`] and the rest) answer from the same parse.
+    pub fn document(&self) -> &ParsedDocument<'a> {
+        match &self.doc {
+            Held::Owned(d) => d,
+            Held::Borrowed(d) => d,
+        }
+    }
+
+    fn parsed(&self) -> &Parsed<'a> {
+        &self.document().parsed
+    }
+
+    /// The whole document — byte-identical to [`super::compile_platform_impl`].
+    pub fn compile(&self) -> Result<String, String> {
+        self.parsed().compile(
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// The top-level element containing byte `offset` — byte-identical to
+    /// [`super::compile_fragment_platform_impl`], and so to that element's span in
+    /// [`Self::compile`] (the fragment invariant, docs/Incremental.md).
+    pub fn compile_fragment(&self, offset: usize) -> Result<String, String> {
+        self.parsed().compile_fragment(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// Source byte range of the incremental unit containing `offset`
+    /// (docs/Incremental.md §9): a direct child of a top-level passthrough
+    /// container, else the top-level element itself.
+    pub fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
+        self.parsed().unit_range(offset)
+    }
+
+    /// Compile the unit containing `offset` on its own — byte-identical to its
+    /// span in its fragment's output.
+    pub fn compile_unit(&self, offset: usize) -> Result<String, String> {
+        self.parsed().compile_unit(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// The fragment containing `offset` plus where each of its units landed in
+    /// it, in output order; the span list is empty when the top-level element is
+    /// its own unit.
+    pub fn compile_fragment_spans(
+        &self,
+        offset: usize,
+    ) -> Result<(String, Vec<super::UnitSpan>), String> {
+        self.parsed().compile_fragment_spans(
+            offset,
+            &self.platform.backend(),
+            self.quality,
+            self.sourcemap,
+            &self.base,
+        )
+    }
+
+    /// [`CompileSession::dependents`] at unit granularity: seeds and results are
+    /// unit source ranges, so dependents inside the same container are found.
+    pub fn unit_dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
+        self.parsed().unit_dependents(seeds)
+    }
+
+    /// Baked-reference dependents of the fragments at `seeds` — the same answer as
+    /// [`super::dependents_multi_impl`], from the retained parse.
+    pub fn dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
+        self.parsed().dependents(seeds)
+    }
+
+    /// Caret geometry for the `<x:textbox>` starting at byte `offset` — the same
+    /// answer as [`super::text_layout_impl`]. `None` when the offset is not a
+    /// textbox or the box resolves to nothing renderable.
+    pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
+        self.parsed()
+            .text_layout(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// How big the `<x:textbox>` at byte `offset` must be to hold its content —
+    /// the same answer as [`super::measure_textbox_impl`]. `None` when the offset
+    /// is not a rectangular textbox.
+    pub fn measure_textbox(&self, offset: usize) -> Option<super::TextboxSize> {
+        self.parsed()
+            .measure_textbox(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// Caret stops on the outlined text element at byte `offset` — the same
+    /// answer as [`super::caret_stops_impl`]. `None` when nothing there outlines.
+    pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
+        self.parsed()
+            .caret_stops(offset, &self.platform.backend(), self.quality)
+    }
 
     /// Source byte range of every element, in document order — the same answer as
     /// [`super::node_spans_impl`].
     pub fn node_spans(&self) -> Vec<(usize, usize)> {
-        self.parsed.node_spans()
+        self.parsed().node_spans()
     }
 
     /// Source byte range of the fragment unit containing `offset` — the same answer
     /// as [`super::fragment_range_impl`].
     pub fn fragment_range(&self, offset: usize) -> Option<(usize, usize)> {
-        self.parsed.fragment_range(offset)
+        self.parsed().fragment_range(offset)
     }
 }

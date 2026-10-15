@@ -41,8 +41,8 @@ pub use compile::{
 // asked of a session's parse.
 #[cfg(feature = "compile")]
 pub use compile::{
-    run_support, Block, BlockKind, PieceBorder, Resolved, RunSupport, Source, TextPiece,
-    ThemeTokens,
+    run_support, Block, BlockKind, ParsedDocument, PieceBorder, Resolved, RunSupport, Source,
+    TextPiece, ThemeTokens,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.

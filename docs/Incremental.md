@@ -476,7 +476,15 @@ by `text_style`, through the run walker the emitters use (`collect_runs`), never
 What a piece reports is filtered by `run_support`: text on a path reports paint only, a plain
 `<text>` reports its runs in the element's own style.
 
-**Host protocol.** The answers are a function of the session's text, so a host keeps the session
-of its last flush and asks it; when the document has changed since, it re-serializes and parses
-once before the next answer (a flush does that anyway). Offsets are source byte starts, as for
-units (§9). The kit wraps these as its `queries` (xsvg-kit `docs/Queries.md`).
+**Host protocol: one parse per change.** The queries live on `ParsedDocument<'a>`, a parse that
+*borrows* its text (the core owns no text and keeps no state between calls; roxmltree is
+zero-copy), and `CompileSession::from_parsed(platform, &doc, …)` compiles from one without
+parsing — byte-identical to a session over the same text, pinned over the dataset with the parse
+counter at zero. A host therefore keeps **one `ParsedDocument` per document, paired with the text
+it borrows, stamped with the mutation count it was built at**: every query reads it; a flush
+compiles from it; when the count has moved, the host re-serializes, parses once and replaces it.
+The pairing is a self-referential value (the tree borrows the text), which is the host's to hold
+(`self_cell` or the like — `ParsedDocument` is covariant in its lifetime, which such a cell
+requires; `parsed_document_is_covariant` fails to build if that ever changes). Offsets are source
+byte starts, as for units (§9). The kit wraps the queries as its `queries` (xsvg-kit
+`docs/Queries.md`), whose JS memo then only saves the bridge hop.

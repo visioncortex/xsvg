@@ -7510,8 +7510,7 @@ fn resolved_walks_the_cascade_the_emitters_lay_out_from() {
 <x:textbox x="0" y="300" width="200" height="40" font-size="0">bad size</x:textbox>
 </g>
 </svg>"##;
-    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-    let s = platform.session(src, "balanced", false, "").unwrap();
+    let s = ParsedDocument::new(src).unwrap();
     let props = [
         "font-family",
         "font-size",
@@ -7605,8 +7604,7 @@ fn resolved_cells_and_standalone_lists_and_declared_defaults() {
 <q:list x="0" y="200" width="200" font-size="10"><q:li font-size="8" fill="#f00">x</q:li></q:list>
 <q:textbox x="0" y="300" width="100" height="30" q:border-width="2">t</q:textbox>
 </svg>"##;
-    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-    let s = platform.session(src, "balanced", false, "").unwrap();
+    let s = ParsedDocument::new(src).unwrap();
     let props = ["font-size", "font-weight", "font-style", "fill"];
     let get = |off: usize| s.resolved(off, &props).unwrap();
     let col0 = nth_at(src, "<q:col", 0);
@@ -7698,12 +7696,11 @@ fn resolved_agrees_with_the_emitters_over_the_dataset() {
     let mut checked = 0;
     for path in dataset_files() {
         let src = std::fs::read_to_string(&path).unwrap();
-        let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-        let Ok(s) = platform.session(&src, "balanced", false, "") else {
+        let Ok(s) = ParsedDocument::new(&src) else {
             continue;
         };
-        let doc = &s.parsed().doc;
-        let theme = &s.parsed().theme;
+        let doc = &s.parsed.doc;
+        let theme = &s.parsed.theme;
         for node in super::visible(doc.root()).filter(|n| n.is_element()) {
             let Some(r) = s.resolved(node.range().start, &props) else {
                 continue;
@@ -7756,8 +7753,7 @@ fn text_style_reports_pieces_in_utf16_over_the_text_content() {
 <path id="p" d="M0,0 L100,0"/>
 <text x="0" y="0">plain<tspan fill="#f00">x</tspan></text>
 </svg>"##;
-    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-    let s = platform.session(src, "balanced", false, "").unwrap();
+    let s = ParsedDocument::new(src).unwrap();
     let pieces = s.text_style(nth_at(src, "<x:textbox", 0)).unwrap();
     // "ß😀 " is 4 UTF-16 units (the emoji is two), uppercasing keeps the count
     let spans: Vec<_> = pieces.iter().map(|p| (p.start, p.end)).collect();
@@ -7798,8 +7794,7 @@ fn blocks_and_run_support_follow_the_emitters() {
 <x:textpath in="#p">p</x:textpath><path id="p" d="M0,0 L9,0"/>
 <x:table x="0" y="0" width="90"><x:tr><x:td>c</x:td></x:tr></x:table>
 </svg>"##;
-    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-    let s = platform.session(src, "balanced", false, "").unwrap();
+    let s = ParsedDocument::new(src).unwrap();
     let list = nth_at(src, "<x:list", 0);
     let b = s.blocks(nth_at(src, "<x:textbox", 0)).unwrap();
     let kinds: Vec<_> = b.iter().map(|b| b.kind.clone()).collect();
@@ -7859,8 +7854,7 @@ fn theme_tokens_come_in_document_order_without_the_doc_island() {
 <x:doc><x:theme><x:color name="island" value="#999"/></x:theme></x:doc>
 <x:theme><x:color name="a" value="#333"/></x:theme>
 </svg>"##;
-    let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
-    let s = platform.session(src, "balanced", false, "").unwrap();
+    let s = ParsedDocument::new(src).unwrap();
     let t = s.theme();
     assert_eq!(
         t.colors,
@@ -7877,4 +7871,39 @@ fn theme_tokens_come_in_document_order_without_the_doc_island() {
             ]
         )]
     );
+}
+
+#[test]
+fn a_session_from_a_held_parse_compiles_the_same_bytes_without_parsing() {
+    // the host keeps one ParsedDocument per change and compiles from it: the
+    // bytes are a fresh session's, and no parse happens
+    for path in dataset_files().into_iter().step_by(5) {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+        let Ok(fresh) = platform.session(&src, "balanced", true, "") else {
+            continue;
+        };
+        let doc = ParsedDocument::new(&src).unwrap();
+        super::session::PARSE_COUNT.with(|c| c.set(0));
+        let held = CompileSession::from_parsed(&platform, &doc, "balanced", true, "");
+        assert_eq!(held.compile(), fresh.compile(), "{}", path.display());
+        for (start, _) in doc
+            .parsed
+            .doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+            .map(|c| (c.range().start, ()))
+        {
+            assert_eq!(held.compile_fragment(start), fresh.compile_fragment(start));
+        }
+        assert_eq!(
+            super::session::PARSE_COUNT.with(|c| c.get()),
+            0,
+            "{}",
+            path.display()
+        );
+        // the session's own document answers the queries the held one does
+        assert_eq!(held.document().theme(), doc.theme());
+    }
 }

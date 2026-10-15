@@ -1422,7 +1422,7 @@ mod tests;
 /// One parse per flush: the editor's compile session (docs/Compile Session.md).
 mod session;
 use crate::MeasureCache;
-pub use session::CompileSession;
+pub use session::{CompileSession, ParsedDocument};
 
 // ---- feature modules (split out of this file) ----
 mod entries;

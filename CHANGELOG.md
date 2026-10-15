@@ -24,7 +24,9 @@ partial one.
   `blocks(offset)` (a box's paragraphs and list items) and `run_support(offset)` (which run
   attributes the element's text draws). The text cascade is now data the emitters compute from
   and the queries report, so the two cannot disagree; pinned over the dataset
-  (Incremental.md §10).
+  (Incremental.md §10). The queries live on `ParsedDocument`, a borrowing parse a host keeps
+  between flushes, and `CompileSession::from_parsed` compiles from one without parsing again:
+  one parse per change, shared by every query and the flush.
 
 - **Runs in curved region flow and `<text inline-size>`.** Both flattened their `<tspan>`s to the
   base style, losing fill and border along with weight, size and family. They now flow styled runs
