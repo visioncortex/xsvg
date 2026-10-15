@@ -22,7 +22,8 @@ partial one.
   or an ancestor, implied, initial), `theme()` (the tokens in document order, `x:doc` excluded),
   `text_style(offset)` (an element's text as pieces in the style each renders in, UTF-16 offsets),
   `blocks(offset)` (a box's paragraphs and list items) and `run_support(offset)` (which run
-  attributes the element's text draws). The text cascade is now data the emitters compute from
+  attributes the element's text draws — by the compiler, or natively by the renderer for a plain
+  `<text>`). The text cascade is now data the emitters compute from
   and the queries report, so the two cannot disagree; pinned over the dataset
   (Incremental.md §10). The queries live on `ParsedDocument`, a borrowing parse a host keeps
   between flushes, and `CompileSession::from_parsed` compiles from one without parsing again:

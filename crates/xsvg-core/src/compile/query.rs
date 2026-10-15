@@ -448,6 +448,14 @@ impl RunSupport {
         border: true,
         ..Self::NONE
     };
+    /// A plain `<text>`, passed through: the browser composes a `<tspan>`'s
+    /// typography, fill, decoration, baseline shift and an `<a>`'s link itself,
+    /// and the compiler lowers a run's border (§6.17). A highlight is the one
+    /// thing nobody draws — it is baked only by the laid-out front-ends.
+    const PLAIN: Self = Self {
+        highlight: false,
+        ..Self::ALL
+    };
     const NONE: Self = Self {
         typography: false,
         fill: false,
@@ -465,12 +473,14 @@ pub(super) fn text_element<'a>(node: roxmltree::Node<'a, 'a>) -> roxmltree::Node
     block_levels(node).map_or(node, |(_, base)| base)
 }
 
-/// What a run inside `node`'s text may carry and see drawn. Every laid-out
-/// front-end — `<textArea>`, `<x:textbox>` (paragraphs, lists, `in=` regions),
-/// `<x:list>`, `<x:table>`, `<text inline-size>` — takes runs through one walker
+/// What a run inside `node`'s text may carry and see drawn — by the compiler or,
+/// for a plain `<text>`, by the renderer. Every laid-out front-end —
+/// `<textArea>`, `<x:textbox>` (paragraphs, lists, `in=` regions), `<x:list>`,
+/// `<x:table>`, `<text inline-size>` — takes runs through one walker
 /// ([`collect_runs`]) and draws all of it; text on a path draws paint runs; a
-/// plain `<text>` passes through as authored, so nothing of a run is the
-/// compiler's to draw. `None` for a node that holds no text.
+/// plain `<text>` passes through, where SVG draws everything but a highlight
+/// natively and the compiler lowers the border. `None` for a node that holds
+/// no text.
 pub fn run_support(node: roxmltree::Node) -> Option<RunSupport> {
     let el = text_element(node);
     let svg = el.tag_name().namespace() == Some(SVG_NS);
@@ -479,7 +489,7 @@ pub fn run_support(node: roxmltree::Node) -> Option<RunSupport> {
         "textbox" | "list" | "table" if xsvg => RunSupport::ALL,
         "textArea" if svg => RunSupport::ALL,
         "text" if svg && el.attribute("inline-size").is_some() => RunSupport::ALL,
-        "text" if svg => RunSupport::NONE,
+        "text" if svg => RunSupport::PLAIN,
         "textpath" if xsvg => RunSupport::PAINT,
         _ => return None,
     })

@@ -7778,9 +7778,12 @@ fn text_style_reports_pieces_in_utf16_over_the_text_content() {
         tp[1].border.as_ref().and_then(|b| b.width.as_deref()),
         Some("1")
     );
-    // a plain <text> passes through: nothing of a run is the compiler's to draw
+    // a plain <text> passes through, and the browser composes its runs: each
+    // piece is reported in its own style, as it draws
     let plain = s.text_style(nth_at(src, "<text", 0)).unwrap();
-    assert!(plain.iter().all(|p| p.fill == "#000"), "{plain:?}");
+    assert_eq!(plain.len(), 2, "{plain:?}");
+    assert_eq!(plain[0].fill, "#000");
+    assert_eq!(plain[1].fill, "#f00");
     assert!(s.text_style(nth_at(src, "<path", 0)).is_none());
 }
 
@@ -7841,7 +7844,15 @@ fn blocks_and_run_support_follow_the_emitters() {
     ] {
         assert_eq!(sup(needle, nth), Some(all), "{needle}");
     }
-    assert_eq!(sup("<text", 1), Some(RunSupport::default()));
+    // plain <text>: everything SVG draws natively plus the lowered border; no highlight
+    let plain = sup("<text", 1).unwrap();
+    assert_eq!(
+        plain,
+        RunSupport {
+            highlight: false,
+            ..all
+        }
+    );
     let tp = sup("<x:textpath", 0).unwrap();
     assert!(tp.fill && tp.border && !tp.typography && !tp.highlight && !tp.decoration);
     assert_eq!(sup("<path", 0), None);

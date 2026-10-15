@@ -473,8 +473,10 @@ document binds) is the element's own, else the default its element declares in `
 `<tspan>`s inward over the element's style, a run's `font-size` is taken against its paragraph's,
 and its border completes from the nearest bordered container (§6.11, §6.17). So runs are answered
 by `text_style`, through the run walker the emitters use (`collect_runs`), never by `resolved`.
-What a piece reports is filtered by `run_support`: text on a path reports paint only, a plain
-`<text>` reports its runs in the element's own style.
+What a piece reports is filtered by `run_support`, which answers for what *draws*, by the compiler
+or the renderer: text on a path reports paint only; a plain `<text>` passes through, where SVG
+composes a `<tspan>`'s typography, fill, decoration, baseline shift and an `<a>`'s link natively
+and the compiler lowers its border, so everything but a highlight is reported.
 
 **Host protocol: one parse per change.** The queries live on `ParsedDocument<'a>`, a parse that
 *borrows* its text (the core owns no text and keeps no state between calls; roxmltree is
