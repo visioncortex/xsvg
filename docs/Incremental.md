@@ -466,8 +466,11 @@ the same levels, so the style a query reports is the style that was laid out
 (`resolved_agrees_with_the_emitters_over_the_dataset` pins it on every element of every sample).
 A value counts at a level only when it is valid for the property — a positive size, `normal` or a
 number for spacing, a known `text-transform` — else the cascade falls through, as CSS ignores an
-invalid declaration. Any other attribute (`x:` naming the xsvg namespace, whatever prefix the
-document binds) is the element's own, else the default its element declares in `describe()`.
+invalid declaration. A block's layout properties follow the paragraph planner (§6.16): `align` and `direction`
+are the paragraph's own, else its box's; `text-indent` the paragraph's own, else none (a box's
+indent is for its own single flow); an item in a list is always start-aligned and unindented
+(`Implied`). Any other attribute (`x:` naming the xsvg namespace, whatever prefix the document
+binds) is the element's own, else the default its element declares in `describe()`.
 
 **Runs.** A run's properties do not follow the element cascade: they compose from the enclosing
 `<tspan>`s inward over the element's style, a run's `font-size` is taken against its paragraph's,

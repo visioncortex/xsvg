@@ -7918,3 +7918,63 @@ fn a_session_from_a_held_parse_compiles_the_same_bytes_without_parsing() {
         assert_eq!(held.document().theme(), doc.theme());
     }
 }
+
+#[test]
+fn resolved_cascades_a_blocks_layout_from_its_box() {
+    // align and direction: a paragraph's own, else the box's; text-indent the
+    // paragraph's own, else none; an item always start-aligned, unindented
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:textbox x="0" y="0" width="200" height="200" align="center" direction="rtl" text-indent="9"><x:p>a</x:p><x:p align="end" text-indent="4" direction="ltr">b</x:p><x:list><x:li align="end">c</x:li></x:list></x:textbox>
+<x:textbox x="0" y="300" width="200" height="40"><x:p>d</x:p></x:textbox>
+</svg>"##;
+    let s = ParsedDocument::new(src).unwrap();
+    let props = ["align", "text-indent", "direction"];
+    let boxo = nth_at(src, "<x:textbox", 0);
+    let get = |needle: &str, nth: usize| s.resolved(nth_at(src, needle, nth), &props).unwrap();
+    let p = get("<x:p", 0);
+    assert_eq!(p[0].value.as_deref(), Some("center"));
+    assert_eq!(
+        p[0].source,
+        Source::Inherited {
+            from: boxo,
+            token: None
+        }
+    );
+    assert_eq!(
+        p[1].value.as_deref(),
+        Some("0"),
+        "a box's indent is for its own flow"
+    );
+    assert_eq!(p[1].source, Source::Initial);
+    assert_eq!(p[2].value.as_deref(), Some("rtl"));
+    assert_eq!(
+        p[2].source,
+        Source::Inherited {
+            from: boxo,
+            token: None
+        }
+    );
+    let own = get("<x:p", 1);
+    assert_eq!(own[0].value.as_deref(), Some("end"));
+    assert_eq!(own[1].value.as_deref(), Some("4"));
+    assert_eq!(own[2].value.as_deref(), Some("ltr"));
+    assert!(own.iter().all(|r| r.source == Source::Own));
+    let li = get("<x:li ", 0);
+    assert_eq!(li[0].value.as_deref(), Some("start"));
+    assert_eq!(li[0].source, Source::Implied);
+    assert_eq!(li[1].value.as_deref(), Some("0"));
+    assert_eq!(li[1].source, Source::Implied);
+    assert_eq!(li[2].value.as_deref(), Some("rtl"));
+    let bare = get("<x:p", 2);
+    assert_eq!(bare[0].value.as_deref(), Some("start"));
+    assert_eq!(bare[0].source, Source::Initial);
+    assert_eq!(bare[2].value.as_deref(), Some("ltr"));
+    // the box itself: its own, else its declared default
+    let b = s.resolved(nth_at(src, "<x:textbox", 1), &props).unwrap();
+    assert_eq!(b[0].value.as_deref(), Some("start"));
+    assert_eq!(b[0].source, Source::Initial);
+    // what the query says is what was laid out: paragraph "a" centres, "b" ends
+    let out = compile_test(src);
+    assert!(out.contains("text-anchor=\"middle\""), "{out}");
+    assert!(out.contains("text-anchor=\"end\""), "{out}");
+}

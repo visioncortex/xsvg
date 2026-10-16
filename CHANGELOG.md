@@ -23,7 +23,8 @@ partial one.
   `text_style(offset)` (an element's text as pieces in the style each renders in, UTF-16 offsets),
   `blocks(offset)` (a box's paragraphs and list items) and `run_support(offset)` (which run
   attributes the element's text draws — by the compiler, or natively by the renderer for a plain
-  `<text>`). The text cascade is now data the emitters compute from
+  `<text>`). A block's `align`, `direction` and `text-indent` cascade from its box as the
+  paragraph planner reads them, the planner now reading the same rule. The text cascade is now data the emitters compute from
   and the queries report, so the two cannot disagree; pinned over the dataset
   (Incremental.md §10). The queries live on `ParsedDocument`, a borrowing parse a host keeps
   between flushes, and `CompileSession::from_parsed` compiles from one without parsing again:

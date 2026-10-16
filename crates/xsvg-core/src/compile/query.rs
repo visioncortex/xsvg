@@ -383,6 +383,12 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
         source,
     };
     if !STYLE_PROPS.contains(&property) {
+        // a block's layout properties cascade from its box by the planner's rules
+        if let Some((_, container)) = block_levels(node) {
+            if let Some((v, source)) = block_layout(node, container, is_x(node, "li"), property) {
+                return done(v, source);
+            }
+        }
         return match attr_by_name(node, property) {
             Some(v) => done(Some(v), Source::Own),
             None => done(declared_default(node, property), Source::Initial),
@@ -411,6 +417,53 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
             Source::Initial,
         ),
     }
+}
+
+/// The layout properties the paragraph planner reads for a block of a box
+/// (§6.16), each with where it came from: `align` and `direction` the
+/// paragraph's own, else its box's; `text-indent` the paragraph's own, else
+/// none — a box's indent is for its own single flow. An item in a list is
+/// always start-aligned and unindented (its gutter is the inset), its direction
+/// its own, else the box's; a standalone list reads no direction at all.
+pub(super) fn block_layout<'a>(
+    block: roxmltree::Node<'a, 'a>,
+    container: roxmltree::Node<'a, 'a>,
+    in_list: bool,
+    prop: &str,
+) -> Option<(Option<&'a str>, Source)> {
+    let inherited = |v: &'a str| {
+        (
+            Some(v),
+            Source::Inherited {
+                from: container.range().start,
+                token: None,
+            },
+        )
+    };
+    Some(match prop {
+        "align" if in_list => (Some("start"), Source::Implied),
+        "align" => match (block.attribute("align"), container.attribute("align")) {
+            (Some(v), _) => (Some(v), Source::Own),
+            (None, Some(v)) => inherited(v),
+            (None, None) => (Some("start"), Source::Initial),
+        },
+        "text-indent" if in_list => (Some("0"), Source::Implied),
+        "text-indent" => match block.attribute("text-indent") {
+            Some(v) => (Some(v), Source::Own),
+            None => (Some("0"), Source::Initial),
+        },
+        "direction" => match (
+            block.attribute("direction"),
+            container
+                .attribute("direction")
+                .filter(|_| is_x(container, "textbox")),
+        ) {
+            (Some(v), _) => (Some(v), Source::Own),
+            (None, Some(v)) => inherited(v),
+            (None, None) => (Some("ltr"), Source::Initial),
+        },
+        _ => return None,
+    })
 }
 
 /// The run attributes a text element's emitter draws (§6.11, §6.13, §6.17), so

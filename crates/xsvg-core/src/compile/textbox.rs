@@ -610,7 +610,9 @@ pub(super) fn plan_paragraphs<'a>(
     let cy = spec.y + spec.padding;
     let cw = spec.width - 2.0 * spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
-    let default_align = node.attribute("align").unwrap_or("start");
+    let layout = |p: roxmltree::Node<'a, 'a>, in_list: bool, prop: &str| {
+        block_layout(p, node, in_list, prop).and_then(|(v, _)| v)
+    };
     // paragraphs default to a visible gap — 0.35em, the same default rhythm
     // lists use for item-spacing — so Enter reads as a paragraph while a
     // forced line break (<tbreak/>) stays at the bare line advance; an
@@ -757,21 +759,15 @@ pub(super) fn plan_paragraphs<'a>(
                 space_before,
                 space_after,
                 inset: u.inset * scale,
-                align: if u.list.is_some() {
-                    Align::Start
-                } else {
-                    Align::parse(p.attribute("align").unwrap_or(default_align))
-                },
-                text_indent: if u.list.is_some() {
-                    0.0
-                } else {
-                    attr_num(p, "text-indent", 0.0) * scale
-                },
-                // a paragraph's own direction, else the box's
-                rtl: p
-                    .attribute("direction")
-                    .or_else(|| node.attribute("direction"))
-                    == Some("rtl"),
+                // align, indent and direction by the block rules a query reports
+                // (query.rs `block_layout`): a paragraph's own over the box's, an
+                // item always start-aligned and unindented
+                align: Align::parse(layout(p, u.list.is_some(), "align").unwrap_or("start")),
+                text_indent: layout(p, u.list.is_some(), "text-indent")
+                    .and_then(parse_num)
+                    .unwrap_or(0.0)
+                    * scale,
+                rtl: layout(p, u.list.is_some(), "direction") == Some("rtl"),
             });
             let marker = u.marker.as_ref().map(|(kind, col_inset, fill)| PlanMarker {
                 kind: match kind {
