@@ -1012,6 +1012,16 @@ fn emit_passthrough(
     if filter_sub.is_some() {
         skip.push("filter");
     }
+    // a <use> of a kept viewport whose transform was hoisted (§5.3) takes that
+    // transform on, conjugated by its own placement, so its instance is unchanged
+    let compensated = if name == "use" {
+        use_compensation(node)
+    } else {
+        None
+    };
+    if compensated.is_some() {
+        skip.push("transform");
+    }
     if border {
         skip.extend(RAW_STROKE_ATTRS);
     }
@@ -1021,6 +1031,9 @@ fn emit_passthrough(
     }
     if border {
         out.push_str(&text_border_attrs(node, ctx));
+    }
+    if let Some(t) = &compensated {
+        out.push_str(&format!(" transform=\"{t}\""));
     }
     out.push_str(&pos_attr(node, ctx));
     let backdrop = if is_root {

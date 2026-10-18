@@ -355,18 +355,66 @@ fn sized_by_a_use(node: roxmltree::Node) -> bool {
     })
 }
 
+/// Why a nested `<svg>` stays the viewport element it is, when it does.
+fn kept_because(node: roxmltree::Node) -> Option<&'static str> {
+    if sized_by_a_use(node) {
+        Some("a <use> sizes it")
+    } else if Viewport::of(node).is_none() {
+        Some("its frame is not resolvable here")
+    } else {
+        None
+    }
+}
+
+/// The `transform` a same-document `<use>` must take on to draw its instance
+/// unchanged when its target is a kept viewport whose own `transform` was
+/// hoisted: a `<use>` deep-clones its target, that transform included, so the
+/// instance would lose it. With the instance's CTM being
+/// `Tu · translate(ux uy) · T · …`, the `<use>` carries
+/// `Tu · translate(ux uy) · T · translate(−ux −uy)` instead and nothing moves.
+/// `None` for every other `<use>`.
+pub(super) fn use_compensation(node: roxmltree::Node) -> Option<String> {
+    let id = local_href_id(node)?;
+    let target = node
+        .document()
+        .descendants()
+        .find(|n| n.is_element() && n.attribute("id") == Some(id))?;
+    if target.tag_name().namespace() != Some(SVG_NS)
+        || target.tag_name().name() != "svg"
+        || target.parent_element().is_none()
+        || kept_because(target).is_none()
+    {
+        return None;
+    }
+    let t = target
+        .attribute("transform")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())?;
+    let (ux, uy) = (attr_num(node, "x", 0.0), attr_num(node, "y", 0.0));
+    let tu = node
+        .attribute("transform")
+        .map(parse_transform)
+        .unwrap_or_default();
+    let at = crate::kurbo::Affine::translate((ux, uy));
+    let m = (tu * at * parse_transform(t) * at.inverse()).as_coeffs();
+    Some(format!(
+        "matrix({})",
+        m.iter().map(|c| fmt(*c)).collect::<Vec<_>>().join(" ")
+    ))
+}
+
 /// A nested `<svg>` (§5.3): lowered to a `<g>`, or — when a `<use>` sizes it,
 /// or its frame cannot be resolved — kept as the viewport element it is, with
 /// its `transform` hoisted onto a wrapping `<g>` so that no nested `<svg>` in
-/// the output ever carries one.
+/// the output ever carries one (the `<use>`s of it are compensated,
+/// [`use_compensation`]).
 pub(super) fn emit_nested_svg(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    if sized_by_a_use(node) {
-        keep(node, out, ctx, "a <use> sizes it");
+    if let Some(why) = kept_because(node) {
+        keep(node, out, ctx, why);
         return;
     }
     let Some(vp) = Viewport::of(node) else {
-        keep(node, out, ctx, "its frame is not resolvable here");
-        return;
+        return; // unreachable: an unresolvable frame is a kept one
     };
     let close = open_viewport(out, &vp, node, &[], ctx);
     emit_children(node, out, ctx);

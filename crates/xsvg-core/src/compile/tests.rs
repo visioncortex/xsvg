@@ -8169,8 +8169,20 @@ fn a_viewport_a_use_sizes_is_kept_without_its_transform() {
         out.contains(r##"<g transform="rotate(5)"><svg id="icon" x="0" y="0" width="24" height="24" viewBox="0 0 100 100"><circle"##),
         "{out}"
     );
+    // the <use> deep-clones its target, transform included, so the instance
+    // would lose the hoisted rotation: the <use> takes it on, conjugated by its
+    // own placement — rotate(5) about the instance's origin (300, 250)
     assert!(
-        out.contains(r##"<use href="#icon" x="300" y="250" width="48"/>"##),
+        out.contains(r##"<use href="#icon" x="300" y="250" width="48" transform="matrix(0.996 0.087 -0.087 0.996 22.931 -25.195)"/>"##),
+        "{out}"
+    );
+    // a <use> with its own transform leads the compensation
+    let svg = format!(
+        r##"{XW}<svg id="icon" width="24" height="24" transform="translate(3 4)"><circle r="5"/></svg><use href="#icon" x="10" y="0" width="48" transform="scale(2)"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"transform="matrix(2 0 0 2 6 8)""##),
         "{out}"
     );
     // a <use> without a size does not keep it: the id stays on the <g>

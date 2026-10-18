@@ -406,9 +406,11 @@ drew it right. Every viewport lowers to the one form every engine draws alike:
 <svg> kept: … -->` marker and the element's `transform` **hoisted onto a wrapping `<g>`**, so
 no nested `<svg>` in any output carries a `transform`: (1) a viewport whose `id` a
 same-document `<use width|height>` targets — `width`/`height` on a `<use>` resize an `<svg>`
-target and are ignored on a `<g>`, and the instance takes its placement from the `<use>`, not the
-wrapper; (2) a frame that cannot be resolved here — a percentage under a root sized by its
-window, or a non-positive size.
+target and are ignored on a `<g>`; (2) a frame that cannot be resolved here — a percentage under
+a root sized by its window, or a non-positive size. A `<use>` deep-clones its target, `transform`
+included, so an instance of a kept viewport would lose the hoisted transform: every
+same-document `<use>` of one takes it on, conjugated by its own placement —
+`Tu · translate(x y) · T · translate(−x −y)` as a `matrix(…)` — and draws unchanged.
 
 **Measuring.** A by-id link's extent (§4.2) and every bbox the compiler takes of its own output
 read a lowered viewport as its frame: the marker rect through the `<g>`'s transform, never the
