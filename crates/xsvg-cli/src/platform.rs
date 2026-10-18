@@ -13,18 +13,63 @@ pub struct Native {
 
 impl Native {
     /// Sum of horizontal glyph advances for `text` in the resolved font, in user units.
-    fn advance(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
+    /// `text` shaped in the style's face at `size`: the glyphs rustybuzz lays
+    /// — kerned, ligated, marks placed — each with its cluster (the byte of the
+    /// first character it draws), its advance and its offset in user units. The
+    /// same shaper resvg renders live text with, so what the compiler measures
+    /// and traces is what that renderer draws. `None` without the font.
+    fn shape(&self, text: &str, style: &TextStyle, size: f64) -> Option<Shaped<'_>> {
         let bytes = self.fonts.resolve(&style.family, &style.style)?;
-        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
-        let s = size / f.units_per_em() as f64;
-        let mut w = 0.0;
-        for c in text.chars() {
-            if let Some(g) = f.glyph_index(c) {
-                w += f.glyph_hor_advance(g).unwrap_or(0) as f64;
-            }
-        }
-        Some(w * s)
+        let mut face = rustybuzz::Face::from_slice(bytes, 0)?;
+        face.set_variations(&[rustybuzz::Variation {
+            tag: ttf_parser::Tag::from_bytes(b"wght"),
+            value: fonts::parse_weight(&style.weight),
+        }]);
+        let s = size / face.units_per_em() as f64;
+        let mut buffer = rustybuzz::UnicodeBuffer::new();
+        buffer.push_str(text);
+        buffer.guess_segment_properties();
+        let out = rustybuzz::shape(&face, &[], buffer);
+        let glyphs = out
+            .glyph_infos()
+            .iter()
+            .zip(out.glyph_positions())
+            .map(|(i, p)| ShapedGlyph {
+                id: ttf_parser::GlyphId(i.glyph_id as u16),
+                cluster: i.cluster as usize,
+                advance: p.x_advance as f64 * s,
+                dx: p.x_offset as f64 * s,
+                dy: p.y_offset as f64 * s,
+            })
+            .collect();
+        Some(Shaped { face, glyphs, s })
     }
+
+    fn advance(&self, text: &str, style: &TextStyle, size: f64) -> Option<f64> {
+        Some(
+            self.shape(text, style, size)?
+                .glyphs
+                .iter()
+                .map(|g| g.advance)
+                .sum(),
+        )
+    }
+}
+
+/// A run shaped for one face and size (see [`Native::shape`]).
+struct Shaped<'a> {
+    face: rustybuzz::Face<'a>,
+    glyphs: Vec<ShapedGlyph>,
+    /// Font units to user units.
+    s: f64,
+}
+
+struct ShapedGlyph {
+    id: ttf_parser::GlyphId,
+    cluster: usize,
+    advance: f64,
+    dx: f64,
+    dy: f64,
 }
 
 impl Measurer for Native {
@@ -92,40 +137,54 @@ impl GlyphOutliner for Native {
         x: f64,
         baseline: f64,
     ) -> Option<String> {
-        let bytes = self.fonts.resolve(&style.family, &style.style)?;
-        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
-        let s = size / f.units_per_em() as f64;
+        let shaped = self.shape(text, style, size)?;
         let mut b = SvgOutline {
             d: String::new(),
             gx: x,
             base: baseline,
-            s,
+            s: shaped.s,
         };
         let mut pen = x;
-        for c in text.chars() {
-            let Some(g) = f.glyph_index(c) else { continue };
-            b.gx = pen;
-            f.outline_glyph(g, &mut b);
-            pen += f.glyph_hor_advance(g).unwrap_or(0) as f64 * s;
+        for g in &shaped.glyphs {
+            b.gx = pen + g.dx;
+            b.base = baseline - g.dy;
+            shaped.face.outline_glyph(g.id, &mut b);
+            pen += g.advance;
         }
         (!b.d.is_empty()).then_some(b.d)
     }
 
+    /// Entry `i` is the pen where scalar `i + 1` begins, kerned; the last the
+    /// run's width. A character inside a ligature begins where the ligature
+    /// does — its cluster's pen — matching the browser adapter's per-prefix
+    /// fallback in placement if not in principle.
     fn advances(&self, text: &str, style: &TextStyle, size: f64) -> Option<Vec<f64>> {
-        let bytes = self.fonts.resolve(&style.family, &style.style)?;
-        let f = fonts::face(bytes, fonts::parse_weight(&style.weight))?;
-        let s = size / f.units_per_em() as f64;
-        let mut w = 0.0;
-        Some(
-            text.chars()
-                .map(|c| {
-                    if let Some(g) = f.glyph_index(c) {
-                        w += f.glyph_hor_advance(g).unwrap_or(0) as f64;
-                    }
-                    w * s
+        let shaped = self.shape(text, style, size)?;
+        // pen at each glyph's cluster start, then the total
+        let mut pen_at: Vec<(usize, f64)> = Vec::with_capacity(shaped.glyphs.len());
+        let mut pen = 0.0;
+        for g in &shaped.glyphs {
+            pen_at.push((g.cluster, pen));
+            pen += g.advance;
+        }
+        let total = pen;
+        let pen_of = |byte: usize| {
+            pen_at
+                .iter()
+                .filter(|(c, _)| *c <= byte)
+                .map(|(_, p)| *p)
+                .fold(None, |acc: Option<f64>, p| {
+                    Some(acc.map_or(p, |a| a.max(p)))
                 })
-                .collect(),
-        )
+                .unwrap_or(0.0)
+        };
+        let mut out: Vec<f64> = text
+            .char_indices()
+            .skip(1)
+            .map(|(byte, _)| pen_of(byte))
+            .collect();
+        out.push(total);
+        Some(out)
     }
 }
 

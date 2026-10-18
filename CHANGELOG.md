@@ -16,6 +16,13 @@ partial one.
 
 ### Added
 
+- **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
+  through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
+  renders live text with, so what the headless compiler measures, fits and traces is what that
+  renderer draws (a kerned word outlined through resvg: 0 px different, from 1.8 %). Boxes fit
+  and wrap by kerned widths now, so the dataset's text-bearing samples compile a little
+  differently than before.
+
 - **Convert to path for editors: `to_path(offset)`.** The compiler's own output for a text
   element with outlining forced, or a basic shape as its `<path>`, in the form an editor writes
   back into the source in the node's place: one group of glyph paths and baked backdrop rects,
@@ -167,6 +174,14 @@ partial one.
   switch to it.
 
 ### Fixed
+
+- **Outlines honour `letter-spacing`, `word-spacing`, justification and `glyph-x-scale`.**
+  A spaced or justified line was traced at the font's bare advances. A run with spacing is now
+  traced glyph by glyph at the pens the live text is laid by — its kerned advance, the tracking
+  after every glyph (the next run starting past the last one's), the word gap and the justify
+  slack after each space — and a `glyph-x-scale` stretches the traced line from its left edge
+  as the live `textLength` does. Pinned by `check:outline`: 0 px against live text on all of
+  tracking, justification and glyph scale.
 
 - **Outlined runs keep their type.** A bold, italic, differently sized or differently faced
   `<tspan>` in an outlined box was traced in the box's own face, its neighbours placed by the
