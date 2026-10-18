@@ -773,7 +773,7 @@ style, family, size), `justify` (§6.9), `glyph-x-scale` (§6.7), and `letter-sp
 (§6.8) do not apply to the traced path, and curved-shape region flow (§6.10) keeps its own per-line
 placement.
 
-**Runs.** A run that paints (its fill, its border) or sets its own type (a weight, a slant, a face, a size) is traced as its own piece in its own style, the pen advanced by that style's width; the line keeps the box's spacing and justification. **Where it applies (2026-10).** Every text front-end the compiler lays out: a textbox in single
+**Runs.** A run that paints (its fill, its border) or sets its own type (a weight, a slant, a face, a size) is traced as its own piece in its own style, the pen advanced by that style's width. A line with `letter-spacing`, `word-spacing` or justify slack is traced glyph by glyph at the pens the live text is laid by (the kerned advance, the tracking after every glyph, the word gap and the slack after each space); a `glyph-x-scale` stretches the traced line from its left edge as the live `textLength` does. **Where it applies (2026-10).** Every text front-end the compiler lays out: a textbox in single
 flow, in paragraph mode (each paragraph and list item traced in its own style, generated markers
 with them) and bound to a shape, `<textArea>` (`x:outline="true"`), `<text inline-size>`, and the
 deforming text-on-path effects; `follow` and `stair` are live by design and have no outline form.

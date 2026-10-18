@@ -518,6 +518,7 @@ pub(super) fn emit_paragraphs(
                     para.laid.rtl,
                     &para.laid.style,
                     para.laid.style.size,
+                    gx,
                     &para.emits,
                     m,
                     ctx.outliner,
@@ -1060,6 +1061,7 @@ pub(super) fn write_area_text(
             layout.rtl,
             style,
             layout.font_size,
+            glyph_x_scale,
             emits,
             m,
             outliner,
@@ -1195,6 +1197,7 @@ pub(super) fn trace_lines(
     rtl: bool,
     style: &TextStyle,
     size: f64,
+    glyph_x_scale: f64,
     emits: &[EmitAttrs],
     m: &dyn Measurer,
     outliner: &dyn GlyphOutliner,
@@ -1211,20 +1214,30 @@ pub(super) fn trace_lines(
         if line.text.is_empty() {
             continue; // blank line (e.g. from <tbreak/>) → nothing to trace
         }
-        let (left, width, _) = line_extent(line, anchor.svg(), rtl, style, size, emits, m);
-        let ok = if split(line) {
-            trace_runs(line, left, width, rtl, style, size, emits, outliner, ctx)
-                .map(|p| paths.extend(p))
+        // a justified line widens its spaces by `extra` (§6.9); otherwise a
+        // glyph-x-scale stretches the whole line from its left edge, as the
+        // live line's textLength does (emit_line applies one or the other)
+        let (left, width, extra) = line_extent(line, anchor.svg(), rtl, style, size, emits, m);
+        let scale = if extra == 0.0 && glyph_x_scale > 0.0 && (glyph_x_scale - 1.0).abs() > 1e-6 {
+            Some(glyph_x_scale)
         } else {
-            ctx.outline(&line.text, style, size, left, line.baseline)
-                .map(|d| {
-                    paths.push(PaintedPath {
-                        d,
-                        fill: None,
-                        border: None,
-                        overflow: line.overflow,
-                    })
+            None
+        };
+        let first = paths.len();
+        let ok = if split(line) {
+            trace_runs(
+                line, left, width, extra, rtl, style, size, emits, outliner, ctx,
+            )
+            .map(|p| paths.extend(p))
+        } else {
+            trace_spaced(&line.text, style, size, left, line.baseline, extra, ctx).map(|d| {
+                paths.push(PaintedPath {
+                    d,
+                    fill: None,
+                    border: None,
+                    overflow: line.overflow,
                 })
+            })
         };
         if ok.is_none() {
             if ctx.outline_miss.borrow().is_none() {
@@ -1232,9 +1245,54 @@ pub(super) fn trace_lines(
             }
             return None;
         }
+        if let Some(gx) = scale {
+            let about = crate::kurbo::Affine::translate((left, 0.0))
+                * crate::kurbo::Affine::scale_non_uniform(gx, 1.0)
+                * crate::kurbo::Affine::translate((-left, 0.0));
+            for p in &mut paths[first..] {
+                p.d = transform_d(&p.d, about)?;
+            }
+        }
         traced.push((line.text.clone(), left, line.baseline));
     }
     Some((paths, traced))
+}
+
+/// A run outlined with its spacing: whole in one call when it has none; else
+/// glyph by glyph, each at its kerned pen (`advances`) plus the tracking before
+/// it, the word gap and the justify slack after each space — the pens
+/// `line_advance` lays the live text by. A glyph the font lacks is skipped as
+/// the whole-run outline skips it; a font the outliner lacks is a miss.
+fn trace_spaced(
+    text: &str,
+    style: &TextStyle,
+    size: f64,
+    x: f64,
+    baseline: f64,
+    extra_per_space: f64,
+    ctx: &Ctx,
+) -> Option<String> {
+    let (ls, ws) = (style.letter_spacing, style.word_spacing + extra_per_space);
+    if ls == 0.0 && ws == 0.0 {
+        return ctx.outline(text, style, size, x, baseline);
+    }
+    let adv = ctx.outliner.advances(text, style, size)?;
+    let mut d = String::new();
+    let mut spacing = 0.0;
+    let mut buf = [0u8; 4];
+    for (i, ch) in text.chars().enumerate() {
+        let pen = x + if i == 0 { 0.0 } else { adv[i - 1] } + spacing;
+        if !ch.is_whitespace() {
+            if let Some(g) = ctx.outline(ch.encode_utf8(&mut buf), style, size, pen, baseline) {
+                d.push_str(&g);
+            }
+        }
+        spacing += ls;
+        if ch == ' ' {
+            spacing += ws;
+        }
+    }
+    (!d.is_empty()).then_some(d)
 }
 
 /// A line traced run by run: from the start edge (the left one, or the right
@@ -1247,6 +1305,7 @@ fn trace_runs(
     line: &PlacedLine,
     left: f64,
     width: f64,
+    extra: f64,
     rtl: bool,
     style: &TextStyle,
     size: f64,
@@ -1261,8 +1320,15 @@ fn trace_runs(
         let (st, rs) = a
             .map(|a| run_measure_style(a, style, size))
             .unwrap_or((style.clone(), size));
+        // the run's width as the renderer lays it: its glyphs, the tracking
+        // after every glyph (the next run starts past the last one's), its
+        // word gaps, the justify slack in its spaces
         let w = match outliner.advances(&r.text, &st, rs) {
-            Some(adv) => adv.last().copied().unwrap_or(0.0),
+            Some(adv) => {
+                adv.last().copied().unwrap_or(0.0)
+                    + r.text.chars().count() as f64 * st.letter_spacing
+                    + spaces_in(&r.text) * (st.word_spacing + extra)
+            }
             None => {
                 ctx.record_miss(ToPathError::font(&st, "no font file to trace"));
                 return None;
@@ -1272,7 +1338,7 @@ fn trace_runs(
             x -= w;
         }
         if !r.text.trim().is_empty() {
-            let Some(d) = ctx.outline(&r.text, &st, rs, x, line.baseline) else {
+            let Some(d) = trace_spaced(&r.text, &st, rs, x, line.baseline, extra, ctx) else {
                 ctx.record_miss(ToPathError::font(&st, "no font file to trace"));
                 return None;
             };

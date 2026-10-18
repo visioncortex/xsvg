@@ -8671,3 +8671,65 @@ fn outlined_runs_are_traced_in_their_own_weight_slant_and_size() {
     .unwrap_err();
     assert_eq!(err.weight.as_deref(), Some("700"), "{err:?}");
 }
+
+#[test]
+fn outlines_apply_tracking_word_gaps_justification_and_glyph_scale() {
+    // an outliner with 5-unit glyphs: tracking goes after every glyph, the
+    // word gap after every space, the justify slack with it — the pens the
+    // live text is laid by (line_advance); a glyph-x-scale stretches the line
+    // from its left edge as textLength does
+    struct Five;
+    impl GlyphOutliner for Five {
+        fn outline(&self, text: &str, _: &TextStyle, _: f64, x: f64, b: f64) -> Option<String> {
+            let w = 5.0 * text.chars().filter(|c| !c.is_whitespace()).count() as f64;
+            (w > 0.0).then(|| format!("M{} {} h{} v-1 h-{} Z", fmt(x), fmt(b), fmt(w), fmt(w)))
+        }
+        fn advances(&self, text: &str, _: &TextStyle, _: f64) -> Option<Vec<f64>> {
+            Some((1..=text.chars().count()).map(|i| i as f64 * 5.0).collect())
+        }
+    }
+    let ds = |src: &str| -> Vec<String> {
+        let out = compile_impl(src, "balanced", false, &Mono, &NoShaper, &Five).unwrap();
+        out.split(" d=\"")
+            .skip(1)
+            .map(|t| t.split('"').next().unwrap().to_string())
+            .collect()
+    };
+    // a b at 0, 7; the space at 14 draws nothing; c at 15 + 2+2+2 + 3 = 24, d at 31
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="400" height="40" font-size="10" letter-spacing="2" word-spacing="3" outline="true">ab cd</x:textbox></svg>"##
+    );
+    assert_eq!(
+        ds(&src),
+        vec!["M0 7 h5 v-1 h-5 ZM7 7 h5 v-1 h-5 ZM24 7 h5 v-1 h-5 ZM31 7 h5 v-1 h-5 Z"]
+    );
+    // a bold run inside keeps the same pens: the run's width counts its tracking
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="400" height="40" font-size="10" letter-spacing="2" outline="true">ab<tspan font-weight="700">cd</tspan>e</x:textbox></svg>"##
+    );
+    assert_eq!(
+        ds(&src),
+        vec![
+            "M0 7 h5 v-1 h-5 ZM7 7 h5 v-1 h-5 Z",
+            "M14 7 h5 v-1 h-5 ZM21 7 h5 v-1 h-5 Z",
+            "M28 7 h5 v-1 h-5 Z"
+        ]
+    );
+    // justified: a full line of "aa bb cc" in a 50-wide box (natural 40, two
+    // spaces) gets 5 extra per space; the last line stays natural
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="50" height="100" font-size="10" align="justify" outline="true">aa bb cc dd</x:textbox></svg>"##
+    );
+    let d = ds(&src);
+    assert_eq!(
+        d[0], "M0 7 h5 v-1 h-5 ZM5 7 h5 v-1 h-5 ZM20 7 h5 v-1 h-5 ZM25 7 h5 v-1 h-5 ZM40 7 h5 v-1 h-5 ZM45 7 h5 v-1 h-5 Z",
+        "{d:?}"
+    );
+    assert!(d[1].starts_with("M0 "), "{d:?}");
+    // glyph-x-scale 2: the line stretched from its left edge, 10 → 20 wide, at x = 10
+    let src = format!(
+        r##"{XW}<x:textbox x="10" y="0" width="400" height="40" font-size="10" glyph-x-scale="2" outline="true">ab</x:textbox></svg>"##
+    );
+    let d = ds(&src);
+    assert!(d[0].starts_with("M10") && d[0].contains("30"), "{d:?}");
+}
