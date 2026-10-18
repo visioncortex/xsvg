@@ -16,6 +16,18 @@ partial one.
 
 ### Added
 
+- **No nested `<svg>` in compiled output.** A nested `<svg>` — a cropped picture, the baked
+  whole-file form of a cross-file `<use>` — now lowers to one clipped `<g>` whose transform folds
+  the element's own, the frame's position and the `viewBox` fit (`preserveAspectRatio` honoured:
+  `none`, `meet`, `slice`, every alignment), with the frame carried as
+  `data-xsvg-viewport="x y w h"` in the group's own space for editors to read (§5.3). WebKit
+  ignores a `transform` on a nested `<svg>`, so a rotated crop drew unrotated there; a `<g>` draws
+  alike everywhere. Percent and missing sizes resolve against the enclosing viewport; a
+  `filter`/`mask`/`clip-path` on the viewport wraps it in frame space; a viewport a
+  `<use width|height>` sizes, or one whose frame cannot be resolved, is kept as `<svg>` with a
+  marker and its transform hoisted. A linked drawing's `<use>` keeps its `transform`, `opacity`
+  and `filter`, which the nested-`<svg>` form dropped.
+
 - **Document queries for editors.** `CompileSession` answers what the compiler does with a node,
   from the parse it compiles from: `resolved(offset, properties)` (the effective value of each
   property and where it came from — own, token, inherited from the box, list, row, column, table

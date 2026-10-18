@@ -50,8 +50,8 @@ pub(super) fn target_extent(node: roxmltree::Node) -> Option<(f64, f64)> {
 }
 
 /// Bake a cross-file `<use>` link (§4): resolve the referenced file, compile it, and
-/// stamp its output into `out`. Whole-file → a nested `<svg>` viewport (SVG's own fit);
-/// `#id` → that compiled element, placed. Degrades with a marker on any failure.
+/// stamp its output into `out`. Whole-file → a viewport `<g>` (§5.3, the fit folded
+/// into its transform); `#id` → that compiled element, placed. Degrades with a marker on any failure.
 pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx: &Ctx) {
     if ctx.files.borrow().len() > MAX_LINK_DEPTH {
         out.push_str("<!-- xsvg: <use> link nesting too deep -->");
@@ -116,39 +116,33 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
     let w = node.attribute("width").and_then(parse_num);
     let h = node.attribute("height").and_then(parse_num);
     let pos = pos_attr(node, ctx);
-
     match frag {
         None => {
-            // whole file → nested <svg> viewport; the browser's own viewBox fit scales it.
+            // whole file → a viewport (§5.3): the dependency's root children under
+            // one clipped <g> that fits its viewBox to the frame — the referrer's
+            // preserveAspectRatio deciding how (the default letterboxes; `none`
+            // stretches, what an editor's free resize of a linked drawing wants) —
+            // and carries the <use>'s own transform, opacity, filter and paint.
             let inner: String = root
                 .children()
                 .map(|c| &compiled[c.range()])
                 .collect::<Vec<_>>()
                 .concat();
-            // Read back out of the compiled dependency, so the parse has already
-            // undone the escaping its own emission applied — re-escape on the way in.
-            let vb = root
-                .attribute("viewBox")
-                .map(|v| format!(" viewBox=\"{}\"", esc(v)))
-                .unwrap_or_default();
-            // The referrer decides how its frame fits the dependency's viewBox:
-            // `preserveAspectRatio` on the <use> is forwarded to the viewport it
-            // becomes (default `xMidYMid meet` letterboxes; `none` stretches —
-            // what an editor's free resize of a linked drawing wants). Forwarded only
-            // when it is a value SVG defines: the attribute has a closed grammar, so
-            // anything else is either a typo or an attempt to smuggle markup.
-            let par = node
-                .attribute("preserveAspectRatio")
-                .filter(|v| valid_preserve_aspect_ratio(v))
-                .map(|v| format!(" preserveAspectRatio=\"{}\"", v.trim()))
-                .unwrap_or_default();
-            out.push_str(&format!(
-                "<svg{pos} x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{vb}{par}>{inner}</svg>",
-                fmt(x),
-                fmt(y),
-                fmt(w.unwrap_or(iw)),
-                fmt(h.unwrap_or(ih))
-            ));
+            let vp = Viewport {
+                x,
+                y,
+                w: w.unwrap_or(iw),
+                h: h.unwrap_or(ih),
+                view_box: view_box_of(root),
+                par: node
+                    .attribute("preserveAspectRatio")
+                    .and_then(Par::parse)
+                    .unwrap_or(Par::DEFAULT),
+                clip: true,
+            };
+            let close = open_viewport(out, &vp, node, &["href", "x", "y", "width", "height"], ctx);
+            out.push_str(&inner);
+            out.push_str(close);
         }
         Some(id) => {
             let Some(target) = dep.descendants().find(|n| n.attribute("id") == Some(id)) else {

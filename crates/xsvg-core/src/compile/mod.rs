@@ -859,7 +859,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     // predicate `unit_at` partitions by. Byte-identical to the fallthrough below:
     // none of the branches between apply to these elements.
     if !is_root && is_passthrough_container(node) {
-        emit_passthrough(node, node.tag_name().name(), out, false, ctx);
+        emit_passthrough(node, node.tag_name().name(), out, false, &[], ctx);
         return;
     }
 
@@ -952,6 +952,11 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         emit_inline_size_text(node, out, ctx);
         return;
     }
+    // a nested viewport (§5.3) lowers to a clipped <g>; the root stays <svg>
+    if name == "svg" && !is_root {
+        emit_nested_svg(node, out, ctx);
+        return;
+    }
     if name == "textArea" {
         emit_text_area(node, out, ctx);
         return;
@@ -971,7 +976,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
-    emit_passthrough(node, name, out, is_root, ctx);
+    emit_passthrough(node, name, out, is_root, &[], ctx);
 }
 
 /// Copy a plain SVG element through: its attributes (theme vars resolved, a
@@ -981,7 +986,14 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 /// child loop is where unit spans are recorded (docs/Incremental.md §9): each
 /// element child of the top-level element, in the order it was written, with
 /// the bytes it wrote.
-fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root: bool, ctx: &Ctx) {
+fn emit_passthrough(
+    node: roxmltree::Node,
+    name: &str,
+    out: &mut String,
+    is_root: bool,
+    extra_skip: &[&str],
+    ctx: &Ctx,
+) {
     let filter_sub = if is_root {
         None
     } else {
@@ -996,7 +1008,7 @@ fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root
     // lowers as on a textbox: paint only, nothing to lay out, and it replaces
     // whatever hand-written stroke the element carries
     let border = !is_root && matches!(name, "text" | "tspan" | "textPath") && has_text_border(node);
-    let mut skip: Vec<&str> = Vec::new();
+    let mut skip: Vec<&str> = extra_skip.to_vec();
     if filter_sub.is_some() {
         skip.push("filter");
     }
@@ -1023,59 +1035,66 @@ fn emit_passthrough(node: roxmltree::Node, name: &str, out: &mut String, is_root
         if let Some(backdrop) = backdrop {
             out.push_str(&backdrop);
         }
-        // units are the element children of a top-level CONTAINER (a top-level
-        // <text> copies its tspans through here too, but they are units of nothing)
-        let record = ctx.unit_spans.borrow().is_some()
-            && is_top_level(node, ctx)
-            && is_passthrough_container(node);
-        let emit_child = |child: roxmltree::Node, out: &mut String| {
-            let start = out.len();
-            serialize(child, out, false, ctx);
-            if record && child.is_element() {
-                if let Some(spans) = ctx.unit_spans.borrow_mut().as_mut() {
-                    let r = child.range();
-                    spans.push(UnitSpan {
-                        source: (r.start, r.end),
-                        output: (start, out.len()),
-                    });
-                }
-            }
-        };
-        let elems: Vec<roxmltree::Node> = node.children().filter(|c| c.is_element()).collect();
-        let restack = elems.iter().any(|c| {
-            c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()
-        });
-        if restack {
-            // Layer restacking (§5.1): stable-sort direct children by
-            // (band, order, document index). Loose content is band 0 / order
-            // 0, so it keeps its place and only bucketed or explicitly-ordered
-            // layers move. Non-element nodes (whitespace) drop in a restacked
-            // container — insignificant for a group.
-            let mut idx: Vec<usize> = (0..elems.len()).collect();
-            idx.sort_by(|&a, &b| {
-                let ka = (
-                    layer_band(elems[a]).unwrap_or(0),
-                    attr_num_ns(elems[a], "order", 0.0),
-                );
-                let kb = (
-                    layer_band(elems[b]).unwrap_or(0),
-                    attr_num_ns(elems[b], "order", 0.0),
-                );
-                ka.0.cmp(&kb.0)
-                    .then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .then(a.cmp(&b))
-            });
-            for &i in &idx {
-                emit_child(elems[i], out);
-            }
-        } else {
-            for child in node.children() {
-                emit_child(child, out);
-            }
-        }
+        emit_children(node, out, ctx);
         out.push_str(&format!("</{name}>"));
     } else {
         out.push_str("/>");
+    }
+}
+
+/// The children of a copied-through container, in source order with the
+/// whitespace between them, or restacked by `x:layer`/`x:order` when any child
+/// asks (§5.1). The unit spans are recorded here (docs/Incremental.md §9).
+fn emit_children(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // units are the element children of a top-level CONTAINER (a top-level
+    // <text> copies its tspans through here too, but they are units of nothing)
+    let record = ctx.unit_spans.borrow().is_some()
+        && is_top_level(node, ctx)
+        && is_passthrough_container(node);
+    let emit_child = |child: roxmltree::Node, out: &mut String| {
+        let start = out.len();
+        serialize(child, out, false, ctx);
+        if record && child.is_element() {
+            if let Some(spans) = ctx.unit_spans.borrow_mut().as_mut() {
+                let r = child.range();
+                spans.push(UnitSpan {
+                    source: (r.start, r.end),
+                    output: (start, out.len()),
+                });
+            }
+        }
+    };
+    let elems: Vec<roxmltree::Node> = node.children().filter(|c| c.is_element()).collect();
+    let restack = elems.iter().any(|c| {
+        c.attribute((XSVG_NS, "layer")).is_some() || c.attribute((XSVG_NS, "order")).is_some()
+    });
+    if restack {
+        // Layer restacking (§5.1): stable-sort direct children by
+        // (band, order, document index). Loose content is band 0 / order
+        // 0, so it keeps its place and only bucketed or explicitly-ordered
+        // layers move. Non-element nodes (whitespace) drop in a restacked
+        // container — insignificant for a group.
+        let mut idx: Vec<usize> = (0..elems.len()).collect();
+        idx.sort_by(|&a, &b| {
+            let ka = (
+                layer_band(elems[a]).unwrap_or(0),
+                attr_num_ns(elems[a], "order", 0.0),
+            );
+            let kb = (
+                layer_band(elems[b]).unwrap_or(0),
+                attr_num_ns(elems[b], "order", 0.0),
+            );
+            ka.0.cmp(&kb.0)
+                .then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal))
+                .then(a.cmp(&b))
+        });
+        for &i in &idx {
+            emit_child(elems[i], out);
+        }
+    } else {
+        for child in node.children() {
+            emit_child(child, out);
+        }
     }
 }
 
@@ -1223,21 +1242,6 @@ const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 /// a new one — `fill='#000" onload="…'` came out as a live handler, which is exactly
 /// what the static subset exists to rule out. `tests/attribute_injection.rs` probes
 /// every attribute of every dataset sample for this.
-/// `none`, or an alignment keyword optionally followed by `meet`/`slice` — the
-/// whole grammar of `preserveAspectRatio` (SVG 2 §8.2).
-fn valid_preserve_aspect_ratio(v: &str) -> bool {
-    const ALIGN: [&str; 10] = [
-        "none", "xMinYMin", "xMidYMin", "xMaxYMin", "xMinYMid", "xMidYMid", "xMaxYMid", "xMinYMax",
-        "xMidYMax", "xMaxYMax",
-    ];
-    let mut it = v.split_ascii_whitespace();
-    match (it.next(), it.next(), it.next()) {
-        (Some(a), None, None) => ALIGN.contains(&a),
-        (Some(a), Some(m), None) => ALIGN.contains(&a) && matches!(m, "meet" | "slice"),
-        _ => false,
-    }
-}
-
 pub(super) fn esc(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
     push_escaped(&mut out, v, true);
@@ -1439,6 +1443,8 @@ mod textbox;
 use textbox::*;
 pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize};
 mod query;
+mod viewport;
+use viewport::*;
 mod stops;
 mod textpath;
 use query::*;

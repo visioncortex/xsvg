@@ -139,6 +139,14 @@ pub(super) fn subtree_bbox(
         acc = Some(acc.map_or(bb, |a: crate::kurbo::Rect| a.union(bb)));
     };
 
+    // A lowered viewport (§5.3) carries its frame in its own space: that is its
+    // extent, and its content — unclipped, scaled by the fit — is not measured.
+    if tag == "g" {
+        if let Some(bb) = viewport_marker(node).and_then(|r| transform_rect_bbox(r, tf)) {
+            fold(bb);
+            return acc;
+        }
+    }
     // A nested <svg> establishes a viewport and clips to it, so its extent *is* that
     // viewport rect. Recursing would measure its children in the unmapped coordinate
     // system — for a scaled viewBox (e.g. 0 0 1000 1000 shown at 20) wildly wrong.

@@ -3632,14 +3632,17 @@ fn use_links_external_files() {
     let logo =
         format!(r##"{XW}<rect id="mark" x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##);
 
-    // whole-file link → the dependency inlined inside a nested <svg> viewport, baked
+    // whole-file link → the dependency inlined under a viewport <g> (§5.3): the
+    // frame's position in its transform, its clip, its marker — no nested <svg>
     let main =
         format!(r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40"/></svg>"##);
     let out = compile_linked(&main, &[("logo.svg", &logo)]);
     assert!(
-        out.contains(r#"<svg x="20" y="30" width="40" height="40""#),
-        "nested svg viewport: {out}"
+        out.contains(r#"<g transform="translate(20 30)" clip-path="url(#x-vp-"#),
+        "viewport group: {out}"
     );
+    assert!(out.contains(r#"data-xsvg-viewport="0 0 40 40""#), "{out}");
+    assert_eq!(out.matches("<svg").count(), 1, "no nested <svg>: {out}");
     assert!(
         out.contains("#f00"),
         "dep content inlined (rect lowers to a path): {out}"
@@ -3649,15 +3652,16 @@ fn use_links_external_files() {
         "the <use> is baked, not a live ref: {out}"
     );
 
-    // the referrer's preserveAspectRatio reaches the viewport it becomes: a
-    // free resize in an editor stretches the drawing instead of letterboxing
+    // the referrer's preserveAspectRatio decides the fit: a free resize in an
+    // editor stretches the drawing (scale 4 1) instead of letterboxing it
+    let boxed = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect id="mark" width="10" height="10" fill="#f00"/></svg>"##;
     let main = format!(
         r##"{XW}<use href="logo.svg" x="0" y="0" width="40" height="10" preserveAspectRatio="none"/></svg>"##
     );
-    let out = compile_linked(&main, &[("logo.svg", &logo)]);
+    let out = compile_linked(&main, &[("logo.svg", boxed)]);
     assert!(
-        out.contains(r#"height="10" preserveAspectRatio="none">"#),
-        "forwarded: {out}"
+        out.contains(r#"transform="scale(4 1)""#),
+        "stretched: {out}"
     );
 
     // by-id link → just that element, placed with a translate
@@ -3747,7 +3751,7 @@ fn linked_fragment_is_a_verbatim_slice_of_the_full_compile() {
     )
     .unwrap();
     assert!(
-        frag.contains(r#"<svg x="20""#) && frag.contains("#f00"),
+        frag.contains(r#"data-xsvg-viewport="#) && frag.contains("#f00"),
         "fragment links: {frag}"
     );
     assert!(
@@ -5569,15 +5573,18 @@ fn plugin_output_is_confined_however_it_was_lowered() {
 
 #[test]
 fn a_forwarded_preserve_aspect_ratio_cannot_carry_markup() {
-    // Forwarded to the viewport a link bakes, and once formatted in raw: a quote in
-    // the value closed the attribute and opened a live onload. The attribute has a
-    // closed grammar, so only values SVG defines are forwarded at all.
+    // The <use>'s value decides the fit of the viewport a link bakes (§5.3), and
+    // once it was forwarded as an attribute, formatted in raw: a quote in the
+    // value closed the attribute and opened a live onload. Now it is parsed —
+    // the attribute has a closed grammar — and nothing of it reaches the output
+    // but the fit it names; anything outside the grammar is the default fit.
+    // A square drawing in a 40×20 frame tells the fits apart.
     struct Dep;
     impl Resolver for Dep {
         fn resolve(&self, _: &str, _: &str) -> Option<(String, String)> {
             Some((
                 "dep.xsvg".into(),
-                format!(r##"{XW}<rect width="4" height="4"/></svg>"##),
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><rect width="4" height="4"/></svg>"##.to_string(),
             ))
         }
     }
@@ -5599,15 +5606,23 @@ fn a_forwarded_preserve_aspect_ratio_cannot_carry_markup() {
     };
     let hostile = doc(r##"none&quot; onload=&quot;alert(1)"##);
     assert!(!hostile.contains("onload"), "{hostile}");
+    assert!(!hostile.contains("preserveAspectRatio"), "{hostile}");
+    // the default fit: meet, centred — scale 5, the square 10 in from the left
     assert!(
-        !hostile.contains("preserveAspectRatio"),
-        "an invalid value is not forwarded: {hostile}"
+        hostile.contains(r##"transform="translate(10 0) scale(5)""##),
+        "{hostile}"
     );
-    for ok in ["none", "xMaxYMin", "xMidYMid slice"] {
+    for (par, tf) in [
+        ("none", "scale(10 5)"),
+        ("xMaxYMin", "translate(20 0) scale(5)"),
+        ("xMidYMid slice", "translate(0 -10) scale(10)"),
+    ] {
+        let out = doc(par);
         assert!(
-            doc(ok).contains(&format!(r##"preserveAspectRatio="{ok}""##)),
-            "{ok} should forward"
+            out.contains(&format!(r##"transform="{tf}""##)),
+            "{par}: {out}"
         );
+        assert!(!out.contains("preserveAspectRatio"), "{par}: {out}");
     }
 }
 
@@ -7977,4 +7992,235 @@ fn resolved_cascades_a_blocks_layout_from_its_box() {
     let out = compile_test(src);
     assert!(out.contains("text-anchor=\"middle\""), "{out}");
     assert!(out.contains("text-anchor=\"end\""), "{out}");
+}
+
+// ---- nested viewports (viewport.rs; §5.3) ------------------------------------
+
+#[test]
+fn a_nested_svg_lowers_to_one_clipped_group_with_the_fit_folded_in() {
+    // a crop as the kit writes it: a unit picture under a fractional viewBox,
+    // stretched (`none`) into a rotated frame — one <g>, the element's own
+    // transform first, then the frame's position, then the fit; the clip and
+    // the marker are the viewBox itself
+    let svg = format!(
+        r##"{XW}<svg x="20" y="20" width="120" height="80" viewBox="0.25 0.1 0.5 0.5" preserveAspectRatio="none" transform="rotate(10 80 60)" opacity="0.5"><image x="0" y="0" width="1" height="1" preserveAspectRatio="none" href="p.png"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(out.matches("<svg").count(), 1, "{out}");
+    assert!(
+        out.contains(r##"<clipPath id="x-vp-"##)
+            && out.contains(r##"><rect x="0.25" y="0.1" width="0.5" height="0.5"/></clipPath>"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g transform="rotate(10 80 60) translate(20 20) scale(240 160) translate(-0.25 -0.1)" clip-path="url(#x-vp-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0.25 0.1 0.5 0.5" opacity="0.5">"##),
+        "{out}"
+    );
+    assert!(
+        !out.contains("viewBox=\"0.25") && !out.contains("preserveAspectRatio=\"none\" transform"),
+        "{out}"
+    );
+    assert!(out.ends_with("</g></svg>"), "{out}");
+
+    // meet (the default) letterboxes: one scale, the content centred, the clip
+    // the frame mapped back — 200 units square around 200×100 content
+    let svg = format!(
+        r##"{XW}<svg x="200" y="20" width="100" height="100" viewBox="0 0 200 100"><rect width="200" height="100"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<g transform="translate(200 45) scale(0.5)" clip-path"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0 -50 200 200""##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<rect x="0" y="-50" width="200" height="200"/></clipPath>"##),
+        "{out}"
+    );
+
+    // slice covers, aligned to the far corner; overflow="visible" drops the clip
+    // but keeps the marker — the frame is still the editor's box
+    let svg = format!(
+        r##"{XW}<svg x="200" y="150" width="100" height="100" viewBox="0 0 200 100" preserveAspectRatio="xMaxYMax slice" overflow="visible"><rect width="200" height="100"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<g transform="translate(100 150)" data-xsvg-viewport="100 0 100 100">"##),
+        "{out}"
+    );
+    assert!(!out.contains("clipPath"), "{out}");
+
+    // no viewBox: no scaling, the frame is the clip at the origin
+    let svg = format!(
+        r##"{XW}<svg x="5" y="6" width="30" height="40"><rect width="9" height="9"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<g transform="translate(5 6)" clip-path="url(#x-vp-"##),
+        "{out}"
+    );
+    assert!(out.contains(r##"data-xsvg-viewport="0 0 30 40""##), "{out}");
+
+    // the def precedes the element: a fragment is self-contained and keyed ids stay stable
+    let keyed = unit_platform()
+        .with_keys(index_keys(&svg))
+        .session(&svg, "balanced", true, "")
+        .unwrap()
+        .compile()
+        .unwrap();
+    assert!(keyed.contains("id=\"x-vp-k"), "{keyed}");
+}
+
+#[test]
+fn a_viewports_sizes_resolve_against_the_enclosing_viewport() {
+    // percentages and a missing size take the nearest viewport's extent: the
+    // root's viewBox, or an enclosing lowered viewport's own viewBox
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><svg x="10%" width="50%" height="20"><rect width="1" height="1"/></svg><svg x="0" y="0" width="100" height="100" viewBox="0 0 10 10"><svg x="1" y="1" height="50%"><rect width="1" height="1"/></svg></svg></svg>"##;
+    let out = compile_test(svg);
+    assert!(
+        out.contains(r##"<g transform="translate(40)" clip-path"##)
+            || out.contains(r##"<g transform="translate(40 0)" clip-path"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0 0 200 20""##),
+        "{out}"
+    );
+    // inside the 10-unit viewBox: width 100% = 10, height 50% = 5
+    assert!(out.contains(r##"data-xsvg-viewport="0 0 10 5""##), "{out}");
+    assert_eq!(out.matches("<svg").count(), 1, "{out}");
+
+    // a root sized by its window gives a percentage nothing to take of: kept,
+    // its transform hoisted so no nested <svg> in the output carries one
+    let svg = format!(
+        r##"{XW}<svg width="50%" height="20" transform="rotate(3)"><rect width="1" height="1"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("<!-- xsvg: nested <svg> kept: its frame is not resolvable here -->"),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g transform="rotate(3)"><svg width="50%" height="20">"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_frame_effect_wraps_the_viewport_in_frame_space() {
+    // a drop shadow on a crop is so many frame units, not fractions of the unit
+    // picture: the filter goes on a wrapper at the frame's origin with the exact
+    // frame region, the fit stays on the inner clipped <g>, paint goes with it
+    let svg = format!(
+        r##"{XW}<svg x="20" y="150" width="200" height="20" viewBox="0 0 1 1" preserveAspectRatio="none" filter="drop-shadow(2 3 4 #0008)" fill="#f00"><rect width="1" height="1"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains(r##"<filter id="x-flt-"##), "{out}");
+    // region: the frame (0 0 200 20) grown by 0.5 + 12 + 3
+    assert!(
+        out.contains(r##"x="-15.5" y="-15.5" width="231" height="51""##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g transform="translate(20 150)" filter="url(#x-flt-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"><g transform="scale(200 20)" clip-path="url(#x-vp-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0 0 1 1" fill="#f00">"##),
+        "{out}"
+    );
+    assert!(out.ends_with("</g></g></svg>"), "{out}");
+    // an authored mask rides the wrapper too, resolved like any paint
+    let svg = format!(
+        r##"{XW}<svg x="0" y="0" width="10" height="10" mask="url(#m)" transform="translate(1 2)"><rect width="1" height="1"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"<g transform="translate(1 2)" mask="url(#m)"><g clip-path"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_viewport_a_use_sizes_is_kept_without_its_transform() {
+    // width/height on a <use> resize an <svg> target and are ignored on a <g>:
+    // that target stays a nested <svg>, marked, its transform hoisted onto a
+    // wrapper the instance does not see
+    let svg = format!(
+        r##"{XW}<svg id="icon" x="0" y="0" width="24" height="24" viewBox="0 0 100 100" transform="rotate(5)"><circle cx="50" cy="50" r="50"/></svg><use href="#icon" x="300" y="250" width="48"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("<!-- xsvg: nested <svg> kept: a <use> sizes it -->"),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g transform="rotate(5)"><svg id="icon" x="0" y="0" width="24" height="24" viewBox="0 0 100 100"><circle"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<use href="#icon" x="300" y="250" width="48"/>"##),
+        "{out}"
+    );
+    // a <use> without a size does not keep it: the id stays on the <g>
+    let svg = format!(
+        r##"{XW}<svg id="icon" x="0" y="0" width="24" height="24" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50"/></svg><use href="#icon" x="1"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert_eq!(out.matches("<svg").count(), 1, "{out}");
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0 0 100 100" id="icon">"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_linked_drawings_use_keeps_its_transform_opacity_and_filter() {
+    // the baked whole-file form goes through the same lowering: the <use>'s own
+    // transform leads the folded one, its opacity rides the <g>, its filter
+    // wraps in frame space, and its paint reaches the content
+    let logo = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"##;
+    let main = format!(
+        r##"{XW}<use href="logo.svg" x="20" y="30" width="40" height="40" transform="rotate(10)" opacity="0.5" filter="blur(1)" fill="#0f0"/></svg>"##
+    );
+    let out = compile_linked(&main, &[("logo.svg", logo)]);
+    assert!(
+        out.contains(r##"<g transform="rotate(10) translate(20 30)" filter="url(#x-flt-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"><g transform="scale(4)" clip-path="url(#x-vp-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"data-xsvg-viewport="0 0 10 10" opacity="0.5" fill="#0f0">"##),
+        "{out}"
+    );
+    assert!(!out.contains("href="), "{out}");
+    assert_eq!(out.matches("<svg").count(), 1, "{out}");
+}
+
+#[test]
+fn no_compiled_sample_holds_a_nested_svg() {
+    // the output contract: a viewport is a <g>; the root is the one <svg>
+    for path in dataset_files() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let platform = Platform::new(&Mono, &NoShaper, &NoOutliner);
+        let Ok(s) = platform.session(&src, "balanced", false, "") else {
+            continue;
+        };
+        let Ok(out) = s.compile() else { continue };
+        assert_eq!(out.matches("<svg").count(), 1, "{}", path.display());
+    }
 }

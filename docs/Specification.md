@@ -167,11 +167,13 @@ self-contained (no dependence on the browser's spotty external-`<use>` support).
 <use href="logo.xsvg#icon" x="0" y="0" width="24"/>     <!-- one element by id -->
 ```
 
-- **Whole file** → the dependency is inlined as a nested `<svg x y width height viewBox>…</svg>`, so
-  its `viewBox` and SVG's own viewport fit place and scale it. `width`/`height` default to the
-  dependency's intrinsic size. A `preserveAspectRatio` on the `<use>` is forwarded to that
-  viewport: the default (`xMidYMid meet`) letterboxes the drawing inside the frame; `none`
-  stretches it to the frame — what an editor's free resize of a linked drawing means.
+- **Whole file** → the dependency's root children are inlined under a **viewport `<g>`** (§5.3)
+  whose transform folds the frame `x y width height` and the fit of the dependency's `viewBox`
+  into it, clipped to the frame. `width`/`height` default to the dependency's intrinsic size. The
+  `<use>`'s `preserveAspectRatio` decides the fit: the default (`xMidYMid meet`) letterboxes the
+  drawing inside the frame; `none` stretches it to the frame — what an editor's free resize of a
+  linked drawing means. The `<use>`'s own `transform`, `opacity`, `filter` and paint ride the
+  group as they would on any element.
 - **By id** (`#icon`) → just that compiled element, placed by `x`/`y` and (if `width`/`height` given)
   uniformly scaled to that size against the **element's own extent** — a declared one (a nested
   `<svg>`'s viewBox, or explicit `width`/`height`), else its drawn geometry's bounding box. So
@@ -358,6 +360,60 @@ fill degrades to a marker.
 **zooms to the first artboard** on load. Both read
 the frames from the emitted `data-` attributes (`web/src/core/artboards.ts`). The compiler itself
 only tags and passes through — artboards do not reorder or clip content.
+
+### 5.3 Nested viewports — a nested `<svg>` lowers to a clipped `<g>` [implemented]
+
+A nested `<svg>` is the **authoring form of a viewport**: a frame `x y width height` in its
+parent's user space, a `viewBox` it shows there, a `preserveAspectRatio` saying how, and
+`overflow` saying whether it clips. It is plain SVG, so an uncompiled document still renders the
+viewport — a cropped picture is a nested `<svg>` whose `viewBox` is the visible fraction of a
+unit image. **The compiled output holds no nested `<svg>`.** Engines disagree about one: WebKit
+ignores a `transform` on a nested `<svg>`, so a rotated crop sat unrotated there while Chromium
+drew it right. Every viewport lowers to the one form every engine draws alike:
+
+```xml
+<svg x="20" y="20" width="120" height="80" viewBox="0.25 0.1 0.5 0.5" preserveAspectRatio="none"
+     transform="rotate(10 80 60)"><image width="1" height="1" preserveAspectRatio="none" href="p.png"/></svg>
+
+<clipPath id="x-vp-K"><rect x="0.25" y="0.1" width="0.5" height="0.5"/></clipPath>
+<g transform="rotate(10 80 60) translate(20 20) scale(240 160) translate(-0.25 -0.1)"
+   clip-path="url(#x-vp-K)" data-xsvg-viewport="0.25 0.1 0.5 0.5"><image …/></g>
+```
+
+**Lowering (normative).** One `<g>` per viewport, keyed as the element:
+
+- **`transform`** = the element's own, then `translate(x+ax y+ay) scale(sx sy) translate(−vx −vy)`:
+  the frame's position and the `viewBox` fit of SVG 2 §8.2 — `none` scales each axis to the
+  frame; `meet`/`slice` one scale (the smaller / the larger) with the `xMin|Mid|Max` share of the
+  slack as the offset `ax ay`. No `viewBox`: no scaling. Identity parts are left out.
+- **`clip-path`** = the frame mapped back into content space, `(vx − ax/sx, vy − ay/sy, w/sx,
+  h/sy)` — for a crop, the `viewBox` itself — as a `<clipPath>` def emitted immediately before
+  the element (self-contained per fragment, id `x-vp-<key>` like a filter's). Omitted under
+  `overflow="visible"` (`auto` is `visible` on a viewport).
+- **`data-xsvg-viewport="x y w h"`** = that same rect. `getBBox` of a clipped group is its
+  unclipped content, so an editor reads the frame here and maps it through the element's own CTM.
+- **Sizes**: a percentage or a missing `width`/`height` (initial value 100 %) resolves against
+  the enclosing viewport's extent — its `viewBox`, else its frame, the root's `viewBox` or numeric
+  size at the top. The other presentation attributes (`opacity`, `fill`, `id`, …) copy onto the
+  `<g>`; `x y width height viewBox preserveAspectRatio transform overflow` are spent.
+- **Frame-space effects.** A `filter`, `mask` or `clip-path` on the viewport acts on the *frame*
+  (a drop shadow is so many frame units, not fractions of a unit picture), so it goes on a
+  wrapper `<g transform="own translate(x y)">` around the content `<g>`, which then carries the
+  fit alone. A filter list lowers per §8 with the frame as its exact region.
+- **Children** copy through as a group's do (§5.1 restacking included).
+
+**Kept as `<svg>`, marked.** Two cases keep the viewport element, with a `<!-- xsvg: nested
+<svg> kept: … -->` marker and the element's `transform` **hoisted onto a wrapping `<g>`**, so
+no nested `<svg>` in any output carries a `transform`: (1) a viewport whose `id` a
+same-document `<use width|height>` targets — `width`/`height` on a `<use>` resize an `<svg>`
+target and are ignored on a `<g>`, and the instance takes its placement from the `<use>`, not the
+wrapper; (2) a frame that cannot be resolved here — a percentage under a root sized by its
+window, or a non-positive size.
+
+**Measuring.** A by-id link's extent (§4.2) and every bbox the compiler takes of its own output
+read a lowered viewport as its frame: the marker rect through the `<g>`'s transform, never the
+unclipped content. The whole-file form of a cross-file `<use>` (§4.2) is this lowering with the
+dependency's root children as content.
 
 ## 6. Text
 
