@@ -8537,3 +8537,62 @@ fn to_path_markup_compiles_to_what_the_outlined_text_rendered() {
     }
     assert!(checked > 5, "{checked}");
 }
+
+#[test]
+fn every_outliner_s_contours_come_out_closed() {
+    // opentype.js 2 closes no contour, drawing a line back to the start instead;
+    // a font parser's builder closes each. The compiler closes for both, so the
+    // editor's path tools see closed shapes whichever outliner traced them.
+    struct Open;
+    impl GlyphOutliner for Open {
+        fn outline(&self, _: &str, _: &TextStyle, _: f64, x: f64, b: f64) -> Option<String> {
+            Some(format!(
+                "M{x} {b}L{} {b}L{} {}L{x} {}L{x} {b}",
+                x + 4.0,
+                x + 4.0,
+                b - 4.0,
+                b - 4.0
+            ))
+        }
+        fn advances(&self, text: &str, _: &TextStyle, size: f64) -> Option<Vec<f64>> {
+            Some(
+                (1..=text.chars().count())
+                    .map(|i| i as f64 * size * 0.5)
+                    .collect(),
+            )
+        }
+    }
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-size="10" outline="true">ab</x:textbox><text x="5" y="30" x:outline="true">c</text></svg>"##
+    );
+    let out = compile_impl(&src, "balanced", false, &Mono, &NoShaper, &Open).unwrap();
+    for d in out
+        .split(" d=\"")
+        .skip(1)
+        .map(|t| t.split('"').next().unwrap())
+    {
+        assert!(d.ends_with('Z'), "closed: {d}");
+        assert_eq!(
+            d.matches('L').count(),
+            3,
+            "the line back to the start is Z now: {d}"
+        );
+    }
+    assert_eq!(out.matches(" d=\"").count(), 2, "{out}");
+    let markup = to_path_impl(
+        &src,
+        src.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &Open,
+    )
+    .unwrap();
+    assert!(
+        markup.contains("L0 -4Z\"") || markup.contains("Z\"/>"),
+        "{markup}"
+    );
+    // a closing outliner's bytes are untouched
+    let closed = compile_outlined(&src);
+    assert!(closed.contains("h1 v-1 h-1 Z"), "{closed}");
+}

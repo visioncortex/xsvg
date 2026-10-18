@@ -441,7 +441,7 @@ pub(super) fn emit_paragraphs(
                     let st = &para.laid.style;
                     let traced = ctx.outliner.advances(t, st, st.size).and_then(|adv| {
                         let w = adv.last().copied().unwrap_or(0.0);
-                        ctx.outliner.outline(t, st, st.size, mk.col - w, first)
+                        ctx.outline(t, st, st.size, mk.col - w, first)
                     });
                     match traced {
                         Some(d) => paths.push((d, mk.fill.clone())),
@@ -1216,8 +1216,7 @@ pub(super) fn trace_lines(
         let ok = if painted(line) {
             trace_runs(line, style, size, start_x, emits, outliner, ctx).map(|p| paths.extend(p))
         } else {
-            outliner
-                .outline(&line.text, style, size, start_x, line.baseline)
+            ctx.outline(&line.text, style, size, start_x, line.baseline)
                 .map(|d| {
                     paths.push(PaintedPath {
                         d,
@@ -1254,7 +1253,7 @@ fn trace_runs(
             let x = start_x + if at == 0 { 0.0 } else { *adv.get(at - 1)? };
             let a = emits.get(r.style);
             pieces.push(PaintedPath {
-                d: outliner.outline(&r.text, style, size, x, line.baseline)?,
+                d: ctx.outline(&r.text, style, size, x, line.baseline)?,
                 fill: a.and_then(|a| a.fill.clone()),
                 border: a.and_then(|a| a.border.as_ref()).map(|b| b.attrs(ctx)),
                 overflow: line.overflow,

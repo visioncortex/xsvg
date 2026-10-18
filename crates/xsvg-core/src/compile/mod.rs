@@ -381,6 +381,21 @@ impl<'a> Ctx<'a> {
         self.theme.resolve_var(v)
     }
 
+    /// A run outlined by the platform, every contour closed ([`close_contours`]):
+    /// the one way the compiler asks for glyph geometry.
+    fn outline(
+        &self,
+        text: &str,
+        style: &TextStyle,
+        size: f64,
+        x: f64,
+        baseline: f64,
+    ) -> Option<String> {
+        self.outliner
+            .outline(text, style, size, x, baseline)
+            .map(|d| crate::close_contours(&d).into_owned())
+    }
+
     /// Record why outlining fell back, once (`to_path` reports the first).
     fn record_miss(&self, why: ToPathError) {
         let mut slot = self.outline_miss.borrow_mut();

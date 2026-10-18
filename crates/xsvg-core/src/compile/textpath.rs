@@ -95,7 +95,7 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
 
     // "stair"/"follow" are live <text> by design — they never consult the outliner.
     if !matches!(fx.effect, "stair" | "follow") {
-        let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
+        let flat = ctx.outline(&text, &style, style.size, 0.0, 0.0);
         let advances = ctx.outliner.advances(&text, &style, style.size);
         if (flat.is_none() || advances.is_none()) && ctx.force_outline.get() {
             ctx.record_miss(ToPathError::font(&style, "no font file to trace"));
@@ -363,7 +363,7 @@ fn warp_runs<'r>(
         let n = r.text.chars().count();
         if !r.text.trim().is_empty() {
             let x0 = if at == 0 { 0.0 } else { *advances.get(at - 1)? };
-            let flat = ctx.outliner.outline(&r.text, style, style.size, x0, 0.0)?;
+            let flat = ctx.outline(&r.text, style, style.size, x0, 0.0)?;
             pieces.push((warp(&flat)?, Some(r)));
         }
         at += n;

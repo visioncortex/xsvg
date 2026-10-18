@@ -785,7 +785,10 @@ and a `<textPath>` child are refused rather than mis-traced, and the element sta
 highlight and decoration bake as rects beside the paths as they do beside live text. Outlining
 stays all-or-nothing per element, silent in a render; an editor that needs the answer asks
 `to_path` ([Incremental.md](Incremental.md) §11), which also converts a basic shape to its `<path>`.
-Pinned by `npm run check:outline`: live and outlined text render to the same pixels through resvg.
+Every contour comes out **closed** (`Z`) whichever outliner traced it — opentype.js draws a
+line back to the start instead of closing, which a fill hides and a path editor does not — so a
+converted glyph is a closed shape to the editor's tools. Pinned by `npm run check:outline`: live
+and outlined text render to the same pixels through resvg.
 
 ### 6.13 Text on a path — `<x:textpath>` [implemented: skew, rainbow]
 

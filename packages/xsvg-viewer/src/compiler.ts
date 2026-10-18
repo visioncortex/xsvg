@@ -304,13 +304,9 @@ function outline(
 ): string {
   const font = lookupFont(family);
   if (!font) return ""; // no bytes for this family → Rust keeps live <text>
-  let d = font.getPath(text, x, baseline, size).toPathData(2);
-  // opentype.js v2 emits no explicit close commands — glyph contours are only
-  // *implicitly* closed (last point ≈ the subpath's M). Fill doesn't care, but
-  // an outline STROKE (a bordered/keyline glyph) shows an open gap. Close each
-  // subpath ourselves: a Z before every M after the first, and one at the end.
-  if (d && !d.includes("Z")) d = d.replace(/M/g, (_m, i) => (i === 0 ? "M" : "ZM")) + "Z";
-  return d;
+  // opentype.js v2 emits no close commands; the core closes every contour
+  // itself (`close_contours`), for this and every other outliner
+  return font.getPath(text, x, baseline, size).toPathData(2);
 }
 
 // The pen x where each next character of a run begins, per the outline font's own

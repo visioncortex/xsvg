@@ -312,7 +312,7 @@ pub(super) fn emit_text_outlined(node: roxmltree::Node, out: &mut String, ctx: &
         .collect();
     let mut traced: Vec<PaintedPath> = Vec::with_capacity(pieces.len());
     for p in &pieces {
-        let Some(d) = ctx.outliner.outline(
+        let Some(d) = ctx.outline(
             &p.text,
             &p.style,
             p.style.size,
