@@ -1,7 +1,7 @@
 //! Headless xsvg compiler — a pure-Rust binary, no browser. Wires the native platform
 //! seams (fonts via ttf-parser, shape flow via kurbo) to the shared `xsvg-core` compiler.
 //!
-//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [--no-plugins] [-o OUT] INPUT
+//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [--no-plugins] [--to-path OFFSET] [-o OUT] INPUT
 //!
 //! INPUT is a path or `-` for stdin; OUT defaults to stdout.
 
@@ -62,6 +62,44 @@ pub fn compile(
     xsvg_core::compile_platform_impl(source, quality, sourcemap, base, &platform)
 }
 
+/// The source with the element starting at byte `offset` replaced by its
+/// conversion to paths (`to_path`, docs/Incremental.md §11) — what an editor's
+/// Convert to path writes. For the parity oracle (`scripts/outline-raster-check.mjs`):
+/// the replaced document must compile and render as the original did.
+pub fn to_path(
+    source: &str,
+    offset: usize,
+    quality: &str,
+    font_dir: Option<&Path>,
+) -> Result<String, String> {
+    let fonts = match font_dir {
+        Some(d) => {
+            FontDb::load_dir(d).map_err(|e| format!("loading fonts from {}: {e}", d.display()))?
+        }
+        None => FontDb::default(),
+    };
+    let p = platform::Native { fonts };
+    let platform = xsvg_core::Platform::new(&p, &p, &p).with_resolver(DiskResolver);
+    let (start, end) = xsvg_core::node_spans_impl(source)
+        .into_iter()
+        .find(|(s, _)| *s == offset)
+        .ok_or_else(|| format!("no element starts at byte {offset}"))?;
+    let markup = platform
+        .session(source, quality, false, "")?
+        .to_path(offset)
+        .map_err(|e| match &e.family {
+            Some(f) => format!(
+                "{} {} {} has {}",
+                f,
+                e.weight.as_deref().unwrap_or(""),
+                e.style.as_deref().unwrap_or(""),
+                e.reason
+            ),
+            None => e.reason,
+        })?;
+    Ok(format!("{}{markup}{}", &source[..start], &source[end..]))
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -79,6 +117,7 @@ fn run() -> Result<(), String> {
     let mut sourcemap = false;
     let mut font_dir: Option<String> = None;
     let mut plugins = true;
+    let mut to_path_at: Option<usize> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -94,6 +133,13 @@ fn run() -> Result<(), String> {
             }
             "--sourcemap" => sourcemap = true,
             "--no-plugins" => plugins = false,
+            "--to-path" => {
+                let v = args.next().ok_or("--to-path needs a byte offset")?;
+                to_path_at = Some(
+                    v.parse()
+                        .map_err(|_| format!("--to-path: not an offset: {v}"))?,
+                );
+            }
             "-h" | "--help" => {
                 println!(
                     "usage: xsvg [--quality fast|balanced|highest] [--font-directory DIR] \
@@ -101,7 +147,9 @@ fn run() -> Result<(), String> {
                      INPUT is a path or - for stdin; OUT defaults to stdout.\n\
                      --font-directory loads .ttf/.otf fonts for text measurement and \
                      outline baking (without it, text uses default metrics and stays live).\n\
-                     --no-plugins skips every <x:import> module, so no third-party code runs."
+                     --no-plugins skips every <x:import> module, so no third-party code runs.\n\
+                     --to-path OFFSET writes the SOURCE with the element at that byte offset \
+                     converted to paths (an editor's Convert to path), instead of compiling."
                 );
                 return Ok(());
             }
@@ -126,14 +174,22 @@ fn run() -> Result<(), String> {
         (s, base)
     };
 
-    let svg = compile(
-        &source,
-        &quality,
-        sourcemap,
-        font_dir.as_deref().map(Path::new),
-        &base,
-        plugins,
-    )?;
+    let svg = match to_path_at {
+        Some(offset) => to_path(
+            &source,
+            offset,
+            &quality,
+            font_dir.as_deref().map(Path::new),
+        )?,
+        None => compile(
+            &source,
+            &quality,
+            sourcemap,
+            font_dir.as_deref().map(Path::new),
+            &base,
+            plugins,
+        )?,
+    };
 
     match output {
         Some(path) => std::fs::write(&path, svg).map_err(|e| format!("writing {path}: {e}"))?,

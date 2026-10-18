@@ -13,6 +13,10 @@
 // a chunk at the wrong pen, an anchor over the wrong extent, a lost decoration
 // or paragraph moves whole words and fails loudly.
 //
+// Each case is also taken the editor's way: `xsvg --to-path OFFSET` replaces the
+// node in the SOURCE by its conversion, that document is compiled, and its raster
+// must match the live one too — Convert to path leaves the picture as it was.
+//
 //   npm run check:outline       (needs `resvg` on PATH and a release CLI build)
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -47,6 +51,20 @@ const cases = [
   ["point-tspans", (o) => `<text x="20" y="60" font-family="Arimo" font-size="26"${o.replace('outline=', 'x:outline=')}>ab<tspan fill="#c00" dy="8">cd</tspan><tspan x="20" y="120" font-size="36">new line</tspan></text>`],
 ];
 
+/** The source with every convertible element replaced by its `to_path` markup —
+ *  what an editor's Convert to path writes — converted last to first so earlier
+ *  offsets hold. */
+function convertAll(source, name) {
+  const starts = [...source.matchAll(/<(x:textbox|textArea|text)[\s>]/g)].map((m) => m.index).reverse();
+  let doc = source;
+  for (const [i, at] of starts.entries()) {
+    const file = join(tmp, `${name}-src-${i}.xsvg`);
+    writeFileSync(file, doc);
+    doc = execFileSync("./target/release/xsvg", ["--font-directory", FONTS, "--to-path", String(at), file], { encoding: "utf8" });
+  }
+  return doc;
+}
+
 function render(source, name) {
   const file = join(tmp, `${name}.svg`);
   writeFileSync(file, source);
@@ -68,17 +86,28 @@ for (const [name, body] of cases) {
     failed++;
     continue;
   }
-  const a = render(live, `${name}-live`);
-  const c = render(outlined, `${name}-outlined`);
-  const diff = new PNG({ width: a.width, height: a.height });
-  const n = pixelmatch(a.data, c.data, diff.data, a.width, a.height, { threshold: 0.3 });
-  const frac = n / (a.width * a.height);
-  const ok = frac <= MAX_DIFF_FRACTION;
-  if (!ok) {
-    writeFileSync(join(tmp, `${name}-diff.png`), PNG.sync.write(diff));
+  // the editor's path: to_path, the node replaced in the SOURCE, compiled again
+  const replaced = compile(convertAll(page(body("")), name), `${name}-replaced`);
+  if (/<text[\s>]/.test(replaced)) {
+    console.log(`✗ ${name}: live text left after to_path replacement`);
     failed++;
+    continue;
   }
-  console.log(`${ok ? "✓" : "✗"} ${name}: ${n} px differ (${(frac * 100).toFixed(2)}%)${ok ? "" : ` — see ${tmp}/${name}-diff.png`}`);
+  const a = render(live, `${name}-live`);
+  const compare = (what, source) => {
+    const c = render(source, `${name}-${what}`);
+    const diff = new PNG({ width: a.width, height: a.height });
+    const n = pixelmatch(a.data, c.data, diff.data, a.width, a.height, { threshold: 0.3 });
+    const frac = n / (a.width * a.height);
+    const ok = frac <= MAX_DIFF_FRACTION;
+    if (!ok) {
+      writeFileSync(join(tmp, `${name}-${what}-diff.png`), PNG.sync.write(diff));
+      failed++;
+    }
+    console.log(`${ok ? "✓" : "✗"} ${name} (${what}): ${n} px differ (${(frac * 100).toFixed(2)}%)${ok ? "" : ` — see ${tmp}/${name}-${what}-diff.png`}`);
+  };
+  compare("outlined", outlined);
+  compare("to_path+replace", replaced);
 }
 if (failed) {
   console.log(`outline-raster: ${failed} case(s) differ`);
