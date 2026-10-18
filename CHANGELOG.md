@@ -192,8 +192,10 @@ partial one.
 - **Outlined glyphs are closed contours whichever outliner traced them.** opentype.js 2 emits
   no `Z`, drawing a line back to each contour's start instead; a fill closed it implicitly, but an
   editor's path tools saw an open shape. The compiler now closes every contour of every outline
-  (`close_contours`): a closing outliner's bytes pass through untouched, an open contour ends in
-  `Z` with its redundant line back to the start dropped. The viewer's regex workaround is gone.
+  (`close_contours`): an open contour ends in `Z`, and a line back to the contour's start —
+  which a font parser's builder draws before its own `Z`, and opentype.js draws instead of one —
+  is dropped, so no node sits on the first at the seam. A well-formed outline passes through
+  byte for byte. The viewer's regex workaround is gone.
 
 - **Outlined text kept its highlights and decorations.** `outline="true"` dropped a run's
   `x:highlight`, underline and strike-through; they bake as rects beside the paths now, as beside
