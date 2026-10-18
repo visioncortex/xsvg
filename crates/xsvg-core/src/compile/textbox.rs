@@ -515,6 +515,7 @@ pub(super) fn emit_paragraphs(
                 trace_lines(
                     shifted,
                     para.laid.anchor,
+                    para.laid.rtl,
                     &para.laid.style,
                     para.laid.style.size,
                     &para.emits,
@@ -1056,6 +1057,7 @@ pub(super) fn write_area_text(
         if let Some((paths, traced)) = trace_lines(
             &layout.lines,
             layout.anchor,
+            layout.rtl,
             style,
             layout.font_size,
             emits,
@@ -1178,15 +1180,19 @@ pub(super) fn has_backdrops(lines: &[PlacedLine], emits: &[EmitAttrs]) -> bool {
     })
 }
 
-/// Trace laid-out lines to glyph paths (§6.12): each line at its anchored start,
-/// whole in the base style, or run by run when a run paints (its fill, its
-/// border). All or nothing: the first line the outliner declines records the
-/// miss (`to_path` reports it) and returns `None`, and the caller renders live.
-/// Also returns `(text, start_x, baseline)` of each traced line, for caret stops.
+/// Trace laid-out lines to glyph paths (§6.12): each line from its anchored
+/// left edge — the edge the backdrops and the live text use — whole in the base
+/// style, or run by run when a run paints (its fill, its border) or sets its own
+/// type (a weight, a slant, a face, a size), each run in its own style and the
+/// pen advanced by that style's width. All or nothing: the first run the
+/// outliner declines records the miss (`to_path` reports it) and returns
+/// `None`, and the caller renders live. Also returns `(text, start_x,
+/// baseline)` of each traced line, for caret stops.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn trace_lines(
     lines: &[PlacedLine],
     anchor: Anchor,
+    rtl: bool,
     style: &TextStyle,
     size: f64,
     emits: &[EmitAttrs],
@@ -1196,27 +1202,21 @@ pub(super) fn trace_lines(
 ) -> Option<(Vec<PaintedPath>, Vec<TracedLine>)> {
     let mut paths = Vec::new();
     let mut traced = Vec::new();
-    // a run's paint — its fill, its border — splits its line into pieces
-    // (§6.12); its typography does not: the line keeps the box's style
-    let painted = |l: &PlacedLine| {
+    let split = |l: &PlacedLine| {
         l.runs
             .iter()
-            .any(|r| emits.get(r.style).is_some_and(EmitAttrs::paints))
+            .any(|r| emits.get(r.style).is_some_and(|a| a.paints() || a.types()))
     };
     for line in lines {
         if line.text.is_empty() {
             continue; // blank line (e.g. from <tbreak/>) → nothing to trace
         }
-        let w = m.measure(&line.text, style, size);
-        let start_x = match anchor {
-            Anchor::Start => line.x,
-            Anchor::Middle => line.x - w / 2.0,
-            Anchor::End => line.x - w,
-        };
-        let ok = if painted(line) {
-            trace_runs(line, style, size, start_x, emits, outliner, ctx).map(|p| paths.extend(p))
+        let (left, width, _) = line_extent(line, anchor.svg(), rtl, style, size, emits, m);
+        let ok = if split(line) {
+            trace_runs(line, left, width, rtl, style, size, emits, outliner, ctx)
+                .map(|p| paths.extend(p))
         } else {
-            ctx.outline(&line.text, style, size, start_x, line.baseline)
+            ctx.outline(&line.text, style, size, left, line.baseline)
                 .map(|d| {
                     paths.push(PaintedPath {
                         d,
@@ -1227,39 +1227,65 @@ pub(super) fn trace_lines(
                 })
         };
         if ok.is_none() {
-            ctx.record_miss(ToPathError::font(style, "no font file to trace"));
+            if ctx.outline_miss.borrow().is_none() {
+                ctx.record_miss(ToPathError::font(style, "no font file to trace"));
+            }
             return None;
         }
-        traced.push((line.text.clone(), start_x, line.baseline));
+        traced.push((line.text.clone(), left, line.baseline));
     }
     Some((paths, traced))
 }
 
+/// A line traced run by run: from the start edge (the left one, or the right
+/// one under `rtl`, runs laying leftward), each run in its own measuring style
+/// — its weight, slant, face and size over the box's — and the pen advanced by
+/// the outliner's own width for it, so the geometry and the placement come from
+/// one font.
+#[allow(clippy::too_many_arguments)]
 fn trace_runs(
     line: &PlacedLine,
+    left: f64,
+    width: f64,
+    rtl: bool,
     style: &TextStyle,
     size: f64,
-    start_x: f64,
     emits: &[EmitAttrs],
     outliner: &dyn GlyphOutliner,
     ctx: &Ctx,
 ) -> Option<Vec<PaintedPath>> {
-    let adv = outliner.advances(&line.text, style, size)?;
     let mut pieces = Vec::new();
-    let mut at = 0usize;
+    let mut x = if rtl { left + width } else { left };
     for r in &line.runs {
-        let n = r.text.chars().count();
+        let a = emits.get(r.style);
+        let (st, rs) = a
+            .map(|a| run_measure_style(a, style, size))
+            .unwrap_or((style.clone(), size));
+        let w = match outliner.advances(&r.text, &st, rs) {
+            Some(adv) => adv.last().copied().unwrap_or(0.0),
+            None => {
+                ctx.record_miss(ToPathError::font(&st, "no font file to trace"));
+                return None;
+            }
+        };
+        if rtl {
+            x -= w;
+        }
         if !r.text.trim().is_empty() {
-            let x = start_x + if at == 0 { 0.0 } else { *adv.get(at - 1)? };
-            let a = emits.get(r.style);
+            let Some(d) = ctx.outline(&r.text, &st, rs, x, line.baseline) else {
+                ctx.record_miss(ToPathError::font(&st, "no font file to trace"));
+                return None;
+            };
             pieces.push(PaintedPath {
-                d: ctx.outline(&r.text, style, size, x, line.baseline)?,
+                d,
                 fill: a.and_then(|a| a.fill.clone()),
                 border: a.and_then(|a| a.border.as_ref()).map(|b| b.attrs(ctx)),
                 overflow: line.overflow,
             });
         }
-        at += n;
+        if !rtl {
+            x += w;
+        }
     }
     Some(pieces)
 }

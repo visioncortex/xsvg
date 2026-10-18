@@ -349,6 +349,14 @@ impl EmitAttrs {
     pub(super) fn paints(&self) -> bool {
         self.fill.is_some() || self.border.is_some()
     }
+
+    /// Whether the run sets its own type: a face, a weight, a slant or a size.
+    pub(super) fn types(&self) -> bool {
+        self.weight.is_some()
+            || self.style.is_some()
+            || self.family.is_some()
+            || self.size.is_some()
+    }
 }
 
 /// `x:border-width` / `-color` / `-opacity` as resolved for one run.

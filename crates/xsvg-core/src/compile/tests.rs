@@ -8596,3 +8596,78 @@ fn every_outliner_s_contours_come_out_closed() {
     let closed = compile_outlined(&src);
     assert!(closed.contains("h1 v-1 h-1 Z"), "{closed}");
 }
+
+#[test]
+fn outlined_runs_are_traced_in_their_own_weight_slant_and_size() {
+    // a bold, an italic and a larger run inside a box: each traced in its own
+    // style, the pen advanced by that style's width — the outliner here makes
+    // bold twice as wide and encodes weight, slant and size in each piece's height
+    struct Styled;
+    impl GlyphOutliner for Styled {
+        fn outline(&self, text: &str, st: &TextStyle, size: f64, x: f64, b: f64) -> Option<String> {
+            let w = self.advances(text, st, size)?.last().copied()?;
+            let h = size / 10.0
+                + if st.weight == "700" { 1.0 } else { 0.0 }
+                + if st.style == "italic" { 2.0 } else { 0.0 };
+            Some(format!(
+                "M{} {} h{} v-{} h-{} Z",
+                fmt(x),
+                fmt(b),
+                fmt(w),
+                fmt(h),
+                fmt(w)
+            ))
+        }
+        fn advances(&self, text: &str, st: &TextStyle, size: f64) -> Option<Vec<f64>> {
+            let per = size * if st.weight == "700" { 1.0 } else { 0.5 };
+            Some((1..=text.chars().count()).map(|i| i as f64 * per).collect())
+        }
+    }
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="400" height="40" font-size="10" outline="true">ab<tspan font-weight="700">cd</tspan><tspan font-style="italic">ef</tspan><tspan font-size="20">gh</tspan>ij</x:textbox></svg>"##
+    );
+    let out = compile_impl(&src, "balanced", false, &Mono, &NoShaper, &Styled).unwrap();
+    let ds: Vec<&str> = out
+        .split(" d=\"")
+        .skip(1)
+        .map(|t| t.split('"').next().unwrap())
+        .collect();
+    // on the line's baseline (14: its tallest run is the 20px one) —
+    // ab: regular, 10 wide, height 1 | cd: bold at 10, 20 wide, height 2
+    // ef: italic at 30, 10 wide, height 3 | gh: size 20 at 40, 20 wide, height 2 | ij at 60
+    assert_eq!(
+        ds,
+        vec![
+            "M0 14 h10 v-1 h-10 Z",
+            "M10 14 h20 v-2 h-20 Z",
+            "M30 14 h10 v-3 h-10 Z",
+            "M40 14 h20 v-2 h-20 Z",
+            "M60 14 h10 v-1 h-10 Z",
+        ],
+        "{out}"
+    );
+    // and the miss names the run's own face when it is the run the outliner lacks
+    struct NoBold;
+    impl GlyphOutliner for NoBold {
+        fn outline(&self, _: &str, st: &TextStyle, _: f64, x: f64, b: f64) -> Option<String> {
+            (st.weight != "700").then(|| format!("M{} {} h1 v-1 h-1 Z", fmt(x), fmt(b)))
+        }
+        fn advances(&self, text: &str, st: &TextStyle, size: f64) -> Option<Vec<f64>> {
+            (st.weight != "700").then(|| {
+                (1..=text.chars().count())
+                    .map(|i| i as f64 * size * 0.5)
+                    .collect()
+            })
+        }
+    }
+    let err = to_path_impl(
+        &src,
+        src.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &NoBold,
+    )
+    .unwrap_err();
+    assert_eq!(err.weight.as_deref(), Some("700"), "{err:?}");
+}

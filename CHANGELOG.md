@@ -168,6 +168,12 @@ partial one.
 
 ### Fixed
 
+- **Outlined runs keep their type.** A bold, italic, differently sized or differently faced
+  `<tspan>` in an outlined box was traced in the box's own face, its neighbours placed by the
+  box's widths. A run is now traced in its own measuring style, the pen advanced by that style's
+  width, from the line's anchored left edge (the edge the backdrops use; right-to-left lines lay
+  runs leftward). `to_path` names the run's face when it is the one the outliner lacks.
+
 - **Outlined glyphs are closed contours whichever outliner traced them.** opentype.js 2 emits
   no `Z`, drawing a line back to each contour's start instead; a fill closed it implicitly, but an
   editor's path tools saw an open shape. The compiler now closes every contour of every outline
