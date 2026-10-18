@@ -4111,8 +4111,8 @@ fn warp_radial_and_rotational_presets_parse() {
 #[test]
 fn warp_perspective_pins_authored_corners_without_subdividing() {
     // bbox (0,0)-(200,120) → authored quad; projective keeps edges straight, so
-    // the rect bakes to exactly its 4 corner vertices (M + 4 L, incl. the
-    // explicit closing edge) — no wasted subdivision
+    // the rect bakes to exactly its 4 corner vertices (M + 3 L + Z, the closing
+    // edge being Z's straight leg) — no wasted subdivision
     let svg = format!(
         r##"{XW}<x:warp field="perspective" corners="20,10 180,10 200,120 0,120"><rect x="0" y="0" width="200" height="120" fill="#f0f"/></x:warp></svg>"##
     );
@@ -4125,7 +4125,7 @@ fn warp_perspective_pins_authored_corners_without_subdividing() {
         .iter()
         .filter(|e| matches!(e, PathEl::LineTo(_)))
         .count();
-    assert_eq!(lines, 4, "{out}");
+    assert_eq!(lines, 3, "{out}");
     // the authored corners are pinned exactly (within the fast grid)
     for corner in [(20.0, 10.0), (180.0, 10.0), (200.0, 120.0), (0.0, 120.0)] {
         let hit = path.elements().iter().any(|e| match e {
@@ -8732,4 +8732,125 @@ fn outlines_apply_tracking_word_gaps_justification_and_glyph_scale() {
     );
     let d = ds(&src);
     assert!(d[0].starts_with("M10") && d[0].contains("30"), "{d:?}");
+}
+
+#[test]
+fn every_outlined_contour_in_the_dataset_has_the_closed_form_editors_fold() {
+    // The contract an editor's path model folds against (CHANGELOG, §6.12):
+    // every contour of every traced glyph ends in Z; a line never returns to
+    // the start before it (Z is that edge); a curve before Z ends at the start
+    // (a curved seam, its endpoint the first node) or short of it (Z the
+    // straight seam); no contour is a move and its close alone. Over the to_path of every text element of every
+    // dataset sample — only glyph paths, nothing else the document draws —
+    // through the deterministic outliner and the real CLI alike.
+    use crate::kurbo::{BezPath, PathEl};
+    fn check(d: &str, what: &str) -> usize {
+        let path = BezPath::from_svg(d).unwrap_or_else(|e| panic!("{what}: {e}"));
+        let mut contours = 0;
+        let mut start = None;
+        let mut prev: Option<PathEl> = None;
+        for el in path.elements() {
+            match el {
+                PathEl::MoveTo(p) => {
+                    assert!(
+                        matches!(prev, None | Some(PathEl::ClosePath)),
+                        "{what}: a contour without Z"
+                    );
+                    start = Some(*p);
+                    contours += 1;
+                }
+                PathEl::ClosePath => {
+                    let s = start.expect("a move first");
+                    match prev {
+                        Some(PathEl::LineTo(p)) => assert!(
+                            (p - s).hypot() > 1e-6,
+                            "{what}: a line back to the start before Z"
+                        ),
+                        // a curve may end at the start (a curved seam) or short
+                        // of it (Z is then the straight seam): both are edges
+                        Some(PathEl::QuadTo(..)) | Some(PathEl::CurveTo(..)) => {}
+                        Some(PathEl::MoveTo(_)) | None => {
+                            panic!("{what}: a move and its close alone")
+                        }
+                        Some(PathEl::ClosePath) => panic!("{what}: Z twice"),
+                    }
+                }
+                _ => {}
+            }
+            prev = Some(*el);
+        }
+        assert!(
+            matches!(prev, Some(PathEl::ClosePath)),
+            "{what}: the last contour is open"
+        );
+        contours
+    }
+    let paths_in = |markup: &str| -> Vec<String> {
+        markup
+            .split(" d=\"")
+            .skip(1)
+            .map(|t| t.split('"').next().unwrap().to_string())
+            .collect()
+    };
+    let is_text = |n: &roxmltree::Node| {
+        n.is_element()
+            && ((n.tag_name().namespace() == Some(XSVG_NS)
+                && matches!(n.tag_name().name(), "textbox" | "textpath"))
+                || (n.tag_name().namespace() == Some(SVG_NS)
+                    && matches!(n.tag_name().name(), "text" | "textArea")))
+    };
+    let cli = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/debug/xsvg");
+    let fonts = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts");
+    let native = std::path::Path::new(cli).exists() && std::path::Path::new(fonts).is_dir();
+    let (mut contours, mut native_contours) = (0, 0);
+    for path in dataset_files() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let platform = Platform::new(&Mono, &NoShaper, &BoxOutliner);
+        let Ok(s) = platform.session(&src, "balanced", false, "") else {
+            continue;
+        };
+        let spans: Vec<(usize, usize)> = s
+            .document()
+            .parsed
+            .doc
+            .root_element()
+            .descendants()
+            .filter(is_text)
+            .map(|n| (n.range().start, n.range().end))
+            .collect();
+        for &(start, end) in &spans {
+            let what = format!("{} @{start}", path.display());
+            if let Ok(markup) = s.to_path(start) {
+                for d in paths_in(&markup) {
+                    contours += check(&d, &what);
+                }
+            }
+            if native {
+                // the CLI writes the source with the node replaced: the markup is
+                // what sits between the untouched prefix and suffix
+                let tmp =
+                    std::env::temp_dir().join(format!("xsvg-seam-{}.xsvg", std::process::id()));
+                std::fs::write(&tmp, &src).unwrap();
+                let run = std::process::Command::new(cli)
+                    .args(["--font-directory", fonts, "--to-path", &start.to_string()])
+                    .arg(&tmp)
+                    .output()
+                    .expect("the CLI runs");
+                let _ = std::fs::remove_file(&tmp);
+                if !run.status.success() {
+                    continue; // a refusal (an effect with no outline form): not a glyph
+                }
+                let out = String::from_utf8_lossy(&run.stdout);
+                let suffix = src.len() - end;
+                let markup = &out[start..out.len() - suffix];
+                for d in paths_in(markup) {
+                    native_contours += check(&d, &format!("{what} (CLI)"));
+                }
+            }
+        }
+    }
+    assert!(contours > 300, "{contours}");
+    if native {
+        assert!(native_contours > 300, "{native_contours}");
+    }
 }

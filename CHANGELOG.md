@@ -195,7 +195,10 @@ partial one.
   (`close_contours`): an open contour ends in `Z`, and a line back to the contour's start —
   which a font parser's builder draws before its own `Z`, and opentype.js draws instead of one —
   is dropped, so no node sits on the first at the seam. A well-formed outline passes through
-  byte for byte. The viewer's regex workaround is gone.
+  byte for byte. The viewer's regex workaround is gone. The warp bake had the same seam — the
+  subdivided closing edge's last leg landed on the start before its `z` — and keeps `z` as that
+  leg now, for warped glyphs and warped shapes alike. The contract is pinned over the `to_path`
+  of every text element of every dataset sample, through the test outliner and the native CLI.
 
 - **Outlined text kept its highlights and decorations.** `outline="true"` dropped a run's
   `x:highlight`, underline and strike-through; they bake as rects beside the paths now, as beside

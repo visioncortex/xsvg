@@ -861,6 +861,14 @@ pub fn bake(path: &BezPath, field: &dyn Field, tolerance: f64) -> BezPath {
                     tol,
                 );
             }
+            // the subdivided seam's last leg lands on the mapped start, and Z
+            // draws that same straight leg: keep one, so no node repeats the
+            // first (the closed form an editor's path model folds against)
+            let home = field.map(start);
+            if matches!(out.elements().last(), Some(PathEl::LineTo(p)) if (*p - home).hypot() < 1e-9)
+            {
+                out.pop();
+            }
             out.close_path();
             cur = start;
         }
@@ -1191,11 +1199,10 @@ mod tests {
     fn zero_bend_is_identity() {
         let path = rect_path();
         let baked = bake(&path, &arch(0.0, path.bounding_box()), 0.25);
-        // identity map, but the implicit closing edge becomes an explicit LineTo
-        // back to the subpath start (so a field could subdivide it)
-        let mut expected = vertices(&path);
-        expected.push(expected[0]);
-        assert_eq!(vertices(&baked), expected);
+        // identity map: the closing edge is subdivided through the field like
+        // any other, but its last leg lands on the start and Z draws that leg,
+        // so the vertices are the rect's own and no node repeats the first
+        assert_eq!(vertices(&baked), vertices(&path));
         assert_eq!(baked.elements().last(), Some(&PathEl::ClosePath));
     }
 
