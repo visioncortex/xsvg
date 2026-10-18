@@ -17,7 +17,13 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     let style = style_from(node, ctx);
     let fill = node.attribute("fill").unwrap_or("#000");
     let stroke = text_border_attrs(node, ctx);
-    let pos = pos_attr(node, ctx);
+    // `to_path` carries the element's attributes, its transform included: this
+    // emitter writes none of its own
+    let pos = format!(
+        "{}{}",
+        pos_attr(node, ctx),
+        ctx.carry_at(node.range().start, true)
+    );
     let tp: elements::Textpath = params_of(node);
     let fx = PathEffect {
         effect: &tp.effect,
@@ -56,6 +62,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     // that follows the curve without deforming; no font bytes needed, only the
     // path's arc length for align placement.
     if fx.effect == "follow" {
+        if ctx.force_outline.get() {
+            ctx.record_miss(ToPathError::limit("effect `follow` has no outline form"));
+        }
         if let Some(frame) = PathFrame::new(&path_d, ctx.quality.text_tolerance()) {
             let advance = line_advance(&text, &style, style.size, ctx.m);
             let offset = run_offset(frame.len(), advance, fx.align, fx.start);
@@ -88,6 +97,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     if !matches!(fx.effect, "stair" | "follow") {
         let flat = ctx.outliner.outline(&text, &style, style.size, 0.0, 0.0);
         let advances = ctx.outliner.advances(&text, &style, style.size);
+        if (flat.is_none() || advances.is_none()) && ctx.force_outline.get() {
+            ctx.record_miss(ToPathError::font(&style, "no font file to trace"));
+        }
         if let (Some(flat), Some(advances)) = (flat, advances) {
             let advance = advances.last().copied().unwrap_or(0.0);
             // Refit is DISABLED (see §7.1): kurbo's fitter overshoots on dense
@@ -160,6 +172,9 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
     // effects (skew, ribbon) without an outline font — when the profile can be
     // sampled; anything else → straight <text> at the element's x/y. One def
     // serves both: the fallback stays near the path too.
+    if fx.effect == "stair" && ctx.force_outline.get() {
+        ctx.record_miss(ToPathError::limit("effect `stair` has no outline form"));
+    }
     let filter = lower_filter_attr(node, out, ctx, live_bbox);
     if matches!(fx.effect, "stair" | "skew" | "ribbon")
         && stepped_text(

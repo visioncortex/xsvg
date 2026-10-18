@@ -9,6 +9,7 @@
 //! dependents) and the text-layout seam are here too, as one-shot sessions.
 
 use super::session::Parsed;
+use super::ToPathError;
 use super::{
     CaretStops, CompileSession, Host, NoKeys, NoResolver, Platform, TextLayout, TextboxSize,
     UnitSpan,
@@ -519,4 +520,25 @@ pub fn measure_textbox_impl(
         .session(input, quality, false, "")
         .ok()?
         .measure_textbox(offset)
+}
+
+/// Convert to path (docs/Incremental.md §11; consumer: xsvg-kit): the element
+/// whose source range starts at byte `offset`, compiled on its own with
+/// outlining forced, as the markup an editor writes back in its place — glyph
+/// paths and baked backdrops under one group that keeps every attribute the
+/// conversion did not spend (`id`, `x:label`, `transform`, `opacity`, a
+/// `filter` list, `var()` paints), or a basic shape as its `<path>`. `Err`
+/// names the font the outliner had no bytes for, or the limit that stopped it.
+pub fn to_path_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Result<String, ToPathError> {
+    Platform::new(m, shaper, outliner)
+        .session(input, quality, false, "")
+        .map_err(ToPathError::limit)?
+        .to_path(offset)
 }

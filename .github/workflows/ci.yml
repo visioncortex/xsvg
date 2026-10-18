@@ -91,6 +91,8 @@ jobs:
         run: npm run check:mesh
       - name: Viewport raster parity
         run: npm run check:viewport
+      - name: Outline raster parity
+        run: npm run check:outline
 
   fuzz:
     name: Fuzz — parse then compile never panics (60s)

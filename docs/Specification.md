@@ -773,6 +773,20 @@ style, family, size), `justify` (§6.9), `glyph-x-scale` (§6.7), and `letter-sp
 (§6.8) do not apply to the traced path, and curved-shape region flow (§6.10) keeps its own per-line
 placement.
 
+**Where it applies (2026-10).** Every text front-end the compiler lays out: a textbox in single
+flow, in paragraph mode (each paragraph and list item traced in its own style, generated markers
+with them) and bound to a shape, `<textArea>` (`x:outline="true"`), `<text inline-size>`, and the
+deforming text-on-path effects; `follow` and `stair` are live by design and have no outline form.
+**Point text** — a plain `<text>` — is traced on `x:outline="true"` or when forced: each pen
+position a path in the font the chunk composes from the `<text>` down, in its own paint (a
+`<tspan>`'s `fill`, its border), the `text-anchor` applied over each SVG text chunk (the run from
+an absolute `x`/`y`); per-glyph `x`/`y`/`dx`/`dy` lists, `rotate`, `textLength`, `baseline-shift`
+and a `<textPath>` child are refused rather than mis-traced, and the element stays live. A run's
+highlight and decoration bake as rects beside the paths as they do beside live text. Outlining
+stays all-or-nothing per element, silent in a render; an editor that needs the answer asks
+`to_path` ([Incremental.md](Incremental.md) §11), which also converts a basic shape to its `<path>`.
+Pinned by `npm run check:outline`: live and outlined text render to the same pixels through resvg.
+
 ### 6.13 Text on a path — `<x:textpath>` [implemented: skew, rainbow]
 
 Bind a text run to an open path: the run is laid out on a straight baseline, **outlined** (§6.12), and

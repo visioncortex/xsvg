@@ -16,6 +16,18 @@ partial one.
 
 ### Added
 
+- **Convert to path for editors: `to_path(offset)`.** The compiler's own output for a text
+  element with outlining forced, or a basic shape as its `<path>`, in the form an editor writes
+  back into the source in the node's place: one group of glyph paths and baked backdrop rects,
+  every attribute the conversion did not spend kept as authored (`id`, `x:label`, `transform`,
+  `opacity`, a `filter` list, `var()` paints). `Err` names the font that could not be traced or
+  the limit that stopped it (Incremental.md §11). On the way, outlining reaches everywhere text is
+  laid out: paragraph-mode boxes (each paragraph and list item in its own style, markers traced),
+  and **point text** — a plain `<text>` on `x:outline="true"` or when forced — traced chunk by
+  chunk with the anchor over each SVG text chunk, refusing per-glyph lists, `rotate`, `textLength`
+  and `baseline-shift` rather than mis-tracing. `npm run check:outline` renders live and outlined
+  text through resvg and requires the same pixels.
+
 - **No nested `<svg>` in compiled output.** A nested `<svg>` — a cropped picture, the baked
   whole-file form of a cross-file `<use>` — now lowers to one clipped `<g>` whose transform folds
   the element's own, the frame's position and the `viewBox` fit (`preserveAspectRatio` honoured:
@@ -155,6 +167,10 @@ partial one.
   switch to it.
 
 ### Fixed
+
+- **Outlined text kept its highlights and decorations.** `outline="true"` dropped a run's
+  `x:highlight`, underline and strike-through; they bake as rects beside the paths now, as beside
+  live text.
 
 - **`describe()` declares enum parameters' defaults.** An enum parameter with no explicit default
   (`align`, `valign`, `fit`, `text-overflow`, a list's `list`, …) reads as its type's `#[default]`

@@ -107,6 +107,15 @@ struct Ctx<'a> {
     /// forces `outline="true"` semantics while scratch-serializing a reference
     /// target, so referenced text contributes glyph geometry instead of nothing.
     force_outline: std::cell::Cell<bool>,
+    /// `to_path` (trace.rs): the output goes back into the SOURCE, so paints
+    /// keep their `var()` tokens and a `filter` list stays as authored.
+    to_path: std::cell::Cell<bool>,
+    /// The node `to_path` converts (its byte start) and the attributes it
+    /// carries onto the group that replaces it, as authored.
+    to_path_carry: std::cell::RefCell<Option<(usize, String)>>,
+    /// Why outlining fell back to live text, the first time it did — silent in
+    /// a render, the answer of `to_path`.
+    outline_miss: std::cell::RefCell<Option<ToPathError>>,
     /// Cross-file `<use>` linking seam (§4).
     resolver: &'a dyn Resolver,
     /// canonical keys of the files currently being linked — the cross-file cycle
@@ -324,6 +333,9 @@ impl<'a> Ctx<'a> {
             cuts: std::cell::Cell::new(0),
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
+            to_path: std::cell::Cell::new(false),
+            to_path_carry: std::cell::RefCell::new(None),
+            outline_miss: std::cell::RefCell::new(None),
             resolver: seams.resolver,
             files: std::cell::RefCell::new(vec![base.to_string()]),
             base: std::cell::RefCell::new(base.to_string()),
@@ -363,7 +375,46 @@ impl<'a> Ctx<'a> {
     /// verbatim (renders as the property's initial value, like a dangling CSS
     /// variable).
     fn resolve_var<'v>(&self, v: &'v str) -> std::borrow::Cow<'v, str> {
+        if self.to_path.get() {
+            return std::borrow::Cow::Borrowed(v); // source markup keeps its tokens
+        }
         self.theme.resolve_var(v)
+    }
+
+    /// Record why outlining fell back, once (`to_path` reports the first).
+    fn record_miss(&self, why: ToPathError) {
+        let mut slot = self.outline_miss.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(why);
+        }
+    }
+
+    /// Whether the element starting at `start` is the one `to_path` converts.
+    fn is_to_path_target(&self, start: usize) -> bool {
+        self.to_path_carry
+            .borrow()
+            .as_ref()
+            .is_some_and(|(s, _)| *s == start)
+    }
+
+    /// The attributes `to_path` carries onto the element starting at `start`,
+    /// when it is the converted node; `with_transform` adds its `transform`,
+    /// for emitters that do not write one themselves. Empty otherwise.
+    fn carry_at(&self, start: usize, with_transform: bool) -> String {
+        if !self.is_to_path_target(start) {
+            return String::new();
+        }
+        let carried = self
+            .to_path_carry
+            .borrow()
+            .as_ref()
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default();
+        if !with_transform {
+            return carried;
+        }
+        let node = visible(self.doc.root()).find(|n| n.is_element() && n.range().start == start);
+        format!("{}{carried}", node.map(transform_attr).unwrap_or_default())
     }
 
     /// A paint value for output: theme tokens resolved, *then* escaped — a token's
@@ -666,6 +717,9 @@ fn lower_filter_attr(
     bbox: impl FnOnce() -> Option<Rect>,
 ) -> Option<String> {
     let fns = parse_filter_functions(node.attribute("filter")?)?;
+    if ctx.to_path.get() {
+        return None; // source markup keeps the list as authored
+    }
     let id = format!("x-flt-{}", gen_id_seed(node, ctx));
     // pointwise functions need only the stroke margin. Blur/drop-shadow spill:
     // on measured content the spill is computed EXACTLY (3σ per blur + the
@@ -950,6 +1004,14 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);
+        return;
+    }
+    // point text traced (§6.12): asked by `x:outline`, or forced by a
+    // referencing <x:boolean>/<x:offset> or by `to_path`; live when it cannot be
+    if name == "text"
+        && (ctx.force_outline.get() || node.attribute((XSVG_NS, "outline")) == Some("true"))
+        && emit_text_outlined(node, out, ctx)
+    {
         return;
     }
     // a nested viewport (§5.3) lowers to a clipped <g>; the root stays <svg>
@@ -1458,6 +1520,9 @@ pub use textbox::{TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize};
 mod query;
 mod viewport;
 use viewport::*;
+mod trace;
+pub use trace::ToPathError;
+use trace::*;
 mod stops;
 mod textpath;
 use query::*;

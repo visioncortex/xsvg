@@ -493,3 +493,30 @@ The pairing is a self-referential value (the tree borrows the text), which is th
 requires; `parsed_document_is_covariant` fails to build if that ever changes). Offsets are source
 byte starts, as for units (§9). The kit wraps the queries as its `queries` (xsvg-kit
 `docs/Queries.md`), whose JS memo then only saves the bridge hop.
+
+## 11. Convert to path (`CompileSession::to_path`, shipped)
+
+An editor's *Create outlines* / *Convert to path* replaces a node by the markup the compiler
+would draw for it, so the rule is: **`to_path(offset)` returns the compiler's own output for the
+element at `offset` with outlining forced, in the form that goes back into the source in the
+node's place.** One group (one `<path>` for a basic shape), its glyph paths and baked backdrop
+rects inside, and **every attribute the conversion did not spend kept as authored**: `id`,
+`class`, `x:label` and the editor's other `x:` attributes, `transform`, `opacity`, a `filter`
+list (lowered again at render), `clip-path`, `mask`, `style`, and every paint with its `var()`
+token, so the theme, the filter and the editor's tools see the converted element as they saw the
+text. Spent: the text and what laid it out — `x y width height`, `font-*` and `x:font`, the
+alignment, fit, overflow and spacing attributes, `in`, `outline`, and for point text the anchor
+and tspan geometry; `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
+no key: the host re-keys the markup it inserts.
+
+`Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
+font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
+names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an
+element that is not text or a basic shape, a text with no characters). The compiled output of
+the document is byte-identical with or without this call.
+
+Coordinates: the node compiles alone, so the markup is in its parent's user space, exactly what
+replacing it in place needs; a text inside an `<x:warp>` converts to paths the warp still
+bends. The round trip is pinned over the dataset (`to_path_markup_compiles_to_what_the_outlined_
+text_rendered`): every traced path of a conversion is in the compile of the document with the
+node replaced; and `npm run check:outline` renders live and outlined text to the same pixels.

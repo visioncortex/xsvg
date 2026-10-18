@@ -237,10 +237,11 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node, ctx);
     let pos = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         pos_attr(node, ctx),
         frame_attr(node, ctx),
-        transform_attr(node)
+        transform_attr(node),
+        ctx.carry_at(node.range().start, false) // `to_path`: the attributes it keeps
     );
 
     // Paragraph mode (§6.16): `<x:p>` children are separate paragraphs stacked with
@@ -257,7 +258,9 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         };
         if let Some(geom) = geom {
             let spec = textbox_area_spec(node, geom);
-            emit_paragraphs(node, &paras, &style, fill, gx, &spec, &pos, out, ctx);
+            emit_paragraphs(
+                node, &paras, &style, fill, gx, &spec, &pos, outline, out, ctx,
+            );
             return;
         }
     }
@@ -396,6 +399,7 @@ pub(super) fn emit_paragraphs(
     gx: f64,
     spec: &AreaSpec,
     pos: &str,
+    outline: bool,
     out: &mut String,
     ctx: &Ctx,
 ) {
@@ -410,6 +414,8 @@ pub(super) fn emit_paragraphs(
     // char-cell tier reads the keyed paragraphs alone
     let mut shapes = String::new();
     let mut markers = String::new();
+    // outlining (§6.12): each generated marker traced at its column, right-aligned
+    let mut marker_paths: Option<Vec<(String, String)>> = outline.then(Vec::new);
     for para in &items {
         let Some(mk) = &para.marker else { continue };
         let Some(first) = para.laid.lines.first().map(|l| l.baseline + block_top) else {
@@ -431,6 +437,20 @@ pub(super) fn emit_paragraphs(
                 );
             }
             super::list::Marker::Text(t) => {
+                if let Some(paths) = marker_paths.as_mut() {
+                    let st = &para.laid.style;
+                    let traced = ctx.outliner.advances(t, st, st.size).and_then(|adv| {
+                        let w = adv.last().copied().unwrap_or(0.0);
+                        ctx.outliner.outline(t, st, st.size, mk.col - w, first)
+                    });
+                    match traced {
+                        Some(d) => paths.push((d, mk.fill.clone())),
+                        None => {
+                            ctx.record_miss(ToPathError::font(st, "no font file to trace"));
+                            marker_paths = None;
+                        }
+                    }
+                }
                 markers.push_str(&format!(
                     "<tspan x=\"{}\" y=\"{}\" text-anchor=\"end\" fill=\"{}\" font-size=\"{}\"{stamp}>",
                     fmt(mk.col),
@@ -484,6 +504,78 @@ pub(super) fn emit_paragraphs(
         }
         bb
     });
+    // Create-outlines in paragraph mode (§6.12): every paragraph's lines traced
+    // in its own style, run by run where a run paints, the markers with them;
+    // live below when any line cannot be (the miss recorded for `to_path`)
+    let traced: Option<Vec<Vec<PaintedPath>>> = if outline && marker_paths.is_some() {
+        items
+            .iter()
+            .zip(&visible)
+            .map(|(para, shifted)| {
+                trace_lines(
+                    shifted,
+                    para.laid.anchor,
+                    &para.laid.style,
+                    para.laid.style.size,
+                    &para.emits,
+                    m,
+                    ctx.outliner,
+                    ctx,
+                )
+                .map(|(paths, _)| paths)
+            })
+            .collect()
+    } else {
+        None
+    };
+    if let Some(traced) = traced {
+        out.push_str("<g");
+        out.push_str(pos);
+        out.push('>');
+        if filter.is_some() {
+            backdrops(out, Backdrops::Highlights);
+        }
+        open_filter_group(out, filter.as_deref());
+        out.push_str(&shapes);
+        for (d, fill) in marker_paths.unwrap_or_default() {
+            out.push_str(&format!("<g fill=\"{}\"><path d=\"", ctx.paint(&fill)));
+            push_escaped(out, &d, true);
+            out.push_str("\"/></g>");
+        }
+        for ((para, shifted), paths) in items.iter().zip(&visible).zip(traced) {
+            if shifted.is_empty() {
+                continue;
+            }
+            emit_run_backdrops(
+                out,
+                shifted,
+                para.laid.anchor.svg(),
+                para.laid.rtl,
+                &para.laid.style,
+                para.laid.style.size,
+                para.fill,
+                &para.emits,
+                if filter.is_some() {
+                    Backdrops::Decorations
+                } else {
+                    Backdrops::All
+                },
+                m,
+                ctx,
+            );
+            let ppos = pos_attr(para.src, ctx);
+            if paths.iter().any(|p| p.fill.is_some() || p.border.is_some()) {
+                push_painted_paths(out, &paths, para.fill, "", &ppos, ctx);
+            } else {
+                let paths: Vec<(String, bool)> =
+                    paths.into_iter().map(|p| (p.d, p.overflow)).collect();
+                push_outline_group(out, para.fill, "", &ppos, &paths, ctx);
+            }
+        }
+        close_filter_group(out, filter.as_deref());
+        out.push_str("</g>");
+        return;
+    }
     // one keyed <g> wraps the per-paragraph <text>s: the TEXTBOX keeps a
     // rendered identity (and so a real bbox) of its own — the paragraphs
     // carry only their own <x:p> keys (found live: a multi-paragraph
@@ -897,7 +989,7 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         text_overflow: overflow_mode(node),
     };
     let gx = attr_num_ns(node, "glyph-x-scale", 1.0);
-    let outline = node.attribute((XSVG_NS, "outline")) == Some("true");
+    let outline = node.attribute((XSVG_NS, "outline")) == Some("true") || ctx.force_outline.get();
     let (segments, styles, emits) = collect_runs(node, &style);
     let layout = layout_text_area_runs(&segments, &styles, &spec, m);
     let filter = lower_text_filter(node, &layout, &style, &emits, out, ctx);
@@ -910,7 +1002,11 @@ pub(super) fn emit_text_area(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         gx,
         m,
         &emits,
-        &pos_attr(node, ctx),
+        &format!(
+            "{}{}",
+            pos_attr(node, ctx),
+            ctx.carry_at(node.range().start, true)
+        ),
         span_of(node),
         outline,
         filter.as_deref(),
@@ -936,81 +1032,6 @@ pub(super) fn write_area_text(
     outliner: &dyn GlyphOutliner,
     ctx: &Ctx,
 ) {
-    // Create-outlines (§6.12): emit each line as a <path> tracing its glyphs instead
-    // of live <text>. All-or-nothing — if the outliner can't do any line (font bytes
-    // unavailable) we fall through to live text. v0 uses the base style per line
-    // (per-run styling / justify / glyph-x-scale don't apply) and anchors via the
-    // measured line width.
-    if outline {
-        let mut paths = Vec::new();
-        let mut traced = Vec::new(); // (text, start_x, baseline) of each traced line
-        let mut ok = true;
-        // a run's paint — its fill, its border — splits its line into pieces
-        // (§6.12); its typography does not: the line keeps the box's style
-        let painted = |l: &PlacedLine| {
-            l.runs
-                .iter()
-                .any(|r| emits.get(r.style).is_some_and(EmitAttrs::paints))
-        };
-        for line in &layout.lines {
-            if line.text.is_empty() {
-                continue; // blank line (e.g. from <tbreak/>) → nothing to trace
-            }
-            let w = m.measure(&line.text, style, layout.font_size);
-            let start_x = match layout.anchor {
-                Anchor::Start => line.x,
-                Anchor::Middle => line.x - w / 2.0,
-                Anchor::End => line.x - w,
-            };
-            let traced_ok = if painted(line) {
-                trace_runs(line, style, layout.font_size, start_x, emits, outliner, ctx)
-                    .map(|pieces| paths.extend(pieces))
-            } else {
-                outliner
-                    .outline(&line.text, style, layout.font_size, start_x, line.baseline)
-                    .map(|d| {
-                        paths.push(PaintedPath {
-                            d,
-                            fill: None,
-                            border: None,
-                            overflow: line.overflow,
-                        })
-                    })
-            };
-            if traced_ok.is_none() {
-                ok = false;
-                break;
-            }
-            traced.push((line.text.as_str(), start_x, line.baseline));
-        }
-        if ok {
-            // a caret_stops query is listening: the stops of each traced line, at
-            // the very placement the outline above was traced from (stops.rs)
-            if ctx.recording_stops() {
-                let metrics = m.font_metrics(style, layout.font_size);
-                for (text, start_x, baseline) in traced {
-                    let run = outliner
-                        .advances(text, style, layout.font_size)
-                        .and_then(|adv| stop_run(text, start_x, baseline, &metrics, &adv));
-                    if let Some(run) = run {
-                        ctx.record_stops(span, run);
-                    }
-                }
-            }
-            open_filter_group(out, filter);
-            if paths.iter().any(|p| p.fill.is_some() || p.border.is_some()) {
-                push_painted_paths(out, &paths, fill, stroke, pos, ctx);
-            } else {
-                let paths: Vec<(String, bool)> =
-                    paths.into_iter().map(|p| (p.d, p.overflow)).collect();
-                push_outline_group(out, fill, stroke, pos, &paths, ctx);
-            }
-            close_filter_group(out, filter);
-            return;
-        }
-        // else: outliner unavailable → fall through to live <text> below
-    }
-
     let backdrops = |out: &mut String, which: Backdrops| {
         emit_run_backdrops(
             out,
@@ -1026,6 +1047,72 @@ pub(super) fn write_area_text(
             ctx,
         );
     };
+    // Create-outlines (§6.12): emit each line as a <path> tracing its glyphs instead
+    // of live <text>. All-or-nothing — if the outliner can't do any line (font bytes
+    // unavailable) we fall through to live text. v0 uses the base style per line
+    // (per-run styling / justify / glyph-x-scale don't apply) and anchors via the
+    // measured line width.
+    if outline {
+        if let Some((paths, traced)) = trace_lines(
+            &layout.lines,
+            layout.anchor,
+            style,
+            layout.font_size,
+            emits,
+            m,
+            outliner,
+            ctx,
+        ) {
+            // a caret_stops query is listening: the stops of each traced line, at
+            // the very placement the outline above was traced from (stops.rs)
+            if ctx.recording_stops() {
+                let metrics = m.font_metrics(style, layout.font_size);
+                for (text, start_x, baseline) in &traced {
+                    let run = outliner
+                        .advances(text, style, layout.font_size)
+                        .and_then(|adv| stop_run(text, *start_x, *baseline, &metrics, &adv));
+                    if let Some(run) = run {
+                        ctx.record_stops(span, run);
+                    }
+                }
+            }
+            // `to_path` replaces one node with one: a box with backdrops wraps
+            // them and its paths in a group carrying the node's attributes
+            let wrap = ctx.is_to_path_target(span.0) && has_backdrops(&layout.lines, emits);
+            if wrap {
+                out.push_str("<g");
+                out.push_str(pos);
+                out.push('>');
+            }
+            let pos = if wrap { "" } else { pos };
+            if filter.is_some() {
+                backdrops(out, Backdrops::Highlights);
+            }
+            open_filter_group(out, filter);
+            backdrops(
+                out,
+                if filter.is_some() {
+                    Backdrops::Decorations
+                } else {
+                    Backdrops::All
+                },
+            );
+            if paths.iter().any(|p| p.fill.is_some() || p.border.is_some()) {
+                push_painted_paths(out, &paths, fill, stroke, pos, ctx);
+            } else {
+                let paths: Vec<(String, bool)> =
+                    paths.into_iter().map(|p| (p.d, p.overflow)).collect();
+                push_outline_group(out, fill, stroke, pos, &paths, ctx);
+            }
+            close_filter_group(out, filter);
+            if wrap {
+                out.push_str("</g>");
+            }
+            return;
+        }
+        // else: outliner unavailable → fall through to live <text> below
+    }
+
     if filter.is_some() {
         backdrops(out, Backdrops::Highlights);
     }
@@ -1077,6 +1164,78 @@ pub(super) fn write_area_text(
 /// the paint it overrides. Whitespace-only runs draw nothing and are skipped.
 /// `None` when the outliner declines any of it; the caller degrades.
 #[allow(clippy::too_many_arguments)]
+/// A traced line's `(text, start_x, baseline)`, for caret stops.
+pub(super) type TracedLine = (String, f64, f64);
+
+/// Whether any run on the lines has a highlight or a decoration to bake.
+pub(super) fn has_backdrops(lines: &[PlacedLine], emits: &[EmitAttrs]) -> bool {
+    lines.iter().any(|l| {
+        l.runs.iter().any(|r| {
+            emits
+                .get(r.style)
+                .is_some_and(|a| a.highlight.is_some() || a.decoration.is_some())
+        })
+    })
+}
+
+/// Trace laid-out lines to glyph paths (§6.12): each line at its anchored start,
+/// whole in the base style, or run by run when a run paints (its fill, its
+/// border). All or nothing: the first line the outliner declines records the
+/// miss (`to_path` reports it) and returns `None`, and the caller renders live.
+/// Also returns `(text, start_x, baseline)` of each traced line, for caret stops.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn trace_lines(
+    lines: &[PlacedLine],
+    anchor: Anchor,
+    style: &TextStyle,
+    size: f64,
+    emits: &[EmitAttrs],
+    m: &dyn Measurer,
+    outliner: &dyn GlyphOutliner,
+    ctx: &Ctx,
+) -> Option<(Vec<PaintedPath>, Vec<TracedLine>)> {
+    let mut paths = Vec::new();
+    let mut traced = Vec::new();
+    // a run's paint — its fill, its border — splits its line into pieces
+    // (§6.12); its typography does not: the line keeps the box's style
+    let painted = |l: &PlacedLine| {
+        l.runs
+            .iter()
+            .any(|r| emits.get(r.style).is_some_and(EmitAttrs::paints))
+    };
+    for line in lines {
+        if line.text.is_empty() {
+            continue; // blank line (e.g. from <tbreak/>) → nothing to trace
+        }
+        let w = m.measure(&line.text, style, size);
+        let start_x = match anchor {
+            Anchor::Start => line.x,
+            Anchor::Middle => line.x - w / 2.0,
+            Anchor::End => line.x - w,
+        };
+        let ok = if painted(line) {
+            trace_runs(line, style, size, start_x, emits, outliner, ctx).map(|p| paths.extend(p))
+        } else {
+            outliner
+                .outline(&line.text, style, size, start_x, line.baseline)
+                .map(|d| {
+                    paths.push(PaintedPath {
+                        d,
+                        fill: None,
+                        border: None,
+                        overflow: line.overflow,
+                    })
+                })
+        };
+        if ok.is_none() {
+            ctx.record_miss(ToPathError::font(style, "no font file to trace"));
+            return None;
+        }
+        traced.push((line.text.clone(), start_x, line.baseline));
+    }
+    Some((paths, traced))
+}
+
 fn trace_runs(
     line: &PlacedLine,
     style: &TextStyle,

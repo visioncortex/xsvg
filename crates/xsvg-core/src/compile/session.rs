@@ -323,6 +323,54 @@ impl<'a> Parsed<'a> {
         super::run_support(self.element_at(offset)?)
     }
 
+    /// Convert to path (trace.rs; docs/Incremental.md §11): the element at
+    /// `offset` compiled on its own with outlining forced — its glyphs as paths,
+    /// its backdrops as rects, a shape as its `<path>` — every attribute the
+    /// conversion does not spend kept as authored, paints with their tokens, no
+    /// source map. `Err` names what could not be traced.
+    pub(super) fn to_path(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Result<String, super::ToPathError> {
+        let node = self
+            .element_at(offset)
+            .ok_or_else(|| super::ToPathError::limit("no element starts at this offset"))?;
+        let (ns, name) = (node.tag_name().namespace(), node.tag_name().name());
+        let text = (ns == Some(super::XSVG_NS) && matches!(name, "textbox" | "textpath"))
+            || (ns == Some(super::SVG_NS) && matches!(name, "text" | "textArea"));
+        let shape = ns == Some(super::SVG_NS)
+            && matches!(
+                name,
+                "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
+            );
+        if !text && !shape {
+            return Err(super::ToPathError::limit(format!(
+                "<{name}> is not convertible"
+            )));
+        }
+        let ctx = Ctx::new(backend, quality, false, "", self);
+        ctx.force_outline.set(true);
+        ctx.to_path.set(true);
+        *ctx.to_path_carry.borrow_mut() = Some((offset, super::carried_attrs(node, false)));
+        let mut out = String::new();
+        if text {
+            serialize(node, &mut out, false, &ctx);
+        } else if !super::emit_shape_as_path(node, &mut out, &ctx) {
+            return Err(super::ToPathError::limit(format!(
+                "<{name}> has no geometry"
+            )));
+        }
+        if let Some(miss) = ctx.outline_miss.take() {
+            return Err(miss);
+        }
+        if text && !out.contains("<path") {
+            return Err(super::ToPathError::limit("nothing to trace"));
+        }
+        Ok(out)
+    }
+
     /// Source byte range of every element in document order, the root included.
     pub(super) fn node_spans(&self) -> Vec<(usize, usize)> {
         self.doc
@@ -722,6 +770,16 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
         self.parsed()
             .caret_stops(offset, &self.platform.backend(), self.quality)
+    }
+
+    /// Convert to path (docs/Incremental.md §11): the element at `offset` as the
+    /// markup that replaces it in the source — its text as glyph paths, a shape as
+    /// a `<path>`, every unspent attribute as authored. `Err` says why not: the
+    /// font without a file, or a named limit. The same answer as
+    /// [`super::to_path_impl`].
+    pub fn to_path(&self, offset: usize) -> Result<String, super::ToPathError> {
+        self.parsed()
+            .to_path(offset, &self.platform.backend(), self.quality)
     }
 
     /// Source byte range of every element, in document order — the same answer as

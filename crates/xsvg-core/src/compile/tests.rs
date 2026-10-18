@@ -8236,3 +8236,304 @@ fn no_compiled_sample_holds_a_nested_svg() {
         assert_eq!(out.matches("<svg").count(), 1, "{}", path.display());
     }
 }
+
+// ---- convert to path (trace.rs; Incremental.md §11) ---------------------------
+
+fn to_path_at(src: &str, needle: &str) -> Result<String, ToPathError> {
+    to_path_impl(
+        src,
+        src.find(needle).expect(needle),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+}
+
+#[test]
+fn to_path_returns_the_outlined_box_with_its_attributes_kept_as_authored() {
+    // the compiler's own outlined output for the node, in the source's terms:
+    // the theme token unresolved, the filter list as written, the editor's
+    // label and the transform on the group, no key, no font, no frame
+    let src = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:theme><x:color name="accent" value="#6366f1"/><x:font name="h" font-size="30"/></x:theme>
+<x:textbox id="t1" x:label="Hello" x="10" y="10" width="200" height="60" x:font="h" fill="var(accent)" opacity="0.8" filter="drop-shadow(2 3 4 #0008)" transform="rotate(5)" x:layer="foreground" class="title">Hello</x:textbox>
+</svg>"##;
+    let out = to_path_at(src, "<x:textbox").unwrap();
+    assert!(
+        out.starts_with(r##"<g fill="var(accent)" transform="rotate(5)""##),
+        "{out}"
+    );
+    for kept in [
+        r#"id="t1""#,
+        r#"x:label="Hello""#,
+        r#"opacity="0.8""#,
+        r#"filter="drop-shadow(2 3 4 #0008)""#,
+        r#"x:layer="foreground""#,
+        r#"class="title""#,
+    ] {
+        assert!(out.contains(kept), "{kept} kept: {out}");
+    }
+    assert!(out.contains("<path d=\"M"), "{out}");
+    assert!(out.ends_with("</g>"), "{out}");
+    for gone in [
+        "<text",
+        "data-xsvg",
+        "x:font",
+        "font-size",
+        "width=",
+        "<filter",
+        "#6366f1",
+    ] {
+        assert!(!out.contains(gone), "{gone} spent: {out}");
+    }
+    // the same node rendered keeps resolving and lowering as ever
+    let rendered = compile_outlined(src);
+    assert!(
+        rendered.contains("#6366f1") && rendered.contains("<filter"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn to_path_keeps_backdrops_inside_one_group_and_outlines_paragraphs() {
+    // a highlighted run and an underlined run: the rects the box bakes ride
+    // inside the one group that replaces the node (and, rendered with
+    // outline="true", are no longer dropped)
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="60" font-size="10" transform="translate(1 2)">ab <tspan x:highlight="#ff0">cd</tspan> <tspan text-decoration="underline">ef</tspan></x:textbox></svg>"##
+    );
+    let out = to_path_at(&src, "<x:textbox").unwrap();
+    assert!(
+        out.starts_with(r##"<g transform="translate(1 2)">"##),
+        "{out}"
+    );
+    assert_eq!(out.matches("<rect ").count(), 2, "{out}");
+    assert!(
+        out.contains(r##"fill="#ff0""##) && out.contains("<g fill=\"#000\"><path d="),
+        "{out}"
+    );
+    assert!(out.ends_with("</g></g>"), "{out}");
+    let rendered = compile_outlined(&src.replace("transform=", "outline=\"true\" transform="));
+    assert_eq!(rendered.matches("<rect ").count(), 2, "{rendered}");
+
+    // paragraph mode: a group per paragraph in its own style, the list's
+    // marker traced, everything under the box's group
+    let src = format!(
+        r##"{XW}<x:textbox id="b" x="0" y="0" width="200" height="200" font-size="10"><x:p>one</x:p><x:p font-size="20" fill="#f00">two</x:p><x:list list="number"><x:li>three</x:li></x:list></x:textbox></svg>"##
+    );
+    let out = to_path_at(&src, "<x:textbox").unwrap();
+    assert!(out.starts_with(r##"<g id="b">"##), "{out}");
+    assert_eq!(
+        out.matches("<g fill=").count(),
+        4,
+        "three blocks and a marker: {out}"
+    );
+    assert!(out.contains(r##"<g fill="#f00"><path"##), "{out}");
+    assert!(!out.contains("<text"), "{out}");
+    // rendered with outline="true" the box no longer stays live
+    let rendered = compile_outlined(&src.replace(r#"id="b""#, r#"id="b" outline="true""#));
+    assert!(
+        !rendered.contains("<text") && rendered.contains("<path d=\"M"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn to_path_traces_point_text_chunk_by_chunk() {
+    // a plain <text>: each pen position a path, the anchor honoured, a tspan's
+    // own fill on its piece, the <text>'s fill on the group; and the same by
+    // x:outline="true" when rendered
+    let src = format!(
+        r##"{XW}<text id="p" x="100" y="20" font-size="10" text-anchor="middle" fill="#123" transform="scale(2)">ab<tspan fill="#f00" dy="5">cd</tspan><tspan x="10" y="40" text-anchor="start">ef</tspan></text></svg>"##
+    );
+    let out = to_path_at(&src, "<text").unwrap();
+    assert!(
+        out.starts_with(r##"<g fill="#123" transform="scale(2)" id="p">"##),
+        "{out}"
+    );
+    assert_eq!(out.matches("<path d=").count(), 3, "{out}");
+    assert!(out.contains(r##" fill="#f00""##), "{out}");
+    // BoxOutliner boxes each glyph: "ab" (10 wide at size 10, 5 per char)
+    // centred on 100 starts at 90; "cd" follows at 100, 5 lower; "ef" at 10,40
+    assert!(out.contains("M90,"), "first chunk anchored middle: {out}");
+    assert!(out.contains("M100,"), "second chunk at the pen: {out}");
+    assert!(out.contains("M10,"), "third chunk at its own x: {out}");
+    assert!(!out.contains("<text"), "{out}");
+    let rendered = compile_outlined(&src.replace(r#"id="p""#, r#"id="p" x:outline="true""#));
+    assert!(
+        !rendered.contains("<text") && rendered.contains("<path"),
+        "{rendered}"
+    );
+    // without the ask, point text passes through untouched
+    assert!(compile_outlined(&src).contains("<text"), "{src}");
+}
+
+#[test]
+fn to_path_refuses_what_it_cannot_trace_and_names_the_font() {
+    // no font: the family, weight and style the outliner declined
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="40" font-family="Inter" font-weight="700" font-style="italic">no font</x:textbox></svg>"##
+    );
+    let err = to_path_impl(
+        &src,
+        src.find("<x:textbox").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap_err();
+    assert_eq!(err.family.as_deref(), Some("Inter"));
+    assert_eq!(err.weight.as_deref(), Some("700"));
+    assert_eq!(err.style.as_deref(), Some("italic"));
+    assert!(err.reason.contains("no font file"), "{err:?}");
+    // the named limits: per-glyph lists, rotate, a textPath, an effect with no
+    // outline form, an element that is not text or a shape, an empty text
+    for (body, needle, what) in [
+        (
+            r##"<text x="0 5 10" y="0">abc</text>"##,
+            "<text",
+            "per-glyph",
+        ),
+        (r##"<text rotate="10">abc</text>"##, "<text", "`rotate`"),
+        (
+            r##"<text><textPath href="#q">abc</textPath></text>"##,
+            "<text",
+            "<textPath>",
+        ),
+        (
+            r##"<path id="q" d="M0,0 L50,0"/><x:textpath in="#q" effect="follow">abc</x:textpath>"##,
+            "<x:textpath",
+            "`follow`",
+        ),
+        (
+            r##"<g><rect width="1" height="1"/></g>"##,
+            "<g>",
+            "not convertible",
+        ),
+        (r##"<text x="0" y="0">  </text>"##, "<text", "no characters"),
+    ] {
+        let src = format!("{XW}{body}</svg>");
+        let err = to_path_at(&src, needle).unwrap_err();
+        assert!(err.reason.contains(what), "{what}: {err:?}");
+    }
+    assert!(to_path_at(
+        &format!("{XW}<rect width=\"1\" height=\"1\"/></svg>"),
+        "</svg>"
+    )
+    .is_err());
+}
+
+#[test]
+fn to_path_converts_shapes_keeping_their_attributes() {
+    let src = format!(
+        r##"{XW}<rect id="r" x:label="Box" x="1" y="2" width="10" height="5" rx="1" fill="var(accent)" filter="blur(2)" transform="rotate(3)"/><circle cx="5" cy="5" r="2" stroke="#000"/><polygon points="0,0 4,0 2,3" class="tri"/></svg>"##
+    );
+    let out = to_path_at(&src, "<rect").unwrap();
+    assert!(out.starts_with("<path"), "{out}");
+    for kept in [
+        r#"id="r""#,
+        r#"x:label="Box""#,
+        r#"fill="var(accent)""#,
+        r#"filter="blur(2)""#,
+        r#"transform="rotate(3)""#,
+    ] {
+        assert!(out.contains(kept), "{kept}: {out}");
+    }
+    for gone in ["width=", "rx=", " x=\"1\"", "<filter"] {
+        assert!(!out.contains(gone), "{gone}: {out}");
+    }
+    assert!(out.contains(" d=\"M2,2 h8 a1,1"), "{out}");
+    let out = to_path_at(&src, "<circle").unwrap();
+    assert!(
+        out.contains(r##"stroke="#000""##) && out.contains(" d=\"M") && !out.contains("cx="),
+        "{out}"
+    );
+    let out = to_path_at(&src, "<polygon").unwrap();
+    assert!(
+        out.contains(r#"class="tri""#) && !out.contains("points="),
+        "{out}"
+    );
+}
+
+#[test]
+fn to_path_on_text_on_a_path_and_textarea_carries_the_transform() {
+    // emitters that write no transform of their own: the carry brings it
+    let src = format!(
+        r##"{XW}<path id="q" d="M0,20 C40,0 80,40 120,20" fill="none"/><x:textpath id="w" in="#q" effect="skew" font-size="20" fill="#111" transform="translate(5 6)">wave</x:textpath><textArea id="a" x="0" y="0" width="100" font-size="10" transform="rotate(1)">area</textArea></svg>"##
+    );
+    let out = to_path_at(&src, "<x:textpath").unwrap();
+    assert!(
+        out.starts_with(r##"<g fill="#111" transform="translate(5 6)" id="w">"##),
+        "{out}"
+    );
+    let out = to_path_at(&src, "<textArea").unwrap();
+    assert!(
+        out.starts_with(r##"<g fill="#000" transform="rotate(1)" id="a">"##),
+        "{out}"
+    );
+}
+
+#[test]
+fn to_path_markup_compiles_to_what_the_outlined_text_rendered() {
+    // the round trip the editor makes: replace the node by its to_path markup,
+    // compile — the glyph paths are byte-identical to the node rendered with
+    // outline="true" (keys and tokens aside), over the dataset's text boxes
+    let mut checked = 0;
+    for path in dataset_files() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let platform = Platform::new(&Mono, &NoShaper, &BoxOutliner);
+        let Ok(s) = platform.session(&src, "balanced", false, "") else {
+            continue;
+        };
+        let doc = s.document();
+        let boxes: Vec<(usize, usize)> = doc
+            .parsed
+            .doc
+            .root_element()
+            .descendants()
+            .filter(|n| {
+                n.is_element()
+                    && n.tag_name().namespace() == Some(XSVG_NS)
+                    && n.tag_name().name() == "textbox"
+                    && n.attribute("in").is_none()
+                    && n.parent_element()
+                        .is_some_and(|p| p.parent_element().is_none())
+            })
+            .map(|n| (n.range().start, n.range().end))
+            .collect();
+        for (start, end) in boxes {
+            let Ok(markup) = s.to_path(start) else {
+                continue;
+            };
+            let replaced = format!("{}{}{}", &src[..start], markup, &src[end..]);
+            let again = platform
+                .session(&replaced, "balanced", false, "")
+                .unwrap()
+                .compile()
+                .unwrap();
+            let ds = |o: &str| o.matches(" d=\"M").count();
+            let rendered = platform
+                .session(&src, "balanced", false, "")
+                .unwrap()
+                .compile_fragment(start)
+                .unwrap();
+            // every traced path of the conversion is in the recompiled document
+            for d in markup
+                .split(" d=\"")
+                .skip(1)
+                .map(|t| t.split('"').next().unwrap())
+            {
+                assert!(
+                    again.contains(d),
+                    "{}: a path was lost in the round trip",
+                    path.display()
+                );
+            }
+            assert!(ds(&markup) >= 1, "{}: {rendered}", path.display());
+            checked += 1;
+        }
+    }
+    assert!(checked > 5, "{checked}");
+}
