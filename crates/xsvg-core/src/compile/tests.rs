@@ -8961,16 +8961,24 @@ fn corners_round_a_rect_exactly_as_rx_does() {
 
 #[test]
 fn corners_clamp_trim_and_skip_where_illustrator_does() {
-    // a radius too large for its edges is limited so the trims meet at the
-    // edge's middle (a 20-wide rect asking 40 gets 10, its short edges gone);
+    // two corners asking for more than the edge between them share it (a
+    // 20-wide rect asking 40 gets 10, its short edges gone); a lone corner may
+    // take the whole edge, so a square's one corner at its side length is a
+    // quarter circle, and unequal corners share an edge in proportion;
     // a 60° corner trims r/tan(30°) along each side; a polyline's ends and
     // collinear anchors (a line into a tangent curve) have no corner; an
     // unclosed path is open, so its first and last anchors are ends
     let src = format!(
-        r##"{XW}<rect x="0" y="0" width="20" height="50" x:corners="40"/><polygon points="0,0 100,0 50,86.6" x:corners="10"/><polyline points="0,0 100,0 100,100" x:corners="10"/><path d="M0 0 L100 0 C150 0 150 50 100 50 L0 50 Z" x:corners="10"/><path d="M0 0 L100 0 L100 50 L0 50 L0 0" x:corners="10"/></svg>"##
+        r##"{XW}<rect x="0" y="0" width="20" height="50" x:corners="40"/><polygon points="0,0 100,0 50,86.6" x:corners="10"/><polyline points="0,0 100,0 100,100" x:corners="10"/><path d="M0 0 L100 0 C150 0 150 50 100 50 L0 50 Z" x:corners="10"/><path d="M0 0 L100 0 L100 50 L0 50 L0 0" x:corners="10"/><rect x="0" y="0" width="100" height="100" x:corners="0:100"/><rect x="0" y="0" width="100" height="100" x:corners="0:90 1:60"/></svg>"##
     );
     let d = corner_paths(&src);
     assert_eq!(d[0], "M10 0 A10 10 0 0 1 20 10 L20 40 A10 10 0 0 1 10 50 A10 10 0 0 1 0 40 L0 10 A10 10 0 0 1 10 0 Z");
+    assert_eq!(d[5], "M100 0 L100 100 L0 100 A100 100 0 0 1 100 0 Z");
+    // 90 + 60 on a 100 edge: scaled by 100/150 to 60 and 40
+    assert_eq!(
+        d[6],
+        "M60 0 A40 40 0 0 1 100 40 L100 100 L0 100 L0 60 A60 60 0 0 1 60 0 Z"
+    );
     assert_eq!(d[1], "M17.321 0 L82.679 0 A10 10 0 0 1 91.339 15 L58.66 71.601 A10 10 0 0 1 41.34 71.601 L8.661 15 A10 10 0 0 1 17.321 0 Z");
     assert_eq!(d[2], "M0 0 L90 0 A10 10 0 0 1 100 10 L100 100");
     assert_eq!(

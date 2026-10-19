@@ -7,9 +7,11 @@
 //!
 //! The geometry is Illustrator's: at a corner anchor P between two segments,
 //! the fillet of radius r tangent to both trims each side by d = r / tan(θ/2),
-//! θ the interior angle, and runs between the trim points; r is clamped so d
-//! never exceeds half of either adjoining segment, so two corners on one edge
-//! never overlap. A round corner is a circular arc (`A`, exact), a chamfer the
+//! θ the interior angle, and runs between the trim points; the trims on a
+//! segment are limited to its length — a lone corner may take a whole edge (a
+//! square's one corner at the side length is a quarter circle), two corners
+//! that ask for more than the edge between them are scaled to share it. A
+//! round corner is a circular arc (`A`, exact), a chamfer the
 //! straight line between the trim points, an inverted corner the same arc
 //! bulging the other way. Collinear anchors and the ends of an open subpath
 //! have no corner.
@@ -217,13 +219,22 @@ struct Fillet {
     sweep: bool,
 }
 
-fn fillet(
+/// A corner before its trim is settled: the apex, the unit directions toward
+/// the previous and next anchors, and the trim its radius asks for.
+struct Corner {
     anchor: usize,
-    seg_in: &PathSeg,
-    seg_out: &PathSeg,
+    p: Point,
+    u: Vec2,
+    v: Vec2,
+    theta: f64,
     requested: f64,
-    style: CornerStyle,
-) -> Option<Fillet> {
+    /// `r / tan(θ/2)`: the trim the requested radius wants on each side.
+    wanted: f64,
+}
+
+/// The corner at the anchor between two segments, or `None` where there is
+/// none to draw (collinear tangents, a spike, a zero radius).
+fn corner(anchor: usize, seg_in: &PathSeg, seg_out: &PathSeg, requested: f64) -> Option<Corner> {
     let p = seg_out.start();
     let (Some(t_in), Some(t_out)) = (end_tangent(seg_in), start_tangent(seg_out)) else {
         return None;
@@ -240,12 +251,30 @@ fn fillet(
     if tan_half <= 1e-9 {
         return None;
     }
-    let d_max = (arclen(seg_in) / 2.0).min(arclen(seg_out) / 2.0);
-    let d = (requested / tan_half).min(d_max);
-    if d <= 1e-9 {
-        return None;
-    }
-    let effective = d * tan_half;
+    let wanted = requested / tan_half;
+    (wanted > 1e-9).then_some(Corner {
+        anchor,
+        p,
+        u,
+        v,
+        theta,
+        requested,
+        wanted,
+    })
+}
+
+/// The corner drawn with trim `d` on each side.
+fn fillet(c: &Corner, d: f64, style: CornerStyle) -> Fillet {
+    let Corner {
+        anchor,
+        p,
+        u,
+        v,
+        theta,
+        requested,
+        ..
+    } = *c;
+    let effective = d * (theta / 2.0).tan();
     let from = p + u * d;
     let to = p + v * d;
     // the centre sits on the bisector, r / sin(θ/2) from the apex; an inverted
@@ -259,7 +288,7 @@ fn fillet(
         center = from + (to - center);
         sweep = !sweep;
     }
-    Some(Fillet {
+    Fillet {
         info: CornerInfo {
             anchor,
             at: (p.x, p.y),
@@ -273,7 +302,36 @@ fn fillet(
         d_in: d,
         d_out: d,
         sweep,
-    })
+    }
+}
+
+/// Illustrator's limit: the trims on a segment never exceed its length. A lone
+/// corner may take the whole segment; two corners asking for more than the
+/// segment between them are scaled by `L / (d_a + d_b)` to share it. A corner's
+/// one trim serves both its sides, so it takes the tightest of its two segments.
+fn settle_trims(corners: &[Option<Corner>], segs: &[PathSeg], closed: bool) -> Vec<f64> {
+    let n = segs.len();
+    let wanted = |i: usize| corners.get(i).and_then(|c| c.as_ref()).map(|c| c.wanted);
+    let mut scale = vec![1.0f64; corners.len()];
+    for (i, seg) in segs.iter().enumerate() {
+        let next = if closed { (i + 1) % n } else { i + 1 };
+        let len = arclen(seg);
+        let (a, b) = (wanted(i).unwrap_or(0.0), wanted(next).unwrap_or(0.0));
+        if a + b > len + 1e-9 {
+            let f = len / (a + b);
+            if wanted(i).is_some() {
+                scale[i] = scale[i].min(f);
+            }
+            if wanted(next).is_some() {
+                scale[next] = scale[next].min(f);
+            }
+        }
+    }
+    corners
+        .iter()
+        .zip(scale)
+        .map(|(c, f)| c.as_ref().map_or(0.0, |c| c.wanted * f))
+        .collect()
 }
 
 fn push_pt(out: &mut String, p: Point) {
@@ -332,7 +390,7 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
         let n = sub.segs.len();
         // the corner at each anchor: closed subpaths at every anchor, open ones
         // at the interior anchors only
-        let corner_at = |i: usize| -> Option<Fillet> {
+        let corner_at = |i: usize| -> Option<Corner> {
             let (seg_in, seg_out) = if sub.closed {
                 (&sub.segs[(i + n - 1) % n], &sub.segs[i % n])
             } else {
@@ -342,10 +400,16 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
                 (&sub.segs[i - 1], &sub.segs[i])
             };
             let r = spec.radius(anchor + i)?;
-            fillet(anchor + i, seg_in, seg_out, r, spec.style)
+            corner(anchor + i, seg_in, seg_out, r)
         };
         let anchors = if sub.closed { n } else { n + 1 };
-        let fillets: Vec<Option<Fillet>> = (0..anchors).map(corner_at).collect();
+        let corners: Vec<Option<Corner>> = (0..anchors).map(corner_at).collect();
+        let trims = settle_trims(&corners, &sub.segs, sub.closed);
+        let fillets: Vec<Option<Fillet>> = corners
+            .iter()
+            .zip(trims)
+            .map(|(c, d)| c.as_ref().map(|c| fillet(c, d, spec.style)))
+            .collect();
         // each segment trimmed by the corner at its start and the one at its end
         let trim_start = |i: usize| fillets[i].as_ref().map_or(0.0, |f| f.d_out);
         let trim_end = |i: usize| {

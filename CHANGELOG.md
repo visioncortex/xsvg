@@ -19,8 +19,9 @@ partial one.
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or
   `anchor:radius` pairs, a length or a theme token; `round` (an exact circular arc), `chamfer` or
-  `inverted`. Illustrator's geometry — the trims `r / tan(θ/2)` along each side, the radius limited
-  to half the adjoining segments so corners never overlap, curved segments trimmed by arc length —
+  `inverted`. Illustrator's geometry — the trims `r / tan(θ/2)` along each side, limited to the
+  segment's length (a lone corner may take a whole edge, so a square's one corner at its side is a
+  quarter circle; two corners sharing an edge scale to fit it), curved segments trimmed by arc length —
   applied in the element's geometry, so references, booleans, offsets, warps and `to_path` see it.
   Anchors are numbered in the closed form compiled contours have, so an editor folding that way
   counts the same. The session's `corners(offset)` reports each corner as drawn for the widget.

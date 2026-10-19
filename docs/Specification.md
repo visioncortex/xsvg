@@ -452,8 +452,11 @@ interior angle θ (from their tangents at P; collinear tangents make no corner),
 each side by `d = r / tan(θ/2)` along its arc length and draws the corner between the trim
 points: `round`, the circular arc of radius r tangent to both (`A r r 0 0 s`, exact); `chamfer`,
 the straight line; `inverted`, the same arc with its centre mirrored across the chord, bulging
-toward P. **Clamp (Illustrator's):** `d` never exceeds half of either adjoining segment, so two
-corners on one edge never overlap; the drawn radius is then `d·tan(θ/2)`. A segment two corners
+toward P. **Limit (Illustrator's):** the trims on a segment never exceed its length. A lone corner
+may take a whole segment — a square with one corner at its side length is a quarter circle; two
+corners asking for more than the segment between them are scaled by `L / (d_a + d_b)` to share it
+(equal radii meet at the middle). A corner's one trim serves both its sides, so it takes the
+tightest of its two segments; the drawn radius is then `d·tan(θ/2)`. A segment its corners
 consume entirely is left out. A curved adjoining segment is trimmed at the arc length, keeping
 the rest of the curve. The closing corner of a closed subpath ends on the subpath's start, then
 `Z`; a closing chamfer is the `Z` itself.
