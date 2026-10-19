@@ -71,6 +71,14 @@ function convertAll(source, name) {
   return doc;
 }
 
+// [name, body, twin]: two authored forms that must draw the same pixels — a
+// shape with x:corners against the rounded shape it describes
+const twinCases = [
+  ["corners-rect", `<rect x="20" y="20" width="200" height="120" x:corners="24" fill="#48a"/>`, `<rect x="20" y="20" width="200" height="120" rx="24" fill="#48a"/>`],
+  ["corners-token", `<x:theme><x:color name="radius" value="16"/></x:theme><rect x="20" y="20" width="200" height="120" x:corners="var(radius)" fill="#e11" stroke="#000" stroke-width="4"/>`, `<rect x="20" y="20" width="200" height="120" rx="16" fill="#e11" stroke="#000" stroke-width="4"/>`],
+  ["corners-stadium", `<rect x="20" y="20" width="200" height="80" x:corners="100" fill="#0a0"/>`, `<rect x="20" y="20" width="200" height="80" rx="40" fill="#0a0"/>`],
+];
+
 function render(source, name) {
   const file = join(tmp, `${name}.svg`);
   writeFileSync(file, source);
@@ -121,8 +129,18 @@ for (const [name, body] of cases) {
   if (!shapesOnly) compare("outlined", outlined);
   compare("to_path+replace", replaced);
 }
+for (const [name, body, twin] of twinCases) {
+  const a = render(compile(page(body), `${name}-a`), `${name}-a`);
+  const c = render(compile(page(twin), `${name}-b`), `${name}-b`);
+  const diff = new PNG({ width: a.width, height: a.height });
+  const n = pixelmatch(a.data, c.data, diff.data, a.width, a.height, { threshold: 0.3 });
+  const frac = n / (a.width * a.height);
+  const ok = frac <= MAX_DIFF_FRACTION;
+  if (!ok) { writeFileSync(join(tmp, `${name}-diff.png`), PNG.sync.write(diff)); failed++; }
+  console.log(`${ok ? "✓" : "✗"} ${name} (twin): ${n} px differ (${(frac * 100).toFixed(2)}%)${ok ? "" : ` — see ${tmp}/${name}-diff.png`}`);
+}
 if (failed) {
   console.log(`outline-raster: ${failed} case(s) differ`);
   process.exit(1);
 }
-console.log(`outline-raster: ${cases.length} cases outline where they drew`);
+console.log(`outline-raster: ${cases.length} cases outline where they drew, ${twinCases.length} corner twins match`);

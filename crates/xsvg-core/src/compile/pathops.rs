@@ -206,7 +206,7 @@ pub(super) fn warp_child_markup(child: roxmltree::Node, ctx: &Ctx) -> Result<Str
         // shape_to_path_d handles a rounded rect too (rx/ry → arc path), so a
         // <rect rx> converts here rather than falling through to a <rect> the
         // bake can't warp — it used to be dropped behind a skip marker.
-        let d = shape_to_path_d(child).ok_or("degenerate shape")?;
+        let d = shape_to_path_d(child, ctx).ok_or("degenerate shape")?;
         let mut s = String::from("<path");
         copy_attrs(
             child,
@@ -290,7 +290,7 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 // stroke ink joins the operand's region (Illustrator expands
                 // strokes before Pathfinder); nonzero operands only — evenodd
                 // would XOR the overlap away
-                match child_stroke_outline(child, ctx.quality.tolerance()) {
+                match child_stroke_outline(child, ctx.quality.tolerance(), ctx) {
                     Some(stroke_d) if !even_odd => {
                         markups
                             .last_mut()
@@ -393,7 +393,11 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 /// A plain-shape boolean operand's stroke ink, expanded to fill geometry via
 /// kurbo's stroke-to-fill (caps and joins from the attributes; dashes are not
 /// supported). `None` when the child has no stroke to expand.
-pub(super) fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Option<String> {
+pub(super) fn child_stroke_outline(
+    child: roxmltree::Node,
+    tolerance: f64,
+    ctx: &Ctx,
+) -> Option<String> {
     if child.tag_name().namespace() == Some(XSVG_NS) {
         return None;
     }
@@ -405,7 +409,7 @@ pub(super) fn child_stroke_outline(child: roxmltree::Node, tolerance: f64) -> Op
     if width <= 0.0 {
         return None;
     }
-    let d = shape_to_path_d(child)?;
+    let d = shape_to_path_d(child, ctx)?;
     let path = crate::kurbo::BezPath::from_svg(&d).ok()?;
     use crate::kurbo::{stroke, Cap, Join, Stroke, StrokeOpts};
     let cap = match child.attribute("stroke-linecap") {

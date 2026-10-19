@@ -8444,21 +8444,20 @@ fn to_path_converts_shapes_keeping_their_attributes() {
     for gone in ["width=", "rx=", " x=\"1\"", "<filter"] {
         assert!(!out.contains(gone), "{gone}: {out}");
     }
-    // a rounded rect as cubics: the top edge, then the top-right corner's
-    // quarter arc with handles κ of the radius along the tangents
+    // a rounded rect: its edges and one quarter arc per corner, exact
     assert!(
-        out.contains(" d=\"M2 2 L10 2 C10.552 2 11 2.448 11 3 L11 6 C11 6.552"),
+        out.contains(" d=\"M2,2 h8 a1,1 0 0,1 1,1 v3 a1,1 0 0,1 -1,1 h-8 a1,1 0 0,1 -1,-1 v-3 a1,1 0 0,1 1,-1 Z\""),
         "{out}"
     );
-    assert!(!out.contains(" a1,1") && !out.contains(" A"), "{out}");
     let out = to_path_at(&src, "<circle").unwrap();
-    // a circle: four cubics from the rightmost point, clockwise in y-down space
+    // a circle: four quarter arcs from the rightmost point, clockwise in
+    // y-down space, the last landing on the start — anchors at the extremes
     assert!(
         out.contains(r##"stroke="#000""##) && !out.contains("cx="),
         "{out}"
     );
     assert!(
-        out.contains(" d=\"M7 5 C7 6.105 6.105 7 5 7 C3.895 7 3 6.105 3 5 C3 3.895 3.895 3 5 3 C6.105 3 7 3.895 7 5 Z\""),
+        out.contains(" d=\"M7 5 A2 2 0 0 1 5 7 A2 2 0 0 1 3 5 A2 2 0 0 1 5 3 A2 2 0 0 1 7 5 Z\""),
         "{out}"
     );
     let out = to_path_at(&src, "<polygon").unwrap();
@@ -8867,54 +8866,152 @@ fn every_outlined_contour_in_the_dataset_has_the_closed_form_editors_fold() {
 }
 
 #[test]
-fn curved_shapes_convert_to_cubics_that_sit_on_the_shape() {
-    // an ellipse and a rounded rect: every anchor exactly on the shape, every
-    // handle along its tangent, the curve within 0.03% of the true radius —
-    // and a fully rounded rect (rx = w/2) has no straight edges at all
+fn curved_shapes_convert_to_exact_arcs_in_the_closed_form() {
+    // an ellipse and rounded rects convert to circular arcs — the compiler's
+    // own geometry, exact — in the closed form: the last arc lands on the
+    // start, then Z; a stadium (rx = w/2) has no straight edges at all
     let src = format!(
         r##"{XW}<ellipse cx="50" cy="40" rx="30" ry="20"/><rect x="0" y="0" width="20" height="10" rx="5"/><rect id="s" x="0" y="0" width="20" height="10" rx="10" ry="5"/></svg>"##
     );
     let ellipse = to_path_at(&src, "<ellipse").unwrap();
-    let d = ellipse
-        .split(" d=\"")
-        .nth(1)
-        .unwrap()
-        .split('"')
-        .next()
-        .unwrap()
-        .to_string();
-    let path = crate::kurbo::BezPath::from_svg(&d).unwrap();
-    use crate::kurbo::{ParamCurve, PathEl, PathSeg};
-    let on = |p: crate::kurbo::Point| ((p.x - 50.0) / 30.0).powi(2) + ((p.y - 40.0) / 20.0).powi(2);
-    let mut cubics = 0;
-    for seg in path.segments() {
-        let PathSeg::Cubic(c) = seg else {
-            panic!("{d}")
-        };
-        cubics += 1;
-        assert!(
-            (on(c.p0) - 1.0).abs() < 1e-9 && (on(c.p3) - 1.0).abs() < 1e-9,
-            "{d}"
-        );
-        for i in 1..20 {
-            let r = on(c.eval(i as f64 / 20.0)).sqrt();
-            assert!((r - 1.0).abs() < 0.0003, "radial error {r}: {d}");
-        }
-    }
-    assert_eq!(cubics, 4, "{d}");
-    assert_eq!(path.elements().last(), Some(&PathEl::ClosePath));
+    assert!(
+        ellipse.contains(" d=\"M80 40 A30 20 0 0 1 50 60 A30 20 0 0 1 20 40 A30 20 0 0 1 50 20 A30 20 0 0 1 80 40 Z\""),
+        "{ellipse}"
+    );
     let rounded = to_path_at(
         &src,
         "<rect x=\"0\" y=\"0\" width=\"20\" height=\"10\" rx=\"5\"",
     )
     .unwrap();
-    assert_eq!(
-        rounded.matches(" L").count(),
-        2,
-        "two straight edges, the ends are half circles: {rounded}"
+    assert_eq!(rounded.matches(" a5,5").count(), 4, "{rounded}");
+    // 20×10 with r 5: the short sides are all arc — no zero-length edge written
+    assert!(
+        rounded.contains(" h10 ") && !rounded.contains(" v0") && !rounded.contains(" v-0"),
+        "{rounded}"
     );
-    assert_eq!(rounded.matches(" C").count(), 4, "{rounded}");
     let stadium = to_path_at(&src, "<rect id=\"s\"").unwrap();
-    assert_eq!(stadium.matches(" L").count(), 0, "{stadium}");
-    assert_eq!(stadium.matches(" C").count(), 4, "{stadium}");
+    assert_eq!(stadium.matches(" a10,5").count(), 4, "{stadium}");
+    assert!(
+        !stadium.contains(" h") && !stadium.contains(" v"),
+        "no straight edge at all: {stadium}"
+    );
+}
+
+// ---- corners (corners.rs; §5.4) ------------------------------------------------
+
+fn corner_paths(src: &str) -> Vec<String> {
+    compile_test(src)
+        .split(" d=\"")
+        .skip(1)
+        .map(|t| t.split('"').next().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn corners_round_a_rect_exactly_as_rx_does() {
+    // x:corners="10" on a sharp rect is the rounded rect's own arcs, clockwise,
+    // the last landing on the start; a token radius resolves; per-anchor radii
+    // leave the other corners sharp; a chamfer is the straight cut, the closing
+    // one being Z itself; inverted flips the sweep
+    let src = format!(
+        r##"{XW}<x:theme><x:color name="r" value="8"/></x:theme><rect x="0" y="0" width="100" height="50" x:corners="10"/><rect x="0" y="0" width="100" height="50" x:corners="0:10 1:var(r)"/><rect x="0" y="0" width="100" height="50" x:corners="10" x:corner-style="chamfer"/><rect x="0" y="0" width="100" height="50" x:corners="10" x:corner-style="inverted"/></svg>"##
+    );
+    let d = corner_paths(&src);
+    assert_eq!(d[0], "M10 0 L90 0 A10 10 0 0 1 100 10 L100 40 A10 10 0 0 1 90 50 L10 50 A10 10 0 0 1 0 40 L0 10 A10 10 0 0 1 10 0 Z");
+    assert_eq!(
+        d[1],
+        "M10 0 L92 0 A8 8 0 0 1 100 8 L100 50 L0 50 L0 10 A10 10 0 0 1 10 0 Z"
+    );
+    assert_eq!(
+        d[2],
+        "M10 0 L90 0 L100 10 L100 40 L90 50 L10 50 L0 40 L0 10 Z"
+    );
+    assert_eq!(d[3], "M10 0 L90 0 A10 10 0 0 0 100 10 L100 40 A10 10 0 0 0 90 50 L10 50 A10 10 0 0 0 0 40 L0 10 A10 10 0 0 0 10 0 Z");
+    // the output is a <path>; the corner attributes and the geometry are spent
+    let out = compile_test(&src);
+    assert!(!out.contains("<rect") && !out.contains("corners"), "{out}");
+    // the same rect as a <rect rx> compiles to the same arcs (modulo spelling)
+    let rx = compile_test(&format!(
+        r##"{XW}<rect x="0" y="0" width="100" height="50" rx="10"/></svg>"##
+    ));
+    assert!(
+        rx.contains("rx=\"10\""),
+        "a rounded rect passes through: {rx}"
+    );
+}
+
+#[test]
+fn corners_clamp_trim_and_skip_where_illustrator_does() {
+    // a radius too large for its edges is limited so the trims meet at the
+    // edge's middle (a 20-wide rect asking 40 gets 10, its short edges gone);
+    // a 60° corner trims r/tan(30°) along each side; a polyline's ends and
+    // collinear anchors (a line into a tangent curve) have no corner; an
+    // unclosed path is open, so its first and last anchors are ends
+    let src = format!(
+        r##"{XW}<rect x="0" y="0" width="20" height="50" x:corners="40"/><polygon points="0,0 100,0 50,86.6" x:corners="10"/><polyline points="0,0 100,0 100,100" x:corners="10"/><path d="M0 0 L100 0 C150 0 150 50 100 50 L0 50 Z" x:corners="10"/><path d="M0 0 L100 0 L100 50 L0 50 L0 0" x:corners="10"/></svg>"##
+    );
+    let d = corner_paths(&src);
+    assert_eq!(d[0], "M10 0 A10 10 0 0 1 20 10 L20 40 A10 10 0 0 1 10 50 A10 10 0 0 1 0 40 L0 10 A10 10 0 0 1 10 0 Z");
+    assert_eq!(d[1], "M17.321 0 L82.679 0 A10 10 0 0 1 91.339 15 L58.66 71.601 A10 10 0 0 1 41.34 71.601 L8.661 15 A10 10 0 0 1 17.321 0 Z");
+    assert_eq!(d[2], "M0 0 L90 0 A10 10 0 0 1 100 10 L100 100");
+    assert_eq!(
+        d[3],
+        "M10 0 L100 0 C150 0 150 50 100 50 L10 50 A10 10 0 0 1 0 40 L0 10 A10 10 0 0 1 10 0 Z"
+    );
+    assert_eq!(
+        d[4],
+        "M0 0 L90 0 A10 10 0 0 1 100 10 L100 40 A10 10 0 0 1 90 50 L10 50 A10 10 0 0 1 0 40 L0 0"
+    );
+}
+
+#[test]
+fn the_corners_query_reports_each_corner_as_drawn() {
+    let src = format!(
+        r##"{XW}<rect x="0" y="0" width="20" height="50" x:corners="40"/><polygon points="0,0 100,0 50,86.6" x:corners="0:10"/><rect x="0" y="0" width="9" height="9"/></svg>"##
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<rect", 0)).unwrap();
+    assert_eq!(c.len(), 4);
+    assert_eq!(c[0].anchor, 0);
+    assert_eq!(c[0].at, (0.0, 0.0));
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+    assert_eq!(c[0].requested, 40.0);
+    assert!(
+        (c[0].effective - 10.0).abs() < 1e-9 && c[0].clamped,
+        "{c:?}"
+    );
+    assert!(
+        near(c[0].from, (0.0, 10.0)) && near(c[0].to, (10.0, 0.0)),
+        "{c:?}"
+    );
+    assert!(near(c[0].center.unwrap(), (10.0, 10.0)), "{c:?}");
+    let c = s.corners(nth_at(&src, "<polygon", 0)).unwrap();
+    assert_eq!(c.len(), 1, "one corner asked: {c:?}");
+    assert!(!c[0].clamped && (c[0].effective - 10.0).abs() < 1e-9);
+    assert!(
+        s.corners(nth_at(&src, "<rect", 1)).is_none(),
+        "no corners asked"
+    );
+}
+
+#[test]
+fn corners_reach_geometry_consumers_and_bake_on_conversion() {
+    // a boolean over a cornered rect sees the rounding; to_path returns the
+    // rounded path with the corner attributes spent and the rest kept
+    let src = format!(
+        r##"{XW}<rect id="r" x:label="Card" x="0" y="0" width="100" height="50" x:corners="10" fill="var(accent)"/><x:boolean op="union"><use href="#r"/></x:boolean></svg>"##
+    );
+    let markup = to_path_at(&src, "<rect").unwrap();
+    assert!(
+        markup.starts_with(r##"<path id="r""##) && markup.contains(r##"x:label="Card""##),
+        "{markup}"
+    );
+    assert!(
+        markup.contains(" A10 10 0 0 1 ") && !markup.contains("corners"),
+        "{markup}"
+    );
+    assert!(markup.contains(r##"fill="var(accent)""##), "{markup}");
+    let out = compile_test(&src);
+    // the union of the rounded rect: its flattened outline has no sharp corner at the origin
+    assert!(!out.contains("M0,0") || out.contains("A10"), "{out}");
 }

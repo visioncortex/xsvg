@@ -456,6 +456,7 @@ session answers them from the parse it compiles from, by the same functions the 
 | `text_style(offset)` | the element's text as pieces, each in the style it renders in, offsets in UTF-16 code units of the text content (each `<tbreak/>` one) |
 | `blocks(offset)` | a box's paragraphs and list items (level, list, marker kind), or a list's items, in reading order |
 | `run_support(offset)` | which run attributes the element's text draws: typography, fill, border, highlight, decoration, baseline-shift, links |
+| `corners(offset)` | each corner a shape's `x:corners` draws (§5.4): anchor, the sharp point, requested and effective radius, `clamped`, the trim points, the arc's centre — for the corner widget |
 
 **One cascade.** Style properties — the eight `<x:font>` token properties and `fill` — come from
 an ordered list of **levels** (`query.rs`): the element's own attributes, then its token, then each
@@ -509,12 +510,11 @@ alignment, fit, overflow and spacing attributes, `in`, `outline`, and for point 
 and tspan geometry; `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
 no key: the host re-keys the markup it inserts.
 
-A basic shape converts to the `<path>` with the same attributes: a rounded rect, an ellipse or a
-circle as **cubic Béziers**, one per quarter arc, handles at κ = 4/3·tan(π/8) of the radius along
-the tangents — anchors exactly on the shape, arcs meeting straight edges smoothly, the constant
-every design tool writes, max radial error 0.027 %; a rounded rect starts after its top-left corner
-and an ellipse at its rightmost point, both clockwise; a sharp rect, a line, a polyline and a
-polygon as the straight path they are. `Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
+A basic shape converts to the `<path>` of the compiler's own geometry, exact: a circle or an
+ellipse as four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four
+extremes; a rounded rect as its edges and one quarter arc per corner, an edge the corners consume
+left out; a shape's `x:corners` (§5.4) applied and spent. Arcs stay arcs: expanding them to
+Béziers is an editor's operation, not a conversion's. `Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
 font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
 names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an
 element that is not text or a basic shape, a text with no characters). The compiled output of

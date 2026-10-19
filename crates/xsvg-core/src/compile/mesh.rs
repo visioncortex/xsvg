@@ -355,7 +355,7 @@ pub(super) fn emit_meshgradient_fill(
     out: &mut String,
     ctx: &Ctx,
 ) -> bool {
-    let Some(shape_d) = shape_to_path_d(node) else {
+    let Some(shape_d) = shape_to_path_d(node, ctx) else {
         return false;
     };
     let tess = match ctx.quality {

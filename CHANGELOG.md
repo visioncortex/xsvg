@@ -16,6 +16,15 @@ partial one.
 
 ### Added
 
+- **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
+  A design tool's live corner as an attribute (§5.4): one radius for every corner or
+  `anchor:radius` pairs, a length or a theme token; `round` (an exact circular arc), `chamfer` or
+  `inverted`. Illustrator's geometry — the trims `r / tan(θ/2)` along each side, the radius limited
+  to half the adjoining segments so corners never overlap, curved segments trimmed by arc length —
+  applied in the element's geometry, so references, booleans, offsets, warps and `to_path` see it.
+  Anchors are numbered in the closed form compiled contours have, so an editor folding that way
+  counts the same. The session's `corners(offset)` reports each corner as drawn for the widget.
+
 - **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
   through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
   renders live text with, so what the headless compiler measures, fits and traces is what that
@@ -27,9 +36,9 @@ partial one.
   element with outlining forced, or a basic shape as its `<path>`, in the form an editor writes
   back into the source in the node's place: one group of glyph paths and baked backdrop rects,
   every attribute the conversion did not spend kept as authored (`id`, `x:label`, `transform`,
-  `opacity`, a `filter` list, `var()` paints). A rounded rect, an ellipse or a circle converts to
-  cubic Béziers (κ = 4/3·tan(π/8), the design tools' constant), anchors on the shape and handles
-  on its tangents, for an editor's path tools. `Err` names the font that could not be traced or
+  `opacity`, a `filter` list, `var()` paints). A circle, an ellipse or a rounded rect converts to
+  the compiler's own geometry, exact: four quarter arcs from the rightmost point, or edges and
+  corner arcs — arcs stay arcs, expanding to Béziers being an editor's operation. `Err` names the font that could not be traced or
   the limit that stopped it (Incremental.md §11). On the way, outlining reaches everywhere text is
   laid out: paragraph-mode boxes (each paragraph and list item in its own style, markers traced),
   and **point text** — a plain `<text>` on `x:outline="true"` or when forced — traced chunk by

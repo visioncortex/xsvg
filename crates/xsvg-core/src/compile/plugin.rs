@@ -576,7 +576,7 @@ fn accumulate_bbox(n: roxmltree::Node, parent: Affine, ctx: &Ctx, acc: &mut Opti
         "image" | "foreignObject" | "svg" => box_attrs(n),
         // a live <use> resolves in the browser; <defs> paints nothing
         "use" | "defs" | "clipPath" | "mask" | "marker" => None,
-        _ => shape_to_path_d(n).as_deref().and_then(svg_path_bbox),
+        _ => shape_to_path_d(n, ctx).as_deref().and_then(svg_path_bbox),
     };
     if let Some(r) = own {
         let r = inflate_stroke(n, r);

@@ -417,6 +417,52 @@ read a lowered viewport as its frame: the marker rect through the `<g>`'s transf
 unclipped content. The whole-file form of a cross-file `<use>` (§4.2) is this lowering with the
 dependency's root children as content.
 
+### 5.4 Corners — `x:corners` [implemented]
+
+A design tool's *live corner*: pick a sharp anchor and bridge it with an arc, and the shape stays
+what it was — a rect, a polygon, a path with that corner rounded — rather than becoming six
+segments. In xsvg it is an attribute, because a radius is a design property, not geometry: it can
+be a theme token, an agent can write "round the top corners to 8" as one attribute, and the shape
+stays legible as "a rect, radius 8 on two corners". Uncompiled, the document renders sharp (§3).
+
+```xml
+<rect x="20" y="20" width="200" height="120" x:corners="24"/>              <!-- every corner -->
+<path d="M0 0 L100 0 L100 50 L0 50 Z" x:corners="0:8 1:var(radius-md)"/>   <!-- anchors 0 and 1 -->
+<polygon points="0,0 100,0 50,86.6" x:corners="10" x:corner-style="chamfer"/>
+```
+
+**Attributes.** `x:corners` on `<path>`, `<rect>`, `<polygon>` and `<polyline>`: one radius for
+every corner, or `anchor:radius` pairs (whitespace or comma separated) for some; a radius is a
+length or a `var()` token; a pair wins over the single value at its anchor. `x:corner-style` is
+`round` (the default), `chamfer` or `inverted`, for the element. On a `<rect>` the corners
+replace `rx`/`ry`.
+
+**Anchors (normative).** The on-curve points of the element's path in order, subpaths
+concatenated, index 0 the first `M`. On a closed subpath the end of a segment that lands on the
+subpath's start is folded into anchor 0 and the `Z` segment is a segment like any other, so
+anchor 0 is a corner between the closing segment and the first — the closed form every compiled
+contour has (§6.12), so an editor that folds that way counts the same anchors. A `<rect>` numbers
+0–3 clockwise from its top-left; a `<polygon>` by its points; a `<polyline>` is open, and its
+two ends have no corner. An unclosed path is open, its first and last anchors ends.
+
+**Geometry (normative).** At a corner anchor P between an incoming and an outgoing segment with
+interior angle θ (from their tangents at P; collinear tangents make no corner), a radius r trims
+each side by `d = r / tan(θ/2)` along its arc length and draws the corner between the trim
+points: `round`, the circular arc of radius r tangent to both (`A r r 0 0 s`, exact); `chamfer`,
+the straight line; `inverted`, the same arc with its centre mirrored across the chord, bulging
+toward P. **Clamp (Illustrator's):** `d` never exceeds half of either adjoining segment, so two
+corners on one edge never overlap; the drawn radius is then `d·tan(θ/2)`. A segment two corners
+consume entirely is left out. A curved adjoining segment is trimmed at the arc length, keeping
+the rest of the curve. The closing corner of a closed subpath ends on the subpath's start, then
+`Z`; a closing chamfer is the `Z` itself.
+
+**Where it applies.** In the element's geometry, so every consumer sees the rounding: the
+serializer (the element lowers to a `<path>` with its other attributes kept, `x:corners` and
+`x:corner-style` spent), `in="#id"` references, booleans, offsets, warps, and `to_path`
+([Incremental.md](Incremental.md) §11), which bakes the arcs. The session's `corners(offset)`
+query reports each corner as drawn — anchor, requested and effective radius, whether it was
+limited, the trim points and the centre — for an editor's corner widget (§10 there).
+
 ## 6. Text
 
 ### 6.1 Common layout primitives [implemented]

@@ -202,7 +202,7 @@ pub(super) fn subtree_bbox(
         return acc;
     }
 
-    if let Some(bb) = shape_to_path_d(node)
+    if let Some(bb) = shape_base_d(node)
         .and_then(|d| transform_d(&d, tf))
         .and_then(|d| svg_path_bbox(&d))
     {
@@ -392,7 +392,7 @@ pub(super) fn target_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<Stri
         None => false,
     };
     if !is_x && target.tag_name().name() != "g" {
-        let d = shape_to_path_d(target).ok_or(RefFail::NoGeometry)?;
+        let d = shape_to_path_d(target, ctx).ok_or(RefFail::NoGeometry)?;
         return transform_d(&d, own).ok_or(RefFail::NoGeometry);
     }
     let id = target.attribute("id").map(str::to_string);
@@ -518,7 +518,30 @@ pub(super) fn group_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<Strin
 /// Convert a fillable SVG shape element to a path `d` string (for rasterization).
 /// `rect` is handled separately (rectangular fast path); returns `None` for shapes
 /// with no fillable area (e.g. `<line>`).
-pub(super) fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
+/// A basic shape's geometry with its corners (§5.4) applied: the path every
+/// consumer of geometry reads — the serializer, a reference's `in="#id"`, a
+/// boolean, an offset, a warp, `to_path`. A polyline asked for corners is the
+/// open polyline it is (its ends have no corner); without, the closed outline
+/// [`shape_base_d`] has always given the geometry operations.
+pub(super) fn shape_to_path_d(node: roxmltree::Node, ctx: &Ctx) -> Option<String> {
+    let Some(spec) = corner_spec(node, ctx.theme) else {
+        return shape_base_d(node);
+    };
+    let base = if node.tag_name().name() == "polyline" {
+        node.attribute("points")
+            .and_then(points_to_path_d)
+            .map(|d| d.trim_end_matches('Z').trim_end().to_string())?
+    } else {
+        shape_base_d(node)?
+    };
+    apply_corners(&base, &spec).map(|(d, _)| d)
+}
+
+/// A basic shape as a path, as authored: a circle or an ellipse as four quarter
+/// arcs from the rightmost point (anchors at the four extremes, where every
+/// design tool puts them; a 90° arc never trips the large-arc flag), a rounded
+/// rect as its edges and corner arcs.
+pub(super) fn shape_base_d(node: roxmltree::Node) -> Option<String> {
     match node.tag_name().name() {
         "path" => node.attribute("d").map(str::to_string),
         "rect" => {
@@ -535,13 +558,24 @@ pub(super) fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
             let rx = attr_num(node, "rx", attr_num(node, "ry", 0.0)).clamp(0.0, w / 2.0);
             let ry = attr_num(node, "ry", attr_num(node, "rx", 0.0)).clamp(0.0, h / 2.0);
             Some(if rx > 0.0 && ry > 0.0 {
+                // edges and corner arcs; an edge the corners consume (a stadium's
+                // short sides) is left out rather than written as a zero-length
+                // segment, so the path has no degenerate node
+                let (ew, eh) = (w - 2.0 * rx, h - 2.0 * ry);
+                let edge = |cmd: &str, len: f64| {
+                    if len > 1e-9 {
+                        format!(" {cmd}{len}")
+                    } else {
+                        String::new()
+                    }
+                };
                 format!(
-                    "M{},{y} h{} a{rx},{ry} 0 0,1 {rx},{ry} v{} a{rx},{ry} 0 0,1 -{rx},{ry} h-{} a{rx},{ry} 0 0,1 -{rx},-{ry} v-{} a{rx},{ry} 0 0,1 {rx},-{ry} Z",
+                    "M{},{y}{} a{rx},{ry} 0 0,1 {rx},{ry}{} a{rx},{ry} 0 0,1 -{rx},{ry}{} a{rx},{ry} 0 0,1 -{rx},-{ry}{} a{rx},{ry} 0 0,1 {rx},-{ry} Z",
                     x + rx,
-                    w - 2.0 * rx,
-                    h - 2.0 * ry,
-                    w - 2.0 * rx,
-                    h - 2.0 * ry
+                    edge("h", ew),
+                    edge("v", eh),
+                    edge("h-", ew),
+                    edge("v-", eh)
                 )
             } else {
                 format!("M{x},{y} h{w} v{h} h-{w} Z")
@@ -553,15 +587,7 @@ pub(super) fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
                 attr_num(node, "cy", 0.0),
                 attr_num(node, "r", 0.0),
             );
-            (r > 0.0).then(|| {
-                format!(
-                    "M{},{} a{r},{r} 0 1,0 {},0 a{r},{r} 0 1,0 {},0 Z",
-                    cx - r,
-                    cy,
-                    2.0 * r,
-                    -2.0 * r
-                )
-            })
+            (r > 0.0).then(|| ellipse_d(cx, cy, r, r))
         }
         "ellipse" => {
             let (cx, cy, rx, ry) = (
@@ -570,15 +596,7 @@ pub(super) fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
                 attr_num(node, "rx", 0.0),
                 attr_num(node, "ry", 0.0),
             );
-            (rx > 0.0 && ry > 0.0).then(|| {
-                format!(
-                    "M{},{} a{rx},{ry} 0 1,0 {},0 a{rx},{ry} 0 1,0 {},0 Z",
-                    cx - rx,
-                    cy,
-                    2.0 * rx,
-                    -2.0 * rx
-                )
-            })
+            (rx > 0.0 && ry > 0.0).then(|| ellipse_d(cx, cy, rx, ry))
         }
         "line" => {
             let (x1, y1, x2, y2) = (
@@ -595,6 +613,22 @@ pub(super) fn shape_to_path_d(node: roxmltree::Node) -> Option<String> {
 }
 
 /// `points="x0,y0 x1,y1 …"` → `"Mx0,y0 Lx1,y1 … Z"`. `None` if fewer than 2 points.
+/// An ellipse as four quarter arcs, clockwise in y-down space from the
+/// rightmost point, the last landing on the start (the closed form).
+fn ellipse_d(cx: f64, cy: f64, rx: f64, ry: f64) -> String {
+    let (rx_s, ry_s) = (fmt(rx), fmt(ry));
+    let arc = |x: f64, y: f64| format!(" A{rx_s} {ry_s} 0 0 1 {} {}", fmt(x), fmt(y));
+    format!(
+        "M{} {}{}{}{}{} Z",
+        fmt(cx + rx),
+        fmt(cy),
+        arc(cx, cy + ry),
+        arc(cx - rx, cy),
+        arc(cx, cy - ry),
+        arc(cx + rx, cy)
+    )
+}
+
 pub(super) fn points_to_path_d(points: &str) -> Option<String> {
     let nums: Vec<f64> = points
         .split(|c: char| c == ',' || c.is_whitespace())

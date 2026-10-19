@@ -777,7 +777,7 @@ fn passthrough_bbox(node: roxmltree::Node, ctx: &Ctx) -> Option<Rect> {
     if node.tag_name().name() == "text" {
         text_bbox_estimate(node, ctx)
     } else {
-        shape_to_path_d(node).and_then(|d| svg_path_bbox(&d))
+        shape_to_path_d(node, ctx).and_then(|d| svg_path_bbox(&d))
     }
 }
 
@@ -1047,6 +1047,15 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         }
     }
 
+    // Corners (§5.4): a shape asked for them lowers to the <path> it rounds to.
+    if matches!(name, "path" | "rect" | "polygon" | "polyline")
+        && corner_spec(node, ctx.theme).is_some()
+    {
+        if let Some(d) = shape_to_path_d(node, ctx) {
+            emit_shape_path(node, name, d, out, ctx);
+            return;
+        }
+    }
     // Sharp-cornered <rect> → <path>. Rounded rects pass through unchanged.
     if name == "rect" && node.attribute("rx").is_none() && node.attribute("ry").is_none() {
         emit_rect_as_path(node, out, ctx);
@@ -1188,6 +1197,37 @@ fn emit_children(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
 }
 
+/// A shape as the `<path d>` of its geometry, every other attribute copied —
+/// the geometry ones spent, the corner ones consumed — its filter lowered.
+fn emit_shape_path(node: roxmltree::Node, name: &str, d: String, out: &mut String, ctx: &Ctx) {
+    let filter_sub = lower_filter_attr(node, out, ctx, || svg_path_bbox(&d));
+    out.push_str("<path");
+    let mut skip: Vec<&str> = shape_geometry_attrs(name).to_vec();
+    if filter_sub.is_some() {
+        skip.push("filter");
+    }
+    copy_attrs(node, out, &skip, ctx);
+    if let Some(sub) = &filter_sub {
+        out.push_str(sub);
+    }
+    out.push_str(&pos_attr(node, ctx));
+    out.push_str(" d=\"");
+    push_escaped(out, &d, true);
+    out.push_str("\"/>");
+}
+
+/// The attributes a basic shape spends on its geometry.
+pub(super) fn shape_geometry_attrs(name: &str) -> &'static [&'static str] {
+    match name {
+        "rect" => &["x", "y", "width", "height", "rx", "ry"],
+        "circle" => &["cx", "cy", "r"],
+        "ellipse" => &["cx", "cy", "rx", "ry"],
+        "line" => &["x1", "y1", "x2", "y2"],
+        "path" => &["d"],
+        _ => &["points"],
+    }
+}
+
 /// `<rect x y width height …>` → equivalent `<path d=… …>`.
 fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let x = attr_num(node, "x", 0.0);
@@ -1196,7 +1236,7 @@ fn emit_rect_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let h = attr_num(node, "height", 0.0);
 
     let filter_sub = lower_filter_attr(node, out, ctx, || {
-        shape_to_path_d(node).and_then(|d| svg_path_bbox(&d))
+        shape_to_path_d(node, ctx).and_then(|d| svg_path_bbox(&d))
     });
     out.push_str("<path");
     match &filter_sub {
@@ -1538,6 +1578,9 @@ use viewport::*;
 mod trace;
 pub use trace::ToPathError;
 use trace::*;
+mod corners;
+use corners::*;
+pub use corners::{CornerInfo, CornerStyle};
 mod stops;
 mod textpath;
 use query::*;

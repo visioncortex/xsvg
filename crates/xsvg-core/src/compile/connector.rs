@@ -89,8 +89,8 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
                         && (name == "ellipse" || name == "circle");
                     let plain = target.tag_name().namespace() != Some(XSVG_NS) && name != "g";
                     if plain && (turned || round) {
-                        if let Some(local) =
-                            super::refs::shape_to_path_d(target).and_then(|d| svg_path_bbox(&d))
+                        if let Some(local) = super::refs::shape_to_path_d(target, ctx)
+                            .and_then(|d| svg_path_bbox(&d))
                         {
                             let (h, v) = an;
                             let (hx, vy) = if round {

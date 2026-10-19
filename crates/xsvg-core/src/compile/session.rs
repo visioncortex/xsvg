@@ -323,6 +323,23 @@ impl<'a> Parsed<'a> {
         super::run_support(self.element_at(offset)?)
     }
 
+    /// Each corner the element at `offset` draws (§5.4): its anchor, the radius
+    /// asked and drawn, where its curve leaves and joins the segments, its
+    /// centre. Empty for an element with corners asked but none drawn; `None`
+    /// for one asking none or without geometry.
+    pub(super) fn corners(&self, offset: usize) -> Option<Vec<super::CornerInfo>> {
+        let node = self.element_at(offset)?;
+        let spec = super::corners::corner_spec(node, &self.theme)?;
+        let base = if node.tag_name().name() == "polyline" {
+            node.attribute("points")
+                .and_then(super::points_to_path_d)
+                .map(|d| d.trim_end_matches('Z').trim_end().to_string())?
+        } else {
+            super::shape_base_d(node)?
+        };
+        super::corners::apply_corners(&base, &spec).map(|(_, infos)| infos)
+    }
+
     /// Convert to path (trace.rs; docs/Incremental.md §11): the element at
     /// `offset` compiled on its own with outlining forced — its glyphs as paths,
     /// its backdrops as rects, a shape as its `<path>` — every attribute the
@@ -578,6 +595,12 @@ impl<'a> ParsedDocument<'a> {
     /// and see drawn. `None` when the element holds no text.
     pub fn run_support(&self, offset: usize) -> Option<super::RunSupport> {
         self.parsed.run_support(offset)
+    }
+
+    /// The corners the shape at `offset` draws (§5.4), for an editor's corner
+    /// widget: where each lands and whether its radius was limited.
+    pub fn corners(&self, offset: usize) -> Option<Vec<super::CornerInfo>> {
+        self.parsed.corners(offset)
     }
 }
 
