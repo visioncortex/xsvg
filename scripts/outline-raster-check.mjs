@@ -77,6 +77,16 @@ const twinCases = [
   ["corners-rect", `<rect x="20" y="20" width="200" height="120" x:corners="24" fill="#48a"/>`, `<rect x="20" y="20" width="200" height="120" rx="24" fill="#48a"/>`],
   ["corners-token", `<x:theme><x:color name="radius" value="16"/></x:theme><rect x="20" y="20" width="200" height="120" x:corners="var(radius)" fill="#e11" stroke="#000" stroke-width="4"/>`, `<rect x="20" y="20" width="200" height="120" rx="16" fill="#e11" stroke="#000" stroke-width="4"/>`],
   ["corners-stadium", `<rect x="20" y="20" width="200" height="80" x:corners="100" fill="#0a0"/>`, `<rect x="20" y="20" width="200" height="80" rx="40" fill="#0a0"/>`],
+  // one corner at the side length is a quarter circle: the circle clipped to the square
+  ["corners-quarter", `<rect x="20" y="20" width="160" height="160" x:corners="0:160" fill="#48a"/>`, `<clipPath id="q"><rect x="20" y="20" width="160" height="160"/></clipPath><circle cx="180" cy="180" r="160" clip-path="url(#q)" fill="#48a"/>`],
+  // a chamfer is the polygon through the trim points
+  ["corners-chamfer", `<rect x="20" y="20" width="200" height="120" x:corners="24" x:corner-style="chamfer" fill="#a40"/>`, `<polygon points="44,20 196,20 220,44 220,116 196,140 44,140 20,116 20,44" fill="#a40"/>`],
+  // an inverted 90° corner is the quarter disc about the apex cut away
+  ["corners-scallop", `<rect x="20" y="20" width="200" height="120" x:corners="30" x:corner-style="inverted" fill="#808"/>`, `<mask id="m"><rect x="20" y="20" width="200" height="120" fill="#fff"/><circle cx="20" cy="20" r="30"/><circle cx="220" cy="20" r="30"/><circle cx="220" cy="140" r="30"/><circle cx="20" cy="140" r="30"/></mask><rect width="400" height="200" fill="#808" mask="url(#m)"/>`],
+  // the winding does not matter
+  ["corners-ccw", `<polygon points="20,20 220,20 220,140 20,140" x:corners="24" fill="#246"/>`, `<polygon points="20,20 20,140 220,140 220,20" x:corners="24" fill="#246"/>`],
+  // a concave corner: the L plus the square at its inner corner, less the disc there
+  ["corners-concave", `<path d="M20 20 H220 V80 H120 V140 H20 Z" x:corners="3:30" fill="#062"/>`, `<mask id="c"><path d="M20 20 H220 V80 H120 V140 H20 Z" fill="#fff"/><rect x="120" y="80" width="30" height="30" fill="#fff"/><circle cx="150" cy="110" r="30"/></mask><rect width="400" height="200" fill="#062" mask="url(#c)"/>`],
 ];
 
 function render(source, name) {

@@ -9021,6 +9021,252 @@ fn the_corners_query_reports_each_corner_as_drawn() {
     );
 }
 
+/// The area of a compiled corner path, its `A` arcs flattened finely (kurbo's
+/// `from_svg` approximates an arc with cubics to 0.1, too coarse to check
+/// geometry against). Reads the absolute, space-separated form the compiler emits.
+fn path_area(d: &str) -> f64 {
+    use crate::kurbo::{Arc, BezPath, Point, Shape, SvgArc, Vec2};
+    let toks: Vec<&str> = d.split_whitespace().collect();
+    let num = |t: &str| {
+        t.trim_start_matches(|c: char| c.is_ascii_alphabetic())
+            .parse::<f64>()
+            .unwrap()
+    };
+    let mut path = BezPath::new();
+    let mut cur = Point::ZERO;
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        // the command letter is glued to its first number; the rest follow
+        let at = |k: usize| Point::new(num(toks[i + k]), num(toks[i + k + 1]));
+        match t.chars().next().unwrap() {
+            'M' => {
+                cur = at(0);
+                path.move_to(cur);
+                i += 2;
+            }
+            'L' => {
+                cur = at(0);
+                path.line_to(cur);
+                i += 2;
+            }
+            'Q' => {
+                let c1 = at(0);
+                cur = at(2);
+                path.quad_to(c1, cur);
+                i += 4;
+            }
+            'C' => {
+                let (c1, c2) = (at(0), at(2));
+                cur = at(4);
+                path.curve_to(c1, c2, cur);
+                i += 6;
+            }
+            'A' => {
+                let to = at(5);
+                let arc = Arc::from_svg_arc(&SvgArc {
+                    from: cur,
+                    to,
+                    radii: Vec2::new(num(toks[i]), num(toks[i + 1])),
+                    x_rotation: num(toks[i + 2]).to_radians(),
+                    large_arc: num(toks[i + 3]) != 0.0,
+                    sweep: num(toks[i + 4]) != 0.0,
+                })
+                .expect("a real arc");
+                path.extend(arc.append_iter(1e-6));
+                cur = to;
+                i += 7;
+            }
+            'Z' => {
+                path.close_path();
+                i += 1;
+            }
+            other => panic!("unexpected {other} in {d}"),
+        }
+    }
+    path.area().abs()
+}
+
+#[test]
+fn corners_change_the_area_by_exactly_the_fillet() {
+    // the normative geometry, checked as area rather than text: on a 90°
+    // corner with r = 10, a round corner removes (1 − π/4)·r², a chamfer r²/2,
+    // an inverted corner the quarter disc π·r²/4; a concave corner gains what a
+    // convex one loses
+    let sq = |extra: &str| {
+        format!(r##"{XW}<rect x="0" y="0" width="100" height="100" x:corners="10"{extra}/></svg>"##)
+    };
+    let fillet = (1.0 - std::f64::consts::FRAC_PI_4) * 100.0;
+    let near = |a: f64, b: f64| {
+        assert!((a - b).abs() < 1e-3, "area {a} expected {b}");
+        true
+    };
+    assert!(near(
+        path_area(&corner_paths(&sq(""))[0]),
+        10000.0 - 4.0 * fillet
+    ));
+    assert!(near(
+        path_area(&corner_paths(&sq(r#" x:corner-style="chamfer""#))[0]),
+        10000.0 - 4.0 * 50.0
+    ));
+    assert!(near(
+        path_area(&corner_paths(&sq(r#" x:corner-style="inverted""#))[0]),
+        10000.0 - 100.0 * std::f64::consts::PI
+    ));
+    // an L: anchor 3 is the inner (concave) corner, anchor 0 a convex one
+    let l = |c: &str| {
+        format!(
+            r##"{XW}<path d="M0 0 L100 0 L100 50 L50 50 L50 100 L0 100 Z" x:corners="{c}"/></svg>"##
+        )
+    };
+    assert!(near(
+        path_area(&corner_paths(&l("3:10"))[0]),
+        7500.0 + fillet
+    ));
+    assert!(near(
+        path_area(&corner_paths(&l("0:10"))[0]),
+        7500.0 - fillet
+    ));
+    assert!(near(
+        path_area(&corner_paths(&l("10"))[0]),
+        7500.0 - 5.0 * fillet + fillet
+    ));
+}
+
+#[test]
+fn corners_do_not_depend_on_the_winding() {
+    // the same rect authored clockwise and counter-clockwise rounds the same
+    // way: the arcs sweep the other way, the shape is identical
+    let src = format!(
+        r##"{XW}<polygon points="0,0 100,0 100,50 0,50" x:corners="10"/><polygon points="0,0 0,50 100,50 100,0" x:corners="10"/></svg>"##
+    );
+    let d = corner_paths(&src);
+    assert_eq!(
+        d[0],
+        "M10 0 L90 0 A10 10 0 0 1 100 10 L100 40 A10 10 0 0 1 90 50 L10 50 A10 10 0 0 1 0 40 L0 10 A10 10 0 0 1 10 0 Z"
+    );
+    assert_eq!(
+        d[1],
+        "M0 10 L0 40 A10 10 0 0 0 10 50 L90 50 A10 10 0 0 0 100 40 L100 10 A10 10 0 0 0 90 0 L10 0 A10 10 0 0 0 0 10 Z"
+    );
+    assert!((path_area(&d[0]) - path_area(&d[1])).abs() < 1e-6);
+}
+
+#[test]
+fn corners_trim_a_curved_segment_at_its_arc_length() {
+    // a line meets a quadratic at a right angle: the trim point on the curve
+    // sits d = r along the curve's arc length, not along its chord or parameter,
+    // and the rest of the curve is kept
+    let src = format!(r##"{XW}<path d="M0 0 L100 0 Q100 100 0 100 Z" x:corners="1:10"/></svg>"##);
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<path", 0)).unwrap();
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].anchor, 1);
+    assert!((c[0].effective - 10.0).abs() < 1e-9 && !c[0].clamped);
+    assert!((c[0].from.0 - 90.0).abs() < 1e-9 && c[0].from.1.abs() < 1e-9);
+    use crate::kurbo::{ParamCurve, ParamCurveArclen, Point, QuadBez};
+    let q = QuadBez::new(
+        Point::new(100.0, 0.0),
+        Point::new(100.0, 100.0),
+        Point::new(0.0, 100.0),
+    );
+    let on_curve = q.eval(q.inv_arclen(10.0, 1e-9));
+    assert!(
+        (c[0].to.0 - on_curve.x).abs() < 1e-6 && (c[0].to.1 - on_curve.y).abs() < 1e-6,
+        "to {:?} on-curve {on_curve:?}",
+        c[0].to
+    );
+    let d = corner_paths(&src).remove(0);
+    assert!(d.starts_with("M0 0 L90 0 A10 10 0 0 1 "), "{d}");
+    // the kept curve still ends at (0, 100); the Z draws the straight side home
+    assert!(d.contains(" Q") && d.ends_with(" 0 100 Z"), "{d}");
+    // the arc ends where the kept curve begins: the point at arc length 10 (the
+    // fillet drawn to the tangent's projection (100, 10) would leave a gap)
+    let arc_end = d
+        .split(" A10 10 0 0 1 ")
+        .nth(1)
+        .unwrap()
+        .split(" Q")
+        .next()
+        .unwrap();
+    assert_eq!(arc_end, format!("{} {}", fmt(on_curve.x), fmt(on_curve.y)));
+}
+
+#[test]
+fn corners_number_anchors_across_subpaths_and_at_every_angle() {
+    // anchors continue across subpaths (the second square starts at 4); the
+    // trim follows the angle — 120° trims r/tan(60°), 45° trims r/tan(22.5°)
+    let src = format!(
+        r##"{XW}<path d="M0 0 L50 0 L50 50 L0 50 Z M100 0 L150 0 L150 50 L100 50 Z" x:corners="4:10"/><polygon points="0,0 100,0 100,100" x:corners="0:10"/><polygon points="50,0 93.301,25 93.301,75 50,100 6.699,75 6.699,25" x:corners="0:10"/></svg>"##
+    );
+    let d = corner_paths(&src);
+    assert_eq!(
+        d[0],
+        "M0 0 L50 0 L50 50 L0 50 Z M110 0 L150 0 L150 50 L100 50 L100 10 A10 10 0 0 1 110 0 Z"
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<path", 0)).unwrap();
+    assert_eq!((c.len(), c[0].anchor, c[0].at), (1, 4, (100.0, 0.0)));
+    let trim = |c: &CornerInfo| ((c.from.0 - c.at.0).powi(2) + (c.from.1 - c.at.1).powi(2)).sqrt();
+    let c = s.corners(nth_at(&src, "<polygon", 0)).unwrap();
+    assert!(
+        (trim(&c[0]) - 10.0 / (22.5f64.to_radians()).tan()).abs() < 1e-6,
+        "{c:?}"
+    );
+    assert!((c[0].effective - 10.0).abs() < 1e-9);
+    let c = s.corners(nth_at(&src, "<polygon", 1)).unwrap();
+    assert!(
+        (trim(&c[0]) - 10.0 / (60f64.to_radians()).tan()).abs() < 1e-3,
+        "{c:?}"
+    );
+}
+
+#[test]
+fn corners_leave_what_is_not_a_corner_alone() {
+    // a zero or negative radius draws nothing (the element still lowers to a
+    // path of its own geometry); a repeated point and a spike have no tangent
+    // pair to round and are skipped without upsetting their neighbours; a
+    // single-anchor list on a missing anchor is ignored
+    let src = format!(
+        r##"{XW}<rect x="0" y="0" width="100" height="50" x:corners="0"/><rect x="0" y="0" width="100" height="50" x:corners="-5"/><polygon points="0,0 0,0 100,0 100,50 0,50" x:corners="10"/><path d="M0 0 L100 0 L50 0 L50 50 Z" x:corners="10"/><rect x="0" y="0" width="100" height="50" x:corners="9:10"/></svg>"##
+    );
+    let d = corner_paths(&src);
+    assert_eq!(d[0], "M0 0 L100 0 L100 50 L0 50 Z");
+    assert_eq!(d[1], "M0 0 L100 0 L100 50 L0 50 Z");
+    assert_eq!(
+        d[2],
+        "M0 0 L90 0 A10 10 0 0 1 100 10 L100 40 A10 10 0 0 1 90 50 L10 50 A10 10 0 0 1 0 40 Z"
+    );
+    // the spike at (100, 0) stays sharp; the other three anchors round
+    assert!(
+        d[3].contains(" L100 0 L60 0 ") && d[3].matches(" A").count() == 3,
+        "{}",
+        d[3]
+    );
+    assert_eq!(d[4], "M0 0 L100 0 L100 50 L0 50 Z");
+}
+
+#[test]
+fn the_corners_query_reports_a_shared_edge_as_clamped() {
+    let src = format!(
+        r##"{XW}<rect x="0" y="0" width="100" height="100" x:corners="0:90 1:60"/></svg>"##
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<rect", 0)).unwrap();
+    assert_eq!(c.len(), 2);
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    assert!(
+        c[0].requested == 90.0 && near(c[0].effective, 60.0) && c[0].clamped,
+        "{c:?}"
+    );
+    assert!(
+        c[1].requested == 60.0 && near(c[1].effective, 40.0) && c[1].clamped,
+        "{c:?}"
+    );
+    assert!(near(c[0].to.0, 60.0) && near(c[0].to.1, 0.0), "{c:?}");
+    assert!(near(c[1].from.0, 60.0) && near(c[1].from.1, 0.0), "{c:?}");
+}
+
 #[test]
 fn corners_reach_geometry_consumers_and_bake_on_conversion() {
     // a boolean over a cornered rect sees the rounding; to_path returns the

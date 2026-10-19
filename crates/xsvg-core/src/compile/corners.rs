@@ -219,13 +219,11 @@ struct Fillet {
     sweep: bool,
 }
 
-/// A corner before its trim is settled: the apex, the unit directions toward
-/// the previous and next anchors, and the trim its radius asks for.
+/// A corner before its trim is settled: the apex, its interior angle and the
+/// trim its radius asks for.
 struct Corner {
     anchor: usize,
     p: Point,
-    u: Vec2,
-    v: Vec2,
     theta: f64,
     requested: f64,
     /// `r / tan(θ/2)`: the trim the requested radius wants on each side.
@@ -255,34 +253,40 @@ fn corner(anchor: usize, seg_in: &PathSeg, seg_out: &PathSeg, requested: f64) ->
     (wanted > 1e-9).then_some(Corner {
         anchor,
         p,
-        u,
-        v,
         theta,
         requested,
         wanted,
     })
 }
 
-/// The corner drawn with trim `d` on each side.
-fn fillet(c: &Corner, d: f64, style: CornerStyle) -> Fillet {
+/// The corner drawn with trim `d` on each side: `from` and `to` are the trim
+/// points on the segments themselves (on a curve, the point at arc length `d`,
+/// not a tangent projection), so the corner meets what is left of each segment.
+fn fillet(c: &Corner, d: f64, from: Point, to: Point, style: CornerStyle) -> Fillet {
     let Corner {
         anchor,
         p,
-        u,
-        v,
         theta,
         requested,
         ..
     } = *c;
-    let effective = d * (theta / 2.0).tan();
-    let from = p + u * d;
-    let to = p + v * d;
-    // the centre sits on the bisector, r / sin(θ/2) from the apex; an inverted
-    // corner's is mirrored across the chord
-    let bis = (u + v) / (u + v).hypot();
-    let mut center = p + bis * (effective / (theta / 2.0).sin());
+    let r = d * (theta / 2.0).tan();
+    // the centre is r from both trim points, on the far side of the chord from
+    // the apex (for two lines, on the bisector r / sin(θ/2) from P); a chord a
+    // curve has stretched past 2r widens the arc to fit, as `A` would
+    let mid = from.midpoint(to);
+    let half = (to - from).hypot() / 2.0;
+    let r = r.max(half);
+    let chord = to - from;
+    let mut away = Vec2::new(-chord.y, chord.x);
+    if away.dot(mid - p) < 0.0 {
+        away = -away;
+    }
+    let away = away / away.hypot();
+    let mut center = mid + away * (r * r - half * half).max(0.0).sqrt();
     // going from `from` to `to` around the centre: clockwise (sweep) in y-down
-    // space when the chord turns that way
+    // space when the chord turns that way; an inverted corner's centre is
+    // mirrored across the chord and sweeps the other way
     let mut sweep = (from - center).cross(to - center) > 0.0;
     if style == CornerStyle::Inverted {
         center = from + (to - center);
@@ -293,8 +297,8 @@ fn fillet(c: &Corner, d: f64, style: CornerStyle) -> Fillet {
             anchor,
             at: (p.x, p.y),
             requested,
-            effective,
-            clamped: effective + 1e-9 < requested,
+            effective: r,
+            clamped: r + 1e-9 < requested,
             from: (from.x, from.y),
             to: (to.x, to.y),
             center: (style != CornerStyle::Chamfer).then_some((center.x, center.y)),
@@ -408,7 +412,18 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
         let fillets: Vec<Option<Fillet>> = corners
             .iter()
             .zip(trims)
-            .map(|(c, d)| c.as_ref().map(|c| fillet(c, d, spec.style)))
+            .enumerate()
+            .map(|(i, (c, d))| {
+                let c = c.as_ref()?;
+                let (seg_in, seg_out) = if sub.closed {
+                    (&sub.segs[(i + n - 1) % n], &sub.segs[i % n])
+                } else {
+                    (&sub.segs[i - 1], &sub.segs[i])
+                };
+                let from = trimmed(seg_in, 0.0, arclen(seg_in) - d).end();
+                let to = trimmed(seg_out, d, arclen(seg_out)).start();
+                Some(fillet(c, d, from, to, spec.style))
+            })
             .collect();
         // each segment trimmed by the corner at its start and the one at its end
         let trim_start = |i: usize| fillets[i].as_ref().map_or(0.0, |f| f.d_out);
@@ -424,6 +439,9 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
             trimmed(s, trim_start(i), arclen(s) - trim_end(i))
         };
         let first = seg(0);
+        if !out.is_empty() {
+            out.push(' ');
+        }
         out.push('M');
         push_pt(&mut out, first.start());
         for i in 0..n {

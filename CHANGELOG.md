@@ -26,7 +26,10 @@ partial one.
   Anchors are numbered in the closed form compiled contours have, so an editor folding that way
   counts the same. The session's `corners(offset)` reports each corner as drawn for the widget.
   `index:value` is now the stated convention for any `x:` list that keys entries by index, with
-  `:` reserved as the pair glue; `indexed_items` is the one parser for it.
+  `:` reserved as the pair glue; `indexed_items` is the one parser for it. A corner on a curved
+  segment meets the curve at its arc-length trim point (the arc used to end on the tangent's
+  projection, leaving a gap); conformance tests check the geometry as area and raster twins
+  (quarter circle, chamfer, scallop, winding, a concave corner) against plain SVG constructions.
 
 - **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
   through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
