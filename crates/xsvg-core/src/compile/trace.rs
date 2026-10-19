@@ -150,9 +150,116 @@ fn shape_geometry(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// A basic shape as the `<path>` with the same attributes.
+/// The cubic Bézier of a quarter ellipse: the control handles sit at κ of the
+/// radius along the tangents, κ = 4/3·tan(π/8). Max radial error 0.027% —
+/// invisible — and exact at both ends and tangents, which a converted shape
+/// needs: its anchors on the ellipse, its arcs meeting a rounded rect's
+/// straight edges smoothly. The constant every design tool writes, so a
+/// converted circle reads as a circle to the next tool's shape detection.
+/// (A free-standing circle can be fit a little closer by nudging the endpoints
+/// off it — Mortensen's 1.00005519 / 0.55342686 / 0.99873585 — but a path's
+/// anchors must not move.)
+const KAPPA: f64 = 0.552_284_749_831;
+
+/// A rounded rect, an ellipse or a circle as cubic Béziers, the way an editor
+/// wants to edit it — anchors and handles, not `A` commands. A rounded rect
+/// starts after its top-left corner and runs clockwise (in y-down space); an
+/// ellipse at its rightmost point, likewise. Each quarter arc is one cubic.
+fn curved_shape_d(node: roxmltree::Node) -> Option<String> {
+    let n = fmt;
+    let cubic = |p1: (f64, f64), p2: (f64, f64), p: (f64, f64)| {
+        format!(
+            " C{} {} {} {} {} {}",
+            n(p1.0),
+            n(p1.1),
+            n(p2.0),
+            n(p2.1),
+            n(p.0),
+            n(p.1)
+        )
+    };
+    match node.tag_name().name() {
+        "rect" => {
+            let (x, y, w, h) = (
+                attr_num(node, "x", 0.0),
+                attr_num(node, "y", 0.0),
+                attr_num(node, "width", 0.0),
+                attr_num(node, "height", 0.0),
+            );
+            if w <= 0.0 || h <= 0.0 {
+                return None;
+            }
+            let rx = attr_num(node, "rx", attr_num(node, "ry", 0.0)).clamp(0.0, w / 2.0);
+            let ry = attr_num(node, "ry", attr_num(node, "rx", 0.0)).clamp(0.0, h / 2.0);
+            if rx <= 0.0 || ry <= 0.0 {
+                return None; // sharp: the plain path form
+            }
+            let (kx, ky) = (rx * KAPPA, ry * KAPPA);
+            let (r, b) = (x + w, y + h);
+            let mut d = format!("M{} {}", n(x + rx), n(y));
+            if w > 2.0 * rx {
+                d.push_str(&format!(" L{} {}", n(r - rx), n(y)));
+            }
+            d.push_str(&cubic((r - rx + kx, y), (r, y + ry - ky), (r, y + ry)));
+            if h > 2.0 * ry {
+                d.push_str(&format!(" L{} {}", n(r), n(b - ry)));
+            }
+            d.push_str(&cubic((r, b - ry + ky), (r - rx + kx, b), (r - rx, b)));
+            if w > 2.0 * rx {
+                d.push_str(&format!(" L{} {}", n(x + rx), n(b)));
+            }
+            d.push_str(&cubic((x + rx - kx, b), (x, b - ry + ky), (x, b - ry)));
+            if h > 2.0 * ry {
+                d.push_str(&format!(" L{} {}", n(x), n(y + ry)));
+            }
+            d.push_str(&cubic((x, y + ry - ky), (x + rx - kx, y), (x + rx, y)));
+            d.push_str(" Z");
+            Some(d)
+        }
+        "circle" | "ellipse" => {
+            let (cx, cy) = (attr_num(node, "cx", 0.0), attr_num(node, "cy", 0.0));
+            let (rx, ry) = if node.tag_name().name() == "circle" {
+                let r = attr_num(node, "r", 0.0);
+                (r, r)
+            } else {
+                (attr_num(node, "rx", 0.0), attr_num(node, "ry", 0.0))
+            };
+            if rx <= 0.0 || ry <= 0.0 {
+                return None;
+            }
+            let (kx, ky) = (rx * KAPPA, ry * KAPPA);
+            let mut d = format!("M{} {}", n(cx + rx), n(cy));
+            d.push_str(&cubic(
+                (cx + rx, cy + ky),
+                (cx + kx, cy + ry),
+                (cx, cy + ry),
+            ));
+            d.push_str(&cubic(
+                (cx - kx, cy + ry),
+                (cx - rx, cy + ky),
+                (cx - rx, cy),
+            ));
+            d.push_str(&cubic(
+                (cx - rx, cy - ky),
+                (cx - kx, cy - ry),
+                (cx, cy - ry),
+            ));
+            d.push_str(&cubic(
+                (cx + kx, cy - ry),
+                (cx + rx, cy - ky),
+                (cx + rx, cy),
+            ));
+            d.push_str(" Z");
+            Some(d)
+        }
+        _ => None,
+    }
+}
+
+/// A basic shape as the `<path>` with the same attributes: a curved one as
+/// cubics ([`curved_shape_d`]), the rest as the geometry routine draws them.
 pub(super) fn emit_shape_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
-    let Some(d) = shape_to_path_d(node) else {
+    let Some(d) = curved_shape_d(node).or_else(|| shape_to_path_d(node)) else {
         return false;
     };
     out.push_str("<path");

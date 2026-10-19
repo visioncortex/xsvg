@@ -48,6 +48,8 @@ const cases = [
   ["box-tracking", (o) => `<x:textbox x="10" y="10" width="380" height="120" font-family="Arimo" font-size="22" letter-spacing="3" word-spacing="8"${o}>Tracked words, spaced out, wrapping to a second line here</x:textbox>`],
   ["box-justified", (o) => `<x:textbox x="10" y="10" width="300" height="160" font-family="Arimo" font-size="20" align="justify"${o}>Justified text spreads its words to both edges of the box on every full line but the last one</x:textbox>`],
   ["box-glyph-scale", (o) => `<x:textbox x="10" y="10" width="380" height="60" font-family="Arimo" font-size="24" glyph-x-scale="1.5"${o}>Wide glyphs here</x:textbox>`],
+  // curved shapes convert to cubics: the editor's leg only (nothing to outline)
+  ["shapes-curved", (o) => `<rect x="20" y="20" width="160" height="90" rx="22" fill="#48a"${o && ""}/><ellipse cx="300" cy="65" rx="80" ry="40" fill="#e11"/><circle cx="100" cy="160" r="30" fill="#0a0"/><rect x="200" y="130" width="60" height="60" rx="30" fill="#06c" stroke="#000" stroke-width="3"/>`],
   ["box-paragraphs", (o) => `<x:textbox x="10" y="10" width="380" height="180" font-family="Arimo" font-size="20"${o}><x:p>First paragraph here.</x:p><x:p font-size="26" fill="#06c">Second, larger.</x:p><x:list list="number"><x:li>one item</x:li><x:li indent="1">nested item</x:li></x:list></x:textbox>`],
   ["textarea", (o) => `<textArea x="10" y="10" width="380" font-family="Arimo" font-size="22" text-align="end"${o.replace('outline=', 'x:outline=')}>Area text, right aligned, wrapping to another line</textArea>`],
   ["point-start", (o) => `<text x="20" y="60" font-family="Arimo" font-size="30" fill="#123"${o.replace('outline=', 'x:outline=')}>Point text</text>`],
@@ -59,7 +61,7 @@ const cases = [
  *  what an editor's Convert to path writes — converted last to first so earlier
  *  offsets hold. */
 function convertAll(source, name) {
-  const starts = [...source.matchAll(/<(x:textbox|textArea|text)[\s>]/g)].map((m) => m.index).reverse();
+  const starts = [...source.matchAll(/<(x:textbox|textArea|text|rect|ellipse|circle)[\s>]/g)].map((m) => m.index).reverse();
   let doc = source;
   for (const [i, at] of starts.entries()) {
     const file = join(tmp, `${name}-src-${i}.xsvg`);
@@ -85,14 +87,20 @@ let failed = 0;
 for (const [name, body] of cases) {
   const live = compile(page(body("")), `${name}-live`);
   const outlined = compile(page(body(' outline="true"')), `${name}-outlined`);
-  if (/<text[\s>]/.test(outlined)) {
+  const shapesOnly = name.startsWith("shapes-");
+  if (!shapesOnly && /<text[\s>]/.test(outlined)) {
     console.log(`✗ ${name}: still live text after outlining — a line could not be traced`);
     failed++;
     continue;
   }
   // the editor's path: to_path, the node replaced in the SOURCE, compiled again
   const replaced = compile(convertAll(page(body("")), name), `${name}-replaced`);
-  if (/<text[\s>]/.test(replaced)) {
+  if (shapesOnly && /<(rect|ellipse|circle)[\s>]/.test(replaced.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<rect width="400" height="200" fill="#fff"\/>/, ""))) {
+    console.log(`✗ ${name}: a shape left unconverted`);
+    failed++;
+    continue;
+  }
+  if (!shapesOnly && /<text[\s>]/.test(replaced)) {
     console.log(`✗ ${name}: live text left after to_path replacement`);
     failed++;
     continue;
@@ -110,7 +118,7 @@ for (const [name, body] of cases) {
     }
     console.log(`${ok ? "✓" : "✗"} ${name} (${what}): ${n} px differ (${(frac * 100).toFixed(2)}%)${ok ? "" : ` — see ${tmp}/${name}-${what}-diff.png`}`);
   };
-  compare("outlined", outlined);
+  if (!shapesOnly) compare("outlined", outlined);
   compare("to_path+replace", replaced);
 }
 if (failed) {

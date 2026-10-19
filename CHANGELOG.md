@@ -27,7 +27,9 @@ partial one.
   element with outlining forced, or a basic shape as its `<path>`, in the form an editor writes
   back into the source in the node's place: one group of glyph paths and baked backdrop rects,
   every attribute the conversion did not spend kept as authored (`id`, `x:label`, `transform`,
-  `opacity`, a `filter` list, `var()` paints). `Err` names the font that could not be traced or
+  `opacity`, a `filter` list, `var()` paints). A rounded rect, an ellipse or a circle converts to
+  cubic Béziers (κ = 4/3·tan(π/8), the design tools' constant), anchors on the shape and handles
+  on its tangents, for an editor's path tools. `Err` names the font that could not be traced or
   the limit that stopped it (Incremental.md §11). On the way, outlining reaches everywhere text is
   laid out: paragraph-mode boxes (each paragraph and list item in its own style, markers traced),
   and **point text** — a plain `<text>` on `x:outline="true"` or when forced — traced chunk by

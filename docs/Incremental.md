@@ -509,7 +509,12 @@ alignment, fit, overflow and spacing attributes, `in`, `outline`, and for point 
 and tspan geometry; `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
 no key: the host re-keys the markup it inserts.
 
-`Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
+A basic shape converts to the `<path>` with the same attributes: a rounded rect, an ellipse or a
+circle as **cubic Béziers**, one per quarter arc, handles at κ = 4/3·tan(π/8) of the radius along
+the tangents — anchors exactly on the shape, arcs meeting straight edges smoothly, the constant
+every design tool writes, max radial error 0.027 %; a rounded rect starts after its top-left corner
+and an ellipse at its rightmost point, both clockwise; a sharp rect, a line, a polyline and a
+polygon as the straight path they are. `Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
 font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
 names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an
 element that is not text or a basic shape, a text with no characters). The compiled output of

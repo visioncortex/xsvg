@@ -8444,10 +8444,21 @@ fn to_path_converts_shapes_keeping_their_attributes() {
     for gone in ["width=", "rx=", " x=\"1\"", "<filter"] {
         assert!(!out.contains(gone), "{gone}: {out}");
     }
-    assert!(out.contains(" d=\"M2,2 h8 a1,1"), "{out}");
-    let out = to_path_at(&src, "<circle").unwrap();
+    // a rounded rect as cubics: the top edge, then the top-right corner's
+    // quarter arc with handles κ of the radius along the tangents
     assert!(
-        out.contains(r##"stroke="#000""##) && out.contains(" d=\"M") && !out.contains("cx="),
+        out.contains(" d=\"M2 2 L10 2 C10.552 2 11 2.448 11 3 L11 6 C11 6.552"),
+        "{out}"
+    );
+    assert!(!out.contains(" a1,1") && !out.contains(" A"), "{out}");
+    let out = to_path_at(&src, "<circle").unwrap();
+    // a circle: four cubics from the rightmost point, clockwise in y-down space
+    assert!(
+        out.contains(r##"stroke="#000""##) && !out.contains("cx="),
+        "{out}"
+    );
+    assert!(
+        out.contains(" d=\"M7 5 C7 6.105 6.105 7 5 7 C3.895 7 3 6.105 3 5 C3 3.895 3.895 3 5 3 C6.105 3 7 3.895 7 5 Z\""),
         "{out}"
     );
     let out = to_path_at(&src, "<polygon").unwrap();
@@ -8853,4 +8864,57 @@ fn every_outlined_contour_in_the_dataset_has_the_closed_form_editors_fold() {
     if native {
         assert!(native_contours > 300, "{native_contours}");
     }
+}
+
+#[test]
+fn curved_shapes_convert_to_cubics_that_sit_on_the_shape() {
+    // an ellipse and a rounded rect: every anchor exactly on the shape, every
+    // handle along its tangent, the curve within 0.03% of the true radius —
+    // and a fully rounded rect (rx = w/2) has no straight edges at all
+    let src = format!(
+        r##"{XW}<ellipse cx="50" cy="40" rx="30" ry="20"/><rect x="0" y="0" width="20" height="10" rx="5"/><rect id="s" x="0" y="0" width="20" height="10" rx="10" ry="5"/></svg>"##
+    );
+    let ellipse = to_path_at(&src, "<ellipse").unwrap();
+    let d = ellipse
+        .split(" d=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    let path = crate::kurbo::BezPath::from_svg(&d).unwrap();
+    use crate::kurbo::{ParamCurve, PathEl, PathSeg};
+    let on = |p: crate::kurbo::Point| ((p.x - 50.0) / 30.0).powi(2) + ((p.y - 40.0) / 20.0).powi(2);
+    let mut cubics = 0;
+    for seg in path.segments() {
+        let PathSeg::Cubic(c) = seg else {
+            panic!("{d}")
+        };
+        cubics += 1;
+        assert!(
+            (on(c.p0) - 1.0).abs() < 1e-9 && (on(c.p3) - 1.0).abs() < 1e-9,
+            "{d}"
+        );
+        for i in 1..20 {
+            let r = on(c.eval(i as f64 / 20.0)).sqrt();
+            assert!((r - 1.0).abs() < 0.0003, "radial error {r}: {d}");
+        }
+    }
+    assert_eq!(cubics, 4, "{d}");
+    assert_eq!(path.elements().last(), Some(&PathEl::ClosePath));
+    let rounded = to_path_at(
+        &src,
+        "<rect x=\"0\" y=\"0\" width=\"20\" height=\"10\" rx=\"5\"",
+    )
+    .unwrap();
+    assert_eq!(
+        rounded.matches(" L").count(),
+        2,
+        "two straight edges, the ends are half circles: {rounded}"
+    );
+    assert_eq!(rounded.matches(" C").count(), 4, "{rounded}");
+    let stadium = to_path_at(&src, "<rect id=\"s\"").unwrap();
+    assert_eq!(stadium.matches(" L").count(), 0, "{stadium}");
+    assert_eq!(stadium.matches(" C").count(), 4, "{stadium}");
 }
