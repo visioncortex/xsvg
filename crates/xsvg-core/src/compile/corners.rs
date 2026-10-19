@@ -74,21 +74,11 @@ pub(super) fn corner_spec(node: roxmltree::Node, theme: &Theme) -> Option<Corner
             .and_then(CornerStyle::parse)
             .unwrap_or(CornerStyle::Round),
     };
-    for tok in v
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|t| !t.is_empty())
-    {
-        match tok.split_once(':') {
-            Some((i, r)) => {
-                if let (Ok(i), Some(r)) = (i.trim().parse::<usize>(), parse_num(r)) {
-                    spec.at.push((i, r.max(0.0)));
-                }
-            }
-            None => {
-                if let Some(r) = parse_num(tok) {
-                    spec.all = Some(r.max(0.0));
-                }
-            }
+    for (i, r) in super::indexed_items(&v) {
+        let Some(r) = parse_num(r) else { continue };
+        match i {
+            Some(i) => spec.at.push((i, r.max(0.0))),
+            None => spec.all = Some(r.max(0.0)),
         }
     }
     (spec.all.is_some() || !spec.at.is_empty()).then_some(spec)

@@ -1527,6 +1527,21 @@ fn parse_num(s: &str) -> Option<f64> {
     s[..end].parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
+/// Entries of an `x:` list value that may key some of them by index — the
+/// `anchor:radius` shape of `x:corners`. Items are separated by whitespace or
+/// commas; `:` glues an index to its value so an item stays one token under
+/// either separator. Yields `(index, value)`, the index `None` for a bare value;
+/// a keyed item whose index does not parse is dropped. `:` is reserved as the
+/// pair glue in `x:` list values, so any later indexed list has this shape.
+pub(super) fn indexed_items(v: &str) -> impl Iterator<Item = (Option<usize>, &str)> {
+    v.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .filter_map(|tok| match tok.split_once(':') {
+            Some((i, val)) => i.parse::<usize>().ok().map(|i| (Some(i), val)),
+            None => Some((None, tok)),
+        })
+}
+
 /// Format a float without a trailing `.0` for whole numbers (tidier path/coords).
 fn fmt(v: f64) -> String {
     if v.fract() == 0.0 {

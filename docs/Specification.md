@@ -435,7 +435,9 @@ stays legible as "a rect, radius 8 on two corners". Uncompiled, the document ren
 every corner, or `anchor:radius` pairs (whitespace or comma separated) for some; a radius is a
 length or a `var()` token; a pair wins over the single value at its anchor. `x:corner-style` is
 `round` (the default), `chamfer` or `inverted`, for the element. On a `<rect>` the corners
-replace `rx`/`ry`.
+replace `rx`/`ry`. The `index:value` shape is the convention for every `x:` list value that keys
+some entries by index: `:` is reserved as the pair glue (it means nothing else inside an SVG
+attribute value, where `#` is a colour or a fragment), so one parser reads them all.
 
 **Anchors (normative).** The on-curve points of the element's path in order, subpaths
 concatenated, index 0 the first `M`. On a closed subpath the end of a segment that lands on the

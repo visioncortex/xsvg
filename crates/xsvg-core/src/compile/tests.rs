@@ -8908,6 +8908,25 @@ fn corner_paths(src: &str) -> Vec<String> {
 }
 
 #[test]
+fn indexed_items_is_the_one_parser_for_index_value_lists() {
+    let items: Vec<_> = super::indexed_items("8, 1:12 3:var(r)\n 2:4px").collect();
+    assert_eq!(
+        items,
+        vec![
+            (None, "8"),
+            (Some(1), "12"),
+            (Some(3), "var(r)"),
+            (Some(2), "4px")
+        ]
+    );
+    // A keyed item needs a parsable index; its value is handed back untouched for
+    // the caller to interpret (a number, a token, an unspent `:`).
+    let items: Vec<_> = super::indexed_items("x:8 :8 1: 1:2:3").collect();
+    assert_eq!(items, vec![(Some(1), ""), (Some(1), "2:3")]);
+    assert_eq!(super::indexed_items("  ,, ").count(), 0);
+}
+
+#[test]
 fn corners_round_a_rect_exactly_as_rx_does() {
     // x:corners="10" on a sharp rect is the rounded rect's own arcs, clockwise,
     // the last landing on the start; a token radius resolves; per-anchor radii

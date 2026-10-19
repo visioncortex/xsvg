@@ -24,6 +24,8 @@ partial one.
   applied in the element's geometry, so references, booleans, offsets, warps and `to_path` see it.
   Anchors are numbered in the closed form compiled contours have, so an editor folding that way
   counts the same. The session's `corners(offset)` reports each corner as drawn for the widget.
+  `index:value` is now the stated convention for any `x:` list that keys entries by index, with
+  `:` reserved as the pair glue; `indexed_items` is the one parser for it.
 
 - **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
   through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
