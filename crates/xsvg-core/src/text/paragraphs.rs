@@ -272,7 +272,10 @@ mod tests {
             100.0,
             &m,
         );
-        assert!(paras[1].lines.is_empty());
+        // the empty block's one row holds a blank line, one advance down
+        assert_eq!(paras[1].lines.len(), 1);
+        assert!(paras[1].lines[0].text.is_empty());
+        assert!((paras[1].lines[0].baseline - 19.0).abs() < 1e-9);
         // the third block sits two advances down, as if the blank line were text
         assert!((paras[2].lines[0].baseline - (7.0 + 12.0 + 12.0)).abs() < 1e-9);
     }

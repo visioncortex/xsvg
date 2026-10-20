@@ -648,13 +648,55 @@ fn empty_paragraph_owns_a_blank_row() {
     let out = compile_test(&svg);
     assert_eq!(
         out.matches("<text ").count(),
-        2,
-        "empty para emits no <text>: {out}"
+        3,
+        "the empty para's <text> holds its blank line: {out}"
     );
     assert!(
         out.contains("y=\"7\">alpha</tspan>") && out.contains("y=\"38\">beta</tspan>"),
         "the blank row: two advances + two default gaps (7 + 2·12 + 2·3.5): {out}"
     );
+    // the blank line sits on its row, one advance and a gap below alpha — the
+    // caret's home, and where an empty text measures
+    assert!(out.contains("<tspan x=\"0\" y=\"22.5\"></tspan>"), "{out}");
+}
+
+#[test]
+fn an_empty_box_lays_one_blank_line_where_typing_starts() {
+    // an empty textbox — its own box, a referenced rect, an empty paragraph,
+    // `<text inline-size>` — emits its <text> with one blank line at the first
+    // line's position, placed by align/valign like text would be; the layout
+    // seam reports the same line, so a caret has a home and the empty element
+    // measures where typing starts instead of at the origin
+    let svg = format!(
+        r##"{XW}<rect id="r" x="20" y="200" width="100" height="50"/><x:textbox x="10" y="10" width="200" height="60" font-size="10"></x:textbox><x:textbox in="#r" font-size="10"></x:textbox><x:textbox x="10" y="10" width="200" height="60" font-size="10" align="center" valign="middle"></x:textbox><x:textbox x="10" y="10" width="200" height="60" font-size="10"><x:p></x:p></x:textbox><text x="5" y="40" inline-size="100" font-size="10"></text></svg>"##
+    );
+    let out = compile_test(&svg);
+    // cap height 7 below the top at size 10 (Mono); the rect box at its own top
+    assert!(out.contains("<tspan x=\"10\" y=\"17\"></tspan>"), "{out}");
+    assert!(out.contains("<tspan x=\"20\" y=\"207\"></tspan>"), "{out}");
+    // centred: x at the middle, the cap band (7 + 2) centred in 60 → cap-top at 35.5
+    assert!(
+        out.contains("<tspan x=\"110\" y=\"42.5\"></tspan>"),
+        "{out}"
+    );
+    // inline-size text: first baseline at y, as always
+    assert!(out.contains("<tspan x=\"5\" y=\"40\"></tspan>"), "{out}");
+    assert_eq!(out.matches("<tspan").count(), 5, "{out}");
+    for (i, (x, y)) in [(10.0, 17.0), (20.0, 207.0), (110.0, 42.5), (10.0, 17.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let l = layout_at(&svg, nth_at(&svg, "<x:textbox", i)).unwrap();
+        let lines = &l.paras[0].lines;
+        assert_eq!(lines.len(), 1, "case {i}: {l:?}");
+        assert!(
+            lines[0].text.is_empty()
+                && (lines[0].x - x).abs() < 1e-9
+                && (lines[0].baseline - y).abs() < 1e-9,
+            "case {i}: {:?}",
+            lines[0]
+        );
+    }
 }
 
 #[test]

@@ -14,6 +14,15 @@ partial one.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An empty text box lays one blank line where typing would start.** A textbox with no text —
+  its own box, a referenced rect or shape, an empty `<x:p>`, an empty `<text inline-size>` — used
+  to emit a bare `<text>` with no position and the layout seam reported no lines, so an editor's
+  empty text measured at the origin and a caret had nowhere to sit. Every flow now lays one blank
+  line placed by `align`/`valign` as a one-line text would be, emitted as an empty `<tspan x y>`
+  (§6.4); paragraph stacking is unchanged, since an empty `<x:p>` already owned its row.
+
 ### Added
 
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**

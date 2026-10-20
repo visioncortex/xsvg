@@ -248,9 +248,12 @@ fn degenerate_layouts_hold_across_fonts() {
             rtl: false,
         };
 
+        let empty = layout_area("", &st, &base, &font);
         assert!(
-            layout_area("", &st, &base, &font).lines.is_empty(),
-            "{slug}: empty text should yield no lines"
+            empty.lines.len() == 1
+                && empty.lines[0].text.is_empty()
+                && (empty.lines[0].x - 50.0).abs() < 1e-9,
+            "{slug}: empty text lays one blank line at the centre"
         );
 
         let zero = AreaSpec {

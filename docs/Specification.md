@@ -539,6 +539,13 @@ spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-al
 | `text-indent` | length | 0 | first-line indent — the first line wraps to `width − indent` and is placed that far in from the start edge; **negative outdents** (a hanging first line). Applies to `start`/`justify` alignment |
 | `direction` | `ltr` \| `rtl` | `ltr` | paragraph direction. Under `rtl` the `start` edge is the RIGHT edge (so `align="start"` right-aligns, `end` left-aligns, the indent insets from the right) and the emitted `<text>` carries `direction="rtl"`, leaving the glyph order of each line's logical string to the renderer's bidi algorithm (wrapping is on logical words either way). An `<x:p>` may set its own (§6.16). **v0:** lists and tables stay left-to-right; inline bidi is the renderer's (deterministic bidi is the Typography roadmap's) |
 
+**An empty box has a first line.** With no text, the box lays one blank line where typing would
+start — placed by `align`/`valign` exactly as a one-line text would be — and emits its `<text>` with
+that one empty `<tspan x y>`. An empty `<x:p>` lays its blank line on the row it owns (§6.16), an
+empty region-bound box (§6.10) in the first band with a span, and an empty `<text inline-size>` at
+its `x`/`y`. So the empty element measures where its text will appear instead of at the origin, and
+the layout seam (Incremental.md §6) reports the line for a caret to sit on.
+
 ### 6.5 Vertical alignment model (normative) [implemented]
 
 Both box elements align on the **cap-height band** — the region from the first line's **cap-top** to

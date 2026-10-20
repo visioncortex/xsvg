@@ -455,7 +455,13 @@ pub fn layout_area_measured(
     };
     // First-line indent (§6.6): wrap the first line to the reduced width, the rest
     // to the full content width. Only when there is text and a real indent.
-    let wrapped = wrap_indented(measured, cw, scale, spec.text_indent);
+    let mut wrapped = wrap_indented(measured, cw, scale, spec.text_indent);
+    // no text lays one blank line where typing would start: an empty box has
+    // a first line (the caret's home, placed by align/valign like any other),
+    // exactly as an empty flow between forced breaks does
+    if wrapped.is_empty() {
+        wrapped.push((Vec::new(), (0, 0)));
+    }
     // a line is justified iff it isn't the paragraph's last (flow-final)
     let last = wrapped.len().saturating_sub(1);
     let line_meta: Vec<LineMeta> = wrapped
@@ -478,7 +484,7 @@ pub fn layout_flow(
 ) -> Vec<PlacedLine> {
     let measured = measure_words(text, style, m);
     let advance = style.size * style.line_height;
-    wrap_pieces(&measured, max_width, 1.0)
+    one_blank_if_empty(wrap_pieces(&measured, max_width, 1.0))
         .into_iter()
         .enumerate()
         .map(|(i, (pieces, words))| {
@@ -497,6 +503,17 @@ pub fn layout_flow(
         .collect()
 }
 
+/// No text wraps to one blank line: an empty flow still has its first line,
+/// at the position typing would start.
+fn one_blank_if_empty(
+    mut wrapped: Vec<(Vec<Piece>, (usize, usize))>,
+) -> Vec<(Vec<Piece>, (usize, usize))> {
+    if wrapped.is_empty() {
+        wrapped.push((Vec::new(), (0, 0)));
+    }
+    wrapped
+}
+
 /// [`layout_flow`] over styled segments (one forced flow — split at `'\n'`
 /// first with [`split_flows`]): first baseline at `y`, every following line
 /// stepping by ITS OWN advance (its largest run size × the base line-height).
@@ -511,7 +528,7 @@ pub fn layout_flow_runs(
     let style = &styles[0];
     let measured = measure_runs(segments, styles, m);
     let mut baseline = y;
-    wrap_pieces(&measured, max_width, 1.0)
+    one_blank_if_empty(wrap_pieces(&measured, max_width, 1.0))
         .into_iter()
         .enumerate()
         .map(|(i, (pieces, words))| {
@@ -659,13 +676,23 @@ mod tests {
     }
 
     #[test]
-    fn empty_text_yields_no_lines() {
+    fn empty_text_lays_one_blank_line() {
+        // the caret's home: an empty box has a first line, placed as text would be
         let st = TextStyle {
             size: 12.0,
             ..Default::default()
         };
         let s = spec(100.0, 100.0, Align::Start, VAlign::Top, Fit::None);
-        assert!(layout_area("   ", &st, &s, &Mono(0.1)).lines.is_empty());
+        let out = layout_area("   ", &st, &s, &Mono(0.1));
+        assert_eq!(out.lines.len(), 1);
+        assert!(out.lines[0].text.is_empty() && out.lines[0].runs.is_empty());
+        assert!(out.lines[0].x.abs() < 1e-9 && (out.lines[0].baseline - 8.4).abs() < 1e-9);
+        let s = spec(100.0, 100.0, Align::Center, VAlign::Bottom, Fit::None);
+        let out = layout_area("", &st, &s, &Mono(0.1));
+        // cap 8.4 + descent 2.4 sit on the bottom edge
+        assert!(
+            (out.lines[0].x - 50.0).abs() < 1e-9 && (out.lines[0].baseline - 97.6).abs() < 1e-9
+        );
     }
 
     #[test]
@@ -722,7 +749,9 @@ mod tests {
         assert_eq!(wrapped.len(), 2);
         assert!((wrapped[1].baseline - 12.0).abs() < 1e-9);
 
-        assert!(layout_flow("", &st, 0.0, 0.0, 50.0, &Mono(0.1)).is_empty());
+        let blank = layout_flow("", &st, 3.0, 9.0, 50.0, &Mono(0.1));
+        assert_eq!(blank.len(), 1);
+        assert!(blank[0].text.is_empty() && blank[0].x == 3.0 && blank[0].baseline == 9.0);
         assert_eq!(
             layout_flow("a b c", &st, 0.0, 0.0, 0.0, &Mono(0.1)).len(),
             3

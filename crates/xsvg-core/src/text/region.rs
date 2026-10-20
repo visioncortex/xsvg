@@ -175,13 +175,16 @@ fn layout_region_measured(
 
     // One flow pass starting at `start_y`; returns placed lines, their span widths,
     // and whether any content overflowed (vertically or as leftover words).
+    // no text lays one blank line in the first band that has a span: an
+    // empty box has a first line (the caret's home) where typing would start
+    let blank = measured.words.is_empty();
     let flow = |start_y: f64| -> (Vec<PlacedLine>, Vec<f64>, bool) {
         let mut lines = Vec::new();
         let mut widths = Vec::new();
         let mut i = 0;
         let mut y = start_y;
         let mut dropped = false;
-        while i < measured.words.len() {
+        while i < measured.words.len() || (blank && lines.is_empty() && !dropped) {
             // past the shape's bottom: dropped, or under `overflow="visible"`
             // (§6.6) flowed on at the region's bounding-box width and flagged
             let below = y + line_h > content_bottom + 1e-6;
@@ -205,7 +208,11 @@ fn layout_region_measured(
                 y += line_h; // band too narrow here — try the next one down
                 continue;
             };
-            let (pieces, next) = fill_line(measured, i, r - l, 1.0);
+            let (pieces, next) = if blank {
+                (Vec::new(), 0)
+            } else {
+                fill_line(measured, i, r - l, 1.0)
+            };
             let (text, runs) = merge_pieces(pieces);
             let ax = match spec.align {
                 Align::Center => (l + r) / 2.0,
@@ -278,7 +285,9 @@ fn layout_region_measured(
                 }
             }
         }
-        lines.retain(|l| !l.text.is_empty());
+        if !blank {
+            lines.retain(|l| !l.text.is_empty());
+        }
     }
 
     AreaLayout {
@@ -320,6 +329,59 @@ mod tests {
         fn span(&self, y0: f64, y1: f64) -> Option<(f64, f64)> {
             (y1 > self.0.y && y0 < self.0.y + self.0.h).then_some((self.0.x, self.0.x + self.0.w))
         }
+    }
+
+    #[test]
+    fn empty_text_lays_one_blank_line_in_the_region() {
+        // an empty shape-bound box has a first line, in the first band with a
+        // span, valigned as one line — the caret's home
+        let st = style(10.0);
+        let r = RectRegion(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        let spec = |valign: VAlign, align: Align| RegionSpec {
+            padding: 0.0,
+            align,
+            valign,
+            text_overflow: TextOverflow::Clip,
+        };
+        let top = layout_region("", &st, &r, &spec(VAlign::Top, Align::Start), &Mono(0.5));
+        assert_eq!(top.lines.len(), 1);
+        assert!(top.lines[0].text.is_empty() && top.lines[0].x == 0.0);
+        assert!(
+            (top.lines[0].baseline - 8.0).abs() < 1e-9,
+            "{:?}",
+            top.lines[0]
+        );
+        let mid = layout_region(
+            "",
+            &st,
+            &r,
+            &spec(VAlign::Middle, Align::Center),
+            &Mono(0.5),
+        );
+        assert_eq!(mid.lines.len(), 1);
+        // one 12-high row centred in 100: top at 44, ascent 8 below it
+        assert!(
+            (mid.lines[0].x - 50.0).abs() < 1e-9 && (mid.lines[0].baseline - 52.0).abs() < 1e-9,
+            "{:?}",
+            mid.lines[0]
+        );
+        // an ellipsis box keeps its blank line too: nothing overflowed
+        let el = layout_region(
+            "",
+            &st,
+            &r,
+            &RegionSpec {
+                text_overflow: TextOverflow::Ellipsis,
+                ..spec(VAlign::Top, Align::Start)
+            },
+            &Mono(0.5),
+        );
+        assert_eq!(el.lines.len(), 1);
     }
 
     /// Triangle wide at the top, narrowing to a point at the bottom. Uses the band's

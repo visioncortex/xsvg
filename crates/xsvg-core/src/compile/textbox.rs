@@ -46,20 +46,8 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
         let mut lines: Vec<PlacedLine> = Vec::new();
         let mut first = y;
         for flow in split_flows(&segments) {
-            let mut ls = layout_flow_runs(&flow, &styles, x, first, max_w, m);
-            if ls.is_empty() {
-                ls.push(PlacedLine {
-                    text: String::new(),
-                    x,
-                    baseline: first,
-                    size: style.size,
-                    justify_width: None,
-                    runs: Vec::new(),
-                    words: (0, 0),
-                    overflow: false,
-                });
-            }
-            let last = ls.last().expect("one line at least");
+            let ls = layout_flow_runs(&flow, &styles, x, first, max_w, m);
+            let last = ls.last().expect("an empty flow lays one blank line");
             first = last.baseline + last.size * style.line_height;
             lines.extend(ls);
         }

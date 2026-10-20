@@ -243,7 +243,9 @@ document doesn't parse, or the box resolves to nothing renderable.
 whole box, or one `<x:p>` in paragraph mode §6.16), carrying its source byte
 `span`, the **rendered** style (`size` is post `fit="shrink"`), anchor,
 `FontMetrics` at the rendered size (caret height), the flow's whitespace-split
-`words`, and the rendered `lines`.
+`words`, and the rendered `lines`. An empty flow has one blank line, where typing
+would start (§6.4): a caret always has a line to sit on, and an empty `<x:p>`'s
+line is on the row it owns.
 
 **Caret mapping contract**:
 
