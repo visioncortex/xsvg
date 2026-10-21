@@ -542,3 +542,20 @@ pub fn to_path_impl(
         .map_err(ToPathError::limit)?
         .to_path(offset)
 }
+
+/// Convert to spline (docs/Incremental.md §11): [`to_path_impl`] with every arc
+/// of the result expanded to cubic Béziers, for an editor whose path model has
+/// no arcs — a circle as four cubics at its extremes, a rounded corner as one.
+pub fn to_spline_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Result<String, ToPathError> {
+    Platform::new(m, shaper, outliner)
+        .session(input, quality, false, "")
+        .map_err(ToPathError::limit)?
+        .to_spline(offset)
+}

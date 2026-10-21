@@ -805,6 +805,15 @@ impl<'a, P: Host> CompileSession<'a, P> {
             .to_path(offset, &self.platform.backend(), self.quality)
     }
 
+    /// Convert to spline (docs/Incremental.md §11): [`Self::to_path`] with every
+    /// arc expanded to cubic Béziers — a quarter turn per cubic at most, so a
+    /// circle is four anchors — for an editor whose paths are Béziers only. The
+    /// same answer as [`super::to_spline_impl`].
+    pub fn to_spline(&self, offset: usize) -> Result<String, super::ToPathError> {
+        self.to_path(offset)
+            .map(|m| super::spline::markup_to_spline(&m))
+    }
+
     /// Source byte range of every element, in document order — the same answer as
     /// [`super::node_spans_impl`].
     pub fn node_spans(&self) -> Vec<(usize, usize)> {

@@ -1,7 +1,7 @@
 //! Headless xsvg compiler — a pure-Rust binary, no browser. Wires the native platform
 //! seams (fonts via ttf-parser, shape flow via kurbo) to the shared `xsvg-core` compiler.
 //!
-//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [--no-plugins] [--to-path OFFSET] [-o OUT] INPUT
+//!   xsvg [--quality fast|balanced|highest] [--sourcemap] [--no-plugins] [--to-path OFFSET | --to-spline OFFSET] [-o OUT] INPUT
 //!
 //! INPUT is a path or `-` for stdin; OUT defaults to stdout.
 
@@ -72,6 +72,26 @@ pub fn to_path(
     quality: &str,
     font_dir: Option<&Path>,
 ) -> Result<String, String> {
+    convert(source, offset, quality, font_dir, false)
+}
+
+/// `to_path` with the result's arcs expanded to cubics (`to_spline`, §11).
+pub fn to_spline(
+    source: &str,
+    offset: usize,
+    quality: &str,
+    font_dir: Option<&Path>,
+) -> Result<String, String> {
+    convert(source, offset, quality, font_dir, true)
+}
+
+fn convert(
+    source: &str,
+    offset: usize,
+    quality: &str,
+    font_dir: Option<&Path>,
+    spline: bool,
+) -> Result<String, String> {
     let fonts = match font_dir {
         Some(d) => {
             FontDb::load_dir(d).map_err(|e| format!("loading fonts from {}: {e}", d.display()))?
@@ -84,19 +104,22 @@ pub fn to_path(
         .into_iter()
         .find(|(s, _)| *s == offset)
         .ok_or_else(|| format!("no element starts at byte {offset}"))?;
-    let markup = platform
-        .session(source, quality, false, "")?
-        .to_path(offset)
-        .map_err(|e| match &e.family {
-            Some(f) => format!(
-                "{} {} {} has {}",
-                f,
-                e.weight.as_deref().unwrap_or(""),
-                e.style.as_deref().unwrap_or(""),
-                e.reason
-            ),
-            None => e.reason,
-        })?;
+    let session = platform.session(source, quality, false, "")?;
+    let markup = if spline {
+        session.to_spline(offset)
+    } else {
+        session.to_path(offset)
+    };
+    let markup = markup.map_err(|e| match &e.family {
+        Some(f) => format!(
+            "{} {} {} has {}",
+            f,
+            e.weight.as_deref().unwrap_or(""),
+            e.style.as_deref().unwrap_or(""),
+            e.reason
+        ),
+        None => e.reason,
+    })?;
     Ok(format!("{}{markup}{}", &source[..start], &source[end..]))
 }
 
@@ -118,6 +141,7 @@ fn run() -> Result<(), String> {
     let mut font_dir: Option<String> = None;
     let mut plugins = true;
     let mut to_path_at: Option<usize> = None;
+    let mut to_spline_at: Option<usize> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -140,6 +164,13 @@ fn run() -> Result<(), String> {
                         .map_err(|_| format!("--to-path: not an offset: {v}"))?,
                 );
             }
+            "--to-spline" => {
+                let v = args.next().ok_or("--to-spline needs a byte offset")?;
+                to_spline_at = Some(
+                    v.parse()
+                        .map_err(|_| format!("--to-spline: not an offset: {v}"))?,
+                );
+            }
             "-h" | "--help" => {
                 println!(
                     "usage: xsvg [--quality fast|balanced|highest] [--font-directory DIR] \
@@ -149,7 +180,8 @@ fn run() -> Result<(), String> {
                      outline baking (without it, text uses default metrics and stays live).\n\
                      --no-plugins skips every <x:import> module, so no third-party code runs.\n\
                      --to-path OFFSET writes the SOURCE with the element at that byte offset \
-                     converted to paths (an editor's Convert to path), instead of compiling."
+                     converted to paths (an editor's Convert to path), instead of compiling; \
+                     --to-spline OFFSET does the same with the result's arcs as cubic Béziers."
                 );
                 return Ok(());
             }
@@ -174,14 +206,20 @@ fn run() -> Result<(), String> {
         (s, base)
     };
 
-    let svg = match to_path_at {
-        Some(offset) => to_path(
+    let svg = match (to_path_at, to_spline_at) {
+        (Some(offset), _) => to_path(
             &source,
             offset,
             &quality,
             font_dir.as_deref().map(Path::new),
         )?,
-        None => compile(
+        (None, Some(offset)) => to_spline(
+            &source,
+            offset,
+            &quality,
+            font_dir.as_deref().map(Path::new),
+        )?,
+        (None, None) => compile(
             &source,
             &quality,
             sourcemap,

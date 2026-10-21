@@ -497,7 +497,7 @@ requires; `parsed_document_is_covariant` fails to build if that ever changes). O
 byte starts, as for units (§9). The kit wraps the queries as its `queries` (xsvg-kit
 `docs/Queries.md`), whose JS memo then only saves the bridge hop.
 
-## 11. Convert to path (`CompileSession::to_path`, shipped)
+## 11. Convert to path (`CompileSession::to_path` / `to_spline`, shipped)
 
 An editor's *Create outlines* / *Convert to path* replaces a node by the markup the compiler
 would draw for it, so the rule is: **`to_path(offset)` returns the compiler's own output for the
@@ -515,8 +515,14 @@ no key: the host re-keys the markup it inserts.
 A basic shape converts to the `<path>` of the compiler's own geometry, exact: a circle or an
 ellipse as four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four
 extremes; a rounded rect as its edges and one quarter arc per corner, an edge the corners consume
-left out; a shape's `x:corners` (§5.4) applied and spent. Arcs stay arcs: expanding them to
-Béziers is an editor's operation, not a conversion's. `Err(ToPathError)` is the answer when nothing half-converts: `family`/`weight`/`style` name the
+left out; a shape's `x:corners` (§5.4) applied and spent. Arcs stay arcs in `to_path`. For an
+editor whose path model is Béziers only, **`to_spline(offset)`** is the same markup with every `A`
+expanded to cubics — at most a quarter turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic
+(0.5523 for a quarter circle), so a circle is four anchors at its extremes and a rounded corner one
+cubic, never a flattening; everything that is not an arc passes through byte for byte, a
+degenerate arc is dropped and a zero-radius one is the line SVG draws. The converter is public as
+`arcs_to_cubics(d)` for any path data (a compiled corner path, say). `Err(ToPathError)` is the
+answer when nothing half-converts: `family`/`weight`/`style` name the
 font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
 names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an
 element that is not text or a basic shape, a text with no characters). The compiled output of

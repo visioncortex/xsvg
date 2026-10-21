@@ -25,6 +25,12 @@ partial one.
 
 ### Added
 
+- **`to_spline(offset)`: `to_path` with every arc as cubic Béziers** (Incremental.md §11), for an
+  editor whose path model has no arcs. At most a quarter turn per cubic, each the classic
+  `κ = 4/3·tan(θ/4)` cubic, so a circle is four anchors at its extremes and a rounded corner one
+  cubic; everything that is not an arc passes through byte for byte. `arcs_to_cubics(d)` is public
+  for any path data; the CLI has `--to-spline OFFSET` beside `--to-path`.
+
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or
   `anchor:radius` pairs, a length or a theme token; `round` (an exact circular arc), `chamfer` or

@@ -8939,6 +8939,190 @@ fn curved_shapes_convert_to_exact_arcs_in_the_closed_form() {
     );
 }
 
+// ---- to_spline (spline.rs; Incremental.md §11) ------------------------------------
+
+#[test]
+fn arcs_to_cubics_expands_only_the_arcs_a_quarter_turn_per_cubic() {
+    use super::arcs_to_cubics;
+    // a circle's four quarter arcs become the four classic cubics (κ·r = 5.523)
+    let circle =
+        "M10 0 A10 10 0 0 1 0 10 A10 10 0 0 1 -10 0 A10 10 0 0 1 0 -10 A10 10 0 0 1 10 0 Z";
+    assert_eq!(
+        arcs_to_cubics(circle),
+        "M10 0 C10 5.523 5.523 10 0 10 C-5.523 10 -10 5.523 -10 0 C-10 -5.523 -5.523 -10 0 -10 C5.523 -10 10 -5.523 10 0 Z"
+    );
+    // a half turn splits in two; a 60° corner arc is one cubic; the rest of the
+    // data — relative commands, glued numbers, implicit repeats — passes through
+    // byte for byte, and a relative arc's endpoint is resolved from the pen
+    let d = "m5,5 l10-2 A10 10 0 0 1 35 3 h-1.5e1 a4 4 0 0,1 4 4 L1 2 3 4z";
+    let out = arcs_to_cubics(d);
+    assert!(out.starts_with("m5,5 l10-2 C"), "{out}");
+    assert!(out.contains(" h-1.5e1 "), "{out}");
+    assert!(out.ends_with("L1 2 3 4z"), "{out}");
+    assert_eq!(out.matches(" C").count(), 3, "{out}");
+    // the half turn's two cubics end where the arc did
+    assert!(out.contains(" 35 3 h"), "{out}");
+    // glued arc flags, implicit repeats of A, a degenerate arc (dropped) and a
+    // zero radius (the straight line)
+    assert_eq!(
+        arcs_to_cubics("M0 0 A5 5 0 01 10 0 5 5 0 0110 0"),
+        "M0 0 C0 -2.761 2.239 -5 5 -5 C7.761 -5 10 -2.761 10 0"
+    );
+    assert_eq!(arcs_to_cubics("M3 3 A5 5 0 0 1 3 3 L4 4"), "M3 3 L4 4");
+    assert_eq!(arcs_to_cubics("M0 0 A0 5 0 0 1 10 0"), "M0 0 L10 0");
+    // no arcs: identical
+    assert_eq!(
+        arcs_to_cubics("M0 0 L1 1 Q2 2 3 3 Z"),
+        "M0 0 L1 1 Q2 2 3 3 Z"
+    );
+    // garbage is handed back rather than guessed at
+    assert_eq!(arcs_to_cubics("M0 0 A5 5 0 0 1 x"), "M0 0 A5 5 0 0 1 x");
+}
+
+#[test]
+fn arcs_to_cubics_stays_on_the_ellipse_to_a_quarter_circle_cubics_precision() {
+    use crate::kurbo::{Arc, BezPath, ParamCurve, PathSeg, Point, SvgArc, Vec2};
+    // every cubic of a converted arc sits on the arc's ellipse (as SVG's
+    // endpoint-to-centre conversion defines it) within the one-cubic-per-quadrant
+    // error (0.03% of the radius), rotation and radius scaling included;
+    // endpoints exact
+    type Case = (
+        &'static str,
+        (f64, f64),
+        (f64, f64),
+        (f64, f64),
+        f64,
+        bool,
+        bool,
+    );
+    let cases: [Case; 5] = [
+        (
+            "M100 0 A100 100 0 0 1 0 100",
+            (100.0, 0.0),
+            (0.0, 100.0),
+            (100.0, 100.0),
+            0.0,
+            false,
+            true,
+        ),
+        (
+            "M100 0 A100 100 0 1 0 0 100",
+            (100.0, 0.0),
+            (0.0, 100.0),
+            (100.0, 100.0),
+            0.0,
+            true,
+            false,
+        ),
+        (
+            "M60 20 A40 20 0 1 1 -20 20",
+            (60.0, 20.0),
+            (-20.0, 20.0),
+            (40.0, 20.0),
+            0.0,
+            true,
+            true,
+        ),
+        (
+            "M20 0 A20 10 30 0 1 -20 0",
+            (20.0, 0.0),
+            (-20.0, 0.0),
+            (20.0, 10.0),
+            30.0,
+            false,
+            true,
+        ),
+        (
+            "M0 0 A1 1 0 0 1 10 0",
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (1.0, 1.0),
+            0.0,
+            false,
+            true,
+        ),
+    ];
+    for (d, from, to, radii, rot_deg, large, sweep) in cases {
+        let out = super::arcs_to_cubics(d);
+        assert!(!out.contains('A'), "{out}");
+        let path = BezPath::from_svg(&out).unwrap();
+        let arc = Arc::from_svg_arc(&SvgArc {
+            from: Point::new(from.0, from.1),
+            to: Point::new(to.0, to.1),
+            radii: Vec2::new(radii.0, radii.1),
+            x_rotation: rot_deg.to_radians(),
+            large_arc: large,
+            sweep,
+        })
+        .unwrap();
+        let (cx, cy, rx, ry) = (arc.center.x, arc.center.y, arc.radii.x, arc.radii.y);
+        let (s, c) = arc.x_rotation.sin_cos();
+        let on_ellipse = |p: Point| {
+            let (dx, dy) = (p.x - cx, p.y - cy);
+            let (u, v) = (dx * c + dy * s, -dx * s + dy * c);
+            ((u / rx).powi(2) + (v / ry).powi(2)).sqrt() - 1.0
+        };
+        let mut n = 0;
+        for seg in path.segments() {
+            let PathSeg::Cubic(cu) = seg else {
+                panic!("{out}")
+            };
+            n += 1;
+            for k in 0..=20 {
+                let e = on_ellipse(cu.eval(k as f64 / 20.0)).abs();
+                assert!(e < 3e-4, "{d}: off the ellipse by {e} at {k}/20 in {out}");
+            }
+        }
+        assert!(n >= 1, "{out}");
+        let last = path.segments().last().unwrap().end();
+        let end: Vec<f64> = d.rsplit(' ').take(2).map(|t| t.parse().unwrap()).collect();
+        assert!(
+            (last.x - end[1]).abs() < 1e-9 && (last.y - end[0]).abs() < 1e-9,
+            "{out}"
+        );
+    }
+}
+
+#[test]
+fn to_spline_is_to_path_with_its_arcs_as_cubics() {
+    let src = format!(
+        r##"{XW}<circle cx="5" cy="5" r="2" fill="var(ink)" id="c"/><rect x="2" y="2" width="10" height="5" rx="1" x:label="card"/><rect x="0" y="0" width="100" height="50" x:corners="10" x:corner-style="chamfer"/></svg>"##
+    );
+    let spline = |needle: &str| {
+        to_spline_impl(
+            &src,
+            nth_at(&src, needle, 0),
+            "balanced",
+            &Mono,
+            &NoShaper,
+            &NoOutliner,
+        )
+    };
+    let path = |needle: &str| to_path_at(&src, needle);
+    let circle = spline("<circle").unwrap();
+    assert_eq!(
+        circle,
+        r##"<path fill="var(ink)" id="c" d="M7 5 C7 6.105 6.105 7 5 7 C3.895 7 3 6.105 3 5 C3 3.895 3.895 3 5 3 C6.105 3 7 3.895 7 5 Z"/>"##
+    );
+    // the arcs are the only difference from to_path
+    let rounded = spline("<rect").unwrap();
+    assert!(
+        !rounded.contains('A') && rounded.contains(r#"x:label="card""#),
+        "{rounded}"
+    );
+    assert_eq!(rounded.matches(" C").count(), 4, "{rounded}");
+    assert_eq!(
+        super::spline::markup_to_spline(&path("<rect").unwrap()),
+        rounded
+    );
+    // nothing to expand: the same markup as to_path (a chamfer has no arcs)
+    let chamfer = spline(r#"<rect x="0""#).unwrap();
+    assert_eq!(chamfer, path(r#"<rect x="0""#).unwrap());
+    assert!(chamfer.contains("M10 0 L90 0 L100 10"), "{chamfer}");
+    // an `id` is not a `d`
+    assert!(circle.contains(r#"id="c""#));
+}
+
 // ---- corners (corners.rs; §5.4) ------------------------------------------------
 
 fn corner_paths(src: &str) -> Vec<String> {

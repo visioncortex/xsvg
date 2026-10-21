@@ -1593,6 +1593,8 @@ use viewport::*;
 mod trace;
 pub use trace::ToPathError;
 use trace::*;
+mod spline;
+pub use spline::arcs_to_cubics;
 mod corners;
 use corners::*;
 pub use corners::{CornerInfo, CornerStyle};
