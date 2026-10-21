@@ -512,16 +512,21 @@ alignment, fit, overflow and spacing attributes, `in`, `outline`, and for point 
 and tspan geometry; `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
 no key: the host re-keys the markup it inserts.
 
-A basic shape converts to the `<path>` of the compiler's own geometry, exact: a circle or an
-ellipse as four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four
-extremes; a rounded rect as its edges and one quarter arc per corner, an edge the corners consume
-left out; a shape's `x:corners` (§5.4) applied and spent. Arcs stay arcs in `to_path`. For an
-editor whose path model is Béziers only, **`to_spline(offset)`** is the same markup with every `A`
-expanded to cubics — at most a quarter turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic
-(0.5523 for a quarter circle), so a circle is four anchors at its extremes and a rounded corner one
-cubic, never a flattening; everything that is not an arc passes through byte for byte, a
-degenerate arc is dropped and a zero-radius one is the line SVG draws. The converter is public as
-`arcs_to_cubics(d)` for any path data (a compiled corner path, say). `Err(ToPathError)` is the
+A basic shape converts to the `<path>` of its geometry, exact. **Corners stay live**, as
+Illustrator's convert-to-path leaves live corners live: a `<path>` carries `x:corners` natively, so
+there is nothing to spend — the shape's `x:corners` and `x:corner-style` ride onto its sharp
+geometry (a polyline opened), and a `<rect rx>` with circular corners becomes the sharp rect plus
+`x:corners="rx"` (a token stays a token), so the corner widget still works on the result and the
+render is the same (§5.4). What has no live form is the compiler's arcs: a circle or an ellipse as
+four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four extremes; a rect
+with elliptical corners (`rx ≠ ry`) as its edges and one arc per corner, an edge the corners consume
+left out. Arcs stay arcs in `to_path`. For an editor whose path model is Béziers only,
+**`to_spline(offset)`** is *expand*: the corners baked, then every `A` as cubics — at most a quarter
+turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic (0.5523 for a quarter circle), so a
+circle is four anchors at its extremes and a rounded corner one cubic, never a flattening;
+everything that is not an arc passes through byte for byte, a degenerate arc is dropped and a
+zero-radius one is the line SVG draws. The converter is public as `arcs_to_cubics(d)` for any
+path data (a compiled corner path, say). `Err(ToPathError)` is the
 answer when nothing half-converts: `family`/`weight`/`style` name the
 font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
 names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an

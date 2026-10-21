@@ -463,8 +463,10 @@ the rest of the curve. The closing corner of a closed subpath ends on the subpat
 
 **Where it applies.** In the element's geometry, so every consumer sees the rounding: the
 serializer (the element lowers to a `<path>` with its other attributes kept, `x:corners` and
-`x:corner-style` spent), `in="#id"` references, booleans, offsets, warps, and `to_path`
-([Incremental.md](Incremental.md) §11), which bakes the arcs. The session's `corners(offset)`
+`x:corner-style` spent), `in="#id"` references, booleans, offsets and warps. `to_path`
+([Incremental.md](Incremental.md) §11) keeps the corners live on the path it writes — and turns a
+`<rect rx>` into `x:corners` — as Illustrator's convert-to-path does; `to_spline` bakes them. The
+session's `corners(offset)`
 query reports each corner as drawn — anchor, requested and effective radius, whether it was
 limited, the trim points and the centre — for an editor's corner widget (§10 there).
 

@@ -110,6 +110,10 @@ struct Ctx<'a> {
     /// `to_path` (trace.rs): the output goes back into the SOURCE, so paints
     /// keep their `var()` tokens and a `filter` list stays as authored.
     to_path: std::cell::Cell<bool>,
+    /// `to_path` keeps a shape's corners live — `x:corners` carried, a
+    /// `<rect rx>` written as the sharp rect plus `x:corners` — where
+    /// `to_spline` bakes them (trace.rs).
+    live_corners: std::cell::Cell<bool>,
     /// The node `to_path` converts (its byte start) and the attributes it
     /// carries onto the group that replaces it, as authored.
     to_path_carry: std::cell::RefCell<Option<(usize, String)>>,
@@ -334,6 +338,7 @@ impl<'a> Ctx<'a> {
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
             to_path: std::cell::Cell::new(false),
+            live_corners: std::cell::Cell::new(false),
             to_path_carry: std::cell::RefCell::new(None),
             outline_miss: std::cell::RefCell::new(None),
             resolver: seams.resolver,

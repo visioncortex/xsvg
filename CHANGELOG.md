@@ -25,11 +25,15 @@ partial one.
 
 ### Added
 
-- **`to_spline(offset)`: `to_path` with every arc as cubic Béziers** (Incremental.md §11), for an
-  editor whose path model has no arcs. At most a quarter turn per cubic, each the classic
-  `κ = 4/3·tan(θ/4)` cubic, so a circle is four anchors at its extremes and a rounded corner one
-  cubic; everything that is not an arc passes through byte for byte. `arcs_to_cubics(d)` is public
-  for any path data; the CLI has `--to-spline OFFSET` beside `--to-path`.
+- **`to_path` keeps corners live; `to_spline(offset)` expands** (Incremental.md §11). Convert to
+  path now leaves a live corner live, as Illustrator does: a shape's `x:corners` rides onto its
+  sharp path, and a `<rect rx>` with circular corners becomes the sharp rect plus `x:corners="rx"`,
+  so the corner widget still works on the result; only elliptical corners, circles and ellipses
+  bake to arcs. `to_spline` is the expand: corners baked, every arc as cubic Béziers — at most a
+  quarter turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic, so a circle is four anchors at
+  its extremes and a rounded corner one cubic; everything that is not an arc passes through byte
+  for byte. `arcs_to_cubics(d)` is public for any path data; the CLI has `--to-spline OFFSET`
+  beside `--to-path`.
 
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or

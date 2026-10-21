@@ -527,14 +527,42 @@ pub(super) fn shape_to_path_d(node: roxmltree::Node, ctx: &Ctx) -> Option<String
     let Some(spec) = corner_spec(node, ctx.theme) else {
         return shape_base_d(node);
     };
-    let base = if node.tag_name().name() == "polyline" {
+    apply_corners(&cornered_base_d(node)?, &spec).map(|(d, _)| d)
+}
+
+/// The geometry `x:corners` rounds: the shape as authored, a polyline opened
+/// (its ends are never corners).
+pub(super) fn cornered_base_d(node: roxmltree::Node) -> Option<String> {
+    if node.tag_name().name() == "polyline" {
         node.attribute("points")
             .and_then(points_to_path_d)
-            .map(|d| d.trim_end_matches('Z').trim_end().to_string())?
+            .map(|d| d.trim_end_matches('Z').trim_end().to_string())
     } else {
-        shape_base_d(node)?
+        shape_base_d(node)
+    }
+}
+
+/// A `<rect rx>` whose rounding `x:corners` can carry live — circular corners
+/// (`rx` equals `ry`, as authored or by SVG's default of one to the other):
+/// the sharp rect and the radius as authored. `None` for a sharp rect or
+/// elliptical corners, which only the arcs express.
+pub(super) fn rect_live_corners(node: roxmltree::Node) -> Option<(String, String)> {
+    let (rx, ry) = (node.attribute("rx"), node.attribute("ry"));
+    let radius = match (rx, ry) {
+        (Some(a), Some(b)) if parse_num(a) == parse_num(b) => a,
+        (Some(a), None) | (None, Some(a)) => a,
+        _ => return None,
     };
-    apply_corners(&base, &spec).map(|(d, _)| d)
+    if parse_num(radius).is_none_or(|r| r <= 0.0) {
+        return None;
+    }
+    let (x, y, w, h) = (
+        attr_num(node, "x", 0.0),
+        attr_num(node, "y", 0.0),
+        attr_num(node, "width", 0.0),
+        attr_num(node, "height", 0.0),
+    );
+    (w > 0.0 && h > 0.0).then(|| (format!("M{x},{y} h{w} v{h} h-{w} Z"), radius.to_string()))
 }
 
 /// A basic shape as a path, as authored: a circle or an ellipse as four quarter

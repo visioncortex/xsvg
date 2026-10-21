@@ -8292,6 +8292,17 @@ fn to_path_at(src: &str, needle: &str) -> Result<String, ToPathError> {
     )
 }
 
+fn to_spline_at(src: &str, needle: &str) -> Result<String, ToPathError> {
+    to_spline_impl(
+        src,
+        src.find(needle).expect(needle),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+}
+
 #[test]
 fn to_path_returns_the_outlined_box_with_its_attributes_kept_as_authored() {
     // the compiler's own outlined output for the node, in the source's terms:
@@ -8486,9 +8497,10 @@ fn to_path_converts_shapes_keeping_their_attributes() {
     for gone in ["width=", "rx=", " x=\"1\"", "<filter"] {
         assert!(!out.contains(gone), "{gone}: {out}");
     }
-    // a rounded rect: its edges and one quarter arc per corner, exact
+    // a rounded rect: the sharp rect with its rounding kept live as x:corners
+    // (§5.4), so the corner widget still works on the result
     assert!(
-        out.contains(" d=\"M2,2 h8 a1,1 0 0,1 1,1 v3 a1,1 0 0,1 -1,1 h-8 a1,1 0 0,1 -1,-1 v-3 a1,1 0 0,1 1,-1 Z\""),
+        out.contains(" x:corners=\"1\" d=\"M1,2 h10 v5 h-10 Z\""),
         "{out}"
     );
     let out = to_path_at(&src, "<circle").unwrap();
@@ -8920,22 +8932,105 @@ fn curved_shapes_convert_to_exact_arcs_in_the_closed_form() {
         ellipse.contains(" d=\"M80 40 A30 20 0 0 1 50 60 A30 20 0 0 1 20 40 A30 20 0 0 1 50 20 A30 20 0 0 1 80 40 Z\""),
         "{ellipse}"
     );
-    let rounded = to_path_at(
-        &src,
-        "<rect x=\"0\" y=\"0\" width=\"20\" height=\"10\" rx=\"5\"",
-    )
-    .unwrap();
-    assert_eq!(rounded.matches(" a5,5").count(), 4, "{rounded}");
-    // 20×10 with r 5: the short sides are all arc — no zero-length edge written
+    // circular corners stay live under to_path; to_spline bakes them — 20×10
+    // with r 5: the short sides are all arc, no zero-length edge written
+    let needle = "<rect x=\"0\" y=\"0\" width=\"20\" height=\"10\" rx=\"5\"";
+    let rounded = to_path_at(&src, needle).unwrap();
     assert!(
-        rounded.contains(" h10 ") && !rounded.contains(" v0") && !rounded.contains(" v-0"),
+        rounded.contains(" x:corners=\"5\" d=\"M0,0 h20 v10 h-20 Z\""),
         "{rounded}"
     );
+    let baked = to_spline_at(&src, needle).unwrap();
+    assert_eq!(baked.matches(" C").count(), 4, "{baked}");
+    assert!(
+        baked.contains(" h10 C17.761 0 20 2.239 20 5 ")
+            && !baked.contains("corners")
+            && !baked.contains(" v0"),
+        "{baked}"
+    );
+    // elliptical corners have no live form: arcs, as the compiler draws them
     let stadium = to_path_at(&src, "<rect id=\"s\"").unwrap();
     assert_eq!(stadium.matches(" a10,5").count(), 4, "{stadium}");
     assert!(
         !stadium.contains(" h") && !stadium.contains(" v"),
         "no straight edge at all: {stadium}"
+    );
+}
+
+#[test]
+fn to_path_keeps_live_corners_as_illustrator_does_and_to_spline_expands() {
+    // Convert to path leaves a live corner live: a token radius is carried
+    // verbatim, a polygon's and a polyline's corners ride onto the path (the
+    // polyline opened), a rect's `rx` becomes `x:corners` — also when only `ry`
+    // is given, since SVG defaults each to the other; `rx ≠ ry` bakes. Expand
+    // (to_spline) spends the corners and writes Béziers only.
+    let src = format!(
+        r##"{XW}<x:theme><x:color name="r" value="8"/></x:theme><rect x="0" y="0" width="40" height="20" x:corners="var(r)"/><polygon points="0,0 40,0 20,30" x:corners="0:4"/><polyline points="0,0 40,0 40,40" x:corners="6"/><rect id="ry" x="0" y="0" width="40" height="20" ry="3"/><rect id="el" x="0" y="0" width="40" height="20" rx="3" ry="2"/></svg>"##
+    );
+    let path = |needle: &str| to_path_at(&src, needle).unwrap();
+    let spline = |needle: &str| to_spline_at(&src, needle).unwrap();
+    assert!(
+        path("<rect x").contains(r#" x:corners="var(r)" d="M0,0 h40 v20 h-40 Z""#),
+        "{}",
+        path("<rect x")
+    );
+    assert!(
+        path("<polygon").contains(r#" x:corners="0:4" d="M0,0 L40,0 L20,30 Z""#),
+        "{}",
+        path("<polygon")
+    );
+    assert!(
+        path("<polyline").contains(r#" x:corners="6" d="M0,0 L40,0 L40,40""#),
+        "{}",
+        path("<polyline")
+    );
+    assert!(
+        path(r#"<rect id="ry""#).contains(r#" x:corners="3" d="M0,0 h40 v20 h-40 Z""#),
+        "{}",
+        path(r#"<rect id="ry""#)
+    );
+    let el = path(r#"<rect id="el""#);
+    assert!(
+        el.matches(" a3,2").count() == 4 && !el.contains("corners"),
+        "{el}"
+    );
+    for needle in [
+        "<rect x",
+        "<polygon",
+        "<polyline",
+        r#"<rect id="ry""#,
+        r#"<rect id="el""#,
+    ] {
+        let s = spline(needle);
+        assert!(
+            !s.contains("corners") && !s.contains(" A") && !s.contains(" a"),
+            "{s}"
+        );
+    }
+    // the token resolves when baked: r 8 → the handles κ·8 = 4.418 from the corner
+    assert!(
+        spline("<rect x").contains(" C36.418 0 40 3.582 40 8 "),
+        "{}",
+        spline("<rect x")
+    );
+    // the replaced document draws the same: the live form compiles to the
+    // rounding the rect had
+    let doc = src.replace(
+        r##"<rect x="0" y="0" width="40" height="20" x:corners="var(r)"/>"##,
+        &path("<rect x"),
+    );
+    let first_path = |out: String| {
+        out.split("<path")
+            .nth(1)
+            .unwrap()
+            .split("/>")
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        first_path(compile_test(&doc)),
+        first_path(compile_test(&src))
     );
 }
 
@@ -9111,14 +9206,22 @@ fn to_spline_is_to_path_with_its_arcs_as_cubics() {
         "{rounded}"
     );
     assert_eq!(rounded.matches(" C").count(), 4, "{rounded}");
+    // the circle has no live form, so there to_spline is exactly to_path's
+    // arcs as cubics; the rounded rect's to_path keeps its corners live instead
     assert_eq!(
-        super::spline::markup_to_spline(&path("<rect").unwrap()),
-        rounded
+        super::spline::markup_to_spline(&path("<circle").unwrap()),
+        circle
     );
-    // nothing to expand: the same markup as to_path (a chamfer has no arcs)
+    assert!(path("<rect").unwrap().contains(r#"x:corners="1""#));
+    // a chamfer bakes to lines alone while to_path keeps it live
     let chamfer = spline(r#"<rect x="0""#).unwrap();
-    assert_eq!(chamfer, path(r#"<rect x="0""#).unwrap());
-    assert!(chamfer.contains("M10 0 L90 0 L100 10"), "{chamfer}");
+    assert_eq!(
+        chamfer,
+        r#"<path d="M10 0 L90 0 L100 10 L100 40 L90 50 L10 50 L0 40 L0 10 Z"/>"#
+    );
+    assert!(path(r#"<rect x="0""#)
+        .unwrap()
+        .contains(r#"x:corner-style="chamfer""#));
     // an `id` is not a `d`
     assert!(circle.contains(r#"id="c""#));
 }
@@ -9494,11 +9597,12 @@ fn the_corners_query_reports_a_shared_edge_as_clamped() {
 }
 
 #[test]
-fn corners_reach_geometry_consumers_and_bake_on_conversion() {
+fn corners_reach_geometry_consumers_and_stay_live_on_conversion() {
     // a boolean over a cornered rect sees the rounding; to_path returns the
-    // rounded path with the corner attributes spent and the rest kept
+    // sharp path with its corners still live (§5.4) and the rest kept, and
+    // to_spline bakes them
     let src = format!(
-        r##"{XW}<rect id="r" x:label="Card" x="0" y="0" width="100" height="50" x:corners="10" fill="var(accent)"/><x:boolean op="union"><use href="#r"/></x:boolean></svg>"##
+        r##"{XW}<rect id="r" x:label="Card" x="0" y="0" width="100" height="50" x:corners="10" x:corner-style="chamfer" fill="var(accent)"/><x:boolean op="union"><use href="#r"/></x:boolean></svg>"##
     );
     let markup = to_path_at(&src, "<rect").unwrap();
     assert!(
@@ -9506,10 +9610,16 @@ fn corners_reach_geometry_consumers_and_bake_on_conversion() {
         "{markup}"
     );
     assert!(
-        markup.contains(" A10 10 0 0 1 ") && !markup.contains("corners"),
+        markup.contains(r##" x:corners="10" x:corner-style="chamfer" d="M0,0 h100 v50 h-100 Z""##),
         "{markup}"
     );
     assert!(markup.contains(r##"fill="var(accent)""##), "{markup}");
+    let baked = to_spline_at(&src, "<rect").unwrap();
+    assert!(
+        baked.contains(r##" d="M10 0 L90 0 L100 10 L100 40 L90 50 L10 50 L0 40 L0 10 Z""##)
+            && !baked.contains("corner"),
+        "{baked}"
+    );
     let out = compile_test(&src);
     // the union of the rounded rect: its flattened outline has no sharp corner at the origin
     assert!(!out.contains("M0,0") || out.contains("A10"), "{out}");

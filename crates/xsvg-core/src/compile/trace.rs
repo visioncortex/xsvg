@@ -142,23 +142,49 @@ pub(super) fn carried_attrs(node: roxmltree::Node, with_transform: bool) -> Stri
 }
 
 /// A basic shape as the `<path>` with the same attributes, its geometry as the
-/// compiler draws it: a circle or ellipse as four quarter arcs, a rounded rect
-/// as edges and corner arcs, its `x:corners` applied and spent.
+/// compiler draws it: a circle or ellipse as four quarter arcs. Corners stay
+/// live under `to_path` (`Ctx::live_corners`) — a `<path>` carries `x:corners`
+/// natively, so there is nothing to spend: the shape's `x:corners` and
+/// `x:corner-style` come along over its sharp geometry, and a `<rect rx>` with
+/// circular corners becomes the sharp rect plus `x:corners="rx"`, the widget
+/// still live on the result, the render the same (§5.4). Elliptical corners
+/// (`rx ≠ ry`) have no live form and bake to arcs. `to_spline` bakes everything.
 pub(super) fn emit_shape_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
-    let Some(d) = shape_to_path_d(node, ctx) else {
+    let live = ctx.live_corners.get();
+    let mut corners_attr: Option<String> = None;
+    let d = if live && corner_spec(node, ctx.theme).is_some() {
+        cornered_base_d(node)
+    } else if live && node.tag_name().name() == "rect" {
+        match rect_live_corners(node) {
+            Some((d, r)) => {
+                corners_attr = Some(r);
+                Some(d)
+            }
+            None => shape_to_path_d(node, ctx),
+        }
+    } else {
+        shape_to_path_d(node, ctx)
+    };
+    let Some(d) = d else {
         return false;
     };
     out.push_str("<path");
     copy_attrs(node, out, shape_geometry_attrs(node.tag_name().name()), ctx);
-    // the editor's own attributes, which copy_attrs consumes
-    for a in node
-        .attributes()
-        .filter(|a| a.namespace() == Some(XSVG_NS) && !SPENT_X.contains(&a.name()))
-    {
+    // the editor's own attributes, which copy_attrs consumes; the corners too
+    // when they stay live
+    let kept_live = |name: &str| live && matches!(name, "corners" | "corner-style");
+    for a in node.attributes().filter(|a| {
+        a.namespace() == Some(XSVG_NS) && (!SPENT_X.contains(&a.name()) || kept_live(a.name()))
+    }) {
         out.push_str(" x:");
         out.push_str(a.name());
         out.push_str("=\"");
         push_escaped(out, a.value(), true);
+        out.push('"');
+    }
+    if let Some(r) = corners_attr {
+        out.push_str(" x:corners=\"");
+        push_escaped(out, &r, true);
         out.push('"');
     }
     out.push_str(" d=\"");

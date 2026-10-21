@@ -350,6 +350,7 @@ impl<'a> Parsed<'a> {
         offset: usize,
         backend: &Backend,
         quality: QualityProfile,
+        bake_corners: bool,
     ) -> Result<String, super::ToPathError> {
         let node = self
             .element_at(offset)
@@ -370,6 +371,7 @@ impl<'a> Parsed<'a> {
         let ctx = Ctx::new(backend, quality, false, "", self);
         ctx.force_outline.set(true);
         ctx.to_path.set(true);
+        ctx.live_corners.set(!bake_corners);
         *ctx.to_path_carry.borrow_mut() = Some((offset, super::carried_attrs(node, false)));
         let mut out = String::new();
         if text {
@@ -802,15 +804,16 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// [`super::to_path_impl`].
     pub fn to_path(&self, offset: usize) -> Result<String, super::ToPathError> {
         self.parsed()
-            .to_path(offset, &self.platform.backend(), self.quality)
+            .to_path(offset, &self.platform.backend(), self.quality, false)
     }
 
-    /// Convert to spline (docs/Incremental.md §11): [`Self::to_path`] with every
-    /// arc expanded to cubic Béziers — a quarter turn per cubic at most, so a
-    /// circle is four anchors — for an editor whose paths are Béziers only. The
-    /// same answer as [`super::to_spline_impl`].
+    /// Convert to spline (docs/Incremental.md §11): [`Self::to_path`] with the
+    /// corners baked and every arc expanded to cubic Béziers — a quarter turn
+    /// per cubic at most, so a circle is four anchors — for an editor whose
+    /// paths are Béziers only. The same answer as [`super::to_spline_impl`].
     pub fn to_spline(&self, offset: usize) -> Result<String, super::ToPathError> {
-        self.to_path(offset)
+        self.parsed()
+            .to_path(offset, &self.platform.backend(), self.quality, true)
             .map(|m| super::spline::markup_to_spline(&m))
     }
 
