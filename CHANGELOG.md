@@ -32,8 +32,9 @@ partial one.
   bake to arcs. `to_spline` is the expand: corners baked, every arc as cubic Béziers — at most a
   quarter turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic, so a circle is four anchors at
   its extremes and a rounded corner one cubic; everything that is not an arc passes through byte
-  for byte. `arcs_to_cubics(d)` is public for any path data; the CLI has `--to-spline OFFSET`
-  beside `--to-path`.
+  for byte. Both accept a `<path>`: `to_path` hands it back as authored (corners live), `to_spline`
+  bakes its corners and arcs. `arcs_to_cubics(d)` is public for any path data; the CLI has
+  `--to-spline OFFSET` beside `--to-path`.
 
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or

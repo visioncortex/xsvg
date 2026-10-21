@@ -361,7 +361,7 @@ impl<'a> Parsed<'a> {
         let shape = ns == Some(super::SVG_NS)
             && matches!(
                 name,
-                "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
+                "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "path"
             );
         if !text && !shape {
             return Err(super::ToPathError::limit(format!(

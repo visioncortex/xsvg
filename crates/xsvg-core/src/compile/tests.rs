@@ -9034,6 +9034,32 @@ fn to_path_keeps_live_corners_as_illustrator_does_and_to_spline_expands() {
     );
 }
 
+#[test]
+fn a_path_converts_to_itself_under_to_path_and_bakes_under_to_spline() {
+    // a <path> is already a path: to_path hands it back with its corners live
+    // and its `d` as authored (a mixed selection's Convert to path need not skip
+    // it); to_spline bakes its corners and expands its arcs like any shape's
+    let src = format!(
+        r##"{XW}<path id="p" d="M0 0 L100 0 L100 50 L0 50 Z" x:corners="10" fill="#123"/><path d="M0 0 A10 10 0 0 1 10 10 l5 0"/></svg>"##
+    );
+    assert_eq!(
+        to_path_at(&src, r#"<path id="p""#).unwrap(),
+        r##"<path id="p" fill="#123" x:corners="10" d="M0 0 L100 0 L100 50 L0 50 Z"/>"##
+    );
+    assert_eq!(
+        to_spline_at(&src, r#"<path id="p""#).unwrap(),
+        r##"<path id="p" fill="#123" d="M10 0 L90 0 C95.523 0 100 4.477 100 10 L100 40 C100 45.523 95.523 50 90 50 L10 50 C4.477 50 0 45.523 0 40 L0 10 C0 4.477 4.477 0 10 0 Z"/>"##
+    );
+    assert_eq!(
+        to_path_at(&src, r#"<path d="M0 0 A"#).unwrap(),
+        r##"<path d="M0 0 A10 10 0 0 1 10 10 l5 0"/>"##
+    );
+    assert_eq!(
+        to_spline_at(&src, r#"<path d="M0 0 A"#).unwrap(),
+        r##"<path d="M0 0 C5.523 0 10 4.477 10 10 l5 0"/>"##
+    );
+}
+
 // ---- to_spline (spline.rs; Incremental.md §11) ------------------------------------
 
 #[test]

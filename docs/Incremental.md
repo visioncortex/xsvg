@@ -520,7 +520,9 @@ geometry (a polyline opened), and a `<rect rx>` with circular corners becomes th
 render is the same (§5.4). What has no live form is the compiler's arcs: a circle or an ellipse as
 four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four extremes; a rect
 with elliptical corners (`rx ≠ ry`) as its edges and one arc per corner, an edge the corners consume
-left out. Arcs stay arcs in `to_path`. For an editor whose path model is Béziers only,
+left out. A `<path>` converts to itself — its `d` as authored, its corners live — so a mixed
+selection's Convert to path need not skip it. Arcs stay arcs in `to_path`. For an editor whose
+path model is Béziers only,
 **`to_spline(offset)`** is *expand*: the corners baked, then every `A` as cubics — at most a quarter
 turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic (0.5523 for a quarter circle), so a
 circle is four anchors at its extremes and a rounded corner one cubic, never a flattening;
@@ -530,7 +532,7 @@ path data (a compiled corner path, say). `Err(ToPathError)` is the
 answer when nothing half-converts: `family`/`weight`/`style` name the
 font the outliner had no bytes for ("Inter 700 italic has no font file to trace"), else `reason`
 names the limit (`follow` and `stair` on a path, a per-glyph list or `rotate` on point text, an
-element that is not text or a basic shape, a text with no characters). The compiled output of
+element that is not text, a basic shape or a path, a text with no characters). The compiled output of
 the document is byte-identical with or without this call.
 
 Coordinates: the node compiles alone, so the markup is in its parent's user space, exactly what
