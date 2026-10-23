@@ -166,9 +166,35 @@ pub fn boolean_svg_paths_curved(
         return Ok(None);
     }
     let inputs: Vec<kurbo::PathSeg> = paths.iter().flat_map(|(p, _)| p.segments()).collect();
-    let result = sweep(&paths, op)?;
+    let result = sweep_normalized(&paths, op)?;
     let snapped = prune_thin(&snap_to_inputs(&result, &inputs));
     Ok(Some(serialize_curves(&snapped)))
+}
+
+/// The sweep in a canonical frame: the operands' joint extent moved to the
+/// origin and scaled to about a thousand units, the result mapped back. The
+/// engine's accuracy is absolute (its epsilon floors at 1e-6), so a tiny
+/// drawing would be swept coarsely and a far-off one at the mercy of its
+/// magnitude; in this frame every drawing is swept alike.
+fn sweep_normalized(paths: &[(BezPath, bool)], op: BoolOp) -> Result<BezPath, String> {
+    use kurbo::{Affine, Shape};
+    let mut bb: Option<Rect> = None;
+    for (p, _) in paths {
+        let b = p.bounding_box();
+        bb = Some(bb.map_or(b, |a| a.union(b)));
+    }
+    let bb = bb.unwrap_or(Rect::ZERO);
+    let span = bb.width().max(bb.height());
+    if !span.is_finite() || span <= 0.0 {
+        return sweep(paths, op);
+    }
+    let to_frame = Affine::scale(1024.0 / span) * Affine::translate((-bb.x0, -bb.y0));
+    let framed: Vec<(BezPath, bool)> = paths
+        .iter()
+        .map(|(p, eo)| (to_frame * p.clone(), *eo))
+        .collect();
+    let result = sweep(&framed, op)?;
+    Ok(to_frame.inverse() * result)
 }
 
 /// The curve-preserving result when it agrees with the flattened one, else the
@@ -184,7 +210,12 @@ pub fn boolean_svg_paths_checked(
     tolerance: f64,
 ) -> Option<String> {
     let flat = boolean_svg_paths(operands, op, tolerance);
-    let Ok(Some(curved)) = boolean_svg_paths_curved(operands, op) else {
+    // an engine panic is a declined input too, on hosts that unwind (a wasm
+    // host aborts on any panic; the fuzz keeps the rate down there)
+    let curved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        boolean_svg_paths_curved(operands, op)
+    }));
+    let Ok(Ok(Some(curved))) = curved else {
         return flat;
     };
     match &flat {
@@ -248,7 +279,7 @@ pub fn boolean_svg_paths_curved_stages(
         return Ok(None);
     }
     let inputs: Vec<kurbo::PathSeg> = paths.iter().flat_map(|(p, _)| p.segments()).collect();
-    let raw = sweep(&paths, op)?;
+    let raw = sweep_normalized(&paths, op)?;
     let snapped = snap_to_inputs(&raw, &inputs);
     let pruned = prune_thin(&snapped);
     Ok(Some([
@@ -273,7 +304,7 @@ pub fn boolean_svg_paths_curved_raw(
     if paths.is_empty() {
         return Ok(None);
     }
-    Ok(Some(serialize_curves(&sweep(&paths, op)?)))
+    Ok(Some(serialize_curves(&sweep_normalized(&paths, op)?)))
 }
 
 /// A contour's length. A degenerate quadratic (its control point on the
