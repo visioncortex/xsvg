@@ -580,11 +580,21 @@ fn snap_to_inputs(path: &BezPath, inputs: &[kurbo::PathSeg]) -> BezPath {
             }
         }
         if let Some(first) = pieces.first() {
-            out.move_to(first.start());
+            let mut snapped = BezPath::new();
+            snapped.move_to(first.start());
             for p in &pieces {
-                out.push(p.as_path_el());
+                snapped.push(p.as_path_el());
             }
-            out.close_path();
+            snapped.close_path();
+            // the snapped contour must be the same region: a run matched to
+            // the wrong input (a copy's curve within epsilon) would not be
+            let (a0, a1) = (sub.area(), snapped.area());
+            let same = (a0 - a1).abs() <= 1e-3 * a0.abs().max(a1.abs()) + 1e-9;
+            if same {
+                out.extend(snapped.elements().iter().copied());
+            } else {
+                out.extend(sub.elements().iter().copied());
+            }
         }
         *sub = BezPath::new();
     };
