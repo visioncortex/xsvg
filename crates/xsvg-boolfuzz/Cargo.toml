@@ -1,0 +1,17 @@
+# The curve-preserving boolean engine under a seeded, panic-tolerant fuzz
+# (docs/Incremental.md §11): synthetic operand pairs, the same op through the
+# flattened algebra and in point-sampled space, every disagreement recorded with
+# its seed. Not published; `cargo run --release -p xsvg-boolfuzz -- --help`.
+[package]
+name = "xsvg-boolfuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+xsvg-core = { path = "../xsvg-core" }
+kurbo = "0.13.1"
+
+[[bin]]
+name = "boolfuzz"
+path = "src/main.rs"

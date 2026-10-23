@@ -14,6 +14,7 @@ members = [
     "crates/xsvg-schema",
     "crates/xsvg-schema-derive",
     "crates/ext/clipart",
+    "crates/xsvg-boolfuzz",
 ]
 # The fuzz targets are their own workspace (they link libFuzzer and need nightly);
 # see crates/xsvg-core/fuzz/Cargo.toml.

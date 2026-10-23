@@ -2,6 +2,7 @@
 //! the shared helpers, `Ctx`, and re-exported primitives.
 
 use super::*;
+use crate::boolean::boolean_svg_paths_curved;
 
 /// `<x:offset in="#id" distance="d" join="round|miter|bevel">` (§7.7): grow
 /// (positive `distance`) or shrink (negative) the referenced region by a
@@ -257,6 +258,31 @@ pub(super) fn has_tag(s: &str, tag: &str) -> bool {
 /// ignored), a legitimately empty result emits an empty `<g>`, and an unknown
 /// `op` degrades behind a marker with the children un-operated.
 pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let (markups, markers, op) = boolean_operands(node, ctx);
+    emit_boolean_result(node, out, ctx, &markups, &markers, op, false);
+}
+
+/// Convert to path for `<x:boolean>` (Incremental.md §11): the same operands,
+/// combined on their curves ([`boolean_svg_paths_curved`]) so the result keeps
+/// every Bézier the operation did not cut, written as one `<path>` with the
+/// element's other attributes; `op` and the children are spent. Falls back to
+/// the flattened algebra if the curve engine declines the input, so the
+/// conversion never fails for a document the compiler renders.
+pub(super) fn emit_boolean_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
+    let (markups, markers, op) = boolean_operands(node, ctx);
+    let before = out.len();
+    emit_boolean_result(node, out, ctx, &markups, &markers, op, true);
+    out[before..].contains("<path")
+}
+
+/// The operands of an `<x:boolean>`: each element child lowered to path
+/// markup (a `<use>` by reference), a stroke's ink joined, the markers for
+/// what was skipped, and the op (`None` for an unknown one).
+#[allow(clippy::type_complexity)]
+fn boolean_operands(
+    node: roxmltree::Node,
+    ctx: &Ctx,
+) -> (Vec<(String, bool)>, String, Option<BoolOp>) {
     // operands are harvested into one region; no caret stands on them
     let _stops = ctx.suspend_stops();
     // lower each child to path markup; one child = one operand. A <use href>
@@ -339,18 +365,34 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         (None, None) => BoolOp::parse("union"),
         (None, Some(_)) => None,
     };
+    (markups, markers, op)
+}
+
+/// The `<x:boolean>` element's output for its harvested operands: the combined
+/// `<path>`, an empty `<g>` for an empty result, or the children un-combined
+/// behind a marker for an unknown op. `curved` is convert-to-path: the curve
+/// engine first, the flattened algebra if it declines.
+fn emit_boolean_result(
+    node: roxmltree::Node,
+    out: &mut String,
+    ctx: &Ctx,
+    markups: &[(String, bool)],
+    markers: &str,
+    op: Option<BoolOp>,
+    curved: bool,
+) {
     let Some(op) = op else {
         // unknown op → children un-operated behind a marker (never silent)
         out.push_str(&format!(
             "<!-- xsvg: <x:boolean op=\"{}\"> unknown op — children un-combined -->",
             node.attribute("op").unwrap_or("")
         ));
-        out.push_str(&markers);
+        out.push_str(markers);
         out.push_str("<g");
         copy_attrs(node, out, &["op"], ctx);
         out.push_str(&pos_attr(node, ctx));
         out.push('>');
-        for (m, _) in &markups {
+        for (m, _) in markups {
             out.push_str(m);
         }
         out.push_str("</g>");
@@ -369,11 +411,29 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .filter(|o| !o.paths.is_empty())
         .collect();
 
-    out.push_str(&markers);
-    match boolean_svg_paths(&operands, op, ctx.quality.tolerance()) {
+    out.push_str(markers);
+    let result = if curved {
+        match boolean_svg_paths_curved(&operands, op) {
+            Ok(r) => r,
+            Err(_) => boolean_svg_paths(&operands, op, ctx.quality.tolerance()),
+        }
+    } else {
+        boolean_svg_paths(&operands, op, ctx.quality.tolerance())
+    };
+    match result {
         Some(d) if !d.is_empty() => {
             out.push_str("<path");
             copy_attrs(node, out, &["op"], ctx);
+            if curved {
+                // the editor's own attributes, which copy_attrs consumes
+                for a in node.attributes().filter(|a| a.namespace() == Some(XSVG_NS)) {
+                    out.push_str(" x:");
+                    out.push_str(a.name());
+                    out.push_str("=\"");
+                    push_escaped(out, a.value(), true);
+                    out.push('"');
+                }
+            }
             out.push_str(&pos_attr(node, ctx));
             out.push_str(&format!(" d=\"{d}\"/>"));
         }

@@ -363,7 +363,8 @@ impl<'a> Parsed<'a> {
                 name,
                 "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "path"
             );
-        if !text && !shape {
+        let boolean = ns == Some(super::XSVG_NS) && name == "boolean";
+        if !text && !shape && !boolean {
             return Err(super::ToPathError::limit(format!(
                 "<{name}> is not convertible"
             )));
@@ -376,6 +377,12 @@ impl<'a> Parsed<'a> {
         let mut out = String::new();
         if text {
             serialize(node, &mut out, false, &ctx);
+        } else if boolean {
+            if !super::emit_boolean_as_path(node, &mut out, &ctx) {
+                return Err(super::ToPathError::limit(
+                    "<x:boolean> has no geometry to combine",
+                ));
+            }
         } else if !super::emit_shape_as_path(node, &mut out, &ctx) {
             return Err(super::ToPathError::limit(format!(
                 "<{name}> has no geometry"

@@ -25,6 +25,16 @@ partial one.
 
 ### Added
 
+- **Convert to path for `<x:boolean>`, on the curves** (Incremental.md §11). `to_path` / `to_spline`
+  on an `<x:boolean>` write the one `<path>` of its result computed by
+  [linesweeper](https://crates.io/crates/linesweeper) over the operands' Béziers — one n-ary sweep,
+  each operand under its own fill rule — so every segment the operation does not cut comes back
+  as authored and a cut one as exact sub-curves; holes wind opposite to outers, sub-precision
+  residue is dropped, and the flattened algebra is the fallback if the engine declines. The
+  compiled render is unchanged (still the integer-exact flattened algebra). `arcs_to_cubics`
+  moved to `xsvg_core::spline`, feature-free. New workspace crate `xsvg-boolfuzz`: a seeded,
+  panic-tolerant fuzz of the curve algebra against the flattened one and the sampled truth.
+
 - **`to_path` keeps corners live; `to_spline(offset)` expands** (Incremental.md §11). Convert to
   path now leaves a live corner live, as Illustrator does: a shape's `x:corners` rides onto its
   sharp path, and a `<rect rx>` with circular corners becomes the sharp rect plus `x:corners="rx"`,

@@ -9060,6 +9060,91 @@ fn a_path_converts_to_itself_under_to_path_and_bakes_under_to_spline() {
     );
 }
 
+#[test]
+fn an_x_boolean_converts_to_its_result_on_the_curves() {
+    // the union of a rect and a circle: the circle's untouched quarter cubics
+    // come back verbatim (κ·30 = 16.569), the cut ones as exact sub-curves,
+    // the rect's edges as lines; `fill` and the editor's `x:label` kept, `op`
+    // and the children spent; to_spline is the same markup (no arcs to expand)
+    let src = format!(
+        r##"{XW}<x:boolean id="b" op="union" fill="#48a" x:label="Badge"><rect x="10" y="10" width="100" height="50"/><circle cx="110" cy="35" r="30"/></x:boolean></svg>"##
+    );
+    let out = to_path_at(&src, "<x:boolean").unwrap();
+    assert_eq!(
+        out,
+        r##"<path id="b" fill="#48a" x:label="Badge" d="M93.411 10 C98.162 6.841 103.866 5 110 5 C126.569 5 140 18.431 140 35 C140 51.569 126.569 65 110 65 C103.866 65 98.162 63.159 93.411 60 L10 60 L10 10 L93.411 10 Z"/>"##
+    );
+    assert_eq!(to_spline_at(&src, "<x:boolean").unwrap(), out);
+    // the compiled render is unchanged: still the flattened algebra
+    let compiled = compile_test(&src);
+    assert!(
+        compiled.contains("<path id=\"b\" fill=\"#48a\" d=\"M10,60l0-50 "),
+        "{compiled}"
+    );
+    // a legitimately empty result has nothing to write
+    let empty = format!(
+        r##"{XW}<x:boolean op="intersect"><rect x="0" y="0" width="10" height="10"/><rect x="50" y="50" width="10" height="10"/></x:boolean></svg>"##
+    );
+    assert!(to_path_at(&empty, "<x:boolean").is_err());
+}
+
+#[test]
+fn an_x_boolean_converted_draws_what_the_compiler_draws() {
+    // subtract with a hole, a text operand (outlined by the box outliner), a
+    // evenodd operand, a stroked operand whose ink joins: the converted path
+    // and the compiled (flattened) path agree at every sampled point but a
+    // flattening tolerance's worth along the boundary
+    let src = format!(
+        r##"{XW}<x:boolean op="subtract" fill="#000"><rect x="0" y="0" width="120" height="80" rx="12"/><circle cx="60" cy="40" r="20"/><x:textbox x="80" y="50" width="40" height="30" font-size="12">Hi</x:textbox><polygon points="0,0 40,40 40,0 0,40" fill-rule="evenodd"/><rect x="100" y="0" width="10" height="10" stroke="#000" stroke-width="4"/></x:boolean></svg>"##
+    );
+    let converted = to_path_at(&src, "<x:boolean").unwrap();
+    assert!(
+        converted.starts_with("<path fill=\"#000\" d=\"") && !converted.contains("<text"),
+        "{converted}"
+    );
+    let d_of = |markup: &str| {
+        markup
+            .split(" d=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    let curved = crate::kurbo::BezPath::from_svg(&d_of(&converted)).unwrap();
+    let flat = crate::kurbo::BezPath::from_svg(&d_of(&compile_test(&src))).unwrap();
+    use crate::kurbo::{Point, Shape};
+    let bb = flat.bounding_box().union(curved.bounding_box());
+    let (n, mut differ) = (96, 0);
+    for j in 0..n {
+        for i in 0..n {
+            let p = Point::new(
+                bb.x0 + (i as f64 + 0.37) * bb.width() / n as f64,
+                bb.y0 + (j as f64 + 0.61) * bb.height() / n as f64,
+            );
+            if (curved.winding(p) != 0) != (flat.winding(p) != 0) {
+                differ += 1;
+            }
+        }
+    }
+    assert!(
+        differ <= n * n / 100,
+        "{differ} of {} samples differ\n{converted}",
+        n * n
+    );
+    // the hole is there, wound opposite to the outer
+    assert!(
+        curved
+            .elements()
+            .iter()
+            .filter(|e| matches!(e, crate::kurbo::PathEl::MoveTo(_)))
+            .count()
+            >= 2,
+        "{converted}"
+    );
+}
+
 // ---- to_spline (spline.rs; Incremental.md §11) ------------------------------------
 
 #[test]

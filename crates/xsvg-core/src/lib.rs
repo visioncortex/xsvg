@@ -9,6 +9,7 @@
 pub mod boolean;
 pub mod filter;
 pub mod offset;
+pub mod spline;
 pub mod text;
 pub mod warp;
 

@@ -521,7 +521,17 @@ render is the same (§5.4). What has no live form is the compiler's arcs: a circ
 four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four extremes; a rect
 with elliptical corners (`rx ≠ ry`) as its edges and one arc per corner, an edge the corners consume
 left out. A `<path>` converts to itself — its `d` as authored, its corners live — so a mixed
-selection's Convert to path need not skip it. Arcs stay arcs in `to_path`. For an editor whose
+selection's Convert to path need not skip it. An **`<x:boolean>`** converts to the one `<path>` of
+its result with the element's other attributes kept, `op` and the children spent — computed on the
+operands' curves, not on the flattened polygons the compiler renders from: every Bézier the
+operation does not cut comes back as authored (a circle's handles to the bit), a cut one as exact
+sub-curves split at the intersection, holes wound opposite to their outers, nothing below the
+output precision. The engine is [linesweeper](https://crates.io/crates/linesweeper) in one n-ary
+sweep over the raw operands (each under its own fill rule); if it declines an input the
+conversion falls back to the flattened algebra, so it never fails for a document the compiler
+renders. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
+and against the truth sampled from the operands, every disagreement logged with the seed that
+reproduces it. Arcs stay arcs in `to_path`. For an editor whose
 path model is Béziers only,
 **`to_spline(offset)`** is *expand*: the corners baked, then every `A` as cubics — at most a quarter
 turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic (0.5523 for a quarter circle), so a

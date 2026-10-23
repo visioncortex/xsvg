@@ -50,6 +50,9 @@ const cases = [
   ["box-glyph-scale", (o) => `<x:textbox x="10" y="10" width="380" height="60" font-family="Arimo" font-size="24" glyph-x-scale="1.5"${o}>Wide glyphs here</x:textbox>`],
   // curved shapes convert to cubics: the editor's leg only (nothing to outline)
   ["shapes-curved", (o) => `<rect x="20" y="20" width="160" height="90" rx="22" fill="#48a"${o && ""}/><ellipse cx="300" cy="65" rx="80" ry="40" fill="#e11"/><circle cx="100" cy="160" r="30" fill="#0a0"/><rect x="200" y="130" width="60" height="60" rx="30" fill="#06c" stroke="#000" stroke-width="3"/>`],
+  // an x:boolean converts on its curves (Incremental.md §11): the replaced document renders the same
+  ["shapes-boolean", (o) => `<x:boolean op="union" fill="#48a"${o}><rect x="20" y="20" width="200" height="120" rx="24"/><circle cx="230" cy="80" r="60"/></x:boolean>`],
+  ["shapes-boolean-holes", (o) => `<x:boolean op="subtract" fill="#262"${o}><rect x="20" y="20" width="360" height="160" rx="30"/><circle cx="120" cy="100" r="50"/><circle cx="280" cy="100" r="50"/><polygon points="180,40 220,160 160,160 240,40"/></x:boolean>`],
   ["box-paragraphs", (o) => `<x:textbox x="10" y="10" width="380" height="180" font-family="Arimo" font-size="20"${o}><x:p>First paragraph here.</x:p><x:p font-size="26" fill="#06c">Second, larger.</x:p><x:list list="number"><x:li>one item</x:li><x:li indent="1">nested item</x:li></x:list></x:textbox>`],
   ["textarea", (o) => `<textArea x="10" y="10" width="380" font-family="Arimo" font-size="22" text-align="end"${o.replace('outline=', 'x:outline=')}>Area text, right aligned, wrapping to another line</textArea>`],
   ["point-start", (o) => `<text x="20" y="60" font-family="Arimo" font-size="30" fill="#123"${o.replace('outline=', 'x:outline=')}>Point text</text>`],
@@ -61,7 +64,7 @@ const cases = [
  *  what an editor's Convert to path writes — converted last to first so earlier
  *  offsets hold. */
 function convertAll(source, name) {
-  const starts = [...source.matchAll(/<(x:textbox|textArea|text|rect|ellipse|circle)[\s>]/g)].map((m) => m.index).reverse();
+  const starts = [...source.matchAll(/<(x:boolean|x:textbox|textArea|text|rect|ellipse|circle)[\s>]/g)].map((m) => m.index).reverse();
   let doc = source;
   for (const [i, at] of starts.entries()) {
     const file = join(tmp, `${name}-src-${i}.xsvg`);
