@@ -532,7 +532,7 @@ host swaps it into `to_path`'s markup. `xsvg-cli --to-path` does that in-process
 runs the crate as its own wasm module in a Worker with a memory maximum and a timeout, because its
 engine can panic (about once in three million cases) and the core must not be the thing that
 aborts. The crate's README has the engine's measured failure modes and what is done around it;
-`xsvg-path-ops-fuzz` is the seeded, memory-jailed fuzz that measures them. Arcs stay arcs in `to_path`. For an editor whose
+its fuzz harness (`examples/fuzz.rs`, FUZZ.md) is the seeded, memory-jailed campaign that measures them. Arcs stay arcs in `to_path`. For an editor whose
 path model is Béziers only,
 **`to_spline(offset)`** is *expand*: the corners baked, then every `A` as cubics — at most a quarter
 turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic (0.5523 for a quarter circle), so a

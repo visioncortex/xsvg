@@ -10,3 +10,8 @@ description = "Boolean operations on SVG paths with the curves kept — the alge
 [dependencies]
 kurbo = "0.13.1"
 linesweeper = "0.5.0"
+
+# the fuzz harness (`examples/fuzz.rs`, FUZZ.md) measures the engine against
+# the compiler's flattened algebra and needs nothing of the core at run time
+[dev-dependencies]
+xsvg-core = { path = "../xsvg-core", version = "0.2.2" }

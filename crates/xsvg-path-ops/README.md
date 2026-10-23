@@ -57,7 +57,7 @@ in-process; a browser host should do it in its own module (below).
 The engine is [linesweeper](https://crates.io/crates/linesweeper) 0.5, a
 robust Bentley–Ottmann sweep over Bézier paths (the one Graphite adopted in
 2026). A seeded fuzz of three million synthetic cases
-(`xsvg-path-ops-fuzz`) shaped everything else here:
+(`examples/fuzz.rs`, [FUZZ.md](FUZZ.md)) shaped everything else here:
 
 1. **One n-ary sweep over the raw operands**, each read under its own fill
    rule in the winding predicate. Folding operands pairwise feeds the engine
@@ -93,7 +93,7 @@ robust Bentley–Ottmann sweep over Bézier paths (the one Graphite adopted in
 ## What the engine still gets wrong
 
 Measured on the final build over 3.06 million seeded cases, every flagged seed
-replayed; `xsvg-path-ops-fuzz/README.md` has the account.
+replayed; [FUZZ.md](FUZZ.md) has the account.
 
 - **Disagreement with the sampled truth in 0.02% of cases**, all engine-side
   (its raw output already wrong): mostly operands that are near-copies of one
@@ -106,7 +106,7 @@ replayed; `xsvg-path-ops-fuzz/README.md` has the account.
   circle nested inside with small clearance, a hexagon crossing both; it
   survives any translation, rotation or scaling and has a basin about a unit
   wide (`linesweeper` `entry_at`, "comparison range ends at or before y").
-  The reproducer is in `xsvg-path-ops-fuzz/linesweeper-findings.md`. A native
+  The reproducer is in [linesweeper-findings.md](linesweeper-findings.md). A native
   host catches it in `combine_checked`; **a wasm host aborts**.
 - **Memory storms** on hair-nudged copies: declined by the pre-check; none
   reached the engine in 192 500 jailed cases after it.
@@ -124,8 +124,8 @@ way; it never links the engine.
 ## Running the fuzz
 
 ```
-cargo run --release -p xsvg-path-ops-fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
-cargo run --release -p xsvg-path-ops-fuzz -- repro --seed 9123382 --subset 0,2,3
+cargo run --release -p xsvg-path-ops --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
+cargo run --release -p xsvg-path-ops --example fuzz -- repro --seed 9123382 --subset 0,2,3
 ```
 
 The harness runs cases in child processes under a counting allocator that

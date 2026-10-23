@@ -658,15 +658,7 @@ version = "0.2.2"
 dependencies = [
  "kurbo",
  "linesweeper",
-]
-
-[[package]]
-name = "xsvg-path-ops-fuzz"
-version = "0.0.0"
-dependencies = [
- "kurbo",
  "xsvg-core",
- "xsvg-path-ops",
 ]
 
 [[package]]

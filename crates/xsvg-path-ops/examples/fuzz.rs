@@ -1,10 +1,10 @@
-//! path-ops-fuzz: the curve-preserving boolean algebra (`xsvg_path_ops::combine`,
+//! The fuzz harness (FUZZ.md): the curve-preserving boolean algebra (`xsvg_path_ops::combine`,
 //! linesweeper) against the flattened one (`boolean_svg_paths`, i_overlay) and
 //! against the truth sampled from the operands themselves, over seeded synthetic
 //! cases. Deterministic: case `seed` is the same case on every run and machine.
 //!
-//!   path-ops-fuzz run   --seed 1 --count N --budget-secs T --out DIR   the campaign
-//!   path-ops-fuzz repro --seed S                                        one case, verbose
+//!   cargo run --release -p xsvg-path-ops --example fuzz -- run   --seed 1 --count N --budget-secs T --out DIR
+//!   cargo run --release -p xsvg-path-ops --example fuzz -- repro --seed S
 //!
 //! The campaign is a parent that runs batches of cases in child processes of
 //! itself: a panic is caught in the child and reported; a hang is killed by the
@@ -87,7 +87,7 @@ static JAIL: Jail = Jail;
 fn watchdog(secs: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(secs));
-        eprintln!("path-ops-fuzz: watchdog — no result within {secs}s, aborting");
+        eprintln!("fuzz: watchdog — no result within {secs}s, aborting");
         std::process::abort();
     });
 }
@@ -1245,6 +1245,6 @@ fn main() {
             Duration::from_secs(flag("--budget-secs", "3600").parse().unwrap()),
             &flag("--out", "target/boolfuzz"),
         ),
-        _ => eprintln!("usage: path-ops-fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
+        _ => eprintln!("usage: fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
     }
 }

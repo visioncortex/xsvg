@@ -37,8 +37,8 @@ partial one.
   gains the **`boolean_operands(offset)`** query that feeds it (operands as convert-to-path lowers
   them, the op, the flattened `d`) and keeps its `to_path` of an `<x:boolean>` on the flattened
   algebra; the CLI swaps the curve-keeping `d` in; a browser host runs the crate as its own wasm
-  module in a Worker. `arcs_to_cubics` moved to `xsvg_core::spline`, feature-free. New
-  `xsvg-path-ops-fuzz`: a seeded, memory-jailed, panic-tolerant fuzz whose first campaign
+  module in a Worker. `arcs_to_cubics` moved to `xsvg_core::spline`, feature-free. Its
+  fuzz harness (`examples/fuzz.rs`): a seeded, memory-jailed, panic-tolerant fuzz whose first campaign
   (3 million cases) shaped the passes above and left about 0.02% of cases to the engine, one
   ordinary-input panic in three million among them (the crate's README has the account).
 
