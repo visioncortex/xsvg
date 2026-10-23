@@ -14,12 +14,62 @@
 //! `DIR/progress.log`.
 
 use kurbo::{Affine, BezPath, Point, Rect, Shape};
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use xsvg_core::{boolean_svg_paths, boolean_svg_paths_curved, BoolOp, BoolOperand};
+
+/// The memory jail: every allocation is counted, and one that would take the
+/// process past the cap aborts it (SIGABRT), which the parent records as `oom`
+/// for the case in flight. A stall in the engine is an allocation storm — one
+/// probe run without this reached 90 GB and took the machine down.
+struct Jail;
+
+static USED: AtomicUsize = AtomicUsize::new(0);
+static CAP: AtomicUsize = AtomicUsize::new(1 << 30);
+
+unsafe impl GlobalAlloc for Jail {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if USED.fetch_add(layout.size(), Ordering::Relaxed) + layout.size()
+            > CAP.load(Ordering::Relaxed)
+        {
+            std::process::abort();
+        }
+        System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        USED.fetch_sub(layout.size(), Ordering::Relaxed);
+        System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        if new_size > layout.size() {
+            let grow = new_size - layout.size();
+            if USED.fetch_add(grow, Ordering::Relaxed) + grow > CAP.load(Ordering::Relaxed) {
+                std::process::abort();
+            }
+        } else {
+            USED.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+        }
+        System.realloc(ptr, layout, new_size)
+    }
+}
+
+#[global_allocator]
+static JAIL: Jail = Jail;
+
+/// A watchdog for a single probe: abort the process after `secs`, so a case
+/// run by hand can never run away either.
+fn watchdog(secs: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(secs));
+        eprintln!("boolfuzz: watchdog — no result within {secs}s, aborting");
+        std::process::abort();
+    });
+}
 
 const FLAT_TOLERANCE: f64 = 0.05;
 const CASE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -859,6 +909,10 @@ fn run(seed: u64, count: u64, budget: Duration, dir: &str) {
         let batch = BATCH.min(end - next);
         let mut child = Command::new(&exe)
             .args(["child", &next.to_string(), &batch.to_string()])
+            .args([
+                "--mem-mib",
+                &(CAP.load(Ordering::Relaxed) >> 20).to_string(),
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -918,15 +972,23 @@ fn run(seed: u64, count: u64, budget: Duration, dir: &str) {
         }
         let status = child.wait().ok();
         if let Some(seed) = in_flight {
-            // the child died mid-case without reporting (an abort, a stack overflow)
+            // the child died mid-case without reporting: the memory jail or
+            // the watchdog (SIGABRT), else a stack overflow or the like
             if status.is_none_or(|s| !s.success()) && last_done <= seed {
-                record(
-                    &mut issues,
-                    seed,
-                    "crash",
-                    &format!("child exited {status:?}"),
-                    &mut counts,
-                );
+                use std::os::unix::process::ExitStatusExt;
+                let aborted = status.and_then(|s| s.signal()) == Some(6);
+                let (kind, detail) = if aborted {
+                    (
+                        "oom",
+                        format!(
+                            "aborted at the memory cap of {} MiB",
+                            CAP.load(Ordering::Relaxed) >> 20
+                        ),
+                    )
+                } else {
+                    ("crash", format!("child exited {status:?}"))
+                };
+                record(&mut issues, seed, kind, &detail, &mut counts);
                 last_done = seed + 1;
                 done += 1;
             }
@@ -955,8 +1017,16 @@ fn run(seed: u64, count: u64, budget: Duration, dir: &str) {
 
 fn repro(seed: u64) {
     let mut case = gen_case(seed);
-    // `--subset 0,2`: only those operands, to bisect a multi-operand case
     let args: Vec<String> = std::env::args().collect();
+    // a probe runs under the watchdog: `--budget-secs` (default 60)
+    let budget = args
+        .iter()
+        .position(|a| a == "--budget-secs")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    watchdog(budget);
+    // `--subset 0,2`: only those operands, to bisect a multi-operand case
     if let Some(i) = args.iter().position(|a| a == "--subset") {
         let keep: Vec<usize> = args[i + 1]
             .split(',')
@@ -972,9 +1042,32 @@ fn repro(seed: u64) {
     let mut k = 0;
     while let Some(i) = args[k..].iter().position(|a| a == "--operand") {
         let idx: usize = args[k + i + 1].parse().unwrap();
-        case.operands[idx].0 = vec![args[k + i + 2].clone()];
+        // several paths for one operand are separated by `|`
+        case.operands[idx].0 = args[k + i + 2].split('|').map(str::to_string).collect();
         case.label = format!("{} [operand {idx} replaced]", case.label);
         k += i + 3;
+    }
+    // `--shift DX DY`, `--turn RAD`, `--scale S`: the whole case transformed
+    let mut xf = Affine::IDENTITY;
+    if let Some(i) = args.iter().position(|a| a == "--shift") {
+        xf = Affine::translate((
+            args[i + 1].parse::<f64>().unwrap(),
+            args[i + 2].parse::<f64>().unwrap(),
+        )) * xf;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--turn") {
+        xf = Affine::rotate(args[i + 1].parse::<f64>().unwrap()) * xf;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--scale") {
+        xf = Affine::scale(args[i + 1].parse::<f64>().unwrap()) * xf;
+    }
+    if xf != Affine::IDENTITY {
+        for (paths, _) in &mut case.operands {
+            for d in paths.iter_mut() {
+                *d = transformed(d, xf);
+            }
+        }
+        case.label = format!("{} [transformed]", case.label);
     }
     if let Some(i) = args.iter().position(|a| a == "--op") {
         case.op = BoolOp::parse(&args[i + 1]).expect("union|intersect|subtract|exclude");
@@ -1115,6 +1208,13 @@ fn main() {
             .and_then(|i| args.get(i + 1).cloned())
             .unwrap_or_else(|| default.to_string())
     };
+    // `--mem-mib N`: the memory jail's cap (default 1024); a child inherits it
+    if let Some(i) = args.iter().position(|a| a == "--mem-mib") {
+        CAP.store(
+            args[i + 1].parse::<usize>().unwrap() << 20,
+            Ordering::Relaxed,
+        );
+    }
     match args.get(1).map(String::as_str) {
         Some("child") => child(args[2].parse().unwrap(), args[3].parse().unwrap()),
         Some("repro") => repro(flag("--seed", "1").parse().unwrap()),
@@ -1124,6 +1224,6 @@ fn main() {
             Duration::from_secs(flag("--budget-secs", "3600").parse().unwrap()),
             &flag("--out", "target/boolfuzz"),
         ),
-        _ => eprintln!("usage: boolfuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] | repro --seed S"),
+        _ => eprintln!("usage: boolfuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
     }
 }
