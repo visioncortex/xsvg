@@ -26,6 +26,7 @@
     "check:mesh": "cargo build --release -p xsvg-cli && node scripts/mesh-raster-check.mjs",
     "check:viewport": "cargo build --release -p xsvg-cli && node scripts/viewport-raster-check.mjs",
     "check:outline": "cargo build --release -p xsvg-cli && node scripts/outline-raster-check.mjs",
+    "fuzz:boolean": "cargo run --release -p xsvg-boolfuzz -- run --seed 1 --count 5000 --budget-secs 300 --out target/boolfuzz",
     "check:incremental": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/incremental-check.mjs",
     "check:dom": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node --experimental-strip-types scripts/dom-patch-check.mjs",
     "check:advances": "npm run wasm:node && npm -w @visioncortex/xsvg-compile run build && node scripts/advances-check.mjs",
