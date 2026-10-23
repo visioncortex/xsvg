@@ -1243,7 +1243,7 @@ fn main() {
             flag("--seed", "1").parse().unwrap(),
             flag("--count", "1000000").parse().unwrap(),
             Duration::from_secs(flag("--budget-secs", "3600").parse().unwrap()),
-            &flag("--out", "target/boolfuzz"),
+            &flag("--out", "target/path-ops-fuzz"),
         ),
         _ => eprintln!("usage: fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
     }

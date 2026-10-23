@@ -5,7 +5,7 @@ A seeded, panic-tolerant fuzz of the curve-preserving boolean algebra
 for `<x:boolean>` (docs/Incremental.md §11).
 
 ```
-cargo run --release -p xsvg-path-ops --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --out target/boolfuzz
+cargo run --release -p xsvg-path-ops --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
 cargo run --release -p xsvg-path-ops --example fuzz -- repro --seed 4389 [--subset 0,2] [--op union] [--operand 0 "M…"] [--raw]
 ```
 

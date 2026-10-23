@@ -1,4 +1,4 @@
-# linesweeper 0.5.0 findings from xsvg-boolfuzz (engine-side: raw == processed)
+# linesweeper 0.5.0 findings from the xsvg-path-ops fuzz (engine-side: raw == processed)
 
 ## seed 3335
 seed 3335: Union star / cubic-blob s1 o0

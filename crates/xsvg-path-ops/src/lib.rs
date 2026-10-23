@@ -23,7 +23,7 @@
 //! Operands are SVG path data with arcs already expanded to cubics (the
 //! compiler's `arcs_to_cubics`); the result is absolute path data at three
 //! decimals. See the README for the engine's known failure modes and their
-//! measured rates, and `xsvg-path-ops-fuzz` for the harness that measures them.
+//! measured rates, and `examples/fuzz.rs` (FUZZ.md) for the harness that measures them.
 
 use kurbo::{BezPath, PathEl, Rect};
 
