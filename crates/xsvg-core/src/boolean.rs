@@ -172,12 +172,13 @@ pub fn boolean_svg_paths_curved(
 }
 
 /// The sweep in a canonical frame: the operands' joint extent moved to the
-/// origin, and a tiny drawing scaled up to about a thousand units, the result
-/// mapped back. The engine's accuracy is absolute (its epsilon floors at
-/// 1e-6), so a tiny drawing would be swept coarsely — it panicked and stalled
-/// there — and a far-off one at the mercy of its magnitude. A drawing of
-/// ordinary or large extent keeps its scale: scaling one down makes the
-/// engine mistake a shape's exact copy for a neighbour and draw the seam.
+/// origin, and a drawing smaller than about a thousand units scaled up to
+/// that, the result mapped back. The engine's accuracy is absolute (its
+/// epsilon floors at 1e-6), so a small drawing is swept coarsely — a tiny one
+/// panicked and stalled, an ordinary one stalled on near-coincident copies —
+/// and a far-off one is at the mercy of its magnitude. A large drawing keeps
+/// its scale: scaled down, the engine mistakes a shape's exact copy for a
+/// neighbour and draws the seam.
 fn sweep_normalized(paths: &[(BezPath, bool)], op: BoolOp) -> Result<BezPath, String> {
     use kurbo::{Affine, Shape};
     let mut bb: Option<Rect> = None;
@@ -190,7 +191,8 @@ fn sweep_normalized(paths: &[(BezPath, bool)], op: BoolOp) -> Result<BezPath, St
     if !span.is_finite() || span <= 0.0 {
         return sweep(paths, op);
     }
-    let scale = if span < 16.0 { 1024.0 / span } else { 1.0 };
+    // scaled up to about a thousand units when smaller, never down
+    let scale = if span < 1024.0 { 1024.0 / span } else { 1.0 };
     let to_frame = Affine::scale(scale) * Affine::translate((-bb.x0, -bb.y0));
     let framed: Vec<(BezPath, bool)> = paths
         .iter()
