@@ -35,7 +35,9 @@ partial one.
   epsilon of another). The
   compiled render is unchanged (still the integer-exact flattened algebra). `arcs_to_cubics`
   moved to `xsvg_core::spline`, feature-free. New workspace crate `xsvg-boolfuzz`: a seeded,
-  panic-tolerant fuzz of the curve algebra against the flattened one and the sampled truth.
+  panic-tolerant fuzz of the curve algebra against the flattened one and the sampled truth; its
+  first campaign (3 million cases) shaped the passes above and left about 0.02% of cases to the
+  engine, nearly all near-coincident copies (its README has the account).
 
 - **`to_path` keeps corners live; `to_spline(offset)` expands** (Incremental.md §11). Convert to
   path now leaves a live corner live, as Illustrator does: a shape's `x:corners` rides onto its
