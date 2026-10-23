@@ -1,10 +1,10 @@
-//! boolfuzz: the curve-preserving boolean algebra (`boolean_svg_paths_curved`,
+//! path-ops-fuzz: the curve-preserving boolean algebra (`xsvg_path_ops::combine`,
 //! linesweeper) against the flattened one (`boolean_svg_paths`, i_overlay) and
 //! against the truth sampled from the operands themselves, over seeded synthetic
 //! cases. Deterministic: case `seed` is the same case on every run and machine.
 //!
-//!   boolfuzz run   --seed 1 --count N --budget-secs T --out DIR   the campaign
-//!   boolfuzz repro --seed S                                        one case, verbose
+//!   path-ops-fuzz run   --seed 1 --count N --budget-secs T --out DIR   the campaign
+//!   path-ops-fuzz repro --seed S                                        one case, verbose
 //!
 //! The campaign is a parent that runs batches of cases in child processes of
 //! itself: a panic is caught in the child and reported; a hang is killed by the
@@ -21,7 +21,28 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use xsvg_core::{boolean_svg_paths, boolean_svg_paths_curved, BoolOp, BoolOperand};
+use xsvg_core::{boolean_svg_paths, BoolOp, BoolOperand};
+
+/// The core's operands and op as the crate under test takes them.
+fn po_ops<'a>(ops: &[BoolOperand<'a>]) -> Vec<xsvg_path_ops::Operand<'a>> {
+    ops.iter()
+        .map(|o| xsvg_path_ops::Operand {
+            paths: o.paths.clone(),
+            even_odd: o.even_odd,
+        })
+        .collect()
+}
+fn po_op(op: BoolOp) -> xsvg_path_ops::Op {
+    match op {
+        BoolOp::Union => xsvg_path_ops::Op::Union,
+        BoolOp::Intersect => xsvg_path_ops::Op::Intersect,
+        BoolOp::Subtract => xsvg_path_ops::Op::Subtract,
+        BoolOp::Exclude => xsvg_path_ops::Op::Exclude,
+    }
+}
+fn boolean_svg_paths_curved(ops: &[BoolOperand], op: BoolOp) -> Result<Option<String>, String> {
+    xsvg_path_ops::combine(&po_ops(ops), po_op(op))
+}
 
 /// The memory jail: every allocation is counted, and one that would take the
 /// process past the cap aborts it (SIGABRT), which the parent records as `oom`
@@ -66,7 +87,7 @@ static JAIL: Jail = Jail;
 fn watchdog(secs: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(secs));
-        eprintln!("boolfuzz: watchdog — no result within {secs}s, aborting");
+        eprintln!("path-ops-fuzz: watchdog — no result within {secs}s, aborting");
         std::process::abort();
     });
 }
@@ -1093,12 +1114,12 @@ fn repro(seed: u64) {
     if args.iter().any(|a| a == "--raw") {
         println!(
             "raw:    {:?}",
-            xsvg_core::boolean_svg_paths_curved_raw(&ops, case.op)
+            xsvg_path_ops::raw(&po_ops(&ops), po_op(case.op))
         );
     }
     if args.iter().any(|a| a == "--stages") {
         if let Ok(Some([raw, snapped, pruned])) =
-            xsvg_core::boolean_svg_paths_curved_stages(&ops, case.op)
+            xsvg_path_ops::stages(&po_ops(&ops), po_op(case.op))
         {
             for (name, d) in [("raw", raw), ("snapped", snapped), ("pruned", pruned)] {
                 let p = parse_closed(&d);
@@ -1224,6 +1245,6 @@ fn main() {
             Duration::from_secs(flag("--budget-secs", "3600").parse().unwrap()),
             &flag("--out", "target/boolfuzz"),
         ),
-        _ => eprintln!("usage: boolfuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
+        _ => eprintln!("usage: path-ops-fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
     }
 }

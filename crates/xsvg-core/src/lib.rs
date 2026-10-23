@@ -42,9 +42,9 @@ pub use compile::{
 // asked of a session's parse.
 #[cfg(feature = "compile")]
 pub use compile::{
-    arcs_to_cubics, run_support, to_path_impl, to_spline_impl, Block, BlockKind, CornerInfo,
-    CornerStyle, ParsedDocument, PieceBorder, Resolved, RunSupport, Source, TextPiece, ThemeTokens,
-    ToPathError,
+    arcs_to_cubics, boolean_operands_impl, run_support, to_path_impl, to_spline_impl, Block,
+    BlockKind, BooleanOperand, BooleanOperands, CornerInfo, CornerStyle, ParsedDocument,
+    PieceBorder, Resolved, RunSupport, Source, TextPiece, ThemeTokens, ToPathError,
 };
 // The plugin seam (docs/Extensibility.md): loadable geometry generators. Hosts
 // implement `GeneratorHost`; the core never loads or runs anything itself.

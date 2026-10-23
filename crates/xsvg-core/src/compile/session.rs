@@ -340,6 +340,27 @@ impl<'a> Parsed<'a> {
         super::corners::apply_corners(&base, &spec).map(|(_, infos)| infos)
     }
 
+    /// The operands of the `<x:boolean>` at `offset` for the curve-keeping
+    /// algebra (docs/Incremental.md §11): lowered as convert-to-path lowers them
+    /// (text outlined), arcs as cubics, with the op and the flattened result.
+    pub(super) fn boolean_operands(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Option<super::BooleanOperands> {
+        let node = self.element_at(offset)?;
+        if node.tag_name().namespace() != Some(super::XSVG_NS)
+            || node.tag_name().name() != "boolean"
+        {
+            return None;
+        }
+        let ctx = Ctx::new(backend, quality, false, "", self);
+        ctx.force_outline.set(true);
+        ctx.to_path.set(true);
+        super::boolean_operands_at(node, &ctx)
+    }
+
     /// Convert to path (trace.rs; docs/Incremental.md §11): the element at
     /// `offset` compiled on its own with outlining forced — its glyphs as paths,
     /// its backdrops as rects, a shape as its `<path>` — every attribute the
@@ -812,6 +833,15 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn to_path(&self, offset: usize) -> Result<String, super::ToPathError> {
         self.parsed()
             .to_path(offset, &self.platform.backend(), self.quality, false)
+    }
+
+    /// The operands of the `<x:boolean>` at `offset`, for `xsvg-path-ops`
+    /// (docs/Incremental.md §11): what a host hands the curve-keeping algebra,
+    /// whose answer replaces the `d` of [`Self::to_path`]'s markup. The same
+    /// answer as [`super::boolean_operands_impl`].
+    pub fn boolean_operands(&self, offset: usize) -> Option<super::BooleanOperands> {
+        self.parsed()
+            .boolean_operands(offset, &self.platform.backend(), self.quality)
     }
 
     /// Convert to spline (docs/Incremental.md §11): [`Self::to_path`] with the

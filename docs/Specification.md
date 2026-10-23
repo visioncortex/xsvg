@@ -1397,10 +1397,11 @@ stroke-to-fill, honoring `stroke-width`, `stroke-linecap`, `stroke-linejoin`, an
 
 **v1 limits.** No multi-output Pathfinder modes (Divide/Trim/Merge).
 Backend: [`i_overlay`](https://crates.io/crates/i_overlay) behind a swappable seam. The seam's
-other side is in: an editor's convert-to-path of an `<x:boolean>` runs the same operands through
-[`linesweeper`](https://crates.io/crates/linesweeper) on their curves ([Incremental.md](Incremental.md)
-§11), so the written path keeps every Bézier the operation did not cut; the compiled render stays
-on the flattened, integer-exact algebra.
+other side is the `xsvg-path-ops` crate: an editor's convert-to-path of an `<x:boolean>` hands the
+same operands (`boolean_operands`, [Incremental.md](Incremental.md) §11) to it, and it combines
+them on their curves with [`linesweeper`](https://crates.io/crates/linesweeper), so the written path
+keeps every Bézier the operation did not cut; the compiled render stays on the flattened,
+integer-exact algebra, and the core never links the curve engine.
 
 ### 7.5 Remaining pillars & deferred
 

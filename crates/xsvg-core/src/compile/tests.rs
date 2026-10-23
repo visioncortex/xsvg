@@ -9061,39 +9061,82 @@ fn a_path_converts_to_itself_under_to_path_and_bakes_under_to_spline() {
 }
 
 #[test]
-fn an_x_boolean_converts_to_its_result_on_the_curves() {
-    // the union of a rect and a circle: the circle's untouched quarter cubics
-    // come back verbatim (κ·30 = 16.569), the cut ones as exact sub-curves,
-    // the rect's edges as lines; `fill` and the editor's `x:label` kept, `op`
-    // and the children spent; to_spline is the same markup (no arcs to expand)
+fn an_x_boolean_converts_to_its_flattened_path_and_hands_its_operands_out() {
+    // the compiler's own answer for an <x:boolean> is the flattened path with
+    // `fill` and the editor's `x:label` kept, `op` and the children spent;
+    // the curve-keeping answer is xsvg-path-ops' (its own tests pin it), fed
+    // by the operands query: the circle as its four κ cubics, the rect as
+    // lines, the op, and the same flattened `d` to gate against
     let src = format!(
         r##"{XW}<x:boolean id="b" op="union" fill="#48a" x:label="Badge"><rect x="10" y="10" width="100" height="50"/><circle cx="110" cy="35" r="30"/></x:boolean></svg>"##
     );
     let out = to_path_at(&src, "<x:boolean").unwrap();
-    assert_eq!(
-        out,
-        r##"<path id="b" fill="#48a" x:label="Badge" d="M93.411 10 C98.162 6.841 103.866 5 110 5 C126.569 5 140 18.431 140 35 C140 51.569 126.569 65 110 65 C103.866 65 98.162 63.159 93.411 60 L10 60 L10 10 L93.411 10 Z"/>"##
+    assert!(
+        out.starts_with(r##"<path id="b" fill="#48a" x:label="Badge" d="M10,60l0-50 83.46,0 "##),
+        "{out}"
     );
     assert_eq!(to_spline_at(&src, "<x:boolean").unwrap(), out);
-    // the compiled render is unchanged: still the flattened algebra
-    let compiled = compile_test(&src);
-    assert!(
-        compiled.contains("<path id=\"b\" fill=\"#48a\" d=\"M10,60l0-50 "),
-        "{compiled}"
+    let q = boolean_operands_impl(
+        &src,
+        src.find("<x:boolean").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert_eq!(q.op, BoolOp::Union);
+    assert_eq!(q.operands.len(), 2);
+    assert_eq!(
+        q.operands[0].paths,
+        vec!["M10,10 h100 v50 h-100 Z".to_string()]
     );
-    // a legitimately empty result has nothing to write
+    assert!(
+        q.operands[1].paths[0].starts_with("M140 35 C140 51.569 126.569 65 110 65 "),
+        "{:?}",
+        q.operands[1]
+    );
+    assert!(!q.operands.iter().any(|o| o.even_odd));
+    let d = out
+        .split(" d=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert_eq!(q.flat.as_deref(), Some(d));
+    // a legitimately empty result has nothing to write, and no operands to hand out
     let empty = format!(
         r##"{XW}<x:boolean op="intersect"><rect x="0" y="0" width="10" height="10"/><rect x="50" y="50" width="10" height="10"/></x:boolean></svg>"##
     );
     assert!(to_path_at(&empty, "<x:boolean").is_err());
+    let q = boolean_operands_impl(
+        &empty,
+        empty.find("<x:boolean").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &BoxOutliner,
+    )
+    .unwrap();
+    assert_eq!(q.flat.as_deref(), Some(""));
+    assert!(boolean_operands_impl(
+        &src,
+        src.find("<rect").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &BoxOutliner
+    )
+    .is_none());
 }
 
 #[test]
 fn an_x_boolean_converted_draws_what_the_compiler_draws() {
     // subtract with a hole, a text operand (outlined by the box outliner), a
     // evenodd operand, a stroked operand whose ink joins: the converted path
-    // and the compiled (flattened) path agree at every sampled point but a
-    // flattening tolerance's worth along the boundary
+    // (lowered under convert-to-path, text outlined) and the compiled path
+    // agree at every sampled point
     let src = format!(
         r##"{XW}<x:boolean op="subtract" fill="#000"><rect x="0" y="0" width="120" height="80" rx="12"/><circle cx="60" cy="40" r="20"/><x:textbox x="80" y="50" width="40" height="30" font-size="12">Hi</x:textbox><polygon points="0,0 40,40 40,0 0,40" fill-rule="evenodd"/><rect x="100" y="0" width="10" height="10" stroke="#000" stroke-width="4"/></x:boolean></svg>"##
     );

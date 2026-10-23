@@ -25,20 +25,22 @@ partial one.
 
 ### Added
 
-- **Convert to path for `<x:boolean>`, on the curves** (Incremental.md §11). `to_path` / `to_spline`
-  on an `<x:boolean>` write the one `<path>` of its result computed by
-  [linesweeper](https://crates.io/crates/linesweeper) over the operands' Béziers — one n-ary sweep,
-  each operand under its own fill rule — so every segment the operation does not cut comes back
-  as authored and a cut one as exact sub-curves; holes wind opposite to outers, sub-precision
-  residue is dropped, and the flattened algebra is the answer if the engine declines or its result
-  disagrees with the render on a grid of samples (the engine's known weakness is a boundary within
-  epsilon of another); an operand within 10⁻⁷ of the extent of another is declined outright, since
-  the engine's subdivision does not terminate there. The
-  compiled render is unchanged (still the integer-exact flattened algebra). `arcs_to_cubics`
-  moved to `xsvg_core::spline`, feature-free. New workspace crate `xsvg-boolfuzz`: a seeded,
-  panic-tolerant fuzz of the curve algebra against the flattened one and the sampled truth; its
-  first campaign (3 million cases) shaped the passes above and left about 0.02% of cases to the
-  engine, nearly all near-coincident copies (its README has the account).
+- **Convert to path for `<x:boolean>`, on the curves — in its own crate** (Incremental.md §11).
+  New `xsvg-path-ops`: boolean operations on paths with the curves kept, by
+  [linesweeper](https://crates.io/crates/linesweeper) in one n-ary sweep over the raw operands,
+  each under its own fill rule, in a normalised frame; a near-coincident pre-check (an operand
+  within 10⁻⁷ of the extent of another is declined — the engine's subdivision never settles there
+  and its memory grows without bound); the result snapped back onto the input segments so every
+  uncut Bézier returns as authored and a cut one as exact sub-curves; holes oriented by containment
+  depth; sub-precision residue dropped; and a gate that writes the compiler's flattened path
+  whenever the engine disagrees with it, errs, declines, or (where hosts unwind) panics. The core
+  gains the **`boolean_operands(offset)`** query that feeds it (operands as convert-to-path lowers
+  them, the op, the flattened `d`) and keeps its `to_path` of an `<x:boolean>` on the flattened
+  algebra; the CLI swaps the curve-keeping `d` in; a browser host runs the crate as its own wasm
+  module in a Worker. `arcs_to_cubics` moved to `xsvg_core::spline`, feature-free. New
+  `xsvg-path-ops-fuzz`: a seeded, memory-jailed, panic-tolerant fuzz whose first campaign
+  (3 million cases) shaped the passes above and left about 0.02% of cases to the engine, one
+  ordinary-input panic in three million among them (the crate's README has the account).
 
 - **`to_path` keeps corners live; `to_spline(offset)` expands** (Incremental.md §11). Convert to
   path now leaves a live corner live, as Illustrator does: a shape's `x:corners` rides onto its

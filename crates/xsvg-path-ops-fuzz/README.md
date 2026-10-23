@@ -1,12 +1,12 @@
-# xsvg-boolfuzz
+# xsvg-path-ops-fuzz
 
 A seeded, panic-tolerant fuzz of the curve-preserving boolean algebra
-(`xsvg_core::boolean_svg_paths_curved`, linesweeper) that convert-to-path uses
+(`xsvg_path_ops::combine`, linesweeper) that convert-to-path uses
 for `<x:boolean>` (docs/Incremental.md §11).
 
 ```
-cargo run --release -p xsvg-boolfuzz -- run --seed 1 --count 100000 --budget-secs 3600 --out target/boolfuzz
-cargo run --release -p xsvg-boolfuzz -- repro --seed 4389 [--subset 0,2] [--op union] [--operand 0 "M…"] [--raw]
+cargo run --release -p xsvg-path-ops-fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --out target/boolfuzz
+cargo run --release -p xsvg-path-ops-fuzz -- repro --seed 4389 [--subset 0,2] [--op union] [--operand 0 "M…"] [--raw]
 ```
 
 Case `seed` is the same case on every run and machine (splitmix64, no

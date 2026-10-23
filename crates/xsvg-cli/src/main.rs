@@ -110,6 +110,12 @@ fn convert(
     } else {
         session.to_path(offset)
     };
+    // an <x:boolean>: the curve-keeping answer from xsvg-path-ops replaces the
+    // flattened `d` when the two agree (Incremental.md §11)
+    let markup = markup.map(|m| match session.boolean_operands(offset) {
+        Some(b) => with_curved_d(m, &b),
+        None => m,
+    });
     let markup = markup.map_err(|e| match &e.family {
         Some(f) => format!(
             "{} {} {} has {}",
@@ -121,6 +127,38 @@ fn convert(
         None => e.reason,
     })?;
     Ok(format!("{}{markup}{}", &source[..start], &source[end..]))
+}
+
+/// The markup's `d` swapped for the curve-keeping result of the same
+/// operands, when `xsvg-path-ops` agrees with the flattened one.
+fn with_curved_d(markup: String, b: &xsvg_core::BooleanOperands) -> String {
+    use xsvg_path_ops::{Op, Operand};
+    let op = match b.op {
+        xsvg_core::BoolOp::Union => Op::Union,
+        xsvg_core::BoolOp::Intersect => Op::Intersect,
+        xsvg_core::BoolOp::Subtract => Op::Subtract,
+        xsvg_core::BoolOp::Exclude => Op::Exclude,
+    };
+    let operands: Vec<Operand> = b
+        .operands
+        .iter()
+        .map(|o| Operand {
+            paths: o.paths.iter().map(String::as_str).collect(),
+            even_odd: o.even_odd,
+        })
+        .collect();
+    let Some(curved) = xsvg_path_ops::combine_checked(&operands, op, b.flat.as_deref()) else {
+        return markup;
+    };
+    if curved.is_empty() || b.flat.as_deref() == Some(curved.as_str()) {
+        return markup;
+    }
+    match (markup.find(" d=\""), markup.rfind("\"/>")) {
+        (Some(a), Some(z)) if a + 4 <= z => {
+            format!("{} d=\"{curved}{}", &markup[..a], &markup[z..])
+        }
+        _ => markup,
+    }
 }
 
 fn main() -> ExitCode {

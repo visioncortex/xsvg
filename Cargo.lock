@@ -614,14 +614,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xsvg-boolfuzz"
-version = "0.0.0"
-dependencies = [
- "kurbo",
- "xsvg-core",
-]
-
-[[package]]
 name = "xsvg-cli"
 version = "0.2.2"
 dependencies = [
@@ -630,6 +622,7 @@ dependencies = [
  "ttf-parser",
  "wasmi",
  "xsvg-core",
+ "xsvg-path-ops",
  "xsvg-plugin",
 ]
 
@@ -640,7 +633,6 @@ dependencies = [
  "i_overlay",
  "i_shape",
  "kurbo",
- "linesweeper",
  "roxmltree",
  "serde_json",
  "xsvg-core",
@@ -659,6 +651,23 @@ dependencies = [
 [[package]]
 name = "xsvg-gradient"
 version = "0.2.2"
+
+[[package]]
+name = "xsvg-path-ops"
+version = "0.2.2"
+dependencies = [
+ "kurbo",
+ "linesweeper",
+]
+
+[[package]]
+name = "xsvg-path-ops-fuzz"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "xsvg-core",
+ "xsvg-path-ops",
+]
 
 [[package]]
 name = "xsvg-plugin"

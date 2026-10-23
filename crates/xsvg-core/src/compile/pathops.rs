@@ -2,7 +2,6 @@
 //! the shared helpers, `Ctx`, and re-exported primitives.
 
 use super::*;
-use crate::boolean::boolean_svg_paths_checked;
 
 /// `<x:offset in="#id" distance="d" join="round|miter|bevel">` (§7.7): grow
 /// (positive `distance`) or shrink (negative) the referenced region by a
@@ -262,18 +261,72 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     emit_boolean_result(node, out, ctx, &markups, &markers, op, false);
 }
 
-/// Convert to path for `<x:boolean>` (Incremental.md §11): the same operands,
-/// combined on their curves ([`boolean_svg_paths_checked`]) so the result keeps
-/// every Bézier the operation did not cut, written as one `<path>` with the
-/// element's other attributes; `op` and the children are spent. The flattened
-/// algebra is the answer if the curve engine declines the input or disagrees
-/// with the render, so the conversion is never worse than what the compiler
-/// draws.
+/// Convert to path for `<x:boolean>` (Incremental.md §11): the flattened result
+/// as one `<path>` with the element's other attributes, `op` and the children
+/// spent — the compiler's own answer, which a host swaps for the curve-keeping
+/// one from `xsvg-path-ops` fed by [`boolean_operands_at`].
 pub(super) fn emit_boolean_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
     let (markups, markers, op) = boolean_operands(node, ctx);
     let before = out.len();
     emit_boolean_result(node, out, ctx, &markups, &markers, op, true);
     out[before..].contains("<path")
+}
+
+/// The operands of the `<x:boolean>` at `node` as data for the curve-keeping
+/// algebra of `xsvg-path-ops` (Incremental.md §11): each operand's path data
+/// with arcs expanded to cubics and its fill rule, the op, and the compiler's
+/// flattened result for the same — the reference the engine's answer is
+/// gated against. `None` for an unknown op or no usable geometry.
+pub(super) fn boolean_operands_at(node: roxmltree::Node, ctx: &Ctx) -> Option<BooleanOperands> {
+    let (markups, _, op) = boolean_operands(node, ctx);
+    let op = op?;
+    // the flattened answer from the paths as lowered (arcs and all), exactly
+    // what `to_path` writes; the engine's operands with the arcs as cubics
+    let as_lowered: Vec<BoolOperand> = markups
+        .iter()
+        .map(|(m, even_odd)| BoolOperand {
+            paths: find_path_d_ranges(m)
+                .into_iter()
+                .map(|(a, b)| &m[a..b])
+                .collect(),
+            even_odd: *even_odd,
+        })
+        .filter(|o| !o.paths.is_empty())
+        .collect();
+    if as_lowered.is_empty() {
+        return None;
+    }
+    let flat = boolean_svg_paths(&as_lowered, op, ctx.quality.tolerance());
+    let operands = as_lowered
+        .iter()
+        .map(|o| BooleanOperand {
+            paths: o
+                .paths
+                .iter()
+                .map(|d| crate::spline::arcs_to_cubics(d))
+                .collect(),
+            even_odd: o.even_odd,
+        })
+        .collect();
+    Some(BooleanOperands { op, operands, flat })
+}
+
+/// One operand of an `<x:boolean>`, for [`boolean_operands_at`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct BooleanOperand {
+    /// Path data, arcs expanded to cubics; several for an element that lowered
+    /// to several paths (an outlined text).
+    pub paths: Vec<String>,
+    pub even_odd: bool,
+}
+
+/// The `<x:boolean>` as the curve-keeping algebra takes it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BooleanOperands {
+    pub op: BoolOp,
+    pub operands: Vec<BooleanOperand>,
+    /// The compiler's flattened result: `Some("")` for an empty region.
+    pub flat: Option<String>,
 }
 
 /// The operands of an `<x:boolean>`: each element child lowered to path
@@ -371,8 +424,8 @@ fn boolean_operands(
 
 /// The `<x:boolean>` element's output for its harvested operands: the combined
 /// `<path>`, an empty `<g>` for an empty result, or the children un-combined
-/// behind a marker for an unknown op. `curved` is convert-to-path: the curve
-/// engine first, the flattened algebra if it declines.
+/// behind a marker for an unknown op. `curved` is convert-to-path, which also
+/// carries the editor's `x:` attributes onto the path.
 fn emit_boolean_result(
     node: roxmltree::Node,
     out: &mut String,
@@ -413,11 +466,7 @@ fn emit_boolean_result(
         .collect();
 
     out.push_str(markers);
-    let result = if curved {
-        boolean_svg_paths_checked(&operands, op, ctx.quality.tolerance())
-    } else {
-        boolean_svg_paths(&operands, op, ctx.quality.tolerance())
-    };
+    let result = boolean_svg_paths(&operands, op, ctx.quality.tolerance());
     match result {
         Some(d) if !d.is_empty() => {
             out.push_str("<path");

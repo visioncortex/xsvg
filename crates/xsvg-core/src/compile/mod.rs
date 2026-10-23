@@ -1625,6 +1625,7 @@ mod mesh;
 use mesh::*;
 mod pathops;
 use pathops::*;
+pub use pathops::{BooleanOperand, BooleanOperands};
 pub mod elements;
 use elements::params_of;
 // so submodules reach `.as_str()` on a declared enum parameter through `super::*`

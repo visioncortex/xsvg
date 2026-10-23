@@ -1,0 +1,12 @@
+[package]
+name = "xsvg-path-ops"
+version = "0.2.2"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/visioncortex/xsvg"
+readme = "README.md"
+description = "Boolean operations on SVG paths with the curves kept — the algebra behind xsvg's convert-to-path of an <x:boolean>."
+
+[dependencies]
+kurbo = "0.13.1"
+linesweeper = "0.5.0"

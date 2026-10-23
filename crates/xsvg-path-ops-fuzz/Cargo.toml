@@ -3,15 +3,16 @@
 # flattened algebra and in point-sampled space, every disagreement recorded with
 # its seed. Not published; `cargo run --release -p xsvg-boolfuzz -- --help`.
 [package]
-name = "xsvg-boolfuzz"
+name = "xsvg-path-ops-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
 
 [dependencies]
 xsvg-core = { path = "../xsvg-core" }
+xsvg-path-ops = { path = "../xsvg-path-ops" }
 kurbo = "0.13.1"
 
 [[bin]]
-name = "boolfuzz"
+name = "path-ops-fuzz"
 path = "src/main.rs"

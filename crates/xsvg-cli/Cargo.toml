@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 xsvg-core = { path = "../xsvg-core", version = "0.2.2", features = ["compile"] }
+xsvg-path-ops = { path = "../xsvg-path-ops", version = "0.2.2" }
 ttf-parser = "0.25"
 # shaping: kerning, ligatures, mark placement — the same shaper resvg renders live text with
 rustybuzz = "0.20"

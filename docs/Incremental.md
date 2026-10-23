@@ -522,20 +522,17 @@ four quarter arcs (`A`) from its rightmost point, clockwise, anchors at the four
 with elliptical corners (`rx ≠ ry`) as its edges and one arc per corner, an edge the corners consume
 left out. A `<path>` converts to itself — its `d` as authored, its corners live — so a mixed
 selection's Convert to path need not skip it. An **`<x:boolean>`** converts to the one `<path>` of
-its result with the element's other attributes kept, `op` and the children spent — computed on the
-operands' curves, not on the flattened polygons the compiler renders from: every Bézier the
-operation does not cut comes back as authored (a circle's handles to the bit), a cut one as exact
-sub-curves split at the intersection, holes wound opposite to their outers, nothing below the
-output precision. The engine is [linesweeper](https://crates.io/crates/linesweeper) in one n-ary
-sweep over the raw operands (each under its own fill rule), and its answer is checked against the
-flattened algebra on a grid of samples before it is written: if the engine declines an input or
-the two disagree beyond the flattening tolerance's boundary band, the flattened result is written
-instead, so the conversion is never worse than the render. One input is declined before the engine
-sees it: an operand that runs along another within 10⁻⁷ of the drawing's extent (a copy nudged by
-a hair, as another tool's arithmetic leaves one) — there the engine's subdivision never settles
-and its memory grows without bound. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
-and against the truth sampled from the operands, every disagreement logged with the seed that
-reproduces it. Arcs stay arcs in `to_path`. For an editor whose
+its result with the element's other attributes kept, `op` and the children spent. The compiler's
+own answer is the flattened path it renders; the **curve-keeping** answer — every Bézier the
+operation did not cut as authored, a cut one as exact sub-curves, holes wound against their outers
+— comes from the `xsvg-path-ops` crate, fed by **`boolean_operands(offset)`**: the operands lowered
+as convert-to-path lowers them (text outlined, arcs as cubics, each with its fill rule), the op,
+and the flattened `d`, which `xsvg_path_ops::combine_checked` gates its result against before the
+host swaps it into `to_path`'s markup. `xsvg-cli --to-path` does that in-process; a browser host
+runs the crate as its own wasm module in a Worker with a memory maximum and a timeout, because its
+engine can panic (about once in three million cases) and the core must not be the thing that
+aborts. The crate's README has the engine's measured failure modes and what is done around it;
+`xsvg-path-ops-fuzz` is the seeded, memory-jailed fuzz that measures them. Arcs stay arcs in `to_path`. For an editor whose
 path model is Béziers only,
 **`to_spline(offset)`** is *expand*: the corners baked, then every `A` as cubics — at most a quarter
 turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic (0.5523 for a quarter circle), so a

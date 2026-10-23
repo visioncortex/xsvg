@@ -543,6 +543,24 @@ pub fn to_path_impl(
         .to_path(offset)
 }
 
+/// The operands of the `<x:boolean>` at `offset` for `xsvg-path-ops`
+/// (docs/Incremental.md §11; consumer: xsvg-kit): see
+/// [`crate::compile::CompileSession::boolean_operands`]. `None` when the offset
+/// is not an `<x:boolean>` with a known op and usable geometry.
+pub fn boolean_operands_impl(
+    input: &str,
+    offset: usize,
+    quality: &str,
+    m: &dyn Measurer,
+    shaper: &dyn Shaper,
+    outliner: &dyn GlyphOutliner,
+) -> Option<super::BooleanOperands> {
+    Platform::new(m, shaper, outliner)
+        .session(input, quality, false, "")
+        .ok()?
+        .boolean_operands(offset)
+}
+
 /// Convert to spline (docs/Incremental.md §11): [`to_path_impl`] with every arc
 /// of the result expanded to cubic Béziers, for an editor whose path model has
 /// no arcs — a circle as four cubics at its extremes, a rounded corner as one.
