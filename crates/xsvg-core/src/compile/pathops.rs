@@ -2,7 +2,7 @@
 //! the shared helpers, `Ctx`, and re-exported primitives.
 
 use super::*;
-use crate::boolean::boolean_svg_paths_curved;
+use crate::boolean::boolean_svg_paths_checked;
 
 /// `<x:offset in="#id" distance="d" join="round|miter|bevel">` (§7.7): grow
 /// (positive `distance`) or shrink (negative) the referenced region by a
@@ -263,11 +263,12 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 }
 
 /// Convert to path for `<x:boolean>` (Incremental.md §11): the same operands,
-/// combined on their curves ([`boolean_svg_paths_curved`]) so the result keeps
+/// combined on their curves ([`boolean_svg_paths_checked`]) so the result keeps
 /// every Bézier the operation did not cut, written as one `<path>` with the
-/// element's other attributes; `op` and the children are spent. Falls back to
-/// the flattened algebra if the curve engine declines the input, so the
-/// conversion never fails for a document the compiler renders.
+/// element's other attributes; `op` and the children are spent. The flattened
+/// algebra is the answer if the curve engine declines the input or disagrees
+/// with the render, so the conversion is never worse than what the compiler
+/// draws.
 pub(super) fn emit_boolean_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
     let (markups, markers, op) = boolean_operands(node, ctx);
     let before = out.len();
@@ -413,10 +414,7 @@ fn emit_boolean_result(
 
     out.push_str(markers);
     let result = if curved {
-        match boolean_svg_paths_curved(&operands, op) {
-            Ok(r) => r,
-            Err(_) => boolean_svg_paths(&operands, op, ctx.quality.tolerance()),
-        }
+        boolean_svg_paths_checked(&operands, op, ctx.quality.tolerance())
     } else {
         boolean_svg_paths(&operands, op, ctx.quality.tolerance())
     };

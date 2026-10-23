@@ -527,9 +527,10 @@ operands' curves, not on the flattened polygons the compiler renders from: every
 operation does not cut comes back as authored (a circle's handles to the bit), a cut one as exact
 sub-curves split at the intersection, holes wound opposite to their outers, nothing below the
 output precision. The engine is [linesweeper](https://crates.io/crates/linesweeper) in one n-ary
-sweep over the raw operands (each under its own fill rule); if it declines an input the
-conversion falls back to the flattened algebra, so it never fails for a document the compiler
-renders. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
+sweep over the raw operands (each under its own fill rule), and its answer is checked against the
+flattened algebra on a grid of samples before it is written: if the engine declines an input or
+the two disagree beyond the flattening tolerance's boundary band, the flattened result is written
+instead, so the conversion is never worse than the render. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
 and against the truth sampled from the operands, every disagreement logged with the seed that
 reproduces it. Arcs stay arcs in `to_path`. For an editor whose
 path model is Béziers only,

@@ -171,6 +171,85 @@ pub fn boolean_svg_paths_curved(
     Ok(Some(serialize_curves(&snapped)))
 }
 
+/// The curve-preserving result when it agrees with the flattened one, else the
+/// flattened one: convert-to-path's answer. The two algebras are compared on a
+/// jittered grid of samples over the result's extent; a disagreement beyond
+/// what the flattening tolerance explains along the boundary means the curve
+/// engine mis-resolved the topology (its known weakness is a boundary within
+/// epsilon of another), and the conversion is then no worse than the render.
+/// `None` is no usable geometry, `Some("")` a legitimately empty result.
+pub fn boolean_svg_paths_checked(
+    operands: &[BoolOperand],
+    op: BoolOp,
+    tolerance: f64,
+) -> Option<String> {
+    let flat = boolean_svg_paths(operands, op, tolerance);
+    let Ok(Some(curved)) = boolean_svg_paths_curved(operands, op) else {
+        return flat;
+    };
+    match &flat {
+        Some(f) if agree(&curved, f) => Some(curved),
+        _ => flat,
+    }
+}
+
+/// Whether two path-data results draw the same region, to a boundary band:
+/// the inside sets sampled at 48×48 jittered points of their joint extent
+/// disagree at fewer than 1.5% of them (and fewer than 8).
+fn agree(a: &str, b: &str) -> bool {
+    use kurbo::Shape;
+    let (Ok(pa), Ok(pb)) = (BezPath::from_svg(a), BezPath::from_svg(b)) else {
+        return false;
+    };
+    if pa.elements().is_empty() != pb.elements().is_empty() {
+        return false;
+    }
+    if pa.elements().is_empty() {
+        return true;
+    }
+    let bb = pa.bounding_box().union(pb.bounding_box());
+    if !(bb.width().is_finite() && bb.height().is_finite()) {
+        return false;
+    }
+    let n = 48;
+    let mut differ = 0;
+    for j in 0..n {
+        for i in 0..n {
+            // a fixed jitter keeps a grid off any axis-aligned or 45° edge
+            let (jx, jy) = (
+                ((i * 7 + j * 3) % 11) as f64 / 11.0 * 0.6 + 0.2,
+                ((i * 5 + j * 11) % 13) as f64 / 13.0 * 0.6 + 0.2,
+            );
+            let p = kurbo::Point::new(
+                bb.x0 + (i as f64 + jx) * bb.width() / n as f64,
+                bb.y0 + (j as f64 + jy) * bb.height() / n as f64,
+            );
+            if (pa.winding(p) != 0) != (pb.winding(p) != 0) {
+                differ += 1;
+            }
+        }
+    }
+    differ < 8 || (differ as f64) < 0.015 * (n * n) as f64
+}
+
+/// [`boolean_svg_paths_curved`] without the snap-to-input and pruning passes:
+/// the engine's own contours, oriented. A diagnostic for the fuzz harness, to
+/// tell an engine disagreement from one the passes introduce.
+#[doc(hidden)]
+pub fn boolean_svg_paths_curved_raw(
+    operands: &[BoolOperand],
+    op: BoolOp,
+) -> Result<Option<String>, String> {
+    let paths: Vec<(BezPath, bool)> = operands
+        .iter()
+        .filter_map(|o| curved_operand(&o.paths).map(|p| (p, o.even_odd)))
+        .collect();
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(serialize_curves(&sweep(&paths, op)?)))
+}
+
 /// Drop contours thinner on average than the output precision resolves (an
 /// exact out-and-back along one curve has no area at all): the residue of
 /// near-coincident edges, and what snapping can leave of it.
@@ -812,6 +891,34 @@ mod tests {
             "{curved}"
         );
         assert_eq!(curved.matches('M').count(), 2, "{curved}");
+    }
+
+    #[test]
+    fn the_checked_algebra_keeps_the_curves_when_they_agree_with_the_render() {
+        let circle = "M140 35 C140 51.569 126.569 65 110 65 C93.431 65 80 51.569 80 35 C80 18.431 93.431 5 110 5 C126.569 5 140 18.431 140 35 Z";
+        let ops = [
+            BoolOperand {
+                paths: vec!["M10 10 L110 10 L110 60 L10 60 Z"],
+                even_odd: false,
+            },
+            BoolOperand {
+                paths: vec![circle],
+                even_odd: false,
+            },
+        ];
+        let d = boolean_svg_paths_checked(&ops, BoolOp::Union, 0.05).unwrap();
+        assert!(d.contains("C126.569 5 140 18.431 140 35"), "{d}");
+        // the gate itself: a region against a different one is a disagreement
+        assert!(agree(
+            "M0 0 L10 0 L10 10 L0 10 Z",
+            "M0 0 L10 0 L10 10 L0 10 Z"
+        ));
+        assert!(!agree(
+            "M0 0 L10 0 L10 10 L0 10 Z",
+            "M0 0 L10 0 L10 5 L0 5 Z"
+        ));
+        assert!(agree("", ""));
+        assert!(!agree("", "M0 0 L10 0 L10 10 Z"));
     }
 
     #[test]

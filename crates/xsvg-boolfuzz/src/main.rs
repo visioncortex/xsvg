@@ -966,10 +966,19 @@ fn repro(seed: u64) {
             .collect();
         case.label = format!("{} [subset {:?}]", case.label, keep);
     }
+    // `--operand I D`: replace operand I's path data, to test a hypothesis
+    let mut k = 0;
+    while let Some(i) = args[k..].iter().position(|a| a == "--operand") {
+        let idx: usize = args[k + i + 1].parse().unwrap();
+        case.operands[idx].0 = vec![args[k + i + 2].clone()];
+        case.label = format!("{} [operand {idx} replaced]", case.label);
+        k += i + 3;
+    }
     if let Some(i) = args.iter().position(|a| a == "--op") {
         case.op = BoolOp::parse(&args[i + 1]).expect("union|intersect|subtract|exclude");
         case.label = format!("{} [op {:?}]", case.label, case.op);
     }
+
     println!("seed {seed}: {}", case.label);
     for (i, (paths, eo)) in case.operands.iter().enumerate() {
         println!("  operand {i} even_odd={eo}");
@@ -986,6 +995,12 @@ fn repro(seed: u64) {
         })
         .collect();
     println!("curved: {:?}", boolean_svg_paths_curved(&ops, case.op));
+    if args.iter().any(|a| a == "--raw") {
+        println!(
+            "raw:    {:?}",
+            xsvg_core::boolean_svg_paths_curved_raw(&ops, case.op)
+        );
+    }
     println!(
         "flat:   {:?}",
         boolean_svg_paths(&ops, case.op, FLAT_TOLERANCE)
