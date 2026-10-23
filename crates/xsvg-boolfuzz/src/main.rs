@@ -1001,6 +1001,40 @@ fn repro(seed: u64) {
             xsvg_core::boolean_svg_paths_curved_raw(&ops, case.op)
         );
     }
+    if args.iter().any(|a| a == "--stages") {
+        if let Ok(Some([raw, snapped, pruned])) =
+            xsvg_core::boolean_svg_paths_curved_stages(&ops, case.op)
+        {
+            for (name, d) in [("raw", raw), ("snapped", snapped), ("pruned", pruned)] {
+                let p = parse_closed(&d);
+                println!(
+                    "stage {name}: {} contour(s), area {:.3}",
+                    d.matches('M').count(),
+                    p.area().abs()
+                );
+                let mut sub = BezPath::new();
+                for el in p
+                    .elements()
+                    .iter()
+                    .chain(std::iter::once(&kurbo::PathEl::MoveTo(Point::ZERO)))
+                {
+                    if let kurbo::PathEl::MoveTo(_) = el {
+                        if !sub.elements().is_empty() {
+                            let d = sub.to_svg();
+                            println!(
+                                "    area {:>10.3}  {}{}",
+                                sub.area(),
+                                &d[..d.len().min(150)],
+                                if d.len() > 150 { "…" } else { "" }
+                            );
+                        }
+                        sub = BezPath::new();
+                    }
+                    sub.push(*el);
+                }
+            }
+        }
+    }
     println!(
         "flat:   {:?}",
         boolean_svg_paths(&ops, case.op, FLAT_TOLERANCE)

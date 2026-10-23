@@ -232,6 +232,32 @@ fn agree(a: &str, b: &str) -> bool {
     differ < 8 || (differ as f64) < 0.015 * (n * n) as f64
 }
 
+/// The stages of [`boolean_svg_paths_curved`] — the engine's oriented
+/// contours, after the snap-to-input pass, after pruning — as path data, for
+/// the fuzz harness to see which stage a disagreement enters at.
+#[doc(hidden)]
+pub fn boolean_svg_paths_curved_stages(
+    operands: &[BoolOperand],
+    op: BoolOp,
+) -> Result<Option<[String; 3]>, String> {
+    let paths: Vec<(BezPath, bool)> = operands
+        .iter()
+        .filter_map(|o| curved_operand(&o.paths).map(|p| (p, o.even_odd)))
+        .collect();
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let inputs: Vec<kurbo::PathSeg> = paths.iter().flat_map(|(p, _)| p.segments()).collect();
+    let raw = sweep(&paths, op)?;
+    let snapped = snap_to_inputs(&raw, &inputs);
+    let pruned = prune_thin(&snapped);
+    Ok(Some([
+        serialize_curves(&raw),
+        serialize_curves(&snapped),
+        serialize_curves(&pruned),
+    ]))
+}
+
 /// [`boolean_svg_paths_curved`] without the snap-to-input and pruning passes:
 /// the engine's own contours, oriented. A diagnostic for the fuzz harness, to
 /// tell an engine disagreement from one the passes introduce.
@@ -250,6 +276,28 @@ pub fn boolean_svg_paths_curved_raw(
     Ok(Some(serialize_curves(&sweep(&paths, op)?)))
 }
 
+/// A contour's length. A degenerate quadratic (its control point on the
+/// chord) can make kurbo's closed-form arc length non-finite; such a segment
+/// counts its control polygon instead, which is never shorter than the curve.
+fn perimeter(path: &BezPath) -> f64 {
+    path.segments()
+        .map(|s| {
+            let l = kurbo::ParamCurveArclen::arclen(&s, 1e-6);
+            if l.is_finite() {
+                l
+            } else {
+                match s {
+                    kurbo::PathSeg::Line(l) => (l.p1 - l.p0).hypot(),
+                    kurbo::PathSeg::Quad(q) => (q.p1 - q.p0).hypot() + (q.p2 - q.p1).hypot(),
+                    kurbo::PathSeg::Cubic(c) => {
+                        (c.p1 - c.p0).hypot() + (c.p2 - c.p1).hypot() + (c.p3 - c.p2).hypot()
+                    }
+                }
+            }
+        })
+        .sum()
+}
+
 /// Drop contours thinner on average than the output precision resolves (an
 /// exact out-and-back along one curve has no area at all): the residue of
 /// near-coincident edges, and what snapping can leave of it.
@@ -262,13 +310,9 @@ fn prune_thin(path: &BezPath) -> BezPath {
             return;
         }
         let area = sub.area().abs();
-        let perimeter: f64 = sub
-            .segments()
-            .map(|s| kurbo::ParamCurveArclen::arclen(&s, 1e-6))
-            .sum();
         let extent = sub.bounding_box();
         let visible = extent.width().max(extent.height()) >= 5e-3;
-        if visible && area.is_finite() && area >= 1e-9 && area >= 2e-3 * perimeter {
+        if visible && area.is_finite() && area >= 1e-9 && area >= 2e-3 * perimeter(sub) {
             out.extend(sub.elements().iter().copied());
         }
         *sub = BezPath::new();
@@ -589,12 +633,7 @@ fn contours_to_path(contours: linesweeper::topology::Contours) -> BezPath {
         }
         // thinner on average than the output precision (0.001) resolves: the
         // residue of near-coincident edges, invisible and a node to delete
-        let perimeter: f64 = c
-            .path
-            .segments()
-            .map(|s| kurbo::ParamCurveArclen::arclen(&s, 1e-6))
-            .sum();
-        if area.abs() < 5e-4 * perimeter {
+        if area.abs() < 5e-4 * perimeter(&c.path) {
             continue;
         }
         parts.push(dedup_points(&c.path));
