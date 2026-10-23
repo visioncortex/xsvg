@@ -46,32 +46,42 @@ running counts.
 
 ## Campaign of 2026-10-23
 
-About 3.06 million cases over seven hours on one machine (three runs, two of
-them on the binary as shipped): seeds 1000000–2586835, 5000000–5428979 and
-9000000–10042107. Every flagged seed was replayed on the final binary.
+3,057,921 cases over seven hours on one machine, three runs (seeds
+1000000–2586835, 5000000–5428979, 9000000–10042107) on successive builds;
+every flagged seed replayed on the final binary (`a19d874`).
 
 What the fuzz found and what changed because of it, in order: holes oriented
 by the engine's own outer/hole flag (wrong on a bowtie's two lobes, which
 touch at the crossing) → oriented by containment depth; a pairwise fold that
 fed the engine its own output (pieces within epsilon of the next operand's
-curves, where XOR and difference went wrong, and the only panics seen then) →
-one n-ary sweep over the raw operands; the depth read beside a shared edge →
-read beside an unshared one; epsilon slivers and ~0.003 handle drift at sweep
-extrema → the snap-to-input pass; a real contour pruned because kurbo's
-quadratic arc length went non-finite → a robust perimeter; panics and
-twenty-second stalls on tiny (×0.01) and far-off (+10⁶) drawings → the sweep
-runs in a normalised frame; a contour mis-snapped at huge scale → a snapped
-contour must keep its region.
+curves, where XOR and difference went wrong, and where the first panics were)
+→ one n-ary sweep over the raw operands; the depth read beside a shared edge
+→ read beside an unshared one; epsilon slivers and ~0.003 handle drift at
+sweep extrema → the snap-to-input pass; a real contour pruned because kurbo's
+quadratic arc length went non-finite → a robust perimeter; panics and stalls
+on tiny (×0.01) drawings and stalls on ordinary ones → the sweep runs with the
+drawing moved to the origin and scaled up to about a thousand units (never
+down: scaled down, the engine draws the seam between a shape and its exact
+copy); a contour mis-snapped at huge scale → a snapped contour must keep its
+region.
 
-What remains on the final binary is about 0.02% of cases, engine-side (the
-raw sweep already disagrees): operands that are near-coincident copies of one
-another (nudged by 10⁻⁹…10⁻³, under XOR or difference) make up most of it,
-then drawings at ×1000 and +10⁶, then self-crossing "wild-handle" cubic blobs
-against a rotated copy or a nested shape in ordinary coordinates (about 1 in
-30 000 cases). One ordinary-input panic was seen in 1.04 million cases
-(`linesweeper` `entry_at` unwrap, seed 9123382 subset `0,2,3`: a rounded
-rect plus a rect, a circle, a hexagon); a native host catches it, a wasm host
-aborts. Stalls over twenty seconds remain for near-coincident copies of a
-cubic blob (about 1 in 50 000). Convert-to-path checks the curve result
-against the flattened one before writing it, so every disagreement above is
-written as the flattened path instead.
+On the final binary, 644 of the 3.06 million cases remain (0.021%), all
+engine-side (the raw sweep already disagrees with the sampled truth):
+
+| regime | remaining | of cases |
+|---|---|---|
+| near-coincident copy of an operand (nudged by 10⁻⁹…10⁻⁵) | 204 | — |
+| parallel copy (nudged by 10⁻⁵…10⁻²) | 111 | — |
+| at ×1000 | 117 | — |
+| at +10⁶ | 57 | — |
+| at ×0.01 | 43 | — |
+| ordinary coordinates | 112 | 1 in 27 000 |
+
+The ordinary ones are self-crossing "wild-handle" cubic blobs against a
+rotated copy or a nested shape, and exact copies under mixed fill rules. One
+panic in 3.06 million (`linesweeper` `entry_at` unwrap, seed 9123382 subset
+`0,2,3`: a rounded rect plus a rect, a circle, a hexagon; a native host
+catches it, a wasm host aborts) and 18 stalls over twenty seconds, all but one
+a cubic blob against a copy of itself nudged by ≤10⁻⁷ (about 1 in 170 000).
+Convert-to-path checks the curve result against the flattened one before
+writing it, so every disagreement above is written as the flattened path.
