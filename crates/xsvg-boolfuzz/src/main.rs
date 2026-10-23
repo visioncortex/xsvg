@@ -677,7 +677,9 @@ fn evaluate(case: &Case) -> Verdict {
         let simple = case.label.contains("rrect")
             || case.label.contains("ellipse-cubics")
             || case.label.contains("rect ");
-        if disjoint && simple && !case.operands.iter().any(|(_, eo)| *eo) {
+        // one path per operand: a two-path operand may cut its own curves
+        let single = case.operands.iter().all(|(paths, _)| paths.len() == 1);
+        if disjoint && simple && single && !case.operands.iter().any(|(_, eo)| *eo) {
             let want = handles(a)
                 .into_iter()
                 .chain(handles(b))
