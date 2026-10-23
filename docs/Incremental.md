@@ -530,7 +530,10 @@ output precision. The engine is [linesweeper](https://crates.io/crates/linesweep
 sweep over the raw operands (each under its own fill rule), and its answer is checked against the
 flattened algebra on a grid of samples before it is written: if the engine declines an input or
 the two disagree beyond the flattening tolerance's boundary band, the flattened result is written
-instead, so the conversion is never worse than the render. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
+instead, so the conversion is never worse than the render. One input is declined before the engine
+sees it: an operand that runs along another within 10⁻⁷ of the drawing's extent (a copy nudged by
+a hair, as another tool's arithmetic leaves one) — there the engine's subdivision never settles
+and its memory grows without bound. `crates/xsvg-boolfuzz` is its seeded fuzz: synthetic operand pairs through both algebras
 and against the truth sampled from the operands, every disagreement logged with the seed that
 reproduces it. Arcs stay arcs in `to_path`. For an editor whose
 path model is Béziers only,

@@ -26,6 +26,7 @@ sampled truth from the operands themselves. The oracles, each a `kind` in
 |---|---|
 | `panic` | the engine or the passes panicked (caught; the campaign continues) |
 | `timeout` | no result within 20 s (the child is killed; the campaign continues) |
+| `oom` | the child hit the memory cap (`--mem-mib`, default 1024) and aborted — an allocation storm in the engine; a probe run without the cap once reached 90 GB |
 | `crash` | the child died without reporting (an abort, a stack overflow) |
 | `engine-error` | the engine declined the input |
 | `pixel` | the curved result disagrees with the sampled truth where the flattened one does not |
@@ -85,3 +86,10 @@ catches it, a wasm host aborts) and 18 stalls over twenty seconds, all but one
 a cubic blob against a copy of itself nudged by ≤10⁻⁷ (about 1 in 170 000).
 Convert-to-path checks the curve result against the flattened one before
 writing it, so every disagreement above is written as the flattened path.
+
+**The stalls are allocation storms.** Under the memory jail every one of the
+18 reaches a 1 GiB cap in 5–20 s (so 90 GB in minutes), all on an operand
+that is a copy of another nudged by 10⁻¹¹…2·10⁻⁹ of the extent. The curve
+algebra now declines such a pair before the engine sees it (`near_coincident`,
+10⁻⁷ of the extent, exact copies and shared edges excepted), and the harness
+reports any storm that gets through as `oom` rather than letting it run.

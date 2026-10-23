@@ -32,7 +32,8 @@ partial one.
   as authored and a cut one as exact sub-curves; holes wind opposite to outers, sub-precision
   residue is dropped, and the flattened algebra is the answer if the engine declines or its result
   disagrees with the render on a grid of samples (the engine's known weakness is a boundary within
-  epsilon of another). The
+  epsilon of another); an operand within 10⁻⁷ of the extent of another is declined outright, since
+  the engine's subdivision does not terminate there. The
   compiled render is unchanged (still the integer-exact flattened algebra). `arcs_to_cubics`
   moved to `xsvg_core::spline`, feature-free. New workspace crate `xsvg-boolfuzz`: a seeded,
   panic-tolerant fuzz of the curve algebra against the flattened one and the sampled truth; its

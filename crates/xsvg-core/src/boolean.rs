@@ -165,10 +165,74 @@ pub fn boolean_svg_paths_curved(
     if paths.is_empty() {
         return Ok(None);
     }
+    if near_coincident(&paths) {
+        return Err(
+            "operands near-coincident: the engine's subdivision does not terminate there".into(),
+        );
+    }
     let inputs: Vec<kurbo::PathSeg> = paths.iter().flat_map(|(p, _)| p.segments()).collect();
     let result = sweep_normalized(&paths, op)?;
     let snapped = prune_thin(&snap_to_inputs(&result, &inputs));
     Ok(Some(serialize_curves(&snapped)))
+}
+
+/// Whether one operand runs along another within a hair of it — a copy nudged
+/// by less than 10⁻⁷ of the extent, as a round trip through another tool's
+/// arithmetic leaves (the storms seen sat at 10⁻¹¹…2·10⁻⁹). Such a pair is
+/// where the engine's robust subdivision never settles and its memory grows
+/// without bound (a probe reached 90 GB), so the curve algebra declines it and
+/// the flattened one answers. An exact copy is fine (its segments are
+/// identical and merge); a shape that merely touches or shares one edge is
+/// fine too: more than half of an operand's sampled boundary must lie that
+/// close to the other's.
+fn near_coincident(paths: &[(BezPath, bool)]) -> bool {
+    use kurbo::{ParamCurve, ParamCurveNearest, Shape};
+    let mut bb: Option<Rect> = None;
+    for (p, _) in paths {
+        let b = p.bounding_box();
+        bb = Some(bb.map_or(b, |a| a.union(b)));
+    }
+    let bb = bb.unwrap_or(Rect::ZERO);
+    let span = bb.width().max(bb.height()).max(1e-12);
+    let hair = 1e-7 * span;
+    // measured with the drawing at the origin: at a far-off position the
+    // float noise of a nearest-point search exceeds the width of a hair
+    let home = kurbo::Affine::translate((-bb.x0, -bb.y0));
+    let segs: Vec<Vec<kurbo::PathSeg>> = paths
+        .iter()
+        .map(|(p, _)| (home * p.clone()).segments().collect())
+        .collect();
+    for (i, a) in segs.iter().enumerate() {
+        for (j, b) in segs.iter().enumerate() {
+            if i == j || a.is_empty() || b.is_empty() {
+                continue;
+            }
+            // a's segments sampled at their midpoints (at most 64 of them)
+            let step = a.len().div_ceil(64).max(1);
+            let samples: Vec<kurbo::Point> = a.iter().step_by(step).map(|s| s.eval(0.5)).collect();
+            let mut close = 0;
+            let mut exact = 0;
+            for q in &samples {
+                let d = b
+                    .iter()
+                    .map(|s| s.nearest(*q, 1e-9).distance_sq)
+                    .fold(f64::INFINITY, f64::min)
+                    .sqrt();
+                if d < hair {
+                    close += 1;
+                    if d < 1e-12 * span {
+                        exact += 1;
+                    }
+                }
+            }
+            // identical copies sit exactly on each other and the engine merges
+            // them; it is the hair-wide gap that does not settle
+            if close * 2 > samples.len() && exact * 2 < close {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The sweep in a canonical frame: the operands' joint extent moved to the
@@ -925,10 +989,9 @@ mod tests {
     }
 
     #[test]
-    fn curved_depth_is_read_beside_an_unshared_edge() {
+    fn curved_declines_a_hair_wide_pair_and_keeps_an_exact_copy() {
         // fuzz seed 4389: a self-crossing polygon (evenodd) xor its copy nudged
-        // by 1.6e-7 (nonzero) — contours sharing an edge, where a point beside
-        // the shared edge reads the neighbour's depth
+        // by 1.6e-7 (nonzero)
         let a = "M53.64925134705148,25.483293384577763 L42.80081259874452,13.719252978729596 L51.51712439924321,15.624231560470413 L42.10704570043318,11.502389092393573 L52.01581039096862,12.124392372247701 L48.892876296106905,16.964237742652568 L49.70840911733144,22.444498192591862 L51.63210420347156,17.72259067706239 L48.537956901556925,28.711522083213403 L48.58188483969366,13.50287440614132 Z";
         let b = "M53.649251511048455,25.483293477200945 L42.800812762741494,13.71925307135278 L51.51712456324018,15.624231653093597 L42.107045864430155,11.502389185016757 L52.01581055496559,12.124392464870885 L48.89287646010388,16.96423783527575 L49.708409281328414,22.444498285215044 L51.632104367468536,17.72259076968557 L48.5379570655539,28.711522175836585 L48.58188500369063,13.502874498764504 Z";
         let ops = [
@@ -941,8 +1004,31 @@ mod tests {
                 even_odd: false,
             },
         ];
-        let (curved, flat) = both(&ops, BoolOp::Exclude);
-        assert!(disagreement(&curved, &flat) < 0.02, "{curved}");
+        // a copy nudged by 1.6e-7 is a hair-wide pair: declined before the
+        // engine (its subdivision never settles there), the flattened answer
+        // stands — the depth fix itself stays covered by the fuzz corpus
+        let declined = boolean_svg_paths_curved(&ops, BoolOp::Exclude);
+        assert!(
+            matches!(&declined, Err(e) if e.contains("near-coincident")),
+            "{declined:?}"
+        );
+        let checked = boolean_svg_paths_checked(&ops, BoolOp::Exclude, 0.05).unwrap();
+        assert_eq!(
+            checked,
+            boolean_svg_paths(&ops, BoolOp::Exclude, 0.05).unwrap()
+        );
+        // an exact copy is not declined: its segments merge
+        let twice = [
+            BoolOperand {
+                paths: vec![a],
+                even_odd: false,
+            },
+            BoolOperand {
+                paths: vec![a],
+                even_odd: false,
+            },
+        ];
+        assert!(boolean_svg_paths_curved(&twice, BoolOp::Union).is_ok());
     }
 
     #[test]
