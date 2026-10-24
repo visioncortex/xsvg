@@ -9778,3 +9778,119 @@ fn corners_reach_geometry_consumers_and_stay_live_on_conversion() {
     // the union of the rounded rect: its flattened outline has no sharp corner at the origin
     assert!(!out.contains("M0,0") || out.contains("A10"), "{out}");
 }
+
+#[test]
+fn a_cell_resolves_its_alignment_through_its_row_and_column() {
+    // what the compiler draws (cell › row › column › table, §6.15) is what the
+    // query answers: a column's `align` reaches its cells over the table's,
+    // a row's beats the column's, a cell's beats the row's; `valign` likewise
+    let src = format!(
+        r##"{XW}<x:table x="10" y="10" width="280" font-size="12" align="end" valign="bottom"><x:col/><x:col align="center" valign="middle" font-weight="bold"/><x:col align="center"/><x:tr><x:td>a</x:td><x:td>b</x:td><x:td>c</x:td></x:tr><x:tr align="start"><x:td>d</x:td><x:td>e</x:td><x:td align="justify" valign="top">f</x:td></x:tr></x:table></svg>"##
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let props = ["align", "valign", "font-weight"];
+    let get = |n: usize| s.resolved(nth_at(&src, "<x:td", n), &props).unwrap();
+    let table = nth_at(&src, "<x:table", 0);
+    let col1 = nth_at(&src, "<x:col align=\"center\" valign", 0);
+    let col2 = nth_at(&src, "<x:col align=\"center\"/>", 0);
+    let row1 = nth_at(&src, "<x:tr align", 0);
+    let a = get(0);
+    assert_eq!(
+        (a[0].value.as_deref(), a[0].source.clone()),
+        (
+            Some("end"),
+            Source::Inherited {
+                from: table,
+                token: None
+            }
+        )
+    );
+    assert_eq!(
+        (a[1].value.as_deref(), a[1].source.clone()),
+        (
+            Some("bottom"),
+            Source::Inherited {
+                from: table,
+                token: None
+            }
+        )
+    );
+    let b = get(1);
+    assert_eq!(
+        (b[0].value.as_deref(), b[0].source.clone()),
+        (
+            Some("center"),
+            Source::Inherited {
+                from: col1,
+                token: None
+            }
+        )
+    );
+    assert_eq!(
+        (b[1].value.as_deref(), b[1].source.clone()),
+        (
+            Some("middle"),
+            Source::Inherited {
+                from: col1,
+                token: None
+            }
+        )
+    );
+    assert_eq!(
+        (b[2].value.as_deref(), b[2].source.clone()),
+        (
+            Some("bold"),
+            Source::Inherited {
+                from: col1,
+                token: None
+            }
+        )
+    );
+    let e = get(4);
+    assert_eq!(
+        (e[0].value.as_deref(), e[0].source.clone()),
+        (
+            Some("start"),
+            Source::Inherited {
+                from: row1,
+                token: None
+            }
+        )
+    );
+    assert_eq!(
+        (e[1].value.as_deref(), e[1].source.clone()),
+        (
+            Some("middle"),
+            Source::Inherited {
+                from: col1,
+                token: None
+            }
+        )
+    );
+    let f = get(5);
+    assert_eq!(
+        (f[0].value.as_deref(), f[0].source.clone()),
+        (Some("justify"), Source::Own)
+    );
+    assert_eq!(
+        (f[1].value.as_deref(), f[1].source.clone()),
+        (Some("top"), Source::Own)
+    );
+    let _ = col2;
+    // and the render agrees: column two centred, row two's first cells at start
+    let out = compile_test(&src);
+    let anchors: Vec<&str> = out.matches("text-anchor=\"").map(|_| "").collect();
+    assert_eq!(anchors.len(), 6);
+    let anchor_of = |text: &str| {
+        let i = out.find(&format!(">{text}</tspan>")).unwrap();
+        let head = &out[..i];
+        let j = head.rfind("text-anchor=\"").unwrap();
+        head[j + 13..].split('"').next().unwrap().to_string()
+    };
+    assert_eq!(anchor_of("a"), "end");
+    assert_eq!(anchor_of("b"), "middle");
+    assert_eq!(anchor_of("c"), "middle");
+    assert_eq!(anchor_of("d"), "start");
+    assert_eq!(anchor_of("e"), "start");
+    assert_eq!(anchor_of("f"), "start"); // justify renders start-anchored
+}

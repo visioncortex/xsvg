@@ -46,6 +46,20 @@ const BLOCK: &[&str] = &[
     "line-height",
     "fill",
 ];
+/// What a cell, its row and its column read over the table (§6.15): the block
+/// properties and the cell's alignment — `<x:col align="center">` is a column's
+/// alignment, and the table's is only the fallback.
+const CELL: &[&str] = &[
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-transform",
+    "line-height",
+    "fill",
+    "align",
+    "valign",
+];
 /// What a list item inside a box reads over its list: a smaller sub-point, its
 /// case and its colour.
 const ITEM_IN_BOX: &[&str] = &["font-size", "text-transform", "fill"];
@@ -225,19 +239,19 @@ pub(super) fn cell_levels<'a>(
     let mut levels = vec![
         Level::Attrs {
             node: cell,
-            props: BLOCK,
+            props: CELL,
             token: None,
         },
         Level::Attrs {
             node: row,
-            props: BLOCK,
+            props: CELL,
             token: None,
         },
     ];
     if let Some(col) = col {
         levels.push(Level::Attrs {
             node: col,
-            props: BLOCK,
+            props: CELL,
             token: None,
         });
     }
@@ -383,6 +397,32 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
         source,
     };
     if !STYLE_PROPS.contains(&property) {
+        // a cell's alignment is the table's rule (§6.15): cell › row › column
+        // › table, not the paragraph planner's own-else-box
+        if (is_x(node, "td") || is_x(node, "th")) && matches!(property, "align" | "valign") {
+            if let Some((levels, table)) = block_levels(node) {
+                return match find(&levels, property) {
+                    Some((v, _, level)) if level.node() == node => done(Some(v), Source::Own),
+                    Some((v, _, level)) => done(
+                        Some(v),
+                        Source::Inherited {
+                            from: level.node().range().start,
+                            token: None,
+                        },
+                    ),
+                    None => match attr_by_name(table, property) {
+                        Some(v) => done(
+                            Some(v),
+                            Source::Inherited {
+                                from: table.range().start,
+                                token: None,
+                            },
+                        ),
+                        None => done(declared_default(table, property), Source::Initial),
+                    },
+                };
+            }
+        }
         // a block's layout properties cascade from its box by the planner's rules
         if let Some((_, container)) = block_levels(node) {
             if let Some((v, source)) = block_layout(node, container, is_x(node, "li"), property) {

@@ -16,6 +16,11 @@ partial one.
 
 ### Fixed
 
+- **A cell's `align` / `valign` resolve as the table draws them.** The `resolved` query read a
+  cell's alignment as its own, else the table's — the paragraph planner's rule — so a
+  `<x:col align="center">` or `<x:tr align>` centred the render while the inspector reported the
+  table's value. A cell now resolves cell › row › column › table (§6.15), `valign` included.
+
 - **An empty text box lays one blank line where typing would start.** A textbox with no text —
   its own box, a referenced rect or shape, an empty `<x:p>`, an empty `<text inline-size>` — used
   to emit a bare `<text>` with no position and the layout seam reported no lines, so an editor's
