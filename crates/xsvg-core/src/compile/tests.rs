@@ -9780,6 +9780,67 @@ fn corners_reach_geometry_consumers_and_stay_live_on_conversion() {
 }
 
 #[test]
+fn a_paragraph_sets_its_own_letter_and_word_spacing() {
+    // a spaced paragraph wraps on its own spacing, writes it on its <text>,
+    // and the query and the layout seam report it; a plain paragraph beside
+    // it keeps the box's (none); a cell reads it through its column
+    let src = format!(
+        r##"{XW}<x:textbox x="0" y="0" width="100" height="200" font-size="10"><x:p>aaaa aaaa aaaa aaaa aaaa aaaa</x:p><x:p letter-spacing="2" word-spacing="4">aaaa aaaa aaaa aaaa aaaa aaaa</x:p></x:textbox><x:table x="0" y="0" width="100" font-size="10"><x:col letter-spacing="3"/><x:tr><x:td>ab</x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_test(&src);
+    let texts: Vec<&str> = out.split("<text ").skip(1).collect();
+    assert!(!texts[0].contains("letter-spacing"), "{}", texts[0]);
+    assert!(
+        texts[1].starts_with("text-anchor=\"start\"")
+            && texts[1].contains(" letter-spacing=\"2\" word-spacing=\"4\""),
+        "{}",
+        texts[1]
+    );
+    // Mono: 5 per char at size 10; the plain line holds four words (95) and
+    // not five (120); spaced (2 per char, 4 more per space) a word is 28 and a
+    // space 11, so two words (67) fit and three (106) do not
+    let first_line = |t: &str| {
+        t.split("<tspan")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .nth(1)
+            .unwrap()
+            .split('<')
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(first_line(texts[0]), "aaaa aaaa aaaa aaaa");
+    assert_eq!(first_line(texts[1]), "aaaa aaaa");
+    // the cell: its column's spacing
+    assert!(texts[2].contains(" letter-spacing=\"3\""), "{}", texts[2]);
+    let s = ParsedDocument::new(&src).unwrap();
+    let r = s
+        .resolved(
+            nth_at(&src, "<x:p letter", 0),
+            &["letter-spacing", "word-spacing"],
+        )
+        .unwrap();
+    assert_eq!(
+        (r[0].value.as_deref(), r[0].source.clone()),
+        (Some("2"), Source::Own)
+    );
+    assert_eq!(
+        (r[1].value.as_deref(), r[1].source.clone()),
+        (Some("4"), Source::Own)
+    );
+    let r = s
+        .resolved(nth_at(&src, "<x:td", 0), &["letter-spacing"])
+        .unwrap();
+    assert_eq!(r[0].value.as_deref(), Some("3"));
+    let layout = layout_at(&src, nth_at(&src, "<x:textbox", 0)).unwrap();
+    assert_eq!(layout.paras[0].style.letter_spacing, 0.0);
+    assert_eq!(layout.paras[1].style.letter_spacing, 2.0);
+    assert_eq!(layout.paras[1].style.word_spacing, 4.0);
+}
+
+#[test]
 fn a_cell_resolves_its_alignment_through_its_row_and_column() {
     // what the compiler draws (cell › row › column › table, §6.15) is what the
     // query answers: a column's `align` reaches its cells over the table's,

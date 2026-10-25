@@ -279,6 +279,13 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 );
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill, ctx);
+                // the cell's spacing (cell › row › column › table), as a box's
+                if st.letter_spacing != 0.0 {
+                    out.push_str(&format!(" letter-spacing=\"{}\"", fmt(st.letter_spacing)));
+                }
+                if st.word_spacing != 0.0 {
+                    out.push_str(&format!(" word-spacing=\"{}\"", fmt(st.word_spacing)));
+                }
                 out.push('>');
                 for line in &layout.lines {
                     emit_line(out, line, &st, layout.font_size, 1.0, m, &emits, ctx);

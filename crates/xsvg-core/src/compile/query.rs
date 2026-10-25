@@ -35,8 +35,8 @@ pub(super) const STYLE_PROPS: [&str; 9] = [
 
 /// What an element reads of its own: every style property, token first.
 const ELEMENT: &[&str] = &STYLE_PROPS;
-/// What a paragraph or list inside a box, a cell, its row or its column, read
-/// of their own over the box's (or the table's): no spacing, no token.
+/// What a paragraph or list inside a box reads of its own over the box's: the
+/// type, its spacing and its colour — no token.
 const BLOCK: &[&str] = &[
     "font-family",
     "font-size",
@@ -44,6 +44,8 @@ const BLOCK: &[&str] = &[
     "font-style",
     "text-transform",
     "line-height",
+    "letter-spacing",
+    "word-spacing",
     "fill",
 ];
 /// What a cell, its row and its column read over the table (§6.15): the block
@@ -56,6 +58,8 @@ const CELL: &[&str] = &[
     "font-style",
     "text-transform",
     "line-height",
+    "letter-spacing",
+    "word-spacing",
     "fill",
     "align",
     "valign",

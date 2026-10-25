@@ -612,6 +612,19 @@ pub(super) fn emit_paragraphs(
         if para.laid.rtl {
             out.push_str(" direction=\"rtl\"");
         }
+        // the paragraph's own spacing (§6.16), as the box's goes on a single flow
+        if para.laid.style.letter_spacing != 0.0 {
+            out.push_str(&format!(
+                " letter-spacing=\"{}\"",
+                fmt(para.laid.style.letter_spacing)
+            ));
+        }
+        if para.laid.style.word_spacing != 0.0 {
+            out.push_str(&format!(
+                " word-spacing=\"{}\"",
+                fmt(para.laid.style.word_spacing)
+            ));
+        }
         out.push_str(&pos_attr(para.src, ctx)); // per-paragraph source map
         out.push('>');
         for l in shifted {
@@ -808,6 +821,9 @@ pub(super) fn plan_paragraphs<'a>(
             let block = levels(p);
             let mut pstyle = overlay(&block, base_style);
             pstyle.size *= scale;
+            // the spacing is in the same units as the size: it shrinks with it
+            pstyle.letter_spacing *= scale;
+            pstyle.word_spacing *= scale;
             // spacing: between items of one list its item-spacing; into the
             // first item, and around a paragraph, the paragraph gaps; the gap
             // AFTER a list's last item is a paragraph gap, not its

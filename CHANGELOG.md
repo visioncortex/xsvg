@@ -30,6 +30,12 @@ partial one.
 
 ### Added
 
+- **`letter-spacing` and `word-spacing` on a paragraph, a list, a cell, a row and a column.**
+  They were the box's alone: set on an `<x:p>` they were ignored (§6.16 listed `font-*` and
+  `fill`). A paragraph's spacing now lays it out, wraps it and is written on its `<text>` like the
+  box's on a single flow; it shrinks with the size under `fit="shrink"`; the `resolved` query and
+  the layout seam's paragraph style report it; a cell reads it cell › row › column › table.
+
 - **Convert to path for `<x:boolean>`, on the curves — in its own crate** (Incremental.md §11).
   New `xsvg-path-ops`: boolean operations on paths with the curves kept, by
   [linesweeper](https://crates.io/crates/linesweeper) in one n-ary sweep over the raw operands,

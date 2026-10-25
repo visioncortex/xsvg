@@ -1098,7 +1098,7 @@ indent, style, and spacing.
 | `direction` | `<x:p>` | this paragraph's direction (`ltr` / `rtl`), overriding the box's (§6.4) |
 | `align` | `<x:p>` | per-paragraph alignment (else the box's) |
 | `text-indent` | `<x:p>` | first-line indent (§6.6), per paragraph |
-| `font-*`, `fill` | `<x:p>` | per-paragraph style over the box defaults |
+| `font-*`, `letter-spacing`, `word-spacing`, `fill` | `<x:p>` | per-paragraph style over the box defaults (the spacing shrinks with the size under `fit="shrink"`) |
 
 **Lists inside a textbox.** A `<x:list>` may stand among the paragraphs as a block of the same
 stack: its items flow as paragraphs with the list's gutter — each `<x:li>` laid out on the text
