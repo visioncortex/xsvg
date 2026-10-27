@@ -37,7 +37,8 @@ partial one.
   `<x:th>`, `<x:tr>`, `<x:col>`, and the plain `<text>` and `<textArea>` the compiler lays out, join
   the eleven `x:` elements (an element in another namespace carries `"ns"` in its entry —
   `ElementSpec::ns`, `#[element(ns = "…")]`). `<x:textbox>` declares its `direction`,
-  `paragraph-spacing` and `fill`, `<x:textpath>` its `fill`. Gaps filled so the table is uniform: an
+  `paragraph-spacing` and `fill`, `<x:textpath>` its `fill`, `<x:table>` its `cell-fill` and
+  `stripe`. Gaps filled so the table is uniform: an
   `<x:li>` takes the whole type block over its list (it took a size, a case and a colour), with
   its own fill and spacing written on its text.
 

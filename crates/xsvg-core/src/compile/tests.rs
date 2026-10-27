@@ -9912,6 +9912,8 @@ fn the_manifest_declares_the_typography_matrix() {
                 "valign",
                 "fill",
                 "header-fill",
+                "cell-fill",
+                "stripe",
                 "stroke",
                 "stroke-width",
             ],

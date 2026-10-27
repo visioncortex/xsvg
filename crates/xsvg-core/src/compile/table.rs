@@ -68,11 +68,11 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let text_fill = ctx.resolve_var(&tp.fill).into_owned();
     let grid = ctx.paint(&tp.stroke);
     let grid_w = tp.stroke_width.max(0.0);
-    let body_bg = node.attribute("cell-fill").map(|v| ctx.paint(v));
+    let body_bg = tp.cell_fill.as_deref().map(|v| ctx.paint(v));
     let header_bg = ctx.paint(&tp.header_fill);
     // zebra striping: an alternate background for every other BODY row (rows with
     // no header cell); the first data row is unstriped.
-    let stripe = node.attribute("stripe").map(|v| ctx.paint(v));
+    let stripe = tp.stripe.as_deref().map(|v| ctx.paint(v));
     let pad = tp.cell_padding.max(0.0);
     let default_align = tp.align.as_str();
     let default_valign = tp.valign.as_str();

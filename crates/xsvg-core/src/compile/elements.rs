@@ -761,6 +761,13 @@ pub(super) struct Table {
     pub fill: String,
     #[param(color, default = "#f1f5f9")]
     pub header_fill: String,
+    #[param(color, doc = "default background of <x:td> cells; none when absent")]
+    pub cell_fill: Option<String>,
+    #[param(
+        color,
+        doc = "zebra background behind every other body row (the first data row unstriped); none when absent"
+    )]
+    pub stripe: Option<String>,
     #[param(color, default = "#cbd5e1", doc = "rule colour")]
     pub stroke: String,
     #[param(default = 1.0, min = 0.0, max = 40.0)]
