@@ -173,6 +173,10 @@ impl ParamSpec {
 #[derive(Clone, Copy, Debug)]
 pub struct ElementSpec {
     pub name: &'static str,
+    /// The element's namespace when it is not the manifest's own — the
+    /// compiler describes the plain SVG text elements it lays out (`<text>`,
+    /// `<textArea>`) beside its `x:` ones. `None` is the manifest's namespace.
+    pub ns: Option<&'static str>,
     pub doc: Option<&'static str>,
     /// The element's own parameters.
     pub params: &'static [ParamSpec],
@@ -310,6 +314,11 @@ impl ElementSpec {
     /// This element as a manifest entry (the value side of `elements`).
     pub fn write_json(&self, out: &mut String) {
         out.push('{');
+        if let Some(ns) = self.ns {
+            out.push_str("\"ns\":");
+            push_json_str(out, ns);
+            out.push(',');
+        }
         if let Some(d) = self.doc {
             out.push_str("\"doc\":");
             push_json_str(out, d);

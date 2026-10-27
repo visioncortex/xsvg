@@ -15,7 +15,8 @@ use super::*;
 /// the document never breaks.
 pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node, ctx);
-    let fill = node.attribute("fill").unwrap_or("#000");
+    let tp: elements::Textpath = params_of(node);
+    let fill = tp.fill.as_str();
     let stroke = text_border_attrs(node, ctx);
     // `to_path` carries the element's attributes, its transform included: this
     // emitter writes none of its own
@@ -24,7 +25,6 @@ pub(super) fn emit_textpath(node: roxmltree::Node, out: &mut String, ctx: &Ctx) 
         pos_attr(node, ctx),
         ctx.carry_at(node.range().start, true)
     );
-    let tp: elements::Textpath = params_of(node);
     let fx = PathEffect {
         effect: &tp.effect,
         baseline_shift: tp.baseline_shift,

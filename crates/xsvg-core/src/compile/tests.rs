@@ -7701,11 +7701,12 @@ fn resolved_cells_and_standalone_lists_and_declared_defaults() {
         Some("#0a0")
     );
 
-    // a standalone list's item: its size, but its colour is the list's
+    // a standalone list's item: its size, and its own colour (the type block
+    // of §6.1 is the item's over the list's, standalone or boxed)
     let li = get(nth_at(src, "<q:li ", 0));
     assert_eq!(li[0].value.as_deref(), Some("8"));
-    assert_eq!(li[3].value.as_deref(), Some("#111827"));
-    assert_eq!(li[3].source, Source::Initial);
+    assert_eq!(li[3].value.as_deref(), Some("#f00"));
+    assert_eq!(li[3].source, Source::Own);
 
     // any other attribute: own (x: names the namespace, whatever its prefix),
     // else the element's declared default
@@ -9838,6 +9839,188 @@ fn a_paragraph_sets_its_own_letter_and_word_spacing() {
     assert_eq!(layout.paras[0].style.letter_spacing, 0.0);
     assert_eq!(layout.paras[1].style.letter_spacing, 2.0);
     assert_eq!(layout.paras[1].style.word_spacing, 4.0);
+}
+
+#[test]
+fn the_manifest_declares_the_typography_matrix() {
+    // §6.1's matrix, as the describe manifest states it: which typography
+    // property each text element and block takes. A panel reads this; the
+    // cascade (query.rs) and the emitters read the same names
+    let elements = super::elements::built_in_elements();
+    let params_of = |name: &str| -> Vec<&str> {
+        elements
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("{name} is not declared"))
+            .all_params()
+            .map(|p| p.name)
+            .collect()
+    };
+    const FONT: [&str; 8] = [
+        "font-family",
+        "font-size",
+        "font-weight",
+        "font-style",
+        "line-height",
+        "letter-spacing",
+        "word-spacing",
+        "text-transform",
+    ];
+    for (name, own) in [
+        (
+            "textbox",
+            vec![
+                "align",
+                "valign",
+                "direction",
+                "text-indent",
+                "paragraph-spacing",
+                "fit",
+                "fit-min",
+                "text-overflow",
+                "overflow",
+                "padding",
+                "outline",
+                "fill",
+            ],
+        ),
+        (
+            "textpath",
+            vec!["align", "start", "baseline-shift", "effect", "fill"],
+        ),
+        (
+            "list",
+            vec![
+                "list",
+                "marker",
+                "marker-fill",
+                "marker-size",
+                "marker-gap",
+                "indent",
+                "item-spacing",
+                "valign",
+                "fill",
+            ],
+        ),
+        (
+            "table",
+            vec![
+                "cols",
+                "cell-padding",
+                "row-min-height",
+                "align",
+                "valign",
+                "fill",
+                "header-fill",
+                "stroke",
+                "stroke-width",
+            ],
+        ),
+        (
+            "p",
+            vec![
+                "align",
+                "direction",
+                "text-indent",
+                "space-before",
+                "space-after",
+                "fill",
+            ],
+        ),
+        ("li", vec!["indent", "list", "marker", "direction", "fill"]),
+        ("td", vec!["align", "valign", "bg", "fill"]),
+        ("th", vec!["align", "valign", "bg", "fill"]),
+        ("tr", vec!["align", "valign", "bg", "fill"]),
+        ("col", vec!["align", "valign", "bg", "fill"]),
+        (
+            "text",
+            vec!["inline-size", "text-anchor", "fill", "x:outline"],
+        ),
+        (
+            "textArea",
+            vec![
+                "width",
+                "height",
+                "text-align",
+                "display-align",
+                "line-increment",
+                "overflow",
+                "fill",
+            ],
+        ),
+    ] {
+        let declared = params_of(name);
+        for p in FONT.iter().chain(own.iter()) {
+            assert!(
+                declared.contains(p),
+                "<{name}> should declare {p}: {declared:?}"
+            );
+        }
+    }
+    // what a block must NOT claim: a box-level control
+    for (name, not) in [
+        ("p", "valign"),
+        ("li", "align"),
+        ("td", "padding"),
+        ("col", "text-indent"),
+        ("list", "text-indent"),
+        ("list", "paragraph-spacing"),
+    ] {
+        assert!(
+            !params_of(name).contains(&not),
+            "<{name}> should not declare {not}"
+        );
+    }
+    // the SVG text elements carry their namespace; the x: ones none
+    let ns_of = |name: &str| elements.iter().find(|e| e.name == name).unwrap().ns;
+    assert_eq!(ns_of("text"), Some("http://www.w3.org/2000/svg"));
+    assert_eq!(ns_of("textArea"), Some("http://www.w3.org/2000/svg"));
+    assert_eq!(ns_of("textbox"), None);
+    let json = super::elements::describe_impl();
+    assert!(
+        json.contains(r#""text":{"ns":"http://www.w3.org/2000/svg""#),
+        "{}",
+        &json[..200]
+    );
+    assert!(json.contains(r#""p":{"doc""#));
+}
+
+#[test]
+fn a_list_item_takes_the_whole_type_block_like_a_paragraph() {
+    // §6.14: an <x:li> sets font-*, line-height, the spacing and fill over its
+    // list — standalone and inside a textbox alike — where it used to take a
+    // size, a case and (in a box) a colour alone
+    let src = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10"><x:li>plain</x:li><x:li font-weight="bold" font-style="italic" letter-spacing="2" fill="#f00">styled</x:li></x:list><x:textbox x="0" y="0" width="200" height="200" font-size="10"><x:list><x:li font-family="Mono" word-spacing="3">boxed</x:li></x:list></x:textbox></svg>"##
+    );
+    let out = compile_test(&src);
+    let texts: Vec<&str> = out.split("<text ").skip(1).collect();
+    let styled = texts.iter().find(|t| t.contains(">styled<")).unwrap();
+    assert!(
+        styled.contains(r#"font-weight="bold""#)
+            && styled.contains(r#"font-style="italic""#)
+            && styled.contains(r#" letter-spacing="2""#)
+            && styled.contains(r##"fill="#f00""##),
+        "{styled}"
+    );
+    let plain = texts.iter().find(|t| t.contains(">plain<")).unwrap();
+    assert!(
+        plain.contains(r#"font-weight="normal""#) && !plain.contains("letter-spacing"),
+        "{plain}"
+    );
+    let boxed = texts.iter().find(|t| t.contains(">boxed<")).unwrap();
+    assert!(
+        boxed.contains(r#"font-family="Mono""#) && boxed.contains(r#" word-spacing="3""#),
+        "{boxed}"
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let r = s
+        .resolved(
+            nth_at(&src, "<x:li font-weight", 0),
+            &["font-weight", "letter-spacing", "fill"],
+        )
+        .unwrap();
+    assert!(r.iter().all(|v| v.source == Source::Own), "{r:?}");
 }
 
 #[test]

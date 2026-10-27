@@ -474,6 +474,36 @@ limited, the trim points and the centre — for an editor's corner widget (§10 
 
 ### 6.1 Common layout primitives [implemented]
 
+**Where each typography property applies (normative).** One rule, then the table that spells it
+out: the **type block** — `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`,
+`letter-spacing`, `word-spacing`, `text-transform`, and `fill` — is taken by every text element and
+by every block inside one (a paragraph, a list item, a cell, a row, a column), each over its
+container; the **layout** properties belong to the thing that lays text out, and a block takes only
+the ones that are its own to decide. The compiler's `describe` manifest declares exactly this per
+element (Extensibility.md §11), and a panel should read it rather than keep a table of its own.
+
+| | `<x:textbox>` | `<text>` | `<textArea>` | `<x:textpath>` | `<x:list>` | `<x:li>` | `<x:table>` | `<x:tr>` `<x:col>` | `<x:td>` `<x:th>` | `<x:p>` | `<tspan>` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| type block (`font-*`, `line-height`, spacing, `text-transform`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `font-*`, `text-transform` |
+| `fill` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `x:font` token | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — |
+| horizontal alignment | `align` | `text-anchor` | `text-align` | `align` (along the path) | — (items start-aligned) | — | `align` | `align` | `align` | `align` | — |
+| vertical alignment | `valign` | — | `display-align` | — | `valign` | — | `valign` | `valign` | `valign` | — | — |
+| `direction` | ✓ | (renderer's) | — | — | — | ✓ (in a box) | — | — | — | ✓ | — |
+| `text-indent` | ✓ | — | — | — | — | — (the gutter) | — | — | — | ✓ | — |
+| `space-before` / `space-after` | — | — | — | — | `item-spacing` | — | — | — | — | ✓ | — |
+| `paragraph-spacing` | ✓ | — | — | — | — | — | — | — | — | — | — |
+| `padding` | ✓ | — | — | — | — | — | `cell-padding` | — | — | — | — |
+| `fit` / `fit-min` | ✓ | — | — | — | — | — | — | — | — | — | — |
+| overflow | `text-overflow`, `overflow` | — | `overflow` | — | — | — | — | — | — | — | — |
+| outlining | `outline` | `x:outline` | — | (always baked) | — | — | — | — | — | — | — |
+| `x:border-*` | ✓ | — | — | ✓ | — | — | — | — | — | — | ✓ |
+| `text-decoration`, `x:highlight`, `baseline-shift` | — | — | — | — | — | — | — | — | — | — | ✓ |
+
+A cell's properties resolve cell › row › column › table (§6.15); a paragraph's and an item's over
+their box or list (§6.14, §6.16); a run's over its element (§6.11). A `<x:tr>`'s or `<x:col>`'s
+`bg` and a cell's `bg` are backgrounds, not type, and are listed in §6.15.
+
 - **Measurement.** Words are measured once at the base size; trial sizes scale widths linearly.
 - **Wrapping.** Greedy (first-fit): break only at whitespace. A token wider than the available width
   is placed alone (it overflows; see §6.6). No automatic hyphenation in v0.
@@ -1006,7 +1036,7 @@ and last lines' sizes) render styled, and `<tbreak/>` forces a line within the b
 | `indent` | length (default `1.5em`) | the per-level indent step |
 | `marker-gap` | length (default `0.5em`) | gap between the marker and the text column |
 | `item-spacing` | length (default `0.35em`) | extra vertical gap between items |
-| `font-*`, `line-height`, `fill` | as §6.1 | base style for every item |
+| `font-*`, `line-height`, `letter-spacing`, `word-spacing`, `fill` | as §6.1 | base style for every item; an `<x:li>` may set any of them over the list (the type block of §6.1), and its own `direction` |
 | `transform` | SVG transform list | passes through to the `<g>` the list lowers to, as on a table (§6.15) |
 
 Each **`<x:li>`** is one item; `indent="N"` sets its **nesting level** (0 = top). Every level steps

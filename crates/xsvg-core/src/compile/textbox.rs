@@ -219,9 +219,9 @@ pub(super) fn blocks_of<'a>(node: roxmltree::Node<'a, 'a>) -> Vec<roxmltree::Nod
 
 pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node, ctx);
-    let fill = node.attribute("fill").unwrap_or("#000");
-    let gx = attr_num(node, "glyph-x-scale", 1.0);
     let tb: elements::Textbox = params_of(node);
+    let fill = tb.fill.as_str();
+    let gx = attr_num(node, "glyph-x-scale", 1.0);
     let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node, ctx);
     let pos = format!(
@@ -712,7 +712,8 @@ pub(super) fn plan_paragraphs<'a>(
     // lists use for item-spacing — so Enter reads as a paragraph while a
     // forced line break (<tbreak/>) stays at the bare line advance; an
     // authored paragraph-spacing (zero included) wins
-    let default_spacing = attr_num(node, "paragraph-spacing", base_style.size * 0.35);
+    let declared: elements::Textbox = params_of(node);
+    let default_spacing = declared.paragraph_spacing.unwrap_or(base_style.size * 0.35);
 
     // per-block style and fill: the box's, with what the `<x:p>` — or the item,
     // then its `<x:list>` — sets over it (query.rs, the same levels a query reads)
@@ -950,7 +951,7 @@ pub(super) fn textbox_area_spec(node: roxmltree::Node, geom: roxmltree::Node) ->
             }
         },
         text_indent: opts.text_indent,
-        rtl: node.attribute("direction") == Some("rtl"),
+        rtl: params_of::<elements::Textbox>(node).direction == elements::DirectionParam::Rtl,
     }
 }
 

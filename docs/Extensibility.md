@@ -497,6 +497,12 @@ the same shape (`crates/xsvg-core/src/compile/elements.rs`), so a host merges th
 lookup and a property panel never has to know which tier it is editing.
 
 All eleven `x:` elements are converted — `offset`, `boolean`, `warp`, `pie`, `plot`, `mesh`,
+`connector`, `textbox`, `textpath`, `list`, `table` — and beside them the **text blocks** their
+containers lay out (`p`, `li`, `td`, `th`, `tr`, `col`) and the two **plain SVG text elements**
+the compiler lays out (`text`, `textArea`), so a panel reads the typography matrix of
+Specification §6.1 from one manifest. An element in another namespace than the manifest's carries
+`"ns"` in its entry (the SVG one for `text` and `textArea`); `ElementSpec::ns` / `#[element(ns =
+"…")]`, `None` for the manifest's own.
 `connector`, `textbox`, `textpath`, `list`, `table` — and none has a declared field its emitter
 does not read.
 

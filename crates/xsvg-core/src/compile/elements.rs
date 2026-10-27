@@ -356,8 +356,262 @@ pub(super) struct Textbox {
     pub overflow: OverflowVisibility,
     #[param(default = 0.0, min = -400.0, max = 400.0, doc = "first-line indent")]
     pub text_indent: f64,
+    pub direction: DirectionParam,
+    #[param(
+        min = 0.0,
+        max = 400.0,
+        doc = "gap after each <x:p> (its space-after default); defaults to 0.35em"
+    )]
+    pub paragraph_spacing: Option<f64>,
+    #[param(color, default = "#000", doc = "text colour")]
+    pub fill: String,
     #[param(default = false, doc = "bake the glyphs to paths instead of live text")]
     pub outline: bool,
+}
+
+/// Paragraph direction (§6.4): under `rtl` the start edge is the right one.
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum DirectionParam {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
+// ---- the text blocks (§6.14–6.16) ------------------------------------------
+//
+// A paragraph, a list item and the table parts are not elements with emitters
+// of their own: the box, list or table they sit in lays them out. They are
+// declared here so an editor's panel knows what each takes — the typography
+// matrix of §6.1 — and the compiler's cascade (query.rs `block_levels`,
+// `cell_levels`) reads exactly the properties declared.
+
+/// `<x:p>`: a paragraph in a textbox.
+#[derive(Params)]
+#[element(
+    name = "p",
+    doc = "A paragraph inside a text box: its own alignment, direction, indent, spacing and type over the box's.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct Paragraph {
+    pub align: AlignParam,
+    pub direction: DirectionParam,
+    #[param(default = 0.0, min = -400.0, max = 400.0, doc = "first-line indent")]
+    pub text_indent: f64,
+    #[param(default = 0.0, min = 0.0, max = 400.0, doc = "extra gap above")]
+    pub space_before: f64,
+    #[param(
+        min = 0.0,
+        max = 400.0,
+        doc = "extra gap below; defaults to the box's paragraph-spacing"
+    )]
+    pub space_after: Option<f64>,
+    #[param(color, doc = "defaults to the box's fill")]
+    pub fill: Option<String>,
+}
+
+/// `<x:li>`: an item of a list, standalone or inside a textbox.
+#[derive(Params)]
+#[element(
+    name = "li",
+    doc = "A list item: its marker, depth and type over the list's.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct ListItem {
+    #[param(
+        default = 0.0,
+        min = 0.0,
+        max = 8.0,
+        step = 1.0,
+        doc = "nesting depth, in indent steps"
+    )]
+    pub indent: f64,
+    #[param(doc = "bullet, number or none, overriding the list's")]
+    pub list: Option<String>,
+    #[param(doc = "a drawn shape or literal marker text, overriding the list's")]
+    pub marker: Option<String>,
+    pub direction: DirectionParam,
+    #[param(color, doc = "defaults to the list's fill")]
+    pub fill: Option<String>,
+}
+
+/// The properties a table part sets over the table (§6.15): the cell's
+/// alignment and paint, read cell › row › column › table.
+#[derive(Params)]
+#[element(
+    name = "td",
+    doc = "A table cell: alignment, background and type over its row, column and table.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct Cell {
+    pub align: AlignParam,
+    #[param(default = "middle")]
+    pub valign: VAlignParam,
+    #[param(
+        color,
+        doc = "background; defaults to the table's cell-fill, stripe or header-fill"
+    )]
+    pub bg: Option<String>,
+    #[param(color, doc = "text colour; defaults to the table's fill")]
+    pub fill: Option<String>,
+}
+
+/// `<x:th>`: a header cell — a cell that defaults to bold and the header fill.
+#[derive(Params)]
+#[element(
+    name = "th",
+    doc = "A header cell: a cell that defaults to bold and the table's header-fill.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct HeaderCell {
+    pub align: AlignParam,
+    #[param(default = "middle")]
+    pub valign: VAlignParam,
+    #[param(color, doc = "background; defaults to the table's header-fill")]
+    pub bg: Option<String>,
+    #[param(color, doc = "text colour; defaults to the table's fill")]
+    pub fill: Option<String>,
+}
+
+/// `<x:tr>`: a row — its cells' defaults.
+#[derive(Params)]
+#[element(
+    name = "tr",
+    doc = "A table row: defaults for its cells' alignment, background and type.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct Row {
+    pub align: AlignParam,
+    #[param(default = "middle")]
+    pub valign: VAlignParam,
+    #[param(color, doc = "background for the row's cells")]
+    pub bg: Option<String>,
+    #[param(color, doc = "text colour for the row's cells")]
+    pub fill: Option<String>,
+}
+
+/// `<x:col>`: a column — its cells' defaults, one per column in order.
+#[derive(Params)]
+#[element(
+    name = "col",
+    doc = "A table column (one per column, in order, before the rows): defaults for its cells' alignment, background and type.",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct Column {
+    pub align: AlignParam,
+    #[param(default = "middle")]
+    pub valign: VAlignParam,
+    #[param(color, doc = "background for the column's cells")]
+    pub bg: Option<String>,
+    #[param(color, doc = "text colour for the column's cells")]
+    pub fill: Option<String>,
+}
+
+// ---- the plain SVG text elements the compiler lays out (§6.2, §6.3) ----------
+
+/// SVG `text-anchor`.
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum TextAnchorParam {
+    #[default]
+    Start,
+    Middle,
+    End,
+}
+
+/// SVG Tiny 1.2 `text-align` on `<textArea>`, plus `justify` (§6.9).
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum TextAlignParam {
+    #[default]
+    Start,
+    End,
+    Center,
+    Justify,
+}
+
+/// SVG Tiny 1.2 `display-align` on `<textArea>`.
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum DisplayAlignParam {
+    #[default]
+    Auto,
+    Before,
+    Center,
+    After,
+}
+
+/// `<text>`: point text, or wrapped with `inline-size` (§6.2).
+#[derive(Params)]
+#[element(
+    name = "text",
+    ns = "http://www.w3.org/2000/svg",
+    doc = "Plain SVG text — point text, or wrapped to inline-size; the compiler lays it out and may outline it.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct SvgText {
+    #[param(default = 0.0, geometry)]
+    pub x: f64,
+    #[param(default = 0.0, geometry)]
+    pub y: f64,
+    #[param(
+        min = 0.0,
+        max = 4000.0,
+        doc = "wrap to this width; absent, the text does not wrap"
+    )]
+    pub inline_size: Option<f64>,
+    pub text_anchor: TextAnchorParam,
+    #[param(color, default = "#000")]
+    pub fill: String,
+    #[param(name = "x:outline", default = false, doc = "bake the glyphs to paths")]
+    pub outline: bool,
+}
+
+/// `<textArea>`: the SVG Tiny 1.2 flowed text region (§6.3).
+#[derive(Params)]
+#[element(
+    name = "textArea",
+    ns = "http://www.w3.org/2000/svg",
+    doc = "SVG Tiny 1.2 flowed text: wraps inside a region with block and inline alignment.",
+    children = "container",
+    group = TextFont
+)]
+#[allow(dead_code)]
+pub(super) struct SvgTextArea {
+    #[param(default = 0.0, geometry)]
+    pub x: f64,
+    #[param(default = 0.0, geometry)]
+    pub y: f64,
+    #[param(min = 0.0, max = 4000.0, geometry, doc = "absent (auto): no wrap")]
+    pub width: Option<f64>,
+    #[param(
+        min = 0.0,
+        max = 4000.0,
+        geometry,
+        doc = "absent (auto): grows, no clip"
+    )]
+    pub height: Option<f64>,
+    pub text_align: TextAlignParam,
+    pub display_align: DisplayAlignParam,
+    #[param(
+        min = 0.0,
+        max = 400.0,
+        doc = "line-box height; absent (auto): 1.1 × font-size"
+    )]
+    pub line_increment: Option<f64>,
+    #[param(doc = "visible: every line renders past an explicit height")]
+    pub overflow: OverflowVisibility,
+    #[param(color, default = "#000")]
+    pub fill: String,
 }
 
 /// The shared font block. Described beside [`super::style_from`], which reads it —
@@ -367,6 +621,7 @@ pub(super) struct TextFont;
 impl Params for TextFont {
     const SPEC: ElementSpec = ElementSpec {
         name: "font",
+        ns: None,
         doc: None,
         params: super::FONT_PARAMS,
         groups: &[],
@@ -390,6 +645,7 @@ pub(super) struct TextBorder;
 impl Params for TextBorder {
     const SPEC: ElementSpec = ElementSpec {
         name: "border",
+        ns: None,
         doc: None,
         params: super::TEXT_BORDER_PARAMS,
         groups: &[],
@@ -419,6 +675,8 @@ pub(super) struct Textpath {
     pub baseline_shift: f64,
     #[param(default = "skew", doc = "skew or rainbow")]
     pub effect: String,
+    #[param(color, default = "#000", doc = "text colour")]
+    pub fill: String,
 }
 
 #[derive(Params)]
@@ -540,4 +798,14 @@ static ELEMENTS: &[ElementSpec] = &[
     Textpath::SPEC,
     List::SPEC,
     Table::SPEC,
+    // the text blocks and the plain SVG text elements: declared for the
+    // panel's sake (the typography matrix of §6.1), laid out by their containers
+    Paragraph::SPEC,
+    ListItem::SPEC,
+    Cell::SPEC,
+    HeaderCell::SPEC,
+    Row::SPEC,
+    Column::SPEC,
+    SvgText::SPEC,
+    SvgTextArea::SPEC,
 ];

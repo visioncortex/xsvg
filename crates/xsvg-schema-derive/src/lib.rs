@@ -115,6 +115,8 @@ fn type_is(ty: &Type, name: &str) -> bool {
 #[derive(Default)]
 struct ElementOpts {
     name: Option<String>,
+    /// A namespace other than the manifest's (the SVG one for `<text>`).
+    ns: Option<String>,
     doc: Option<String>,
     input: Option<String>,
     children: Option<String>,
@@ -204,6 +206,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             let text = expr.and_then(expr_text);
             match key {
                 "name" => el.name = text,
+                "ns" => el.ns = text,
                 "doc" => el.doc = text,
                 "input" => el.input = text,
                 "children" => el.children = text,
@@ -214,6 +217,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     let el_name = el.name.clone().unwrap_or_else(|| kebab_variant(&ast.ident));
     let el_doc = opt_str(&el.doc);
+    let el_ns = opt_str(&el.ns);
     let input_mode = mode_tokens(
         &el.input,
         "InputMode",
@@ -392,6 +396,7 @@ fn expand_params(ast: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         impl #imp ::xsvg_schema::Params for #ty #tys #whr {
             const SPEC: ::xsvg_schema::ElementSpec = ::xsvg_schema::ElementSpec {
                 name: #el_name,
+                ns: #el_ns,
                 doc: #el_doc,
                 params: &[#(#specs),*],
                 groups: &[#(#groups),*],

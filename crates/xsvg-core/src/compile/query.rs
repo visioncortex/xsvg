@@ -64,11 +64,6 @@ const CELL: &[&str] = &[
     "align",
     "valign",
 ];
-/// What a list item inside a box reads over its list: a smaller sub-point, its
-/// case and its colour.
-const ITEM_IN_BOX: &[&str] = &["font-size", "text-transform", "fill"];
-/// What a standalone list's item reads over its list — its colour is the list's.
-const ITEM: &[&str] = &["font-size", "text-transform"];
 /// What an ancestor above the text element gives it: the family alone (§4.1).
 const INHERITED: &[&str] = &["font-family"];
 
@@ -211,11 +206,8 @@ pub(super) fn block_levels<'a>(
     if is_x(node, "li") && is_x(parent, "list") {
         return Some(
             match parent.parent_element().filter(|b| is_x(*b, "textbox")) {
-                Some(textbox) => (
-                    vec![attrs(node, ITEM_IN_BOX), attrs(parent, BLOCK)],
-                    textbox,
-                ),
-                None => (vec![attrs(node, ITEM)], parent),
+                Some(textbox) => (vec![attrs(node, BLOCK), attrs(parent, BLOCK)], textbox),
+                None => (vec![attrs(node, BLOCK)], parent),
             },
         );
     }

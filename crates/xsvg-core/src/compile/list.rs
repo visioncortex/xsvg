@@ -63,11 +63,21 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         // item, and its marker must sit on that row, not at the block top
         size: f64,                    // per-item font size (defaults to the list's)
         style: TextStyle,             // the item's resolved base style (its own size)
+        fill: String,                 // the item's text colour (its own, else the list's)
         emits: Vec<EmitAttrs>,        // its styled-run emit table (`collect_runs`)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
     }
     let mut units: Vec<ParaUnit> = Vec::new();
-    let mut meta: Vec<(f64, Marker, f64, TextStyle, Vec<EmitAttrs>, roxmltree::Node)> = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let mut meta: Vec<(
+        f64,
+        Marker,
+        f64,
+        TextStyle,
+        String,
+        Vec<EmitAttrs>,
+        roxmltree::Node,
+    )> = Vec::new();
     for li in node
         .children()
         .filter(|c| c.tag_name().namespace() == Some(XSVG_NS) && c.tag_name().name() == "li")
@@ -78,10 +88,13 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         let col = x + inset - marker_gap; // markers' right-edge column
                                           // an <x:li> may override the font size (e.g. a smaller sub-point); it
                                           // inherits the list's size otherwise, keeping the list's line-height
-        let item_style = overlay(
-            &block_levels(li).map(|(l, _)| l).unwrap_or_default(),
-            &style,
-        );
+                                          // the item's type block over the list's (§6.1): any of font-*,
+                                          // line-height, the spacing, the case — and its colour
+        let item_levels = block_levels(li).map(|(l, _)| l).unwrap_or_default();
+        let item_style = overlay(&item_levels, &style);
+        let item_fill = level_value(&item_levels, "fill")
+            .map(|v| ctx.resolve_var(v).into_owned())
+            .unwrap_or_else(|| fill.to_string());
         let item_size = item_style.size;
         // an item is a real run leaf: <tspan> styling and <tbreak/> forced
         // breaks ('\n' in the stream) flow through the walker every box uses
@@ -121,28 +134,31 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             text_indent: 0.0,
             rtl: false,
         });
-        meta.push((col, marker, item_size, item_style, emits, li));
+        meta.push((col, marker, item_size, item_style, item_fill, emits, li));
     }
     let (laid, block_h) = stack_paragraphs(&units, x, width, m);
     let items: Vec<Item> = laid
         .into_iter()
         .zip(meta)
-        .map(|(laid, (col, marker, size, style, emits, src))| Item {
-            col,
-            marker,
-            baseline: laid.first_baseline,
-            // a blank row (an empty item, or a forced blank line) takes its
-            // space and emits nothing
-            lines: laid
-                .lines
-                .into_iter()
-                .filter(|l| !l.text.is_empty())
-                .collect(),
-            size,
-            style,
-            emits,
-            src,
-        })
+        .map(
+            |(laid, (col, marker, size, style, fill, emits, src))| Item {
+                col,
+                marker,
+                baseline: laid.first_baseline,
+                // a blank row (an empty item, or a forced blank line) takes its
+                // space and emits nothing
+                lines: laid
+                    .lines
+                    .into_iter()
+                    .filter(|l| !l.text.is_empty())
+                    .collect(),
+                size,
+                style,
+                fill,
+                emits,
+                src,
+            },
+        )
         .collect();
 
     // Block height = first cap-top → last descent (the engine's frame puts the
@@ -214,14 +230,24 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 false,
                 &it.style,
                 it.size,
-                fill,
+                &it.fill,
                 &it.emits,
                 Backdrops::All,
                 m,
                 ctx,
             );
             body.push_str("<text text-anchor=\"start\"");
-            push_font_attrs(&mut body, &it.style, it.size, fill, ctx);
+            push_font_attrs(&mut body, &it.style, it.size, &it.fill, ctx);
+            // the item's spacing, as a box's goes on its text
+            if it.style.letter_spacing != 0.0 {
+                body.push_str(&format!(
+                    " letter-spacing=\"{}\"",
+                    fmt(it.style.letter_spacing)
+                ));
+            }
+            if it.style.word_spacing != 0.0 {
+                body.push_str(&format!(" word-spacing=\"{}\"", fmt(it.style.word_spacing)));
+            }
             body.push_str(&pos_attr(it.src, ctx)); // per-item source map
             body.push('>');
             for l in &shifted {
