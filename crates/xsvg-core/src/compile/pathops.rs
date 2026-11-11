@@ -282,13 +282,15 @@ pub(super) fn boolean_operands_at(node: roxmltree::Node, ctx: &Ctx) -> Option<Bo
     let op = op?;
     // the flattened answer from the paths as lowered (arcs and all), exactly
     // what `to_path` writes; the engine's operands with the arcs as cubics
+    let placed: Vec<_> = markups
+        .iter()
+        .map(|(m, _)| boolean_markup_paths(m))
+        .collect();
     let as_lowered: Vec<BoolOperand> = markups
         .iter()
-        .map(|(m, even_odd)| BoolOperand {
-            paths: find_path_d_ranges(m)
-                .into_iter()
-                .map(|(a, b)| &m[a..b])
-                .collect(),
+        .zip(&placed)
+        .map(|((_, even_odd), paths)| BoolOperand {
+            paths: paths.iter().map(String::as_str).collect(),
             even_odd: *even_odd,
         })
         .filter(|o| !o.paths.is_empty())
@@ -327,6 +329,32 @@ pub struct BooleanOperands {
     pub operands: Vec<BooleanOperand>,
     /// The compiler's flattened result: `Some("")` for an empty region.
     pub flat: Option<String>,
+}
+
+/// Harvest lowered paths in their operand coordinate system, composing the
+/// transforms on every enclosing group and on the path itself. Reading only
+/// `d` loses a nested boolean's transform (its output is a transformed path).
+/// The consuming boolean's own transform is intentionally outside this markup.
+fn boolean_markup_paths(markup: &str) -> Vec<String> {
+    let wrapped = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="{XSVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink">{markup}</svg>"#
+    );
+    let Ok(doc) = roxmltree::Document::parse(&wrapped) else {
+        return Vec::new();
+    };
+    doc.descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "path")
+        .filter_map(|n| {
+            // ancestors includes self, from the leaf upwards: pre-multiply.
+            let affine = n
+                .ancestors()
+                .filter(|a| a.is_element())
+                .fold(crate::kurbo::Affine::IDENTITY, |acc, a| {
+                    element_transform(a) * acc
+                });
+            transform_d(n.attribute("d")?, affine)
+        })
+        .collect()
 }
 
 /// The operands of an `<x:boolean>`: each element child lowered to path
@@ -370,7 +398,9 @@ fn boolean_operands(
                 // stroke ink joins the operand's region (Illustrator expands
                 // strokes before Pathfinder); nonzero operands only — evenodd
                 // would XOR the overlap away
-                match child_stroke_outline(child, ctx.quality.tolerance(), ctx) {
+                match child_stroke_outline(child, ctx.quality.tolerance(), ctx)
+                    .and_then(|d| transform_d(&d, element_transform(child)))
+                {
                     Some(stroke_d) if !even_odd => {
                         markups
                             .last_mut()
@@ -382,10 +412,8 @@ fn boolean_operands(
                         // evenodd operand: resolve fill (evenodd) ∪ stroke
                         // (nonzero) NOW so the mixed rules never meet
                         let m = &markups.last().unwrap().0;
-                        let fill_paths: Vec<&str> = find_path_d_ranges(m)
-                            .into_iter()
-                            .map(|(a, b)| &m[a..b])
-                            .collect();
+                        let placed = boolean_markup_paths(m);
+                        let fill_paths = placed.iter().map(String::as_str).collect();
                         let ops = [
                             BoolOperand {
                                 paths: fill_paths,
@@ -453,13 +481,15 @@ fn emit_boolean_result(
         return;
     };
 
+    let placed: Vec<_> = markups
+        .iter()
+        .map(|(m, _)| boolean_markup_paths(m))
+        .collect();
     let operands: Vec<BoolOperand> = markups
         .iter()
-        .map(|(m, even_odd)| BoolOperand {
-            paths: find_path_d_ranges(m)
-                .into_iter()
-                .map(|(a, b)| &m[a..b])
-                .collect(),
+        .zip(&placed)
+        .map(|((_, even_odd), paths)| BoolOperand {
+            paths: paths.iter().map(String::as_str).collect(),
             even_odd: *even_odd,
         })
         .filter(|o| !o.paths.is_empty())

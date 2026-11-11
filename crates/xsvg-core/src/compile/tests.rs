@@ -10140,3 +10140,150 @@ fn a_cell_resolves_its_alignment_through_its_row_and_column() {
     assert_eq!(anchor_of("e"), "start");
     assert_eq!(anchor_of("f"), "start"); // justify renders start-anchored
 }
+
+#[test]
+fn boolean_nested_transforms_reach_render_and_operand_query() {
+    use crate::kurbo::{BezPath, Shape};
+    // Inner transforms compose in operand space. The outer transform must
+    // stay on the result, rather than also being baked into its operands.
+    let src = format!(
+        r#"{XW}<x:boolean transform="translate(200 0)" op="intersect"><x:boolean transform="translate(30 10) scale(2)" op="union"><path transform="translate(5 0)" d="M0 0H10V10H0Z"/></x:boolean><path d="M45 15H55V25H45Z"/></x:boolean></svg>"#
+    );
+    let out = compile_test(&src);
+    assert!(out.contains("<path"), "{out}");
+    let bb = first_path(&out).bounding_box();
+    assert_eq!(bb, crate::kurbo::Rect::new(45., 15., 55., 25.));
+    assert!(out.contains(r#"transform="translate(200 0)""#), "{out}");
+    let q = boolean_operands_impl(
+        &src,
+        src.find("<x:boolean").unwrap(),
+        "balanced",
+        &Mono,
+        &NoShaper,
+        &NoOutliner,
+    )
+    .unwrap();
+    assert_eq!(
+        BezPath::from_svg(&q.operands[0].paths[0])
+            .unwrap()
+            .bounding_box(),
+        crate::kurbo::Rect::new(40., 10., 60., 30.)
+    );
+    assert_eq!(
+        BezPath::from_svg(q.flat.as_ref().unwrap())
+            .unwrap()
+            .bounding_box(),
+        bb
+    );
+    assert_eq!(
+        first_path(&to_path_at(&src, "<x:boolean").unwrap()).bounding_box(),
+        bb
+    );
+}
+
+#[test]
+fn boolean_group_and_stroke_transforms_are_baked_once() {
+    use crate::kurbo::Shape;
+    for rule in ["nonzero", "evenodd"] {
+        let src = format!(
+            r#"{XW}<x:boolean><path transform="translate(30 10) scale(2)" fill-rule="{rule}" stroke="black" stroke-width="2" d="M0 0H10V10H0Z"/></x:boolean></svg>"#
+        );
+        let bb = first_path(&compile_test(&src)).bounding_box();
+        assert_eq!(bb, crate::kurbo::Rect::new(28., 8., 52., 32.));
+    }
+    let src = format!(
+        r#"{XW}<x:boolean><g transform="translate(30 10)"><g transform="scale(2)"><path transform="rotate(90)" d="M0 0H10V5H0Z"/></g></g></x:boolean></svg>"#
+    );
+    assert_eq!(
+        first_path(&compile_test(&src)).bounding_box(),
+        crate::kurbo::Rect::new(20., 10., 30., 30.)
+    );
+}
+
+// Two 20×20 squares overlap by 10×20 only AFTER the nested transforms.
+// Probe all three regions: bounds alone would miss a broken subtraction/XOR.
+fn check_nested_boolean_operation(op: &str, area: f64, regions: [bool; 3]) {
+    use crate::kurbo::{BezPath, Point, Shape};
+    for transform in [
+        "translate(30 10) scale(2)",
+        "translate(60 0) rotate(90) scale(2)",
+    ] {
+        let src = format!(
+            r#"{XW}<x:boolean op="{op}"><x:boolean transform="{transform}" op="union"><path transform="translate(5 0)" d="M0 0H10V10H0Z"/></x:boolean><path transform="translate(50 10)" d="M0 0H20V20H0Z"/></x:boolean></svg>"#
+        );
+        let query = boolean_operands_impl(
+            &src,
+            src.find("<x:boolean").unwrap(),
+            "balanced",
+            &Mono,
+            &NoShaper,
+            &NoOutliner,
+        )
+        .unwrap();
+        let paths = [
+            first_path(&compile_test(&src)),
+            first_path(&to_path_at(&src, "<x:boolean").unwrap()),
+            BezPath::from_svg(query.flat.as_ref().unwrap()).unwrap(),
+        ];
+        for path in paths {
+            assert!(
+                (path.area().abs() - area).abs() < 0.01,
+                "{op}: {}",
+                path.area()
+            );
+            for (x, inside) in [45., 55., 65.].into_iter().zip(regions) {
+                assert_eq!(
+                    path.winding(Point::new(x, 20.)) != 0,
+                    inside,
+                    "{op} at x={x}"
+                );
+            }
+            assert_eq!(
+                path.winding(Point::new(5., 5.)),
+                0,
+                "{op}: untransformed geometry leaked"
+            );
+        }
+    }
+}
+
+#[test]
+fn boolean_nested_intersect_respects_operand_rotation() {
+    check_nested_boolean_operation("intersect", 200., [false, true, false]);
+}
+
+#[test]
+fn boolean_nested_union_respects_operand_transforms() {
+    check_nested_boolean_operation("union", 600., [true, true, true]);
+}
+
+#[test]
+fn boolean_nested_subtract_respects_operand_transforms_and_order() {
+    check_nested_boolean_operation("subtract", 200., [true, false, false]);
+}
+
+#[test]
+fn boolean_nested_exclude_respects_operand_transforms() {
+    check_nested_boolean_operation("exclude", 400., [true, false, true]);
+}
+
+#[test]
+fn boolean_nested_subtract_hole_survives_reflection_and_union() {
+    use crate::kurbo::{Point, Shape};
+    // The inner subtraction leaves a hole; a reflection flips BOTH contour
+    // windings. The outer union must preserve that hole in its new location.
+    let src = format!(
+        r#"{XW}<x:boolean op="union"><x:boolean op="subtract" transform="translate(60 10) scale(-2 2)"><path d="M0 0H10V10H0Z"/><path transform="translate(2.5 2.5)" d="M0 0H5V5H0Z"/></x:boolean><path transform="translate(80 10)" d="M0 0H10V10H0Z"/></x:boolean></svg>"#
+    );
+    let path = first_path(&compile_test(&src));
+    assert!((path.area().abs() - 400.).abs() < 0.01);
+    for (x, y, inside) in [
+        (42., 20., true),
+        (50., 20., false),
+        (58., 20., true),
+        (85., 15., true),
+        (70., 20., false),
+    ] {
+        assert_eq!(path.winding(Point::new(x, y)) != 0, inside, "at ({x}, {y})");
+    }
+}
