@@ -993,6 +993,88 @@ fn pie_geometry_and_per_slice() {
 }
 
 #[test]
+fn charts_keep_transforms_in_full_and_incremental_output() {
+    let charts = [
+        (
+            "pie",
+            r#"cx="30" cy="40" r="20""#,
+            r#"<x:slice value="1"/><x:slice value="2"/>"#,
+        ),
+        (
+            "plot",
+            r#"x="10" y="20" width="100" height="80" y-ticks="2""#,
+            r#"<x:bars><x:bar value="50" label="A"/></x:bars><x:line points="0,10 1,50" marker="dot" area="red"/>"#,
+        ),
+    ];
+    for (tag, attrs, children) in charts {
+        for transform in [
+            "translate(35 -12)",
+            "rotate(30 50 40)",
+            "scale(1.5 0.75)",
+            "translate(10 20) rotate(25) scale(2)",
+        ] {
+            let src = format!(
+                r#"{XW}<g transform="translate(7 9)"><x:{tag} {attrs} transform="{transform}">{children}</x:{tag}></g></svg>"#
+            );
+            let offset = src.find(&format!("<x:{tag}")).unwrap();
+            let source_doc = roxmltree::Document::parse(&src).unwrap();
+            let range = source_doc
+                .descendants()
+                .find(|n| n.is_element() && n.range().start == offset)
+                .unwrap()
+                .range();
+            let expected_pos = format!("{}-{}", range.start, range.end);
+            for keyed in [false, true] {
+                let full =
+                    compile_impl(&src, "balanced", keyed, &Mono, &NoShaper, &NoOutliner).unwrap();
+                let fragment = compile_fragment_impl(
+                    &src,
+                    "balanced",
+                    keyed,
+                    offset,
+                    &Mono,
+                    &NoShaper,
+                    &NoOutliner,
+                )
+                .unwrap();
+                for output in [&full, &fragment] {
+                    let wrapped =
+                        format!(r#"<svg xmlns="http://www.w3.org/2000/svg">{output}</svg>"#);
+                    let doc = roxmltree::Document::parse(&wrapped).unwrap();
+                    let groups: Vec<_> = doc
+                        .descendants()
+                        .filter(|n| n.attribute("transform") == Some(transform))
+                        .collect();
+                    assert_eq!(
+                        groups.len(),
+                        1,
+                        "{tag}: exactly one chart transform: {output}"
+                    );
+                    let group = groups[0];
+                    assert_eq!(group.tag_name().name(), "g");
+                    assert!(
+                        group.children().any(|n| n.is_element()),
+                        "chart transform wraps its artwork"
+                    );
+                    if keyed {
+                        assert_eq!(
+                            group.attribute("data-xsvg-pos"),
+                            Some(expected_pos.as_str())
+                        );
+                    }
+                    if std::ptr::eq(output, &full) {
+                        assert_eq!(
+                            group.parent_element().unwrap().attribute("transform"),
+                            Some("translate(7 9)")
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn plot_maps_bars_and_lines() {
     // plot (0,0) 100×200, y-domain 0..100 → a value-50 bar is bottom-aligned
     // with its top at mapy(50)=100 and height 100

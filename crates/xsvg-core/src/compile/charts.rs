@@ -154,6 +154,9 @@ pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // pie's, so an incremental re-emit can find the element it replaces.
     out.push_str("<g");
     out.push_str(&pos_attr(node, ctx));
+    // The chart is laid out in local coordinates; editor placement belongs
+    // on the wrapper so slices, series, labels and grid move together.
+    out.push_str(&transform_attr(node));
     out.push('>');
     let mut angle = start;
     for (i, &s) in slices.iter().enumerate() {
@@ -290,6 +293,9 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     out.push_str("<g");
     out.push_str(&pos_attr(node, ctx));
+    // The chart is laid out in local coordinates; editor placement belongs
+    // on the wrapper so slices, series, labels and grid move together.
+    out.push_str(&transform_attr(node));
     out.push('>');
 
     // y gridlines + value labels
