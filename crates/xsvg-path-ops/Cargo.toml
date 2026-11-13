@@ -1,6 +1,6 @@
 [package]
 name = "xsvg-path-ops"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/visioncortex/xsvg"
@@ -14,4 +14,4 @@ linesweeper = "0.5.0"
 # the fuzz harness (`examples/fuzz.rs`, FUZZ.md) measures the engine against
 # the compiler's flattened algebra and needs nothing of the core at run time
 [dev-dependencies]
-xsvg-core = { path = "../xsvg-core", version = "0.2.2" }
+xsvg-core = { path = "../xsvg-core", version = "0.3.0" }

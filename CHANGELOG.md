@@ -7,136 +7,90 @@ per-package [Semantic Versioning](https://semver.org/).
 One version covers the whole project: the two npm packages
 (**`@visioncortex/xsvg-viewer`**, **`@visioncortex/xsvg-compile`**) and every
 published crate (`xsvg-gradient`, `xsvg-schema-derive`, `xsvg-schema`, `xsvg-core`,
-`xsvg-plugin`, `xsvg-cli`, `xsvg-wasm`) release together, via `scripts/publish.sh`.
+`xsvg-plugin`, `xsvg-path-ops`, `xsvg-cli`, `xsvg-wasm`) release together, via `scripts/publish.sh`.
 A release is all three of its phases — crates.io, npm, and the GitHub release
 carrying the raw wasm; shipping one without the others is a broken release, not a
 partial one.
 
 ## [Unreleased]
 
-### Fixed
+## [0.3.0] — 2026-11-13
 
-- **A cell's `align` / `valign` resolve as the table draws them.** The `resolved` query read a
-  cell's alignment as its own, else the table's — the paragraph planner's rule — so a
-  `<x:col align="center">` or `<x:tr align>` centred the render while the inspector reported the
-  table's value. A cell now resolves cell › row › column › table (§6.15), `valign` included.
+**Live corners, text that behaves the same outlined as live, and an editor's view of the
+compiler.** `x:corners` rounds, chamfers or scallops any corner of a shape the way a design
+tool's live corner does, compiled to exact arcs. Outlined text now traces what live text draws —
+its spacing, justification, run type and paint — as closed contours. Paragraphs, list items and
+table cells take the whole type block, lists live inside text boxes, and `text-transform` and
+`overflow="visible"` arrive. For editing hosts, the compiler answers what it does with a node
+(`resolved`, `text_style`, `blocks`, `corners`…), converts a node to source paths (`to_path`,
+`to_spline`, a boolean's curves kept by the new `xsvg-path-ops` crate), and declares in its
+`describe` manifest which typography property every text element and block takes.
 
-- **An empty text box lays one blank line where typing would start.** A textbox with no text —
-  its own box, a referenced rect or shape, an empty `<x:p>`, an empty `<text inline-size>` — used
-  to emit a bare `<text>` with no position and the layout seam reported no lines, so an editor's
-  empty text measured at the origin and a caret had nowhere to sit. Every flow now lays one blank
-  line placed by `align`/`valign` as a one-line text would be, emitted as an empty `<tspan x y>`
-  (§6.4); paragraph stacking is unchanged, since an empty `<x:p>` already owned its row.
+Existing documents compile the same, apart from the changes below: of the 51 dataset samples
+compiled by the CLI, 18 are byte-identical to 0.2.2's output and 29 more render pixel-identically through resvg (the
+markup changed — inherited `font-family`, baked decorations, no nested `<svg>`). Of the other
+four, `artboards` now paints its dark slides' frames, which 0.2.2 left white under light text,
+and `textpath`, `warp-presets` and `warp-perspective` differ in at most 0.1 % of pixels, at the
+contour seams the outline and warp fixes closed.
+
+The npm packages keep their exported API, and the CLI its flags, adding `--to-path` and
+`--to-spline`. Code below them breaks in three places, hence 0.3.0: the raw wasm module's
+`compile_ext` takes an `advances` callback returning `number[]` where it took `advanceWidth`
+returning a number; in Rust, `GlyphOutliner::advances` replaces `advance_width`; and
+`xsvg_schema::ElementSpec` gains an `ns` field and `ParamEnum` a `DEFAULT`, which the derives
+supply but a hand-written impl must add.
 
 ### Added
 
-- **The typography matrix, declared.** Specification §6.1 now states, as one table, which
-  typography property each text element and block takes — the type block (`font-*`,
-  `line-height`, the spacing, `text-transform`, `fill`) everywhere, the layout properties where
-  they are decided — and the `describe` manifest declares the same: `<x:p>`, `<x:li>`, `<x:td>`,
-  `<x:th>`, `<x:tr>`, `<x:col>`, and the plain `<text>` and `<textArea>` the compiler lays out, join
-  the eleven `x:` elements (an element in another namespace carries `"ns"` in its entry —
-  `ElementSpec::ns`, `#[element(ns = "…")]`). `<x:textbox>` declares its `direction`,
-  `paragraph-spacing` and `fill`, `<x:textpath>` its `fill`, `<x:table>` its `cell-fill` and
-  `stripe`. Gaps filled so the table is uniform: an
-  `<x:li>` takes the whole type block over its list (it took a size, a case and a colour), with
-  its own fill and spacing written on its text.
-
-- **`letter-spacing` and `word-spacing` on a paragraph, a list, a cell, a row and a column.**
-  They were the box's alone: set on an `<x:p>` they were ignored (§6.16 listed `font-*` and
-  `fill`). A paragraph's spacing now lays it out, wraps it and is written on its `<text>` like the
-  box's on a single flow; it shrinks with the size under `fit="shrink"`; the `resolved` query and
-  the layout seam's paragraph style report it; a cell reads it cell › row › column › table.
-
-- **Convert to path for `<x:boolean>`, on the curves — in its own crate** (Incremental.md §11).
-  New `xsvg-path-ops`: boolean operations on paths with the curves kept, by
-  [linesweeper](https://crates.io/crates/linesweeper) in one n-ary sweep over the raw operands,
-  each under its own fill rule, in a normalised frame; a near-coincident pre-check (an operand
-  within 10⁻⁷ of the extent of another is declined — the engine's subdivision never settles there
-  and its memory grows without bound); the result snapped back onto the input segments so every
-  uncut Bézier returns as authored and a cut one as exact sub-curves; holes oriented by containment
-  depth; sub-precision residue dropped; and a gate that writes the compiler's flattened path
-  whenever the engine disagrees with it, errs, declines, or (where hosts unwind) panics. The core
-  gains the **`boolean_operands(offset)`** query that feeds it (operands as convert-to-path lowers
-  them, the op, the flattened `d`) and keeps its `to_path` of an `<x:boolean>` on the flattened
-  algebra; the CLI swaps the curve-keeping `d` in; a browser host runs the crate as its own wasm
-  module in a Worker. `arcs_to_cubics` moved to `xsvg_core::spline`, feature-free. Its
-  fuzz harness (`examples/fuzz.rs`): a seeded, memory-jailed, panic-tolerant fuzz whose first campaign
-  (3 million cases) shaped the passes above and left about 0.02% of cases to the engine, one
-  ordinary-input panic in three million among them (the crate's README has the account).
-
-- **`to_path` keeps corners live; `to_spline(offset)` expands** (Incremental.md §11). Convert to
-  path now leaves a live corner live, as Illustrator does: a shape's `x:corners` rides onto its
-  sharp path, and a `<rect rx>` with circular corners becomes the sharp rect plus `x:corners="rx"`,
-  so the corner widget still works on the result; only elliptical corners, circles and ellipses
-  bake to arcs. `to_spline` is the expand: corners baked, every arc as cubic Béziers — at most a
-  quarter turn per cubic, each the classic `κ = 4/3·tan(θ/4)` cubic, so a circle is four anchors at
-  its extremes and a rounded corner one cubic; everything that is not an arc passes through byte
-  for byte. Both accept a `<path>`: `to_path` hands it back as authored (corners live), `to_spline`
-  bakes its corners and arcs. `arcs_to_cubics(d)` is public for any path data; the CLI has
-  `--to-spline OFFSET` beside `--to-path`.
-
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or
-  `anchor:radius` pairs, a length or a theme token; `round` (an exact circular arc), `chamfer` or
-  `inverted`. Illustrator's geometry — the trims `r / tan(θ/2)` along each side, limited to the
-  segment's length (a lone corner may take a whole edge, so a square's one corner at its side is a
-  quarter circle; two corners sharing an edge scale to fit it), curved segments trimmed by arc length —
-  applied in the element's geometry, so references, booleans, offsets, warps and `to_path` see it.
-  Anchors are numbered in the closed form compiled contours have, so an editor folding that way
-  counts the same. The session's `corners(offset)` reports each corner as drawn for the widget.
-  `index:value` is now the stated convention for any `x:` list that keys entries by index, with
-  `:` reserved as the pair glue; `indexed_items` is the one parser for it. A corner on a curved
-  segment meets the curve at its arc-length trim point (the arc used to end on the tangent's
-  projection, leaving a gap); conformance tests check the geometry as area and raster twins
-  (quarter circle, chamfer, scallop, winding, a concave corner) against plain SVG constructions.
+  `anchor:radius` pairs (`x:corners="0:8 1:var(radius-md)"`), a length or a theme token;
+  `round` (an exact circular arc), `chamfer` or `inverted`. Illustrator's geometry: the trims
+  `r / tan(θ/2)` along each side, limited to the segment's length — a lone corner may take a
+  whole edge, so a square's one corner at its side is a quarter circle, and two corners sharing an
+  edge scale to fit it — and a curved segment trimmed at its arc length. Applied in the element's
+  geometry, so references, booleans, offsets, warps and `to_path` all see it. Anchors are numbered
+  in the closed form compiled contours have, so an editor folding that way counts the same.
+  `index:value` is the stated convention for any `x:` list keyed by index. Conformance tests
+  check the geometry as area and as raster twins against plain SVG constructions.
 
-- **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
-  through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
-  renders live text with, so what the headless compiler measures, fits and traces is what that
-  renderer draws (a kerned word outlined through resvg: 0 px different, from 1.8 %). Boxes fit
-  and wrap by kerned widths now, so the dataset's text-bearing samples compile a little
-  differently than before.
+- **`letter-spacing` and `word-spacing` on a paragraph, a list item, a cell, a row and a
+  column**, and **an `<x:li>` takes the whole type block** over its list (it took a size, a case
+  and, in a box, a colour). Each block's spacing lays it out, wraps it, is written on its own
+  `<text>`, and shrinks with the size under `fit="shrink"`; a cell reads it cell › row › column ›
+  table. Specification §6.1 now states as one table which typography property each text element
+  and block takes: the type block (`font-*`, `line-height`, the spacing, `text-transform`, `fill`)
+  everywhere, the layout properties where they are decided.
 
-- **Convert to path for editors: `to_path(offset)`.** The compiler's own output for a text
-  element with outlining forced, or a basic shape as its `<path>`, in the form an editor writes
-  back into the source in the node's place: one group of glyph paths and baked backdrop rects,
-  every attribute the conversion did not spend kept as authored (`id`, `x:label`, `transform`,
-  `opacity`, a `filter` list, `var()` paints). A circle, an ellipse or a rounded rect converts to
-  the compiler's own geometry, exact: four quarter arcs from the rightmost point, or edges and
-  corner arcs — arcs stay arcs, expanding to Béziers being an editor's operation. `Err` names the font that could not be traced or
-  the limit that stopped it (Incremental.md §11). On the way, outlining reaches everywhere text is
-  laid out: paragraph-mode boxes (each paragraph and list item in its own style, markers traced),
-  and **point text** — a plain `<text>` on `x:outline="true"` or when forced — traced chunk by
-  chunk with the anchor over each SVG text chunk, refusing per-glyph lists, `rotate`, `textLength`
-  and `baseline-shift` rather than mis-tracing. `npm run check:outline` renders live and outlined
-  text through resvg and requires the same pixels.
+- **`text-transform` — render text in capitals (or small letters) whatever case it was typed in.**
+  `uppercase` / `lowercase` / `none` on any text element the compiler emits, on `<tspan>` runs, and
+  in an `<x:font>` token; it cascades within a text element (box › paragraph › run) like the font
+  properties. The compiler applies it before layout, so wrapping, fitting, outlines and caret
+  stops measure the capitals that render, and bakes the mapped characters into the output (SVG has
+  no such attribute). The mapping is one character to one, so a caret offset in the source is the
+  same offset in the output; `ß` becomes `ẞ` (§6.18).
 
-- **No nested `<svg>` in compiled output.** A nested `<svg>` — a cropped picture, the baked
-  whole-file form of a cross-file `<use>` — now lowers to one clipped `<g>` whose transform folds
-  the element's own, the frame's position and the `viewBox` fit (`preserveAspectRatio` honoured:
-  `none`, `meet`, `slice`, every alignment), with the frame carried as
-  `data-xsvg-viewport="x y w h"` in the group's own space for editors to read (§5.3). WebKit
-  ignores a `transform` on a nested `<svg>`, so a rotated crop drew unrotated there; a `<g>` draws
-  alike everywhere. Percent and missing sizes resolve against the enclosing viewport; a
-  `filter`/`mask`/`clip-path` on the viewport wraps it in frame space; a viewport a
-  `<use width|height>` sizes, or one whose frame cannot be resolved, is kept as `<svg>` with a
-  marker and its transform hoisted. A linked drawing's `<use>` keeps its `transform`, `opacity`
-  and `filter`, which the nested-`<svg>` form dropped.
+- **`overflow="visible"` on `<x:textbox>` and `<textArea>`** — nothing cropped: every line
+  renders where layout placed it (`valign` placement kept, so middle-aligned overflow spills both
+  ways), `text-overflow` has nothing to act on, and curved region flow continues past the shape at
+  its bounding-box width. In editor output the lines a cropping box would drop are stamped
+  `data-xsvg-overflow="1"` (tspans, outline paths, highlight and decoration rects, list markers),
+  and `text_layout` flags them `overflow: true`, so an editor can show a box's hidden text as a
+  ghost while it is edited — through a render override, without writing to the document (§6.6).
 
-- **Document queries for editors.** `CompileSession` answers what the compiler does with a node,
-  from the parse it compiles from: `resolved(offset, properties)` (the effective value of each
-  property and where it came from — own, token, inherited from the box, list, row, column, table
-  or an ancestor, implied, initial), `theme()` (the tokens in document order, `x:doc` excluded),
-  `text_style(offset)` (an element's text as pieces in the style each renders in, UTF-16 offsets),
-  `blocks(offset)` (a box's paragraphs and list items) and `run_support(offset)` (which run
-  attributes the element's text draws — by the compiler, or natively by the renderer for a plain
-  `<text>`). A block's `align`, `direction` and `text-indent` cascade from its box as the
-  paragraph planner reads them, the planner now reading the same rule. The text cascade is now data the emitters compute from
-  and the queries report, so the two cannot disagree; pinned over the dataset
-  (Incremental.md §10). The queries live on `ParsedDocument`, a borrowing parse a host keeps
-  between flushes, and `CompileSession::from_parsed` compiles from one without parsing again:
-  one parse per change, shared by every query and the flush.
+- **Lists inside a textbox.** A `<x:list>` stands among a textbox's paragraphs as a block of the
+  same stack: its items flow as paragraphs with the list's gutter and markers, under the box's
+  shrink-to-fit, `valign` and padding — one box holds a heading, bullets and a closing paragraph
+  (§6.16). The standalone list remains.
+
+- **Table column and row styles.** `<x:col>` children (one per column, HTML's `<col>`) and
+  attributes on `<x:tr>` carry cell defaults — `align`, `valign`, `fill`, `bg`, `font-*`,
+  `line-height` — resolving cell › row › column › header default › table, so a bold first
+  column or a tinted header row is one declaration and an inserted row keeps the look (§6.15).
+
+- **`transform` on `<x:table>` and `<x:list>`** passes through to the `<g>` each lowers to, as a
+  textbox's does: rotating or scaling a table or a list is its transform (§6.14, §6.15). Found by
+  the editor: a transform on a table was consumed and never re-emitted, so the table could not move.
 
 - **Runs in curved region flow and `<text inline-size>`.** Both flattened their `<tspan>`s to the
   base style, losing fill and border along with weight, size and family. They now flow styled runs
@@ -156,36 +110,84 @@ partial one.
   path per stretch, traced where the whole string puts it, all borders behind all fills. Also: the
   element's own border now reaches live `follow` / `stair` text, where it was dropped (§6.13).
 
-- **`overflow="visible"` on `<x:textbox>` and `<textArea>`** — nothing cropped: every line
-  renders where layout placed it (`valign` placement kept, so middle-aligned overflow spills both
-  ways), `text-overflow` has nothing to act on, and curved region flow continues past the shape at
-  its bounding-box width. In editor output the lines a cropping box would drop are stamped
-  `data-xsvg-overflow="1"` (tspans, outline paths, highlight and decoration rects, list markers),
-  and `text_layout` flags them `overflow: true`, so an editor can show a box's hidden text as a
-  ghost while it is edited — through a render override, without writing to the document (§6.6).
+- **Connector anchors sit on the shape.** `to="#id:top"` on a rotated or skewed plain
+  shape attaches to the shape's own top-edge midpoint, mapped through its transform,
+  instead of the top of its axis-aligned bounds, where no edge of the shape lies; on an
+  ellipse or circle the eight anchors lie on the circumference — the four axis points and
+  the four diagonals at 45° — where a box's corners would float off the curve (§7.6).
 
-- **`text-transform` — render text in capitals (or small letters) whatever case it was typed in.**
-  `uppercase` / `lowercase` / `none` on any text element the compiler emits, on `<tspan>` runs, and
-  in an `<x:font>` token; it cascades within a text element (box › paragraph › run) like the font
-  properties. The compiler applies it before layout, so wrapping, fitting, outlines and caret
-  stops measure the capitals that render, and bakes the mapped characters into the output (SVG has
-  no such attribute). The mapping is one character to one, so a caret offset in the source is the
-  same offset in the output; `ß` becomes `ẞ` (§6.18).
+- **`<x:doc>` — document settings.** The one element for an editor's document-level settings
+  (artboard defaults and arrangement, a print size, …), dropped whole at compile and never read
+  inside: an `id` there cannot be referenced or shadow a real element's, an `<x:theme>` or
+  `<x:import>` there binds nothing, and an edit there invalidates nothing, so a host can skip the
+  render (§4.4). Its children are the tool's, in the `x:` namespace by convention.
 
-- **Units: incremental compilation one level down** for editing hosts. A direct child of a
+- **`x:fill` on an artboard paints its frame.** A slide's backdrop used to be a hand-written
+  `<rect>` repeating the frame's size; `<g x:artboard="…" x:frame="x y w h" x:fill="#0b1020">`
+  now lowers that rect itself, as the group's first child, mapped through the group's
+  transform so a placed slide gets it at its own origin (§5.2). The deck sample uses it.
+
+- **The native CLI shapes text.** Measurement, caret advances and outlines in `xsvg-cli` go
+  through rustybuzz — kerning, ligatures, mark placement, variable weight — the shaper resvg
+  renders live text with, so what the headless compiler measures, fits and traces is what that
+  renderer draws (a kerned word outlined through resvg: 0 px different, from 1.8 %). The CLI also
+  gains `--to-path OFFSET` and `--to-spline OFFSET` (below).
+
+*For editing hosts* (`xsvg-core`, [docs/Incremental.md](docs/Incremental.md)):
+
+- **Convert to path: `to_path(offset)` and `to_spline(offset)`.** The compiler's own output for
+  a node, in the form an editor writes back into the source in its place, with every attribute
+  the conversion did not spend kept as authored (`id`, `x:label`, `transform`, `opacity`, a
+  `filter` list, `var()` paints). Text converts to its outlined glyphs and baked backdrops —
+  paragraph-mode boxes, list markers and **point text** included, the latter traced chunk by chunk
+  with each SVG text chunk's anchor. A shape converts to a `<path>` with its corners left live, as
+  Illustrator does (a `<rect rx>` becomes the sharp rect plus `x:corners`); circles, ellipses and
+  elliptical corners stay exact arcs. `to_spline` is the expand: corners baked and every arc as
+  cubic Béziers, a quarter turn per cubic (`arcs_to_cubics` is public for any path data). An
+  `<x:boolean>` converts to the one path of its result; `boolean_operands(offset)` hands its
+  operands to `xsvg-path-ops` for a result with the curves kept. `Err` names the font that could
+  not be traced or the limit that stopped it (§11). `npm run check:outline` renders live and
+  converted text and shapes through resvg and requires the same pixels.
+
+- **`xsvg-path-ops` — boolean operations on paths with the curves kept.** A new crate: every
+  Bézier the operation did not cut comes back exactly as authored, a cut one as exact sub-curves,
+  holes wound against their outers. It runs [linesweeper](https://crates.io/crates/linesweeper)
+  in one n-ary sweep in a normalised frame, declines near-coincident operands (where the engine's
+  memory grows without bound), snaps the result back onto the input segments, and writes the
+  compiler's flattened path instead whenever the engine disagrees with it, errs, or panics. Kept
+  out of the core so a browser host can run it in its own Worker. Its seeded, memory-jailed fuzz
+  harness (`examples/fuzz.rs`) ran three million cases; the crate's README has the account.
+
+- **Document queries.** `CompileSession` answers what the compiler does with a node, from the
+  parse it compiles from: `resolved(offset, properties)` (each property's effective value and
+  where it came from — own, token, inherited from the box, list, row, column, table or an
+  ancestor, implied, initial), `theme()`, `text_style(offset)`, `blocks(offset)`,
+  `run_support(offset)` and `corners(offset)`. The text cascade is data the emitters compute from
+  and the queries report, so the two cannot disagree; pinned over the dataset (§10). The queries
+  live on `ParsedDocument`, a borrowing parse a host keeps between flushes, and
+  `CompileSession::from_parsed` compiles from one without parsing again.
+
+- **The typography matrix, declared.** The `describe` manifest declares, per element, the §6.1
+  table: `<x:p>`, `<x:li>`, `<x:td>`, `<x:th>`, `<x:tr>`, `<x:col>`, and the plain `<text>` and
+  `<textArea>` the compiler lays out, join the eleven `x:` elements (an element in another
+  namespace carries `"ns"` in its entry — `ElementSpec::ns`, `#[element(ns = "…")]`).
+  `<x:textbox>` declares its `direction`, `paragraph-spacing` and `fill`, `<x:textpath>` its
+  `fill`, `<x:table>` its `cell-fill` and `stripe`.
+
+- **Units: incremental compilation one level down.** A direct child of a
   top-level passthrough container (an artboard's `<g>`) is now a unit of its own: `compile_unit`
   compiles it alone, byte-identical to its span in the parent's fragment; `compile_fragment_spans`
   returns the fragment with every unit's span in output order; `unit_dependents` finds dependents
   inside the same container, which the top-level scan could not — a keystroke in a slide's textbox
   no longer re-bakes the slide's warps ([Incremental.md §9](docs/Incremental.md)).
 
-- **Sizing a textbox to its content** for editing hosts. `measure_textbox_impl` (and
+- **Sizing a textbox to its content.** `measure_textbox_impl` (and
   `CompileSession::measure_textbox`) returns the height a textbox needs to hold its paragraphs and
   lists at its authored width — the cap band of the stacked blocks plus padding — and the width its
   content actually uses, through the same engine that renders it, so a pasted block can be given a
   box that just fits ([Incremental.md §8](docs/Incremental.md)).
 
-- **Caret stops on outlined text** for editing hosts. `caret_stops_impl` (and
+- **Caret stops on outlined text.** `caret_stops_impl` (and
   `CompileSession::caret_stops`) returns the caret positions between the outlined glyphs of an
   `<x:textbox outline="true">` — through any `<x:warp>` it sits in — or an `<x:textpath>` effect,
   in the coordinates of the emitted paths. The compile records them as it traces and warps, so
@@ -194,52 +196,7 @@ partial one.
   asking on every keystroke costs the element, not its artboard
   ([Incremental.md §7](docs/Incremental.md)).
 
-- **`GlyphOutliner::advances`** replaces `advance_width`: the outline seam now answers the
-  cumulative advance after each character of a run in one call (the last entry is the run's
-  width), so caret stops and text-on-path placement shape a run once. The browser callback
-  `advances(text, family, weight, style, size)` returns `number[]` (`[]` to decline) where
-  `advanceWidth` returned a number; both JS adapters make one `forEachGlyph` pass.
-
-- **Lists inside a textbox.** A `<x:list>` stands among a textbox's paragraphs as a block of the
-  same stack: its items flow as paragraphs with the list's gutter and markers, under the box's
-  shrink-to-fit, `valign` and padding — one box holds a heading, bullets and a closing paragraph
-  (§6.16). The standalone list remains.
-
-- **`transform` on `<x:table>` and `<x:list>`** passes through to the `<g>` each lowers to, as a
-  textbox's does: rotating or scaling a table or a list is its transform (§6.14, §6.15). Found by
-  the editor: a transform on a table was consumed and never re-emitted, so the table could not move.
-
-- **Table column and row styles.** `<x:col>` children (one per column, HTML's `<col>`) and
-  attributes on `<x:tr>` carry cell defaults — `align`, `valign`, `fill`, `bg`, `font-*`,
-  `line-height` — resolving cell › row › column › header default › table, so a bold first
-  column or a tinted header row is one declaration and an inserted row keeps the look (§6.15).
-
-- **Connector anchors sit on the shape.** `to="#id:top"` on a rotated or skewed plain
-  shape attaches to the shape's own top-edge midpoint, mapped through its transform,
-  instead of the top of its axis-aligned bounds, where no edge of the shape lies; on an
-  ellipse or circle the eight anchors lie on the circumference — the four axis points and
-  the four diagonals at 45° — where a box's corners would float off the curve (§7.6).
-
-- **`<x:doc>` — document settings.** The one element for an editor's document-level settings
-  (artboard defaults and arrangement, a print size, …), dropped whole at compile with no marker
-  and no validation; its children are the tool's, in the `x:` namespace by convention (§4.4).
-
-- **`x:fill` on an artboard paints its frame.** A slide's backdrop used to be a hand-written
-  `<rect>` repeating the frame's size; `<g x:artboard="…" x:frame="x y w h" x:fill="#0b1020">`
-  now lowers that rect itself, as the group's first child, mapped through the group's
-  transform so a placed slide gets it at its own origin (§5.2). The deck sample uses it.
-
 ### Changed
-
-- **An invalid text style value falls through.** A `letter-spacing`, `word-spacing` or
-  `text-transform` the compiler cannot read on an element now gives way to its `<x:font>` token's
-  value, as an invalid `font-size` or `line-height` already did and as CSS ignores an invalid
-  declaration (§4.1). Previously such a value read as the initial one and hid the token.
-
-- **`<x:doc>` is a sealed island.** The compiler already dropped the editor's settings element
-  from its output; now it never reads inside it at all: an `id` there cannot be referenced or
-  shadow a real element's, an `<x:theme>` or `<x:import>` there binds nothing, a textbox there has
-  no text layout, and an edit there invalidates nothing — a host can skip the render (§4.4).
 
 - **Compiled text inherits `font-family`.** A textbox, list, table, text on a path or `<textArea>`
   with no `font-family` of its own now takes the nearest ancestor's — a `<g font-family>`, a
@@ -250,7 +207,43 @@ partial one.
   above a box can reflow it. Documents that set a root `font-family` will see their compiled text
   switch to it.
 
+- **No nested `<svg>` in compiled output.** A nested `<svg>` — a cropped picture, the baked
+  whole-file form of a cross-file `<use>` — now lowers to one clipped `<g>` whose transform folds
+  the element's own, the frame's position and the `viewBox` fit (`preserveAspectRatio` honoured),
+  with the frame carried as `data-xsvg-viewport="x y w h"` for editors to read (§5.3). WebKit
+  ignores a `transform` on a nested `<svg>`, so a rotated crop drew unrotated there; a `<g>` draws
+  alike everywhere. A viewport a `<use width|height>` sizes is kept as `<svg>` with its transform
+  hoisted. A linked drawing's `<use>` keeps its `transform`, `opacity` and `filter`, which the
+  nested-`<svg>` form dropped.
+
+- **An invalid text style value falls through.** A `letter-spacing`, `word-spacing` or
+  `text-transform` the compiler cannot read on an element now gives way to its `<x:font>` token's
+  value, as an invalid `font-size` or `line-height` already did and as CSS ignores an invalid
+  declaration (§4.1). Previously such a value read as the initial one and hid the token.
+
+- **`GlyphOutliner::advances` replaces `advance_width`.** The outline seam answers the cumulative
+  advance after each character of a run in one call (the last entry is the run's width), so caret
+  stops and text on a path shape a run once. The raw wasm module's `compile_ext` takes the
+  matching callback, `advances(text, family, weight, style, size)` returning `number[]` (`[]` to
+  decline), where `advanceWidth` returned a number; both JS adapters make one `forEachGlyph` pass.
+
+- **`xsvg-schema`: `ElementSpec::ns` and `ParamEnum::DEFAULT`.** An element may name a namespace
+  other than its manifest's, and an enum parameter carries its `#[default]` variant. The derives
+  supply both; a hand-written `ElementSpec` or `ParamEnum` impl must add them.
+
 ### Fixed
+
+- **Boolean operands keep their transforms.** A `<g transform>` or a nested `<x:boolean>` as an
+  operand was combined untransformed — at the origin — and a transformed operand's stroke ink
+  stayed where the transform would have moved it from. Every enclosing transform now composes
+  into the operand once, the consuming boolean's own staying on its result.
+
+- **An empty text box lays one blank line where typing would start.** A textbox with no text —
+  its own box, a referenced rect or shape, an empty `<x:p>`, an empty `<text inline-size>` — used
+  to emit a bare `<text>` with no position and the layout seam reported no lines, so an editor's
+  empty text measured at the origin and a caret had nowhere to sit. Every flow now lays one blank
+  line placed by `align`/`valign` as a one-line text would be, emitted as an empty `<tspan x y>`
+  (§6.4); paragraph stacking is unchanged, since an empty `<x:p>` already owned its row.
 
 - **Outlines honour `letter-spacing`, `word-spacing`, justification and `glyph-x-scale`.**
   A spaced or justified line was traced at the font's bare advances. A run with spacing is now
@@ -321,6 +314,15 @@ partial one.
   paragraph it falls in, and a line wider than its paragraph is cut to fit, as §6.6 says
   for every other flow. The editor's text-layout seam reports the same rewritten line.
 
+### Known limitations
+
+- **`xsvg-path-ops` can panic**, about once in three million fuzz cases, on ordinary geometry
+  (the engine's; the reproducer is in the crate). A native host catches it and writes the
+  flattened path; in wasm a panic aborts the module, so run the crate in its own Worker, as its
+  README describes. Operands that are near-copies of one another always get the flattened path.
+- **Point text that `to_path` cannot place faithfully is refused**, not mis-traced: per-glyph
+  `x`/`y`/`dx`/`dy` lists, `rotate`, `textLength`, `baseline-shift` and `<textPath>`.
+
 ### Internal
 
 - Text layout consolidated, with no output change: one clip-and-truncate pass
@@ -328,6 +330,8 @@ partial one.
   bisection (`fit::bisect_fit`), and paragraph stacking moved out of the emitter into a
   `text::paragraphs` engine that the textbox, the standalone list and the editor's
   text-layout seam all share.
+- `arcs_to_cubics` lives in `xsvg_core::spline`, outside the `compile` feature.
+- The CLI links `xsvg-path-ops` for `--to-path` on an `<x:boolean>`; the core never does.
 
 ## [0.2.2] — 2026-10-08
 

@@ -1,6 +1,6 @@
 [package]
 name = "xsvg-cli"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/visioncortex/xsvg"
@@ -12,11 +12,11 @@ name = "xsvg"
 path = "src/main.rs"
 
 [dependencies]
-xsvg-core = { path = "../xsvg-core", version = "0.2.2", features = ["compile"] }
-xsvg-path-ops = { path = "../xsvg-path-ops", version = "0.2.2" }
+xsvg-core = { path = "../xsvg-core", version = "0.3.0", features = ["compile"] }
+xsvg-path-ops = { path = "../xsvg-path-ops", version = "0.3.0" }
 ttf-parser = "0.25"
 # shaping: kerning, ligatures, mark placement — the same shaper resvg renders live text with
 rustybuzz = "0.20"
 wasmi = { version = "1.1", default-features = false, features = ["std"] }
 sha2 = { version = "0.10", default-features = false }
-xsvg-plugin = { version = "0.2.2", path = "../xsvg-plugin" }
+xsvg-plugin = { version = "0.3.0", path = "../xsvg-plugin" }

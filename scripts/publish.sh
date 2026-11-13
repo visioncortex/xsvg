@@ -11,7 +11,7 @@
 # `publish = false` is skipped, and the rest go to crates.io in dependency order —
 # so a crate added to the workspace is released without touching this script. Today
 # that is xsvg-gradient, xsvg-schema-derive, xsvg-schema, xsvg-core, xsvg-plugin,
-# xsvg-cli and xsvg-wasm; xsvg-ext-clipart is held back (see its manifest).
+# xsvg-path-ops, xsvg-cli and xsvg-wasm; xsvg-ext-clipart is held back (see its manifest).
 #
 # All three phases are the release. Publishing npm alone leaves the crates behind at
 # whatever version they last shipped, silently — it has happened.

@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "xsvg-cli"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "rustybuzz",
  "sha2",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "xsvg-core"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "i_overlay",
  "i_shape",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "xsvg-ext-clipart"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "xsvg-plugin",
  "xsvg-schema",
@@ -650,11 +650,11 @@ dependencies = [
 
 [[package]]
 name = "xsvg-gradient"
-version = "0.2.2"
+version = "0.3.0"
 
 [[package]]
 name = "xsvg-path-ops"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "kurbo",
  "linesweeper",
@@ -663,21 +663,21 @@ dependencies = [
 
 [[package]]
 name = "xsvg-plugin"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "xsvg-schema",
 ]
 
 [[package]]
 name = "xsvg-schema"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "xsvg-schema-derive",
 ]
 
 [[package]]
 name = "xsvg-schema-derive"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "xsvg-wasm"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
