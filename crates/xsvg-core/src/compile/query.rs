@@ -36,7 +36,7 @@ pub(super) const STYLE_PROPS: [&str; 9] = [
 /// What an element reads of its own: every style property, token first.
 const ELEMENT: &[&str] = &STYLE_PROPS;
 /// What a paragraph or list inside a box reads of its own over the box's: the
-/// type, its spacing and its colour — no token.
+/// type, its spacing and its colour, including its font token.
 const BLOCK: &[&str] = &[
     "font-family",
     "font-size",
@@ -193,11 +193,12 @@ fn is_x(node: roxmltree::Node, local: &str) -> bool {
 /// own text element (or none).
 pub(super) fn block_levels<'a>(
     node: roxmltree::Node<'a, 'a>,
+    theme: Option<&'a Theme>,
 ) -> Option<(Vec<Level<'a>>, roxmltree::Node<'a, 'a>)> {
     let attrs = |node, props| Level::Attrs {
         node,
         props,
-        token: None,
+        token: theme.and_then(|t| token_of(node, t)),
     };
     let parent = node.parent_element()?;
     if (is_x(node, "p") || is_x(node, "list")) && is_x(parent, "textbox") {
@@ -213,7 +214,7 @@ pub(super) fn block_levels<'a>(
     }
     if (is_x(node, "td") || is_x(node, "th")) && is_x(parent, "tr") {
         let table = parent.parent_element().filter(|t| is_x(*t, "table"))?;
-        return Some((cell_levels(node, parent, table), table));
+        return Some((cell_levels(node, parent, table, theme), table));
     }
     None
 }
@@ -224,6 +225,7 @@ pub(super) fn cell_levels<'a>(
     cell: roxmltree::Node<'a, 'a>,
     row: roxmltree::Node<'a, 'a>,
     table: roxmltree::Node<'a, 'a>,
+    theme: Option<&'a Theme>,
 ) -> Vec<Level<'a>> {
     let is_cell = |c: &roxmltree::Node| is_x(*c, "td") || is_x(*c, "th");
     let ci = row
@@ -236,19 +238,19 @@ pub(super) fn cell_levels<'a>(
         Level::Attrs {
             node: cell,
             props: CELL,
-            token: None,
+            token: theme.and_then(|t| token_of(cell, t)),
         },
         Level::Attrs {
             node: row,
             props: CELL,
-            token: None,
+            token: theme.and_then(|t| token_of(row, t)),
         },
     ];
     if let Some(col) = col {
         levels.push(Level::Attrs {
             node: col,
             props: CELL,
-            token: None,
+            token: theme.and_then(|t| token_of(col, t)),
         });
     }
     if is_x(cell, "th") {
@@ -325,7 +327,7 @@ fn cascade<'a>(
     node: roxmltree::Node<'a, 'a>,
     theme: &'a Theme,
 ) -> (Vec<Level<'a>>, roxmltree::Node<'a, 'a>) {
-    let (mut levels, base) = block_levels(node).unwrap_or((Vec::new(), node));
+    let (mut levels, base) = block_levels(node, Some(theme)).unwrap_or((Vec::new(), node));
     levels.extend(element_levels(base, theme));
     (levels, base)
 }
@@ -396,7 +398,7 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
         // a cell's alignment is the table's rule (§6.15): cell › row › column
         // › table, not the paragraph planner's own-else-box
         if (is_x(node, "td") || is_x(node, "th")) && matches!(property, "align" | "valign") {
-            if let Some((levels, table)) = block_levels(node) {
+            if let Some((levels, table)) = block_levels(node, Some(theme)) {
                 return match find(&levels, property) {
                     Some((v, _, level)) if level.node() == node => done(Some(v), Source::Own),
                     Some((v, _, level)) => done(
@@ -420,7 +422,7 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
             }
         }
         // a block's layout properties cascade from its box by the planner's rules
-        if let Some((_, container)) = block_levels(node) {
+        if let Some((_, container)) = block_levels(node, Some(theme)) {
             if let Some((v, source)) = block_layout(node, container, is_x(node, "li"), property) {
                 return done(v, source);
             }
@@ -559,7 +561,7 @@ impl RunSupport {
 /// The text element whose emitter lays out `node`'s runs: `node` itself, or the
 /// box, list or table its paragraph, item or cell belongs to.
 pub(super) fn text_element<'a>(node: roxmltree::Node<'a, 'a>) -> roxmltree::Node<'a, 'a> {
-    block_levels(node).map_or(node, |(_, base)| base)
+    block_levels(node, None).map_or(node, |(_, base)| base)
 }
 
 /// What a run inside `node`'s text may carry and see drawn — by the compiler or,

@@ -394,7 +394,7 @@ pub(super) fn emit_paragraphs(
     let m = ctx.m;
     let cy = spec.y + spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
-    let (items, block_top) = plan_paragraphs(node, paras, base_style, base_fill, spec, m);
+    let (items, block_top) = plan_paragraphs(node, paras, base_style, base_fill, spec, m, &ctx.theme);
 
     // list items' markers (§6.16): drawn shapes and one shared <text> of
     // generated markers, before the paragraphs, as a standalone list emits
@@ -700,6 +700,7 @@ pub(super) fn plan_paragraphs<'a>(
     base_fill: &'a str,
     spec: &AreaSpec,
     m: &dyn Measurer,
+    theme: &'a Theme,
 ) -> (Vec<ParaPlan<'a>>, f64) {
     let cx = spec.x + spec.padding;
     let cy = spec.y + spec.padding;
@@ -717,7 +718,7 @@ pub(super) fn plan_paragraphs<'a>(
 
     // per-block style and fill: the box's, with what the `<x:p>` — or the item,
     // then its `<x:list>` — sets over it (query.rs, the same levels a query reads)
-    let levels = |p: roxmltree::Node<'a, 'a>| block_levels(p).map(|(l, _)| l).unwrap_or_default();
+    let levels = |p: roxmltree::Node<'a, 'a>| block_levels(p, Some(theme)).map(|(l, _)| l).unwrap_or_default();
 
     // pass 1 at a given SCALE (fit="shrink" searches it below): every text
     // metric — the font sizes, the paragraph gaps, the first-line indent —
@@ -1737,7 +1738,7 @@ pub(super) fn measure_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<Textbo
     };
     let paras = blocks_of(node);
     if !paras.is_empty() {
-        let (items, _) = plan_paragraphs(node, &paras, &style, "", &spec, m);
+        let (items, _) = plan_paragraphs(node, &paras, &style, "", &spec, m, &ctx.theme);
         for it in &items {
             take(&it.laid.lines, &it.laid.style, top);
         }
@@ -1846,7 +1847,7 @@ pub(super) fn layout_textbox(node: roxmltree::Node, ctx: &Ctx) -> Option<TextLay
         };
         if let Some(geom) = geom {
             let spec = textbox_area_spec(node, geom);
-            return Some(paragraphs_layout_info(node, &paras, &style, &spec, ctx.m));
+            return Some(paragraphs_layout_info(node, &paras, &style, &spec, ctx.m, &ctx.theme));
         }
         // curved region flow ignores <x:p> and falls through, like emission
     }
@@ -1921,8 +1922,9 @@ pub(super) fn paragraphs_layout_info(
     base_style: &TextStyle,
     spec: &AreaSpec,
     m: &dyn Measurer,
+    theme: &Theme,
 ) -> TextLayout {
-    let (items, block_top) = plan_paragraphs(node, paras, base_style, "", spec, m);
+    let (items, block_top) = plan_paragraphs(node, paras, base_style, "", spec, m, theme);
     let cy = spec.y + spec.padding;
     let ch = spec.height - 2.0 * spec.padding;
     let p = spec.padding;

@@ -7865,7 +7865,7 @@ fn resolved_agrees_with_the_emitters_over_the_dataset() {
             };
             // the emitters: a block over its text element's style, an element
             // over the initial style
-            let laid = match super::query::block_levels(node) {
+            let laid = match super::query::block_levels(node, Some(theme)) {
                 Some((levels, base)) => super::query::overlay(
                     &levels,
                     &super::query::overlay(
@@ -10367,5 +10367,37 @@ fn boolean_nested_subtract_hole_survives_reflection_and_union() {
         (70., 20., false),
     ] {
         assert_eq!(path.winding(Point::new(x, y)) != 0, inside, "at ({x}, {y})");
+    }
+}
+
+#[test]
+fn theme_font_tokens_style_paragraphs_list_items_and_cells() {
+    use super::query::Source;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org">
+<x:theme><x:font name="heading" font-family="serif" font-size="30" font-weight="700" line-height="1.4"/><x:font name="body" font-size="16"/></x:theme>
+<x:textbox width="400" height="300" font-size="10"><x:p id="p" x:font="heading">Alpha</x:p><x:p id="own" x:font="heading" font-size="12">Beta</x:p><x:list x:font="heading"><x:li id="nested">Nested</x:li></x:list></x:textbox>
+<x:list width="300" y="310" font-size="10"><x:li id="li" x:font="heading">Gamma</x:li></x:list>
+<x:table y="400" width="300"><x:col x:font="heading"/><x:col/><x:tr><x:td id="col">Delta</x:td><x:td id="cell" x:font="heading">Epsilon</x:td></x:tr><x:tr x:font="heading"><x:td id="row">Zeta</x:td><x:td id="override" x:font="body">Eta</x:td></x:tr></x:table></svg>"#;
+    let parsed = ParsedDocument::new(svg).unwrap();
+    let source = roxmltree::Document::parse(svg).unwrap();
+    for (id, size) in [("p", "30"), ("own", "12"), ("nested", "30"), ("li", "30"), ("col", "30"), ("cell", "30"), ("row", "30"), ("override", "16")] {
+        let node = source.descendants().find(|n| n.attribute("id") == Some(id)).unwrap();
+        let resolved = parsed.resolved(node.range().start, &["font-size"]).unwrap();
+        assert_eq!(resolved[0].value.as_deref(), Some(size), "{id}");
+        if id == "p" { assert_eq!(resolved[0].source, Source::Token("heading".into())); }
+        if id == "own" { assert_eq!(resolved[0].source, Source::Own); }
+    }
+    let layout = layout_at(svg, at(svg, "<x:textbox")).unwrap();
+    assert_eq!(layout.paras[0].style.size, 30.0);
+    assert_eq!(layout.paras[0].style.family, "serif");
+    assert_eq!(layout.paras[0].style.line_height, 1.4);
+    assert_eq!(layout.paras[1].style.size, 12.0);
+    assert_eq!(layout.paras[2].style.size, 30.0);
+    let output = compile_test(svg);
+    let rendered = roxmltree::Document::parse(&output).unwrap();
+    for (word, size) in [("Alpha", "30"), ("Beta", "12"), ("Gamma", "30"), ("Delta", "30"), ("Epsilon", "30"), ("Zeta", "30"), ("Eta", "16")] {
+        let text = rendered.descendants().find(|n| n.is_text() && n.text() == Some(word)).unwrap();
+        let actual = text.ancestors().find_map(|n| n.attribute("font-size"));
+        assert_eq!(actual, Some(size), "{word}");
     }
 }

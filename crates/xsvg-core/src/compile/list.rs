@@ -90,7 +90,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                                           // inherits the list's size otherwise, keeping the list's line-height
                                           // the item's type block over the list's (§6.1): any of font-*,
                                           // line-height, the spacing, the case — and its colour
-        let item_levels = block_levels(li).map(|(l, _)| l).unwrap_or_default();
+        let item_levels = block_levels(li, Some(&ctx.theme)).map(|(l, _)| l).unwrap_or_default();
         let item_style = overlay(&item_levels, &style);
         let item_fill = level_value(&item_levels, "fill")
             .map(|v| ctx.resolve_var(v).into_owned())
