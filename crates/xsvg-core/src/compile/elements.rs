@@ -443,7 +443,7 @@ pub(super) struct ListItem {
     pub list: Option<String>,
     #[param(doc = "a drawn shape or literal marker text, overriding the list's")]
     pub marker: Option<String>,
-    #[param(doc = "defaults to the box's direction; a standalone list is left-to-right")]
+    #[param(doc = "defaults to the list's direction, then its box's")]
     pub direction: Option<DirectionParam>,
     #[param(color, doc = "defaults to the list's fill")]
     pub fill: Option<String>,
@@ -464,6 +464,8 @@ pub(super) struct Cell {
     pub align: Option<AlignParam>,
     #[param(doc = "defaults to the row's, then the column's, then the table's")]
     pub valign: Option<VAlignParam>,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub direction: Option<DirectionParam>,
     #[param(
         color,
         doc = "background; defaults to the table's cell-fill, stripe or header-fill"
@@ -487,6 +489,8 @@ pub(super) struct HeaderCell {
     pub align: Option<AlignParam>,
     #[param(doc = "defaults to the row's, then the column's, then the table's")]
     pub valign: Option<VAlignParam>,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub direction: Option<DirectionParam>,
     #[param(color, doc = "background; defaults to the table's header-fill")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour; defaults to the table's fill")]
@@ -507,6 +511,8 @@ pub(super) struct Row {
     pub align: Option<AlignParam>,
     #[param(doc = "defaults to the column's, then the table's")]
     pub valign: Option<VAlignParam>,
+    #[param(doc = "defaults to the column's, then the table's")]
+    pub direction: Option<DirectionParam>,
     #[param(color, doc = "background for the row's cells")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour for the row's cells")]
@@ -526,6 +532,8 @@ pub(super) struct Column {
     pub align: Option<AlignParam>,
     #[param(doc = "defaults to the table's")]
     pub valign: Option<VAlignParam>,
+    #[param(doc = "defaults to the table's")]
+    pub direction: Option<DirectionParam>,
     #[param(color, doc = "background for the column's cells")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour for the column's cells")]
@@ -864,6 +872,8 @@ pub(super) struct List {
     )]
     pub item_spacing: Option<f64>,
     pub valign: VAlignParam,
+    #[param(doc = "rtl: every item's text starts from the right edge of its column")]
+    pub direction: DirectionParam,
     #[param(color, default = "#111827")]
     pub fill: String,
     #[param(
@@ -897,6 +907,8 @@ pub(super) struct Table {
     /// Cells centre vertically by default, unlike a textbox.
     #[param(default = "middle")]
     pub valign: VAlignParam,
+    #[param(doc = "rtl: a cell's start edge is its right one")]
+    pub direction: DirectionParam,
     #[param(color, default = "#0f172a")]
     pub fill: String,
     #[param(color, default = "#f1f5f9")]

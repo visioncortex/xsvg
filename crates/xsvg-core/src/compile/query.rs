@@ -63,6 +63,7 @@ const CELL: &[&str] = &[
     "fill",
     "align",
     "valign",
+    "direction",
 ];
 /// What an ancestor above the text element gives it: the family alone (§4.1).
 const INHERITED: &[&str] = &["font-family"];
@@ -405,7 +406,9 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
     if !STYLE_PROPS.contains(&property) {
         // a cell's alignment is the table's rule (§6.15): cell › row › column
         // › table, not the paragraph planner's own-else-box
-        if (is_x(node, "td") || is_x(node, "th")) && matches!(property, "align" | "valign") {
+        if (is_x(node, "td") || is_x(node, "th"))
+            && matches!(property, "align" | "valign" | "direction")
+        {
             if let Some((levels, table)) = block_levels(node, Some(theme)) {
                 return match find(&levels, property) {
                     Some((v, _, level)) if level.node() == node => done(Some(v), Source::Own),
@@ -470,7 +473,7 @@ pub(super) fn resolved(node: roxmltree::Node, property: &str, theme: &Theme) -> 
 /// paragraph's own, else its box's; `text-indent` the paragraph's own, else
 /// none — a box's indent is for its own single flow. An item in a list is
 /// always start-aligned and unindented (its gutter is the inset), its direction
-/// its own, else the box's; a standalone list reads no direction at all.
+/// its own, else its list's, else the box's — standalone or boxed alike.
 pub(super) fn block_layout<'a>(
     block: roxmltree::Node<'a, 'a>,
     container: roxmltree::Node<'a, 'a>,
@@ -498,16 +501,30 @@ pub(super) fn block_layout<'a>(
             Some(v) => (Some(v), Source::Own),
             None => (Some("0"), Source::Initial),
         },
-        "direction" => match (
-            block.attribute("direction"),
-            container
-                .attribute("direction")
-                .filter(|_| is_x(container, "textbox")),
-        ) {
-            (Some(v), _) => (Some(v), Source::Own),
-            (None, Some(v)) => inherited(v),
-            (None, None) => (Some("ltr"), Source::Initial),
-        },
+        "direction" => {
+            // an item's own, else its list's, else the box's; a paragraph's
+            // own, else the box's
+            let list = block
+                .parent()
+                .filter(|p| in_list && is_x(*p, "list") && *p != container);
+            let from_list = list.and_then(|l| Some((l, l.attribute("direction")?)));
+            match (
+                block.attribute("direction"),
+                from_list,
+                container.attribute("direction"),
+            ) {
+                (Some(v), _, _) => (Some(v), Source::Own),
+                (None, Some((l, v)), _) => (
+                    Some(v),
+                    Source::Inherited {
+                        from: l.range().start,
+                        token: None,
+                    },
+                ),
+                (None, None, Some(v)) => inherited(v),
+                (None, None, None) => (Some("ltr"), Source::Initial),
+            }
+        }
         _ => return None,
     })
 }

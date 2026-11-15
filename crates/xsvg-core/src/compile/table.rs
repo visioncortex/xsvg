@@ -92,6 +92,7 @@ fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bo
     let pad = tp.cell_padding.max(0.0);
     let default_align = tp.align.as_str();
     let default_valign = tp.valign.as_str();
+    let default_rtl = tp.direction == super::elements::DirectionParam::Rtl;
     let row_min = tp.row_min_height;
 
     // block geometry: `in="#rect"` bbox, else x/y/width
@@ -259,7 +260,10 @@ fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bo
             let st = cell_style(cell, *row, ci);
             let (segments, styles, emits) = collect_runs(cell, &st);
             let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
-            if !plain.trim().is_empty() {
+            // an empty cell lays its one blank line — the row an editor's
+            // caret sits on, as an empty box's does (§6.4); outlined, nothing
+            let blank = plain.trim().is_empty();
+            if !(blank && outline) {
                 let fill = level_value(&cell_levels(cell, *row, node, Some(ctx.theme)), "fill")
                     .map(|v| ctx.resolve_var(v).into_owned())
                     .unwrap_or_else(|| text_fill.clone());
@@ -280,14 +284,16 @@ fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bo
                     fit: Fit::None,
                     text_overflow: TextOverflow::Clip,
                     text_indent: 0.0,
-                    rtl: false,
+                    // cell › row › column › table, like its alignment
+                    rtl: cell_prop(cell, *row, col_styles.get(ci).copied(), "direction")
+                        .map_or(default_rtl, |d| d == "rtl"),
                 };
                 let layout = layout_area_runs(&segments, &styles, &spec, m);
                 emit_run_backdrops(
                     out,
                     &layout.lines,
                     layout.anchor.svg(),
-                    false,
+                    layout.rtl,
                     &st,
                     layout.font_size,
                     &fill,
@@ -300,7 +306,7 @@ fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bo
                     let Some((paths, _)) = trace_lines(
                         &layout.lines,
                         layout.anchor,
-                        false,
+                        layout.rtl,
                         &st,
                         layout.font_size,
                         1.0,
@@ -316,6 +322,9 @@ fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bo
                     continue;
                 }
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
+                if layout.rtl {
+                    out.push_str(" direction=\"rtl\"");
+                }
                 push_font_attrs(out, &st, layout.font_size, &fill, ctx);
                 // the cell's spacing (cell › row › column › table), as a box's
                 if st.letter_spacing != 0.0 {

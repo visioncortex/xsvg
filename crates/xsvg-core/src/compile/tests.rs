@@ -10053,10 +10053,10 @@ fn the_manifest_declares_the_typography_matrix() {
             ],
         ),
         ("li", vec!["indent", "list", "marker", "direction", "fill"]),
-        ("td", vec!["align", "valign", "bg", "fill"]),
-        ("th", vec!["align", "valign", "bg", "fill"]),
-        ("tr", vec!["align", "valign", "bg", "fill"]),
-        ("col", vec!["align", "valign", "bg", "fill"]),
+        ("td", vec!["align", "valign", "direction", "bg", "fill"]),
+        ("th", vec!["align", "valign", "direction", "bg", "fill"]),
+        ("tr", vec!["align", "valign", "direction", "bg", "fill"]),
+        ("col", vec!["align", "valign", "direction", "bg", "fill"]),
         (
             "text",
             vec![
@@ -10168,6 +10168,8 @@ fn the_manifest_declares_the_typography_matrix() {
         ("tr", "valign"),
         ("col", "align"),
         ("col", "valign"),
+        ("td", "direction"),
+        ("col", "direction"),
     ] {
         let p = param(el, name);
         assert_eq!(p.default, None, "<x:{el}> {name} inherits");
@@ -10175,6 +10177,8 @@ fn the_manifest_declares_the_typography_matrix() {
         assert!(!p.values.is_empty(), "<x:{el}> {name} keeps its spellings");
     }
     assert_eq!(param("table", "valign").default, Some("middle"));
+    assert_eq!(param("table", "direction").default, Some("ltr"));
+    assert_eq!(param("list", "direction").default, Some("ltr"));
     assert_eq!(param("textbox", "align").default, Some("start"));
     // the SVG text elements carry their namespace; the x: ones none
     let ns_of = |name: &str| elements.iter().find(|e| e.name == name).unwrap().ns;
@@ -10840,4 +10844,97 @@ fn a_spacing_with_a_unit_or_a_var_is_invalid_and_falls_through() {
         (r[0].value.as_deref(), &r[0].source),
         (Some("normal"), &Source::Initial)
     );
+}
+
+#[test]
+fn an_empty_item_and_an_empty_cell_lay_one_blank_line() {
+    // §6.4: every empty flow lays one blank line — the row an editor's caret
+    // sits on. A standalone list's empty item and a table's empty cell used
+    // to emit nothing, where an empty box, paragraph and boxed item did
+    let src = format!(
+        r##"{XW}<x:list x="10" y="0" width="200" font-size="10"><x:li></x:li><x:li>b<tbreak/><tbreak/>c</x:li></x:list><x:table x="0" y="100" width="200" font-size="10"><x:tr><x:td></x:td><x:td>b</x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_mapped(&src);
+    let li = src.find("<x:li></x:li>").unwrap();
+    let item = out
+        .split("<text ")
+        .find(|t| t.contains(&format!("data-xsvg-pos=\"{li}-")))
+        .unwrap_or_else(|| panic!("the empty item has a keyed <text>: {out}"));
+    assert!(item.contains("></tspan></text>"), "{item}");
+    assert!(
+        item.contains(r#"<tspan x="25""#),
+        "at the text column: {item}"
+    );
+    // a forced blank line inside an item with text still emits nothing
+    assert_eq!(out.matches("></tspan>").count(), 2, "item and cell: {out}");
+    let td = src.find("<x:td></x:td>").unwrap();
+    let cell = out
+        .split(&format!("data-xsvg-pos=\"{td}-"))
+        .nth(1)
+        .and_then(|c| c.split("</g>").next())
+        .unwrap();
+    assert!(
+        cell.contains("<rect") && cell.contains("></tspan></text>"),
+        "{cell}"
+    );
+    // the blank line changes no geometry: the row is as tall as it was
+    assert!(cell.contains(r#"height="25""#), "{cell}");
+    // outlined, a blank line is nothing
+    let outlined = compile_outlined(&src.replace("<x:list ", r#"<x:list outline="true" "#));
+    assert!(
+        !outlined.split("<g").nth(1).unwrap().contains("<tspan"),
+        "{outlined}"
+    );
+}
+
+#[test]
+fn direction_reaches_standalone_lists_and_table_cells() {
+    // §6.4 direction on every block that lays text: an item's own, else its
+    // list's (standalone or boxed), else its box's; a cell's own, else its
+    // row's, column's, table's — as the queries report
+    use super::query::Source;
+    let src = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10" direction="rtl"><x:li id="a">one</x:li><x:li id="b" direction="ltr">two</x:li></x:list><x:textbox x="0" y="100" width="200" height="100" font-size="10"><x:list direction="rtl"><x:li id="c">three</x:li></x:list></x:textbox><x:table x="0" y="200" width="200" font-size="10"><x:col direction="rtl"/><x:col/><x:tr><x:td id="d">four</x:td><x:td id="e">five</x:td></x:tr></x:table><x:table x="0" y="300" width="100" font-size="10" direction="rtl"><x:tr><x:td id="f">six</x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_test(&src);
+    let text_with = |needle: &str| {
+        out.split("<text ")
+            .find(|t| t.contains(needle))
+            .unwrap_or_else(|| panic!("{needle}: {out}"))
+            .to_string()
+    };
+    for (word, rtl) in [
+        ("one", true),
+        ("two", false),
+        ("three", true),
+        ("four", true),
+        ("five", false),
+        ("six", true),
+    ] {
+        let t = text_with(&format!(">{word}<"));
+        assert_eq!(t.contains(r#"direction="rtl""#), rtl, "{word}: {t}");
+    }
+    // an rtl item starts at the right edge of its column (x=0, width=200)
+    assert!(text_with(">one<").contains(r#"<tspan x="200""#), "{out}");
+    assert!(text_with(">two<").contains(r#"<tspan x="15""#), "{out}");
+    // an rtl cell starts at its right edge less the padding
+    assert!(text_with(">four<").contains(r#"<tspan x="92""#), "{out}");
+    let parsed = ParsedDocument::new(&src).unwrap();
+    let dir = |id: &str| {
+        let tag = if matches!(id, "a" | "b" | "c") {
+            "li"
+        } else {
+            "td"
+        };
+        let r = parsed
+            .resolved(at(&src, &format!(r#"<x:{tag} id="{id}""#)), &["direction"])
+            .unwrap();
+        (r[0].value.clone().unwrap(), r[0].source.clone())
+    };
+    assert!(matches!(dir("a"), (v, Source::Inherited { .. }) if v == "rtl"));
+    assert_eq!(dir("b"), ("ltr".to_string(), Source::Own));
+    assert!(matches!(dir("c"), (v, Source::Inherited { .. }) if v == "rtl"));
+    assert!(matches!(dir("d"), (v, Source::Inherited { .. }) if v == "rtl"));
+    assert_eq!(dir("e"), ("ltr".to_string(), Source::Initial));
+    assert!(matches!(dir("f"), (v, Source::Inherited { .. }) if v == "rtl"));
 }

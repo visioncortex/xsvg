@@ -285,6 +285,15 @@ supply but a hand-written impl must add.
   `x:highlight`, underline and strike-through; they bake as rects beside the paths now, as beside
   live text.
 
+- **`direction` on standalone lists and tables.** An `<x:li>`'s `direction` was declared and
+  documented but read only inside a text box. It is now the item's own, else its list's, else its
+  box's, standalone and boxed alike; `<x:list>` and `<x:table>` take `direction`, and a cell
+  resolves it cell › row › column › table. `resolved` reports each.
+
+- **An empty list item and an empty table cell lay one blank line**, as every other empty flow
+  does: a keyed `<text>` with one empty `<tspan>` where typing would start. A standalone list's
+  empty item and a table's empty cell used to emit nothing for a caret to sit on.
+
 - **A spacing with a relative unit or a `var()` is invalid, not its leading number.**
   `letter-spacing="50%"` was read as 50 user units and `0.2em` silently dropped; on
   `<text inline-size>` the refused value was still copied to the output, so the renderer tracked

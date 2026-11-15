@@ -516,7 +516,7 @@ element (Extensibility.md §11), and a panel should read it rather than keep a t
 | `x:font` token | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | horizontal alignment | `align` | `text-anchor` | `text-align` | `align` (along the path) | — (items start-aligned) | — | `align` | `align` | `align` | `align` | — |
 | vertical alignment | `valign` | — | `display-align` | — | `valign` | — | `valign` | `valign` | `valign` | — | — |
-| `direction` | ✓ | (renderer's) | — | — | — | ✓ (in a box) | — | — | — | ✓ | — |
+| `direction` | ✓ | (renderer's) | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | `text-indent` | ✓ | — | — | — | — | — (the gutter) | — | — | — | ✓ | — |
 | `space-before` / `space-after` | — | — | — | — | `item-spacing` | — | — | — | — | ✓ | — |
 | `paragraph-spacing` | ✓ | — | — | — | — | — | — | — | — | — | — |
@@ -602,8 +602,10 @@ spacing (`line-height` vs `line-increment`) and keyword (`valign` vs `display-al
 **An empty box has a first line.** With no text, the box lays one blank line where typing would
 start — placed by `align`/`valign` exactly as a one-line text would be — and emits its `<text>` with
 that one empty `<tspan x y>`. An empty `<x:p>` lays its blank line on the row it owns (§6.16), an
-empty region-bound box (§6.10) in the first band with a span, and an empty `<text inline-size>` at
-its `x`/`y`. So the empty element measures where its text will appear instead of at the origin, and
+empty region-bound box (§6.10) in the first band with a span, an empty `<text inline-size>` at
+its `x`/`y`, an empty `<x:li>` at its text column on the row it owns (§6.14, standalone or in a
+box), and an empty `<x:td>`/`<x:th>` where its alignment would place one line (§6.15). Outlined
+(§6.12), a blank line is nothing. So the empty element measures where its text will appear instead of at the origin, and
 the layout seam (Incremental.md §6) reports the line for a caret to sit on.
 
 ### 6.5 Vertical alignment model (normative) [implemented]
@@ -1089,7 +1091,9 @@ level**, restarted whenever nesting pops back to a shallower level (so `1. 2. a.
 into the gutter so `1.` and `10.` share a column edge. An `<x:li marker="…">` (or `marker` on the
 list) overrides with a named shape or a literal character, and an `<x:li font-size="…">` overrides
 just that item's size (a smaller sub-point) — it inherits the list's size and line-height otherwise,
-and its marker scales to match. An empty item still advances one line; `list="none"` suppresses the
+and its marker scales to match. `direction` on the list, or on an item over it, is §6.4's: under
+`rtl` the item's text starts from the right edge of its column (the marker gutter stays on the
+left). An empty item still advances one line and lays its blank line there (§6.4); `list="none"` suppresses the
 marker but keeps the indent.
 
 **v0 limits.** One style per item beyond `font-size` (inline `<tspan>` fill/weight styling is not yet applied inside an item); no
@@ -1119,6 +1123,7 @@ It bakes to plain `<rect>`s (cell backgrounds + grid) plus positioned `<text>` �
 | `cols` | list | per-column width: a **length** (fixed) or a **flex weight** (`*` = 1, `2*` = 2). Flex columns split what remains after the fixed ones; a missing/blank column is flex-1, so no `cols` gives even columns |
 | `cell-padding` | length (8) | inset inside every cell |
 | `row-min-height` | length (0) | floor for a row's computed height |
+| `direction` | `ltr` *(default)* / `rtl` | the cells' paragraph direction (§6.4), resolved cell › row › column › table like `align` |
 | `stroke` / `stroke-width` | color / length | grid line color and width (`0` = no lines) |
 | `cell-fill` / `header-fill` | color | default background for `<x:td>` / `<x:th>` cells |
 | `stripe` | color | zebra background for every other **body** row (rows with no header cell); the first data row is unstriped |

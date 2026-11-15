@@ -79,6 +79,8 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
         // item, and its marker must sit on that row, not at the block top
         size: f64,                    // per-item font size (defaults to the list's)
         style: TextStyle,             // the item's resolved base style (its own size)
+        anchor: Anchor,               // the lines' anchor: `end` under rtl (§6.4)
+        rtl: bool,                    // the item's direction: its own, else the list's
         fill: String,                 // the item's text colour (its own, else the list's)
         emits: Vec<EmitAttrs>,        // its styled-run emit table (`collect_runs`)
         src: roxmltree::Node<'n, 'n>, // the <x:li>, for per-item source keys
@@ -150,7 +152,13 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
             inset,
             align: Align::Start,
             text_indent: 0.0,
-            rtl: false,
+            // the item's direction, else the list's (§6.14): its text starts
+            // from the right edge of its column; the gutter stays where it is
+            rtl: li
+                .attribute("direction")
+                .map_or(lp.direction == super::elements::DirectionParam::Rtl, |d| {
+                    d == "rtl"
+                }),
         });
         meta.push((col, marker, item_size, item_style, item_fill, emits, li));
     }
@@ -163,13 +171,19 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
                 col,
                 marker,
                 baseline: laid.first_baseline,
-                // a blank row (an empty item, or a forced blank line) takes its
-                // space and emits nothing
-                lines: laid
-                    .lines
-                    .into_iter()
-                    .filter(|l| !l.text.is_empty())
-                    .collect(),
+                anchor: laid.anchor,
+                rtl: laid.rtl,
+                // a forced blank line takes its space and emits nothing; an
+                // item with no text at all keeps its one blank line — the row
+                // an editor's caret sits on, as an empty box's does (§6.4)
+                lines: if laid.lines.iter().all(|l| l.text.is_empty()) {
+                    laid.lines.into_iter().take(1).collect()
+                } else {
+                    laid.lines
+                        .into_iter()
+                        .filter(|l| !l.text.is_empty())
+                        .collect()
+                },
                 size,
                 style,
                 fill,
@@ -249,8 +263,10 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
         }
         // list items are run leaves — one positioned <tspan> per line carrying
         // its styled runs, in the item's OWN keyed <text> at the item's size
-        // (empty items emit none)
-        if !it.lines.is_empty() {
+        // (an empty item emits its one blank line live, and nothing outlined)
+        let blank = it.lines.iter().all(|l| l.text.is_empty());
+        let skip = it.lines.is_empty() || (blank && outline);
+        if !skip {
             let shifted: Vec<PlacedLine> = it
                 .lines
                 .iter()
@@ -262,8 +278,8 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
             emit_run_backdrops(
                 &mut body,
                 &shifted,
-                "start",
-                false,
+                it.anchor.svg(),
+                it.rtl,
                 &it.style,
                 it.size,
                 &it.fill,
@@ -275,8 +291,8 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
             if outline {
                 let Some((paths, _)) = trace_lines(
                     &shifted,
-                    Anchor::Start,
-                    false,
+                    it.anchor,
+                    it.rtl,
                     &it.style,
                     it.size,
                     1.0,
@@ -290,7 +306,10 @@ fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: boo
                 push_painted_paths(&mut body, &paths, &it.fill, "", &pos_attr(it.src, ctx), ctx);
                 continue;
             }
-            body.push_str("<text text-anchor=\"start\"");
+            body.push_str(&format!("<text text-anchor=\"{}\"", it.anchor.svg()));
+            if it.rtl {
+                body.push_str(" direction=\"rtl\"");
+            }
             push_font_attrs(&mut body, &it.style, it.size, &it.fill, ctx);
             // the item's spacing, as a box's goes on its text
             if it.style.letter_spacing != 0.0 {
