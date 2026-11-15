@@ -58,6 +58,20 @@ fn stops_scope<'a, 'i>(node: roxmltree::Node<'a, 'i>) -> Option<roxmltree::Node<
 /// compile over this text needs. Owned by a [`CompileSession`]; borrowed by
 /// each per-call [`Ctx`]. The `&dyn` entry points use it directly with a
 /// stack-local [`Backend`].
+/// How `to_path` converts an element.
+#[derive(Clone, Copy, PartialEq)]
+enum Convertible {
+    /// Compiled with outlining forced: glyphs as paths.
+    Text,
+    /// A basic shape or a path, as its `<path>`.
+    Shape,
+    Boolean,
+    /// An element that already compiles to paths: an offset, a warp, a connector.
+    Derived,
+    /// A group: each convertible child converted in place.
+    Group,
+}
+
 pub(super) struct Parsed<'a> {
     pub(super) doc: roxmltree::Document<'a>,
     pub(super) theme: Theme,
@@ -371,16 +385,46 @@ impl<'a> Parsed<'a> {
         let node = self
             .element_at(offset)
             .ok_or_else(|| super::ToPathError::limit("no element starts at this offset"))?;
+        self.convert(node, backend, quality, bake_corners)
+    }
+
+    /// What `to_path` converts: the text elements, the shapes, and the
+    /// elements that already compile to paths.
+    fn convertible(node: roxmltree::Node) -> Option<Convertible> {
+        let name = node.tag_name().name();
+        match node.tag_name().namespace() {
+            Some(super::XSVG_NS) => match name {
+                "textbox" | "textpath" | "list" | "table" => Some(Convertible::Text),
+                "boolean" => Some(Convertible::Boolean),
+                "offset" | "warp" | "connector" => Some(Convertible::Derived),
+                _ => None,
+            },
+            Some(super::SVG_NS) => match name {
+                "text" | "textArea" => Some(Convertible::Text),
+                "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "path" => {
+                    Some(Convertible::Shape)
+                }
+                "g" => Some(Convertible::Group),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn convert(
+        &self,
+        node: roxmltree::Node,
+        backend: &Backend,
+        quality: QualityProfile,
+        bake_corners: bool,
+    ) -> Result<String, super::ToPathError> {
+        let offset = node.range().start;
         let (ns, name) = (node.tag_name().namespace(), node.tag_name().name());
-        let text = (ns == Some(super::XSVG_NS)
-            && matches!(name, "textbox" | "textpath" | "list" | "table"))
-            || (ns == Some(super::SVG_NS) && matches!(name, "text" | "textArea"));
-        let shape = ns == Some(super::SVG_NS)
-            && matches!(
-                name,
-                "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "path"
-            );
-        let boolean = ns == Some(super::XSVG_NS) && name == "boolean";
+        let Some(kind) = Self::convertible(node) else {
+            return Err(super::ToPathError::limit(format!(
+                "<{name}> is not convertible"
+            )));
+        };
         // a list inside a text box is one of the box's paragraphs (§6.16):
         // the box lays it out, so the box is what converts
         if ns == Some(super::XSVG_NS)
@@ -393,10 +437,8 @@ impl<'a> Parsed<'a> {
                 "an <x:list> inside an <x:textbox> converts with its box",
             ));
         }
-        if !text && !shape && !boolean {
-            return Err(super::ToPathError::limit(format!(
-                "<{name}> is not convertible"
-            )));
+        if kind == Convertible::Group {
+            return self.convert_group(node, backend, quality, bake_corners);
         }
         let ctx = Ctx::new(backend, quality, false, "", self);
         ctx.force_outline.set(true);
@@ -404,25 +446,78 @@ impl<'a> Parsed<'a> {
         ctx.live_corners.set(!bake_corners);
         *ctx.to_path_carry.borrow_mut() = Some((offset, super::carried_attrs(node, false)));
         let mut out = String::new();
-        if text {
-            serialize(node, &mut out, false, &ctx);
-        } else if boolean {
-            if !super::emit_boolean_as_path(node, &mut out, &ctx) {
-                return Err(super::ToPathError::limit(
-                    "<x:boolean> has no geometry to combine",
-                ));
+        match kind {
+            Convertible::Text | Convertible::Derived => serialize(node, &mut out, false, &ctx),
+            Convertible::Boolean => {
+                if !super::emit_boolean_as_path(node, &mut out, &ctx) {
+                    return Err(super::ToPathError::limit(
+                        "<x:boolean> has no geometry to combine",
+                    ));
+                }
             }
-        } else if !super::emit_shape_as_path(node, &mut out, &ctx) {
-            return Err(super::ToPathError::limit(format!(
-                "<{name}> has no geometry"
-            )));
+            Convertible::Shape => {
+                if !super::emit_shape_as_path(node, &mut out, &ctx) {
+                    return Err(super::ToPathError::limit(format!(
+                        "<{name}> has no geometry"
+                    )));
+                }
+            }
+            Convertible::Group => unreachable!("handled above"),
         }
         if let Some(miss) = ctx.outline_miss.take() {
             return Err(miss);
         }
-        if text && !out.contains("<path") {
+        if kind == Convertible::Text && !out.contains("<path") {
             return Err(super::ToPathError::limit("nothing to trace"));
         }
+        if kind == Convertible::Derived {
+            // a marker is the compiler saying it could not draw this as asked
+            // (a missing reference, a child it skipped): not a faithful path
+            if let Some(at) = out.find("<!-- xsvg:") {
+                let why = out[at + 10..].split("-->").next().unwrap_or("").trim();
+                return Err(super::ToPathError::limit(why.to_string()));
+            }
+            if !out.contains("<path") {
+                return Err(super::ToPathError::limit(format!(
+                    "<x:{name}> has no geometry"
+                )));
+            }
+        }
+        Ok(out)
+    }
+
+    /// A `<g>` converts as its source with every convertible child replaced by
+    /// its own conversion (nested groups likewise) — the group's tag, its other
+    /// children and the text between them as authored. All-or-nothing: a child
+    /// that cannot be converted fails the group with that child's reason.
+    fn convert_group(
+        &self,
+        node: roxmltree::Node,
+        backend: &Backend,
+        quality: QualityProfile,
+        bake_corners: bool,
+    ) -> Result<String, super::ToPathError> {
+        let src = self.doc.input_text();
+        let range = node.range();
+        let mut out = String::new();
+        let mut last = range.start;
+        let mut converted = false;
+        for child in node.children().filter(|c| c.is_element()) {
+            if Self::convertible(child).is_none() {
+                continue;
+            }
+            let markup = self.convert(child, backend, quality, bake_corners)?;
+            out.push_str(&src[last..child.range().start]);
+            out.push_str(&markup);
+            last = child.range().end;
+            converted = true;
+        }
+        if !converted {
+            return Err(super::ToPathError::limit(
+                "the <g> holds nothing to convert",
+            ));
+        }
+        out.push_str(&src[last..range.end]);
         Ok(out)
     }
 

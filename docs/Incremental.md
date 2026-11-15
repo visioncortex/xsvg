@@ -510,8 +510,17 @@ An editor's *Create outlines* / *Convert to path* replaces a node by the markup 
 would draw for it, so the rule is: **`to_path(offset)` returns the compiler's own output for the
 element at `offset` with outlining forced, in the form that goes back into the source in the
 node's place.** It converts every text element — `<x:textbox>`, `<x:textpath>`, `<x:list>`,
-`<x:table>`, `<text>` (point or `inline-size`), `<textArea>` — the basic shapes and `<path>`, and
-`<x:boolean>`; a list inside a text box converts with its box. One group (one `<path>` for a basic shape), its glyph paths and baked backdrop
+`<x:table>`, `<text>` (point or `inline-size`), `<textArea>` — the basic shapes and `<path>`,
+`<x:boolean>`, the elements that already compile to paths (`<x:offset>`, `<x:warp>`,
+`<x:connector>`), and `<g>`; a list inside a text box converts with its box. An offset is its one
+`<path>`, the reference spent; a warp its group of baked paths, its text children outlined; a
+connector its route — a group when it has arrowheads, the stroke on the route so the filled heads
+do not inherit it. What the compiler could only mark (a missing reference, a child it skipped)
+is refused with the marker's reason. A **`<g>`** converts as its source with every convertible
+child converted in place, nested groups likewise: its own tag, its other children (an `<image>`,
+a `<use>`, a chart) and the text between them stay as authored, and a child that cannot convert
+fails the group with that child's reason. Not convertible: `<x:pie>`, `<x:plot>`, `<x:mesh>`,
+plugin elements, `<image>`, `<use>`. One group (one `<path>` for a basic shape), its glyph paths and baked backdrop
 rects inside (a list's drawn bullets, a table's cell boxes), and **every attribute the conversion did not spend kept as authored**: `id`,
 `class`, `x:label` and the editor's other `x:` attributes, `transform`, `opacity`, a `filter`
 list (lowered again at render), `clip-path`, `mask`, `style`, and every paint with its `var()`

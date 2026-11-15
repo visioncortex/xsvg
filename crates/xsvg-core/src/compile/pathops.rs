@@ -257,7 +257,7 @@ pub(super) fn has_tag(s: &str, tag: &str) -> bool {
 /// `op` degrades behind a marker with the children un-operated.
 pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let (markups, markers, op) = boolean_operands(node, ctx);
-    emit_boolean_result(node, out, ctx, &markups, &markers, op, false);
+    emit_boolean_result(node, out, ctx, &markups, &markers, op);
 }
 
 /// Convert to path for `<x:boolean>` (Incremental.md §11): the flattened result
@@ -267,7 +267,7 @@ pub(super) fn emit_boolean(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 pub(super) fn emit_boolean_as_path(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
     let (markups, markers, op) = boolean_operands(node, ctx);
     let before = out.len();
-    emit_boolean_result(node, out, ctx, &markups, &markers, op, true);
+    emit_boolean_result(node, out, ctx, &markups, &markers, op);
     out[before..].contains("<path")
 }
 
@@ -451,8 +451,8 @@ fn boolean_operands(
 
 /// The `<x:boolean>` element's output for its harvested operands: the combined
 /// `<path>`, an empty `<g>` for an empty result, or the children un-combined
-/// behind a marker for an unknown op. `curved` is convert-to-path, which also
-/// carries the editor's `x:` attributes onto the path.
+/// behind a marker for an unknown op. Under convert-to-path the element it
+/// opens also carries the editor's `x:` attributes (`Ctx::carry_x`).
 fn emit_boolean_result(
     node: roxmltree::Node,
     out: &mut String,
@@ -460,7 +460,6 @@ fn emit_boolean_result(
     markups: &[(String, bool)],
     markers: &str,
     op: Option<BoolOp>,
-    curved: bool,
 ) {
     let Some(op) = op else {
         // unknown op → children un-operated behind a marker (never silent)
@@ -498,16 +497,6 @@ fn emit_boolean_result(
     match result {
         Some(d) if !d.is_empty() => {
             open_effect_element(node, "path", out, &["op"], ctx, || svg_path_bbox(&d));
-            if curved {
-                // the editor's own attributes, which copy_attrs consumes
-                for a in node.attributes().filter(|a| a.namespace() == Some(XSVG_NS)) {
-                    out.push_str(" x:");
-                    out.push_str(a.name());
-                    out.push_str("=\"");
-                    push_escaped(out, a.value(), true);
-                    out.push('"');
-                }
-            }
             out.push_str(&pos_attr(node, ctx));
             out.push_str(&format!(" d=\"{d}\"/>"));
         }

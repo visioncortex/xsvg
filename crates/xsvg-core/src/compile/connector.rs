@@ -713,6 +713,47 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         svg_path_bbox(&d).map(|bb| bb.inflate(size, size))
     });
     let filtered = !filter.is_empty();
+    // `to_path` replaces one node with one: a connector with arrowheads
+    // becomes a group carrying its attributes, the stroke staying on the
+    // route so the heads (filled, siblings) do not inherit it
+    if ctx.is_to_path_target(node.range().start) && !heads.is_empty() {
+        const PARAMS: &[&str] = &[
+            "from",
+            "to",
+            "from-point",
+            "to-point",
+            "route",
+            "arrow",
+            "arrow-size",
+            "bulge",
+            "fill",
+        ];
+        let on_route = |name: &str| {
+            name.starts_with("stroke") || matches!(name, "paint-order" | "vector-effect")
+        };
+        let mut skip: Vec<&str> = PARAMS.to_vec();
+        skip.extend(
+            node.attributes()
+                .filter(|a| a.namespace().is_none() && on_route(a.name()))
+                .map(|a| a.name()),
+        );
+        out.push_str("<g");
+        copy_attrs(node, out, &skip, ctx);
+        out.push_str(&ctx.carry_x(node));
+        out.push_str("><path");
+        for a in node
+            .attributes()
+            .filter(|a| a.namespace().is_none() && on_route(a.name()))
+        {
+            out.push_str(&format!(" {}=\"", a.name()));
+            push_escaped(out, &ctx.resolve_var(a.value()), true);
+            out.push('"');
+        }
+        out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));
+        out.push_str(&heads);
+        out.push_str("</g>");
+        return;
+    }
     if filtered {
         out.push_str("<g");
         out.push_str(&filter);
@@ -736,6 +777,7 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         skip.extend(["filter", "transform"]);
     }
     copy_attrs(node, out, &skip, ctx);
+    out.push_str(&ctx.carry_x(node));
     if !filtered {
         out.push_str(&pos_attr(node, ctx));
     }

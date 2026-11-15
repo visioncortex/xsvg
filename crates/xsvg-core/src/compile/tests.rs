@@ -8579,8 +8579,8 @@ fn to_path_refuses_what_it_cannot_trace_and_names_the_font() {
             "`follow`",
         ),
         (
-            r##"<g><rect width="1" height="1"/></g>"##,
-            "<g>",
+            r##"<image href="a.png" width="1" height="1"/>"##,
+            "<image",
             "not convertible",
         ),
         (r##"<text x="0" y="0">  </text>"##, "<text", "no characters"),
@@ -10982,4 +10982,154 @@ fn a_corner_style_is_set_per_anchor_like_a_radius() {
     );
     // the chamfer at anchor 1 is the straight chord between its trim points
     assert!(d.contains("L196 20 L220 44"), "{d}");
+}
+
+#[test]
+fn to_path_converts_the_elements_that_compile_to_paths() {
+    // an offset, a warp and a connector already lower to paths: `to_path`
+    // returns that lowering in the source's terms — parameters spent, the
+    // editor's attributes and paint tokens kept
+    let src = format!(
+        r##"{XW}<x:theme><x:color name="ink" value="#123456"/></x:theme><rect id="a" x="0" y="0" width="40" height="40"/><rect id="b" x="120" y="0" width="40" height="40"/><x:offset id="o" in="#a" distance="5" join="round" fill="var(ink)" x:label="Grown" opacity="0.5"/><x:warp id="w" field="arc" bend="30" fill="var(ink)" x:label="Bent"><rect x="0" y="60" width="100" height="20"/><x:textbox x="0" y="60" width="100" height="20" font-size="10" outline="true">hi</x:textbox></x:warp><x:connector id="c" from="#a" to="#b" stroke="var(ink)" stroke-width="2" x:label="Link" class="k"/><x:connector id="n" from="#a" to="#b" arrow="none" stroke="#000" x:label="Bare"/><x:offset in="#gone" distance="5"/></svg>"##
+    );
+    let offset = to_path_at(&src, "<x:offset id").unwrap();
+    assert!(
+        offset.starts_with("<path") && offset.ends_with("/>"),
+        "{offset}"
+    );
+    for kept in [
+        r#"id="o""#,
+        r#"fill="var(ink)""#,
+        r#"x:label="Grown""#,
+        r#"opacity="0.5""#,
+    ] {
+        assert!(offset.contains(kept), "{kept}: {offset}");
+    }
+    for spent in ["in=", "distance", "join"] {
+        assert!(!offset.contains(spent), "{spent}: {offset}");
+    }
+
+    let warp = to_path_at(&src, "<x:warp").unwrap();
+    assert!(warp.starts_with("<g") && warp.ends_with("</g>"), "{warp}");
+    assert!(warp.contains(r#"x:label="Bent""#) && warp.contains(r#"fill="var(ink)""#));
+    assert!(!warp.contains("field") && !warp.contains("bend"), "{warp}");
+    assert!(!warp.contains("<text") && !warp.contains("<rect"), "{warp}");
+    assert!(
+        warp.matches("<path").count() >= 2,
+        "shape and glyphs: {warp}"
+    );
+
+    // arrowheads make it a group: the stroke on the route, not on the heads
+    let conn = to_path_at(&src, "<x:connector id=\"c\"").unwrap();
+    assert!(conn.starts_with("<g") && conn.ends_with("</g>"), "{conn}");
+    let open = &conn[..conn.find('>').unwrap()];
+    assert!(
+        open.contains(r#"id="c""#) && open.contains(r#"x:label="Link""#),
+        "{open}"
+    );
+    assert!(
+        open.contains(r#"class="k""#) && !open.contains("stroke"),
+        "{open}"
+    );
+    assert!(
+        conn.contains(r#"<path stroke="var(ink)" stroke-width="2" fill="none""#),
+        "{conn}"
+    );
+    assert!(
+        conn.contains(r#"<path fill="var(ink)""#),
+        "the head: {conn}"
+    );
+    assert!(!conn.contains("from=") && !conn.contains("to="), "{conn}");
+    // without heads it is the one path
+    let bare = to_path_at(&src, "<x:connector id=\"n\"").unwrap();
+    assert!(
+        bare.starts_with("<path") && bare.matches('<').count() == 1,
+        "{bare}"
+    );
+    assert!(
+        bare.contains(r#"x:label="Bare""#) && !bare.contains("arrow"),
+        "{bare}"
+    );
+
+    // what the compiler could only mark is refused with the marker's reason
+    let err = to_path_at(&src, "<x:offset in=\"#gone\"").unwrap_err();
+    assert!(format!("{err:?}").contains("target not found"), "{err:?}");
+    // each result compiles to what the element compiled to
+    for (needle, markup) in [("<x:offset id", &offset), ("<x:warp", &warp)] {
+        let at = src.find(needle).unwrap();
+        let end = at
+            + src[at..]
+                .find(if needle == "<x:warp" {
+                    "</x:warp>"
+                } else {
+                    "/>"
+                })
+                .unwrap()
+            + if needle == "<x:warp" { 9 } else { 2 };
+        let replaced = format!("{}{markup}{}", &src[..at], &src[end..]);
+        let strip = |o: &str| {
+            o.replace(r#" x:label="Grown""#, "")
+                .replace(r#" x:label="Bent""#, "")
+        };
+        assert_eq!(
+            strip(&compile_outlined(&replaced)),
+            compile_outlined(&src),
+            "{needle} round-trips"
+        );
+    }
+}
+
+#[test]
+fn to_path_converts_a_group_child_by_child() {
+    // a <g> is its source with every convertible child converted in place:
+    // its own tag, its other children and the text between them as authored
+    let src = format!(
+        r##"{XW}<g id="grp" transform="translate(5 5)" x:label="Group">
+  <rect x="0" y="0" width="10" height="10" rx="2"/>
+  <image href="a.png" width="4" height="4"/>
+  <g class="inner"><x:textbox x="0" y="0" width="100" height="20" font-size="10">hi</x:textbox></g>
+</g><g id="empty"><image href="a.png" width="4" height="4"/></g><g id="bad"><x:offset in="#gone" distance="2"/></g></svg>"##
+    );
+    let out = to_path_at(&src, "<g id=\"grp\"").unwrap();
+    assert!(
+        out.starts_with(r#"<g id="grp" transform="translate(5 5)" x:label="Group">"#),
+        "{out}"
+    );
+    assert!(
+        out.contains("\n  <image href=\"a.png\" width=\"4\" height=\"4\"/>\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g class="inner"><g fill="#000""##),
+        "{out}"
+    );
+    assert!(
+        !out.contains("<rect") && !out.contains("<x:textbox"),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"x:corners="2""#),
+        "the rect's corner stays live: {out}"
+    );
+    assert!(out.ends_with("</g>\n</g>"), "{out}");
+    // to_spline expands every converted child
+    let spline = to_spline_at(&src, "<g id=\"grp\"").unwrap();
+    assert!(
+        !spline.contains("x:corners") && spline.contains(" C"),
+        "{spline}"
+    );
+    // nothing convertible, and a child that cannot convert
+    let err = to_path_at(&src, "<g id=\"empty\"").unwrap_err();
+    assert!(format!("{err:?}").contains("nothing to convert"), "{err:?}");
+    let err = to_path_at(&src, "<g id=\"bad\"").unwrap_err();
+    assert!(format!("{err:?}").contains("target not found"), "{err:?}");
+    // and the result is source: it parses and compiles in the group's place
+    // (`npm run check:outline` pins that it draws the same pixels)
+    let at = src.find("<g id=\"grp\"").unwrap();
+    let end = src.find("<g id=\"empty\"").unwrap();
+    let replaced = compile_outlined(&format!("{}{out}{}", &src[..at], &src[end..]));
+    assert!(
+        replaced.contains("<image") && !replaced.contains("<text"),
+        "{replaced}"
+    );
 }

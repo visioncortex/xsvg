@@ -54,6 +54,11 @@ const cases = [
   // an x:boolean converts on its curves (Incremental.md §11): the replaced document renders the same
   ["shapes-boolean", (o) => `<x:boolean op="union" fill="#48a"${o}><rect x="20" y="20" width="200" height="120" rx="24"/><circle cx="230" cy="80" r="60"/></x:boolean>`],
   ["shapes-boolean-holes", (o) => `<x:boolean op="subtract" fill="#262"${o}><rect x="20" y="20" width="360" height="160" rx="30"/><circle cx="120" cy="100" r="50"/><circle cx="280" cy="100" r="50"/><polygon points="180,40 220,160 160,160 240,40"/></x:boolean>`],
+  // the elements that already compile to paths convert to those paths
+  ["shapes-offset", (o) => `<rect id="r" x="60" y="50" width="160" height="90" rx="14" fill="#48a"/><x:offset in="#r" distance="14" fill="none" stroke="#e11" stroke-width="3"${o && ""}/><x:offset in="#r" distance="-16" join="miter" fill="#fff" opacity="0.6"/>`],
+  ["shapes-warp", (o) => `<x:warp field="arc" bend="35" fill="#262"${o && ""}><rect x="60" y="60" width="280" height="30"/><x:textbox x="60" y="100" width="280" height="50" font-family="Arimo" font-size="34" align="center" fill="#c00" outline="true">Warped words</x:textbox></x:warp>`],
+  ["shapes-connector", (o) => `<rect id="a" x="20" y="70" width="90" height="60" fill="#ddd"/><rect id="b" x="290" y="20" width="90" height="60" fill="#ddd"/><x:connector from="#a" to="#b" route="elbow" stroke="#06c" stroke-width="3"${o && ""}/><x:connector from="#b" to="#a" route="curved" arrow="none" stroke="#c00" stroke-dasharray="6 4" stroke-width="2"/>`],
+  ["group", (o) => `<g transform="translate(20 10) rotate(4)" opacity="0.85"><rect x="0" y="0" width="340" height="150" rx="16" fill="#eef"/><g fill="#06c"><circle cx="40" cy="40" r="20"/><x:textbox x="80" y="20" width="240" height="60" font-family="Arimo" font-size="24"${o}>Grouped <tspan fill="#c00">text</tspan> box</x:textbox></g><text x="20" y="130" font-family="Arimo" font-size="20"${o.replace('outline=', 'x:outline=')}>and point text</text></g>`],
   ["box-paragraphs", (o) => `<x:textbox x="10" y="10" width="380" height="180" font-family="Arimo" font-size="20"${o}><x:p>First paragraph here.</x:p><x:p font-size="26" fill="#06c">Second, larger.</x:p><x:list list="number"><x:li>one item</x:li><x:li indent="1">nested item</x:li></x:list></x:textbox>`],
   ["textarea", (o) => `<textArea x="10" y="10" width="380" font-family="Arimo" font-size="22" text-align="end"${o.replace('outline=', 'x:outline=')}>Area text, right aligned, wrapping to another line</textArea>`],
   ["point-start", (o) => `<text x="20" y="60" font-family="Arimo" font-size="30" fill="#123"${o.replace('outline=', 'x:outline=')}>Point text</text>`],
@@ -70,10 +75,13 @@ const cases = [
  *  what an editor's Convert to path writes — converted last to first so earlier
  *  offsets hold. */
 function convertAll(source, name) {
-  // a list inside a text box converts with its box, not alone
+  // a list inside a text box converts with its box, not alone; a group and a
+  // warp convert their own children (the outermost one is the one converted)
   const boxes = [...source.matchAll(/<x:textbox[\s>][^]*?<\/x:textbox>/g)].map((m) => [m.index, m.index + m[0].length]);
-  const starts = [...source.matchAll(/<(x:boolean|x:textbox|x:list|x:table|textArea|text|rect|ellipse|circle)[\s>]/g)]
+  const wraps = [...source.matchAll(/<x:warp[\s>][^]*?<\/x:warp>/g), ...source.matchAll(/<g[\s>][^]*<\/g>/g)].map((m) => [m.index, m.index + m[0].length]);
+  const starts = [...source.matchAll(/<(x:boolean|x:textbox|x:list|x:table|x:offset|x:warp|x:connector|g|textArea|text|rect|ellipse|circle)[\s>]/g)]
     .filter((m) => !(m[1] === "x:list" && boxes.some(([a, b]) => m.index > a && m.index < b)))
+    .filter((m) => !wraps.some(([a, b]) => m.index > a && m.index < b))
     .map((m) => m.index)
     .reverse();
   let doc = source;

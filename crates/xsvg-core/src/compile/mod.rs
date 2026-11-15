@@ -442,6 +442,24 @@ impl<'a> Ctx<'a> {
         format!("{}{carried}", node.map(transform_attr).unwrap_or_default())
     }
 
+    /// The editor's own `x:` attributes of the node `to_path` converts (a label,
+    /// a layer, an order), which [`copy_attrs`] consumes: they ride onto the
+    /// element a generated shape opens. Empty for any other node.
+    fn carry_x(&self, node: roxmltree::Node) -> String {
+        if !self.is_to_path_target(node.range().start) {
+            return String::new();
+        }
+        let mut s = String::new();
+        for a in node.attributes().filter(|a| a.namespace() == Some(XSVG_NS)) {
+            s.push_str(" x:");
+            s.push_str(a.name());
+            s.push_str("=\"");
+            push_escaped(&mut s, a.value(), true);
+            s.push('"');
+        }
+        s
+    }
+
     /// A paint value for output: theme tokens resolved, *then* escaped — a token's
     /// value is authored too, so resolving after escaping would let it carry the
     /// quote.
@@ -813,6 +831,7 @@ fn open_effect_element(
     let mut skip = skip.to_vec();
     skip.push("filter");
     copy_attrs(node, out, &skip, ctx);
+    out.push_str(&ctx.carry_x(node));
     out.push_str(&filter);
 }
 
