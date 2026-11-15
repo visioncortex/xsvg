@@ -9,7 +9,19 @@ description = "Boolean operations on SVG paths with the curves kept — the alge
 
 [dependencies]
 kurbo = "0.13.1"
-linesweeper = "0.5.0"
+# Pinned exactly: the passes around the sweep (normalised frame, near-coincidence
+# pre-check, snap, prune) were tuned by fuzzing this release (FUZZ.md), and a
+# library consumer resolves its own lockfile. Raise it with a fuzz run.
+linesweeper = "=0.5.0"
+
+[features]
+# `raw` and `stages`: the engine's intermediate results, for the fuzz harness
+# to tell where a disagreement enters. Not part of the crate's API.
+diagnostics = []
+
+[[example]]
+name = "fuzz"
+required-features = ["diagnostics"]
 
 # the fuzz harness (`examples/fuzz.rs`, FUZZ.md) measures the engine against
 # the compiler's flattened algebra and needs nothing of the core at run time

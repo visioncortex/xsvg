@@ -892,7 +892,7 @@ fn child(start: u64, count: u64) {
 
 // ---- the parent: batches in child processes, timeouts, the issue log ------------
 
-fn run(seed: u64, count: u64, budget: Duration, dir: &str) {
+fn run(seed: u64, count: u64, budget: Duration, dir: &str, fail_on: &[String]) {
     std::fs::create_dir_all(dir).unwrap();
     let mut issues = std::fs::OpenOptions::new()
         .create(true)
@@ -1034,6 +1034,17 @@ fn run(seed: u64, count: u64, budget: Duration, dir: &str) {
     );
     let _ = writeln!(progress, "{line}");
     println!("{line}");
+    // `--fail-on kind,kind`: a gate for CI — the seeds are deterministic, so a
+    // kind that a clean range never produced is a regression when it appears
+    let hit: Vec<String> = fail_on
+        .iter()
+        .filter(|k| counts.get(k.as_str()).is_some_and(|n| *n > 0))
+        .cloned()
+        .collect();
+    if !hit.is_empty() {
+        eprintln!("FAIL: {} in {dir}/issues.jsonl", hit.join(", "));
+        std::process::exit(1);
+    }
 }
 
 fn repro(seed: u64) {
@@ -1244,7 +1255,12 @@ fn main() {
             flag("--count", "1000000").parse().unwrap(),
             Duration::from_secs(flag("--budget-secs", "3600").parse().unwrap()),
             &flag("--out", "target/path-ops-fuzz"),
+            &flag("--fail-on", "")
+                .split(',')
+                .filter(|k| !k.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
         ),
-        _ => eprintln!("usage: fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] | repro --seed S [--budget-secs T] [--mem-mib M]"),
+        _ => eprintln!("usage: fuzz run [--seed S] [--count N] [--budget-secs T] [--out DIR] [--mem-mib M] [--fail-on KIND,…] | repro --seed S [--budget-secs T] [--mem-mib M]"),
     }
 }

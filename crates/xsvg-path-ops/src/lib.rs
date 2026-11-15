@@ -254,6 +254,7 @@ fn agree(a: &str, b: &str) -> bool {
 /// The stages of [`combine`] — the engine's oriented
 /// contours, after the snap-to-input pass, after pruning — as path data, for
 /// the fuzz harness to see which stage a disagreement enters at.
+#[cfg(feature = "diagnostics")]
 #[doc(hidden)]
 pub fn stages(operands: &[Operand], op: Op) -> Result<Option<[String; 3]>, String> {
     let paths: Vec<(BezPath, bool)> = operands
@@ -277,6 +278,7 @@ pub fn stages(operands: &[Operand], op: Op) -> Result<Option<[String; 3]>, Strin
 /// [`combine`] without the snap-to-input and pruning passes:
 /// the engine's own contours, oriented. A diagnostic for the fuzz harness, to
 /// tell an engine disagreement from one the passes introduce.
+#[cfg(feature = "diagnostics")]
 #[doc(hidden)]
 pub fn raw(operands: &[Operand], op: Op) -> Result<Option<String>, String> {
     let paths: Vec<(BezPath, bool)> = operands

@@ -153,12 +153,7 @@ fn with_curved_d(markup: String, b: &xsvg_core::BooleanOperands) -> String {
     if curved.is_empty() || b.flat.as_deref() == Some(curved.as_str()) {
         return markup;
     }
-    match (markup.find(" d=\""), markup.rfind("\"/>")) {
-        (Some(a), Some(z)) if a + 4 <= z => {
-            format!("{} d=\"{curved}{}", &markup[..a], &markup[z..])
-        }
-        _ => markup,
-    }
+    b.with_curves(&markup, &curved).unwrap_or(markup)
 }
 
 fn main() -> ExitCode {
@@ -274,4 +269,67 @@ fn run() -> Result<(), String> {
             .map_err(|e| format!("writing stdout: {e}"))?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn union_of(a: &str, b: &str, flat: &str) -> xsvg_core::BooleanOperands {
+        xsvg_core::BooleanOperands {
+            op: xsvg_core::BoolOp::Union,
+            operands: [a, b]
+                .iter()
+                .map(|d| xsvg_core::BooleanOperand {
+                    paths: vec![d.to_string()],
+                    even_odd: false,
+                })
+                .collect(),
+            flat: Some(flat.to_string()),
+        }
+    }
+
+    #[test]
+    fn the_curved_result_replaces_the_flattened_d_and_nothing_else() {
+        // two overlapping circles as cubics: the engine keeps the curves
+        let circle = |cx: f64| {
+            let k = 27.614;
+            format!(
+                "M{} 50 C{} {} {} {} {} 100 C{} 100 {} {} {} 50 C{} {} {} {} {} 0 C{} 0 {} {} {} 50 Z",
+                cx + 50.0, cx + 50.0, 50.0 + k, cx + k, 100.0, cx,
+                cx - k, cx - 50.0, 50.0 + k, cx - 50.0,
+                cx - 50.0, 50.0 - k, cx - k, 0.0, cx,
+                cx + k, cx + 50.0, 50.0 - k, cx + 50.0
+            )
+        };
+        let (a, b) = (circle(50.0), circle(110.0));
+        let flat = xsvg_core::boolean_svg_paths(
+            &[
+                xsvg_core::BoolOperand {
+                    paths: vec![&a],
+                    even_odd: false,
+                },
+                xsvg_core::BoolOperand {
+                    paths: vec![&b],
+                    even_odd: false,
+                },
+            ],
+            xsvg_core::BoolOp::Union,
+            0.05,
+        )
+        .unwrap();
+        let ops = union_of(&a, &b, &flat);
+        let markup = format!(r#"<path id="u" x:label=' d="x"' fill="red" d="{flat}"/>"#);
+        let out = with_curved_d(markup.clone(), &ops);
+        assert_ne!(out, markup, "the engine's curves were written");
+        assert!(
+            out.starts_with(r#"<path id="u" x:label=' d="x"' fill="red" d="M"#),
+            "{out}"
+        );
+        assert!(out.ends_with("\"/>") && out.contains('C'), "{out}");
+        assert!(!out.contains(&flat), "{out}");
+        // markup that does not hold this boolean's flattened path is left alone
+        let other = r#"<path d="M0 0 L1 1 Z"/>"#.to_string();
+        assert_eq!(with_curved_d(other.clone(), &ops), other);
+    }
 }

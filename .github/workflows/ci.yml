@@ -39,12 +39,24 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy (warnings are errors)
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # the fuzz harness is an example behind a feature, so the workspace pass skips it
+      - name: Clippy, path-ops fuzz harness
+        run: cargo clippy -p xsvg-path-ops --all-targets --features diagnostics -- -D warnings
       - name: Tests
         run: cargo test --workspace
       - name: Core without the compile feature (the primitives alone must build)
         run: cargo check -p xsvg-core
+      # xsvg-path-ops is built for wasm by hosts (a browser runs it in a Worker
+      # of its own), so it must keep compiling there though nothing here links it
       - name: wasm32 targets
-        run: cargo build --target wasm32-unknown-unknown -p xsvg-wasm -p xsvg-ext-clipart
+        run: cargo build --target wasm32-unknown-unknown -p xsvg-wasm -p xsvg-ext-clipart -p xsvg-path-ops
+      # seeds 1–3000 of the path-ops campaign under its 1 GiB memory jail: any
+      # panic, stall, crash or wrong result fails (crates/xsvg-path-ops/FUZZ.md)
+      - name: Path-ops regression range (memory-jailed)
+        run: >
+          cargo run --release -p xsvg-path-ops --features diagnostics --example fuzz --
+          run --seed 1 --count 3000 --budget-secs 240 --mem-mib 1024 --out target/path-ops-check
+          --fail-on panic,timeout,oom,crash,pixel,area,preserve,sliver,dup-points,nan
 
   web:
     name: Web — wasm-pack, packages, checks

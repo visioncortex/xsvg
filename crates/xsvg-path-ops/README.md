@@ -124,8 +124,8 @@ way; it never links the engine.
 ## Running the fuzz
 
 ```
-cargo run --release -p xsvg-path-ops --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
-cargo run --release -p xsvg-path-ops --example fuzz -- repro --seed 9123382 --subset 0,2,3
+cargo run --release -p xsvg-path-ops --features diagnostics --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
+cargo run --release -p xsvg-path-ops --features diagnostics --example fuzz -- repro --seed 9123382 --subset 0,2,3
 ```
 
 The harness runs cases in child processes under a counting allocator that

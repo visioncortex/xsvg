@@ -11133,3 +11133,47 @@ fn to_path_converts_a_group_child_by_child() {
         "{replaced}"
     );
 }
+
+#[test]
+fn path_data_is_found_in_tags_only() {
+    // a converted <g> passes authored children through, so `d="…"` can sit in
+    // a text's words, a comment or another attribute's value: only a tag's
+    // own `d` attribute is path data
+    let markup = r#"<g title=' d="M0 0 A1 1 0 0 1 2 0"'><!-- d="M0 0 A1 1 0 0 1 2 0" --><text>say d="M0 0 A1 1 0 0 1 2 0"</text><path id="p" d="M0 0 A1 1 0 0 1 2 0"/><path
+ d='M5 5 A1 1 0 0 1 7 5' data-d="A"/></g>"#;
+    let ranges = super::spline::d_attr_ranges(markup);
+    let found: Vec<&str> = ranges.iter().map(|&(a, b)| &markup[a..b]).collect();
+    assert_eq!(found, ["M0 0 A1 1 0 0 1 2 0", "M5 5 A1 1 0 0 1 7 5"]);
+    let spline = super::spline::markup_to_spline(markup);
+    assert_eq!(
+        spline.matches(" A1 1").count(),
+        3,
+        "the three non-paths: {spline}"
+    );
+    assert_eq!(
+        spline.matches('C').count(),
+        4,
+        "two half turns, two cubics each: {spline}"
+    );
+    assert!(spline.contains(r#"data-d="A""#), "{spline}");
+
+    // a boolean's curved result goes where its flattened path is, or nowhere
+    let b = BooleanOperands {
+        op: crate::BoolOp::Union,
+        operands: Vec::new(),
+        flat: Some("M0 0 L1 0 L1 1 Z".to_string()),
+    };
+    assert_eq!(
+        b.with_curves(
+            r#"<path x:label="d=" d="M0 0 L1 0 L1 1 Z" fill="red"/>"#,
+            "M9 9 Z"
+        )
+        .as_deref(),
+        Some(r#"<path x:label="d=" d="M9 9 Z" fill="red"/>"#)
+    );
+    assert_eq!(b.with_curves(r#"<path d="M2 2 Z"/>"#, "M9 9 Z"), None);
+    assert_eq!(
+        b.with_curves(r#"<text>M0 0 L1 0 L1 1 Z</text>"#, "M9 9 Z"),
+        None
+    );
+}

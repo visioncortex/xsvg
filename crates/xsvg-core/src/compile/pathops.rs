@@ -321,6 +321,21 @@ pub struct BooleanOperand {
     pub even_odd: bool,
 }
 
+impl BooleanOperands {
+    /// `to_path`'s markup for this boolean with its path data replaced by
+    /// `curved` — the curve-keeping result a host computed from
+    /// [`Self::operands`] (`xsvg-path-ops`). `None` when the markup does not
+    /// hold this boolean's flattened path, so a host never writes a curve into
+    /// markup it does not belong to.
+    pub fn with_curves(&self, markup: &str, curved: &str) -> Option<String> {
+        let flat = self.flat.as_deref().filter(|f| !f.is_empty())?;
+        let (a, b) = super::spline::d_attr_ranges(markup)
+            .into_iter()
+            .find(|&(a, b)| &markup[a..b] == flat)?;
+        Some(format!("{}{curved}{}", &markup[..a], &markup[b..]))
+    }
+}
+
 /// The `<x:boolean>` as the curve-keeping algebra takes it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BooleanOperands {

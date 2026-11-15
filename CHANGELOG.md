@@ -362,6 +362,15 @@ supply but a hand-written impl must add.
 
 ### Internal
 
+- **`xsvg-path-ops` in CI.** The crate is built for `wasm32-unknown-unknown`, its fuzz harness
+  is linted, and seeds 1–3000 of the campaign run under the 1 GiB memory jail as a regression
+  gate (`npm run check:path-ops`, `fuzz run --fail-on`). `linesweeper` is pinned to `=0.5.0`,
+  the release the passes were tuned against, and the harness-only `raw` and `stages` moved
+  behind the `diagnostics` feature, out of the crate's API.
+- **Path data is found by reading tags.** `to_spline` and the CLI's curve swap located `d="…"`
+  by substring; they now read it as an attribute of a start tag, and the swap
+  (`BooleanOperands::with_curves`) replaces only this boolean's own flattened path.
+
 - Text layout consolidated, with no output change: one clip-and-truncate pass
   (`truncate::clip_lines`) for the area, textArea and paragraph flows, one shrink-to-fit
   bisection (`fit::bisect_fit`), and paragraph stacking moved out of the emitter into a

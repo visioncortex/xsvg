@@ -5,8 +5,8 @@ A seeded, panic-tolerant fuzz of the curve-preserving boolean algebra
 for `<x:boolean>` (docs/Incremental.md §11).
 
 ```
-cargo run --release -p xsvg-path-ops --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
-cargo run --release -p xsvg-path-ops --example fuzz -- repro --seed 4389 [--subset 0,2] [--op union] [--operand 0 "M…"] [--raw]
+cargo run --release -p xsvg-path-ops --features diagnostics --example fuzz -- run --seed 1 --count 100000 --budget-secs 3600 --mem-mib 1024 --out target/path-ops-fuzz
+cargo run --release -p xsvg-path-ops --features diagnostics --example fuzz -- repro --seed 4389 [--subset 0,2] [--op union] [--operand 0 "M…"] [--raw]
 ```
 
 Case `seed` is the same case on every run and machine (splitmix64, no
@@ -36,6 +36,11 @@ sampled truth from the operands themselves. The oracles, each a `kind` in
 | `dup-points` | a zero-length segment in the output |
 | `nan` | a non-finite coordinate in the output |
 | `slow` | over 500 ms |
+
+`run --fail-on KIND,…` exits non-zero when any of those kinds was recorded. Seeds are
+deterministic, so a fixed range is a regression gate: `npm run check:path-ops` runs seeds
+1–3000 under the 1 GiB cap and fails on every kind but `engine-error` and `slow` (the range is
+clean as of linesweeper 0.5.0; CI runs it, and a dependency bump must keep it so).
 
 Every issue line carries the operands' path data, so a case can be replayed
 without the generator, and `repro` prints a 64×64 map of where the curved
