@@ -1861,6 +1861,18 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | Geometry bake — kurbo flatten → map with adaptive subdivision, quality-graded tolerance | implemented |
 | Geometry bake — cubic refit | implemented at the API, **disabled in lowering** (kurbo fitter overshoots on glyph-density input) |
 | Geometry bake — compact path serialization (quantized grid, relative + implicit repetition, drift-free) | implemented |
+| Nested viewports — a nested `<svg>` lowers to a clipped, fitted `<g>`; the root stays `<svg>` (§5.3) | implemented |
+| Corners — `x:corners` radii and `x:corner-style` (round · chamfer · inverted), each for every corner or by anchor; exact arcs, segment-length limit, live on every geometry consumer (§5.4) | implemented |
+| Typography matrix — the type block on every text element and block, `x:font` tokens included; layout properties on the element that lays out; declared per element in the `describe` manifest (§6.1) | implemented |
+| `direction` — on `<x:textbox>`, `<x:p>`, `<x:list>`/`<x:li>` and `<x:table>` with its rows, columns and cells (§6.4) | implemented |
+| Empty flows — every empty box, paragraph, item, cell and wrapped `<text>` lays one blank line (§6.4) | implemented |
+| `overflow="visible"` — every line renders past the box, stamped for an editor (§6.6) | implemented |
+| Create outlines — `outline` on `<x:textbox>`, `<x:list>`, `<x:table>`; `x:outline` on `<text>` (point and `inline-size`) and `<textArea>`; all-or-nothing with live fallback (§6.12) | implemented |
+| Case — `text-transform` baked into the characters on every text element, block and run (§6.18) | implemented |
+| Convert to path — `to_path` / `to_spline` for text elements, lists, tables, shapes, booleans, offsets, warps, connectors and groups ([Incremental.md](Incremental.md) §11); a boolean's curves kept by `xsvg-path-ops` | implemented |
 | `xml:space=preserve`, UAX #14, `editable` | not implemented |
+| Right-to-left lists with a mirrored marker gutter (`direction="rtl"` moves the text, not the gutter) | not implemented |
+| `to_path` of `<x:pie>`, `<x:plot>`, `<x:mesh>` and plugin elements | not implemented |
+| Relative units (`em`, `%`) and `var()` in `letter-spacing` / `word-spacing` (§6.8) | not supported by design |
 | `<x:vstroke>` variable-width strokes | deferred (§7.5) |
 | Per-run outlines; hidden selectable-text layer; concrete SVG-subset list; WebGPU renderer | planned |
