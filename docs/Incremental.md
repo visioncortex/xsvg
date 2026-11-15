@@ -176,9 +176,10 @@ in Node.
 
 ## 5. Known limits (v1)
 
-- ~~**Granularity** is the top-level element~~ — **units (§9) go one level down**: a direct child of
-  a top-level passthrough container compiles and patches on its own. Deeper nesting still re-emits
-  its unit; refine further if profiling demands.
+- **Granularity** descends through plain groups and layers to independent leaf units.
+  Containers with filters remain whole because their generated filter regions depend
+  on descendant geometry. Container-tag and structural changes refresh their spans.
+
 - ~~Dependency scan is one hop~~ — **the scan is now a transitive closure.** Since composition by
   reference shipped (Specification.md §4 *Reference resolution*), an `x:` element can itself be an
   `in`-target: editing `#a` re-emits `<x:warp id="b" in="#a">`, whose changed output re-emits
@@ -384,28 +385,34 @@ descent exactly on the padded bottom edge; a referenced rect gives the same
 answer as the box's own geometry; a short line reports its own width and an
 empty box one line; a circle-bound box answers `None`.
 
-## 9. Units: incremental compilation one level down (shipped)
+## 9. Units: incremental compilation through nested containers
+
+The unit walk now descends recursively through passthrough groups/layers. Spans
+remain disjoint: only leaves are recorded. A filtered group is one leaf, including
+its generated region. Dependency candidates use the same recursive boundaries;
+changing a descendant also dirties references to its named ancestors. A container
+own-tag change falls back to its fragment when it has no leaf span.
+
 
 A deck is a list of artboards, each a top-level `<g>` holding its slide: text, warps, tables,
 offsets. §2's unit was the top-level element, so a keystroke in one textbox re-emitted the whole
-artboard — every warp and boolean on the slide baked again to place one word. A **unit** is now a
-direct child of a top-level element whose parent is a **passthrough container**: a plain SVG
-container (`g`, `a`, `defs`, `symbol`, `marker`, `pattern`, `mask`, `clipPath`, `switch`) that is
-not hidden. The serializer copies such a parent through — attributes, an artboard backdrop, then its
+artboard — every warp and boolean on the slide baked again to place one word. A **unit** is an
+independent leaf reached through plain SVG containers (`g`, `a`, `defs`, `symbol`, `marker`,
+`pattern`, `mask`, `switch`) that are neither hidden nor filtered. The serializer copies such a parent through — attributes, an artboard backdrop, then its
 children, restacked by `x:layer`/`x:order` when any child asks — and nothing of the parent's reaches
 a child's output, so a child compiled alone is byte-identical to its span in the parent's fragment.
 Everything a unit *does* depend on is read from the whole parsed document: inherited `font-family`,
 theme tokens, `in="#id"` targets anywhere, imports.
 
-**One predicate.** `is_passthrough_container` is read by three things that must agree: `serialize`
-routes those elements to its copy-through branch by it; `unit_at(offset)` partitions a top-level
-element by it; the caret-stop scope climbs by it. A top-level element that is not such a container
+**Shared boundaries.** `is_passthrough_container` defines the serializer's copy-through branch
+and caret-stop scope. `is_unit_container` adds the filter-region restriction for both the
+recursive unit walk and span recording. A top-level element that is not such a container
 (an `<x:warp>`, a `<text>` with its tspans, a hidden group) is its own unit, as before.
 
 **API** (`CompileSession` and the `*_impl` entries):
 
-- `unit_range(offset) → (start, end)`: the unit containing a byte — the child, or the top-level
-  element when the offset lies in its own tag, when it is not a container, or when it is hidden.
+- `unit_range(offset) → (start, end)`: the unit containing a byte — the leaf, or a containing
+  element when the offset lies in its own tag or reaches a lowering, hidden or filter boundary.
 - `compile_unit(offset) → String`: the unit alone — a **run of output nodes**, since marker
   comments and a `filter` def precede the element inside its own output; a hidden child is `""`.
 - `compile_fragment_spans(offset) → (fragment, [UnitSpan { source, output }])`: the fragment plus

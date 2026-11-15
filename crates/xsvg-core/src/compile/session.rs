@@ -138,24 +138,18 @@ impl<'a> Parsed<'a> {
         Ok(out)
     }
 
-    /// The incremental **unit** at `offset` (docs/Incremental.md §9): the direct
-    /// child of a top-level passthrough container that contains the offset, else
-    /// the top-level element itself — when it is not such a container, when it
-    /// is hidden, or when the offset lies in its own tag rather than in a child.
+    /// The deepest independently compilable unit at `offset`: descend through
+    /// plain containers, stopping at lowering/filter boundaries or an own tag.
     pub(super) fn unit_at<'s>(&'s self, offset: usize) -> Option<roxmltree::Node<'s, 's>> {
-        let top = top_level_at(&self.doc, offset)?;
-        if !super::is_passthrough_container(top) {
-            return Some(top);
+        let mut unit = top_level_at(&self.doc, offset)?;
+        while super::is_unit_container(unit) {
+            let Some(child) = unit.children().filter(|c| c.is_element()).find(|c| {
+                let r = c.range();
+                r.start <= offset && offset < r.end
+            }) else { break };
+            unit = child;
         }
-        Some(
-            top.children()
-                .filter(|c| c.is_element())
-                .find(|c| {
-                    let r = c.range();
-                    r.start <= offset && offset < r.end
-                })
-                .unwrap_or(top),
-        )
+        Some(unit)
     }
 
     pub(super) fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
@@ -203,6 +197,7 @@ impl<'a> Parsed<'a> {
             .ok_or_else(|| format!("no top-level element at byte offset {offset}"))?;
         let ctx = Ctx::new(backend, quality, sourcemap, base, self);
         *ctx.unit_spans.borrow_mut() = Some(Vec::new());
+        ctx.unit_container.set(Some(node.id()));
         let mut out = String::new();
         serialize(node, &mut out, false, &ctx);
         let spans = ctx.unit_spans.take().unwrap_or_default();
@@ -454,24 +449,23 @@ impl<'a> Parsed<'a> {
         self.dependents_among(seeds, |off| top_level_at(doc, off), tops)
     }
 
-    /// [`Parsed::dependents`] one level down (docs/Incremental.md §9): seeds and
+    /// [`Parsed::dependents`] through nested containers (docs/Incremental.md §9): seeds and
     /// results are **units**, so a sibling unit inside the same container that
     /// bakes a seed's geometry is reported — `<x:offset in="#w">` beside the
     /// `<x:warp id="w">` it traces, which the top-level scan never sees.
     pub(super) fn unit_dependents(&self, seeds: &[usize]) -> Vec<(usize, usize)> {
-        let units: Vec<roxmltree::Node> = self
-            .doc
-            .root_element()
-            .children()
-            .filter(|c| c.is_element())
-            .flat_map(|t| {
-                if super::is_passthrough_container(t) {
-                    t.children().filter(|c| c.is_element()).collect::<Vec<_>>()
-                } else {
-                    vec![t]
-                }
-            })
-            .collect();
+        fn collect<'a>(node: roxmltree::Node<'a, 'a>, out: &mut Vec<roxmltree::Node<'a, 'a>>) {
+            let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
+            if super::is_unit_container(node) && !children.is_empty() {
+                for child in children { collect(child, out); }
+            } else {
+                out.push(node);
+            }
+        }
+        let mut units = Vec::new();
+        for top in self.doc.root_element().children().filter(|c| c.is_element()) {
+            collect(top, &mut units);
+        }
         self.dependents_among(seeds, |off| self.unit_at(off), units)
     }
 
@@ -502,7 +496,7 @@ impl<'a> Parsed<'a> {
         // ids whose (compiled) geometry has changed; grows as dependents join
         let mut live: Vec<&str> = targets
             .iter()
-            .flat_map(|t| super::visible(*t).filter_map(|n| n.attribute("id")))
+            .flat_map(|t| super::visible(*t).chain(t.ancestors().skip(1)).filter_map(|n| n.attribute("id")))
             .collect();
         // Editing an <x:import> rebinds a whole namespace — every element in it lowers
         // through a different module, so all of them are dependents (§Extensibility §3).
@@ -541,7 +535,7 @@ impl<'a> Parsed<'a> {
                     included[i] = true;
                     changed = true;
                     // its output changed, so ids it defines go live too
-                    for id in super::visible(*tl).filter_map(|n| n.attribute("id")) {
+                    for id in super::visible(*tl).chain(tl.ancestors().skip(1)).filter_map(|n| n.attribute("id")) {
                         if !live.contains(&id) {
                             live.push(id);
                         }
@@ -756,7 +750,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     }
 
     /// Source byte range of the incremental unit containing `offset`
-    /// (docs/Incremental.md §9): a direct child of a top-level passthrough
+    /// (docs/Incremental.md §9): a leaf below nested passthrough
     /// container, else the top-level element itself.
     pub fn unit_range(&self, offset: usize) -> Option<(usize, usize)> {
         self.parsed().unit_range(offset)

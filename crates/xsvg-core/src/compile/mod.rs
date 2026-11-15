@@ -164,6 +164,7 @@ struct Ctx<'a> {
     /// call, where the passthrough child loop of the top-level element notes
     /// where each child's output landed (docs/Incremental.md §9).
     unit_spans: std::cell::RefCell<Option<Vec<UnitSpan>>>,
+    unit_container: std::cell::Cell<Option<roxmltree::NodeId>>,
 }
 
 /// The borrowed view of a platform a compile runs against — what [`Ctx`] is built
@@ -357,6 +358,7 @@ impl<'a> Ctx<'a> {
             in_plugin: std::cell::Cell::new(false),
             stops: std::cell::RefCell::new(None),
             unit_spans: std::cell::RefCell::new(None),
+            unit_container: std::cell::Cell::new(None),
         }
     }
 
@@ -605,13 +607,12 @@ pub(super) fn is_passthrough_container(node: roxmltree::Node) -> bool {
         && !is_hidden(node)
 }
 
-/// A direct child of a top-level element (`node.parent_element()` is the root),
-/// in the entry document.
-fn is_top_level(node: roxmltree::Node, ctx: &Ctx) -> bool {
-    std::ptr::eq(node.document(), ctx.doc)
-        && node
-            .parent_element()
-            .is_some_and(|p| p.parent_element().is_none())
+/// Containers whose children can be cached independently. A generated filter
+/// region depends on descendant geometry, so that entire container is a unit.
+pub(super) fn is_unit_container(node: roxmltree::Node) -> bool {
+    is_passthrough_container(node)
+        && node.attribute("filter").is_none()
+        && !node.attribute("style").is_some_and(|s| s.contains("filter"))
 }
 
 /// Where one unit of a top-level element landed in that element's fragment
@@ -1175,6 +1176,9 @@ fn emit_passthrough(
         out.push_str(&format!(" transform=\"{t}\""));
     }
     out.push_str(&pos_attr(node, ctx));
+    if ctx.sourcemap.get() && name == "g" && node.attribute((XSVG_NS, "layer")).is_some() {
+        out.push_str(" data-xsvg-layer=\"true\"");
+    }
     let backdrop = if is_root {
         None
     } else {
@@ -1198,15 +1202,21 @@ fn emit_passthrough(
 /// whitespace between them, or restacked by `x:layer`/`x:order` when any child
 /// asks (§5.1). The unit spans are recorded here (docs/Incremental.md §9).
 fn emit_children(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
-    // units are the element children of a top-level CONTAINER (a top-level
-    // <text> copies its tspans through here too, but they are units of nothing)
+    // Record disjoint leaf units through plain groups/layers. Restrict recording
+    // to the active structural walk: scratch compiles of references must never
+    // add spans from another output buffer.
     let record = ctx.unit_spans.borrow().is_some()
-        && is_top_level(node, ctx)
-        && is_passthrough_container(node);
+        && std::ptr::eq(node.document(), ctx.doc)
+        && ctx.unit_container.get() == Some(node.id())
+        && is_unit_container(node);
     let emit_child = |child: roxmltree::Node, out: &mut String| {
         let start = out.len();
+        let descend = record && is_unit_container(child)
+            && child.children().any(|c| c.is_element());
+        let previous = ctx.unit_container.replace(if descend { Some(child.id()) } else { None });
         serialize(child, out, false, ctx);
-        if record && child.is_element() {
+        ctx.unit_container.set(previous);
+        if record && child.is_element() && !descend {
             if let Some(spans) = ctx.unit_spans.borrow_mut().as_mut() {
                 let r = child.range();
                 spans.push(UnitSpan {
