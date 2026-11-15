@@ -296,9 +296,15 @@ through. Defined lowerings:
   font seam can supply them, otherwise positioned SVG text. An `<x:mesh>` uses
   its exact face polygons (both grid and indexed syntax), without rasterization;
   colours and alpha do not change its clipping geometry. Images contribute their
-  rectangular viewports. Referenced groups expand with cycle/depth/fuel guards.
+  rectangular viewports. Referenced groups expand with cycle/depth/fuel guards;
+  the expanded copies carry no `id`. A plain SVG shape's `fill-rule` is dropped
+  (SVG ignores it in a clip; write `clip-rule`), while an xsvg shape's
+  `fill-rule` is its geometry and becomes `clip-rule`. A wrapper's `class` is
+  merged onto the shapes it held. A wrapper's own `clip-path` keeps applying in
+  the wrapper's user space: where a shape's transform differs, the referenced
+  clip is re-emitted as a derived `<clipPath id="{clip id}-clip{n}">` with the
+  change of space, chained through `clip-path` to intersect nested clips.
   This changes compiled output only: the authored objects remain intact for editing.
-
 
 **Passthrough (normative).** Any element in the **SVG namespace** the compiler doesn't recognize —
 filters, gradients, masks, markers, `foreignObject`, future or unknown elements — passes through

@@ -1551,6 +1551,14 @@ fn copy_attrs(node: roxmltree::Node, out: &mut String, skip: &[&str], ctx: &Ctx)
         if skip.contains(&attr.name()) || attr.name() == "text-transform" {
             continue;
         }
+        // SVG ignores `fill-rule` inside a clip; dropping a plain shape's keeps it
+        // from being read as the winding of an xsvg shape (clipping.rs)
+        if attr.name() == "fill-rule"
+            && ctx.clip_geometry.get()
+            && node.tag_name().namespace() == Some(SVG_NS)
+        {
+            continue;
+        }
         // event handlers are outside the static subset (§9, Plan R6)
         if attr.name().starts_with("on") && attr.namespace().is_none() {
             continue;
