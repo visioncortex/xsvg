@@ -133,12 +133,27 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
         ctx,
     );
     out.push_str("<text");
-    copy_attrs(
-        node,
-        out,
-        &["inline-size", "line-height", "text-transform", "filter"],
-        ctx,
-    );
+    // a spacing the cascade refused (§6.8: a unit, a var()) was not measured,
+    // so it is not written either — what renders is what was laid out; the
+    // value the cascade fell through to (a token's) goes out in its place
+    let mut skip = vec!["inline-size", "line-height", "text-transform", "filter"];
+    let mut resolved = String::new();
+    for (prop, value) in [
+        ("letter-spacing", style.letter_spacing),
+        ("word-spacing", style.word_spacing),
+    ] {
+        let refused = node
+            .attribute(prop)
+            .is_some_and(|v| super::query::spacing_value(v).is_none());
+        if refused {
+            skip.push(prop);
+            if value != 0.0 {
+                resolved.push_str(&format!(" {prop}=\"{}\"", fmt(value)));
+            }
+        }
+    }
+    copy_attrs(node, out, &skip, ctx);
+    out.push_str(&resolved);
     if let Some(f) = &filter {
         out.push_str(f);
     } else if let Some(f) = node.attribute("filter") {

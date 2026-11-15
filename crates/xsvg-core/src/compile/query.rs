@@ -81,11 +81,26 @@ fn initial(prop: &str) -> Option<&'static str> {
     })
 }
 
+/// A `letter-spacing` / `word-spacing` value (§6.8): `normal` (zero) or a
+/// number of user units, `px` being the same unit. Anything else — `em`, `%`,
+/// a `var()` — is no value at all, never its leading number.
+pub(super) fn spacing_value(value: &str) -> Option<f64> {
+    let v = value.trim();
+    if v == "normal" {
+        return Some(0.0);
+    }
+    v.strip_suffix("px")
+        .unwrap_or(v)
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite())
+}
+
 /// Whether `value` counts for `prop` at a level, or the cascade falls through.
 fn valid(prop: &str, value: &str) -> bool {
     match prop {
         "font-size" | "line-height" => parse_num(value).is_some_and(|n| n > 0.0),
-        "letter-spacing" | "word-spacing" => value == "normal" || parse_num(value).is_some(),
+        "letter-spacing" | "word-spacing" => spacing_value(value).is_some(),
         "text-transform" => TextTransform::parse(value).is_some(),
         _ => true,
     }
@@ -289,18 +304,11 @@ pub(super) fn overlay(levels: &[Level], fallback: &TextStyle) -> TextStyle {
     if let Some(v) = get("line-height").and_then(parse_num) {
         st.line_height = v;
     }
-    let spacing = |v: &str| {
-        if v == "normal" {
-            0.0
-        } else {
-            parse_num(v).unwrap_or(0.0)
-        }
-    };
-    if let Some(v) = get("letter-spacing") {
-        st.letter_spacing = spacing(v);
+    if let Some(v) = get("letter-spacing").and_then(spacing_value) {
+        st.letter_spacing = v;
     }
-    if let Some(v) = get("word-spacing") {
-        st.word_spacing = spacing(v);
+    if let Some(v) = get("word-spacing").and_then(spacing_value) {
+        st.word_spacing = v;
     }
     if let Some(v) = get("text-transform").and_then(TextTransform::parse) {
         st.text_transform = v;

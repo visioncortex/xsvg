@@ -285,6 +285,13 @@ supply but a hand-written impl must add.
   `x:highlight`, underline and strike-through; they bake as rects beside the paths now, as beside
   live text.
 
+- **A spacing with a relative unit or a `var()` is invalid, not its leading number.**
+  `letter-spacing="50%"` was read as 50 user units and `0.2em` silently dropped; on
+  `<text inline-size>` the refused value was still copied to the output, so the renderer tracked
+  text the compiler had measured untracked. The spacings take a number of user units (`px`
+  allowed) or `normal`; anything else falls through the cascade as §4.1 rules, and is not
+  written. §6.8 says so, and the §6.1 matrix now shows `x:font` on every block.
+
 - **`describe()` declares enum parameters' defaults.** An enum parameter with no explicit default
   (`align`, `valign`, `fit`, `text-overflow`, a list's `list`, …) reads as its type's `#[default]`
   variant, but its spec said it had none; `ParamEnum` now carries a `DEFAULT` and the derive

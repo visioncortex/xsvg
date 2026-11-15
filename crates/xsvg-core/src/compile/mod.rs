@@ -1453,11 +1453,11 @@ pub(super) const FONT_PARAMS: &[xsvg_schema::ParamSpec] = &[
         ..ParamSpec::new("line-height", xsvg_schema::ParamKind::Number)
     },
     ParamSpec {
-        doc: Some("extra tracking in user units; `normal` means none"),
+        doc: Some("extra tracking, a number of user units (no unit, no var()); `normal` means none"),
         ..ParamSpec::new("letter-spacing", xsvg_schema::ParamKind::Text)
     },
     ParamSpec {
-        doc: Some("extra space at each word gap; `normal` means none"),
+        doc: Some("extra space at each word gap, a number of user units (no unit, no var()); `normal` means none"),
         ..ParamSpec::new("word-spacing", xsvg_schema::ParamKind::Text)
     },
     ParamSpec {

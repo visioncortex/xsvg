@@ -145,7 +145,7 @@ resolve live.
   place; a root token's other properties reach plain text through the browser and compiled text
   not at all. Resolution stays within one document: a linked file resolves against its own root.
   A value counts only when it is valid for its property — a positive `font-size` or
-  `line-height`, `normal` or a number for the spacings, a known `text-transform` — else
+  `line-height`, `normal` or a number of user units for the spacings (§6.8), a known `text-transform` — else
   resolution falls through to the next source, as CSS ignores an invalid declaration. An editor
   asks for the resolved values, and where each came from, through the session's queries
   ([Incremental.md](Incremental.md) §10) rather than re-deriving them.
@@ -513,7 +513,7 @@ element (Extensibility.md §11), and a panel should read it rather than keep a t
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | type block (`font-*`, `line-height`, spacing, `text-transform`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `font-*`, `text-transform` |
 | `fill` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `x:font` token | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — |
+| `x:font` token | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | horizontal alignment | `align` | `text-anchor` | `text-align` | `align` (along the path) | — (items start-aligned) | — | `align` | `align` | `align` | `align` | — |
 | vertical alignment | `valign` | — | `display-align` | — | `valign` | — | `valign` | `valign` | `valign` | — | — |
 | `direction` | ✓ | (renderer's) | — | — | — | ✓ (in a box) | — | — | — | ✓ | — |
@@ -710,8 +710,17 @@ names, §3).
 
 | Attr | Values | Initial | Effect |
 |---|---|---|---|
-| `letter-spacing` | `normal` \| `<length>` | `normal` (= 0) | extra advance added per inter-grapheme gap |
-| `word-spacing` | `normal` \| `<length>` | `normal` (= 0) | extra advance added per inter-word space |
+| `letter-spacing` | `normal` \| `<number>` | `normal` (= 0) | extra advance added per inter-grapheme gap |
+| `word-spacing` | `normal` \| `<number>` | `normal` (= 0) | extra advance added per inter-word space |
+
+**Values (normative).** A number of user units, negative allowed (`px` may be written; it is the
+same unit), or `normal`. Nothing else is a value: a relative unit (`0.2em`, `10%`) or a `var()`
+reference is invalid and, as §4.1 rules for every type property, the cascade falls through to
+the next source — it is never read as its leading number, and on text the compiler lays out it
+is not copied to the output either, so what renders is what was measured. Font-relative tracking would contradict the model below; a shared tracking value
+is an `<x:font>` token's `letter-spacing` (§4.1), which is how every type property takes a theme
+value. (`var()` names a *colour* token, and resolves where a paint or a geometry length such as
+`x:corners` is read — never in the type block.)
 
 **Model (normative).** Both are **absolute lengths** in user units — they do *not* scale with
 `font-size` (so under shrink-to-fit the spacing stays put while glyphs shrink), matching CSS/SVG. They

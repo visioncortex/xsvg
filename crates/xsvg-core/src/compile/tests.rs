@@ -10793,3 +10793,51 @@ fn to_path_converts_a_list_and_a_table() {
         "{out}"
     );
 }
+
+#[test]
+fn a_spacing_with_a_unit_or_a_var_is_invalid_and_falls_through() {
+    // §6.8: the spacings are a bare number or `normal`. A unit or a var() is
+    // not read as its leading number — the cascade falls through (§4.1), on
+    // every front-end alike, and the query says so
+    use super::query::Source;
+    let src = format!(
+        r##"{XW}<x:theme><x:color name="g" value="3"/><x:font name="t" letter-spacing="2"/></x:theme><x:textbox x="0" y="0" width="200" height="40" font-size="10" letter-spacing="0.2em">em</x:textbox><x:textbox x="0" y="50" width="200" height="40" font-size="10" letter-spacing="var(g)">var</x:textbox><x:textbox x="0" y="100" width="200" height="40" font-size="10" x:font="t" letter-spacing="1pt">token</x:textbox><x:textbox x="0" y="150" width="200" height="80" font-size="10" word-spacing="4"><x:p word-spacing="50%">para</x:p></x:textbox><text x="0" y="300" inline-size="100" font-size="10" letter-spacing="0.5em">wrapped</text></svg>"##
+    );
+    let out = compile_test(&src);
+    let text_with = |needle: &str| {
+        out.split("<text ")
+            .find(|t| t.contains(needle))
+            .unwrap_or_else(|| panic!("{needle}: {out}"))
+            .to_string()
+    };
+    assert!(!text_with(">em<").contains("letter-spacing"), "{out}");
+    assert!(!text_with(">var<").contains("letter-spacing"), "{out}");
+    // the invalid attribute falls through to the token's value
+    assert!(
+        text_with(">token<").contains(r#"letter-spacing="2""#),
+        "{out}"
+    );
+    // and a paragraph's to its box's
+    assert!(text_with(">para<").contains(r#"word-spacing="4""#), "{out}");
+    // wrapped text was measured untracked, so the refused value is not written
+    assert!(!text_with(">wrapped<").contains("letter-spacing"), "{out}");
+    // px is the user unit; a valid value passes through as authored
+    let px = compile_test(&format!(
+        r##"{XW}<x:textbox x="0" y="0" width="200" height="40" font-size="10" letter-spacing="1.5px">px</x:textbox><text x="0" y="60" inline-size="100" font-size="10" letter-spacing="2">kept</text></svg>"##
+    ));
+    assert!(px.contains(r#"letter-spacing="1.5""#), "{px}");
+    assert!(px.contains(r#"font-size="10" letter-spacing="2">"#), "{px}");
+    let parsed = ParsedDocument::new(&src).unwrap();
+    let r = parsed
+        .resolved(at(&src, r#"<x:textbox x="0" y="100""#), &["letter-spacing"])
+        .unwrap();
+    assert_eq!(r[0].value.as_deref(), Some("2"));
+    assert_eq!(r[0].source, Source::Token("t".into()));
+    let r = parsed
+        .resolved(at(&src, r#"<x:textbox x="0" y="0""#), &["letter-spacing"])
+        .unwrap();
+    assert_eq!(
+        (r[0].value.as_deref(), &r[0].source),
+        (Some("normal"), &Source::Initial)
+    );
+}
