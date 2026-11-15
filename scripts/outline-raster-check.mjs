@@ -58,6 +58,11 @@ const cases = [
   ["textarea", (o) => `<textArea x="10" y="10" width="380" font-family="Arimo" font-size="22" text-align="end"${o.replace('outline=', 'x:outline=')}>Area text, right aligned, wrapping to another line</textArea>`],
   ["point-start", (o) => `<text x="20" y="60" font-family="Arimo" font-size="30" fill="#123"${o.replace('outline=', 'x:outline=')}>Point text</text>`],
   ["point-anchors", (o) => `<text x="200" y="50" font-family="Arimo" font-size="26" text-anchor="middle"${o.replace('outline=', 'x:outline=')}>centred <tspan font-weight="700">bold</tspan></text><text x="380" y="120" font-family="Arimo" font-size="26" text-anchor="end"${o.replace('outline=', 'x:outline=')}>ends here</text>`],
+  ["wrapped", (o) => `<text x="20" y="40" inline-size="340" font-family="Arimo" font-size="24" fill="#123"${o.replace('outline=', 'x:outline=')}>Wrapped point text flowing onto a second and a third line here</text>`],
+  ["wrapped-runs", (o) => `<text x="200" y="40" inline-size="340" text-anchor="middle" font-family="Arimo" font-size="22"${o.replace('outline=', 'x:outline=')}>centred <tspan fill="#c00">red words</tspan> and <tspan font-weight="700">bold ones</tspan> wrapping to another line</text>`],
+  ["list-bullets", (o) => `<x:list x="20" y="20" width="360" font-family="Arimo" font-size="20"${o}><x:li>First item wrapping onto a second line of the list</x:li><x:li indent="1" fill="#06c">Nested, blue</x:li><x:li letter-spacing="2">Tracked item</x:li></x:list>`],
+  ["list-numbers", (o) => `<x:list x="20" y="20" width="360" list="number" marker-fill="#c00" font-family="Arimo" font-size="20"${o}><x:li>one</x:li><x:li>two <tspan font-weight="700">bold</tspan></x:li><x:li indent="1" font-size="16">sub</x:li><x:li>three</x:li></x:list>`],
+  ["table", (o) => `<x:table x="20" y="20" width="360" font-family="Arimo" font-size="18" stripe="#eef"${o}><x:col align="start"/><x:col align="center"/><x:col align="end"/><x:tr><x:th>Name</x:th><x:th>Kind</x:th><x:th>Count</x:th></x:tr><x:tr><x:td>alpha beta gamma wrapping</x:td><x:td fill="#c00">red</x:td><x:td>12</x:td></x:tr><x:tr><x:td>delta</x:td><x:td></x:td><x:td font-weight="700">345</x:td></x:tr></x:table>`],
   ["point-tspans", (o) => `<text x="20" y="60" font-family="Arimo" font-size="26"${o.replace('outline=', 'x:outline=')}>ab<tspan fill="#c00" dy="8">cd</tspan><tspan x="20" y="120" font-size="36">new line</tspan></text>`],
 ];
 
@@ -65,7 +70,12 @@ const cases = [
  *  what an editor's Convert to path writes — converted last to first so earlier
  *  offsets hold. */
 function convertAll(source, name) {
-  const starts = [...source.matchAll(/<(x:boolean|x:textbox|textArea|text|rect|ellipse|circle)[\s>]/g)].map((m) => m.index).reverse();
+  // a list inside a text box converts with its box, not alone
+  const boxes = [...source.matchAll(/<x:textbox[\s>][^]*?<\/x:textbox>/g)].map((m) => [m.index, m.index + m[0].length]);
+  const starts = [...source.matchAll(/<(x:boolean|x:textbox|x:list|x:table|textArea|text|rect|ellipse|circle)[\s>]/g)]
+    .filter((m) => !(m[1] === "x:list" && boxes.some(([a, b]) => m.index > a && m.index < b)))
+    .map((m) => m.index)
+    .reverse();
   let doc = source;
   for (const [i, at] of starts.entries()) {
     const file = join(tmp, `${name}-src-${i}.xsvg`);

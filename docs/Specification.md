@@ -523,7 +523,7 @@ element (Extensibility.md §11), and a panel should read it rather than keep a t
 | `padding` | ✓ | — | — | — | — | — | `cell-padding` | — | — | — | — |
 | `fit` / `fit-min` | ✓ | — | — | — | — | — | — | — | — | — | — |
 | overflow | `text-overflow`, `overflow` | — | `overflow` | — | — | — | — | — | — | — | — |
-| outlining | `outline` | `x:outline` | `x:outline` | (always baked) | — | — | — | — | — | — | — |
+| outlining | `outline` | `x:outline` | `x:outline` | (always baked) | `outline` | — | `outline` | — | — | — | — |
 | `x:border-*` | ✓ | ✓ | ✓ | ✓ | — | — | — | — | — | — | ✓ |
 | `text-decoration`, `x:highlight`, `baseline-shift` | — | — | — | — | — | — | — | — | — | — | ✓ |
 | glyph stretch | `glyph-x-scale` | `x:glyph-x-scale` | `x:glyph-x-scale` | — | — | — | — | — | — | — | — |
@@ -846,8 +846,8 @@ border is the run-level stroke.
 ### 6.12 Create outlines — `outline="true"` [implemented]
 
 Turn a text element's glyphs into vector `<path>` geometry at compile time ("Create Outlines" in
-Illustrator terms). Set `outline="true"` on `<x:textbox>`, or the prefixed `x:outline="true"` on the
-reused `<textArea>` (§2). Layout is unchanged — outlining is a purely **emit-time** transform applied
+Illustrator terms). Set `outline="true"` on `<x:textbox>`, `<x:list>` or `<x:table>`, or the
+prefixed `x:outline="true"` on the plain SVG `<text>` and the reused `<textArea>` (§2). Layout is unchanged — outlining is a purely **emit-time** transform applied
 after wrapping, fitting, and alignment have run.
 
 **Model (normative).** Each laid-out line is traced from its text at the element's **base style** and
@@ -893,8 +893,10 @@ placement.
 
 **Runs.** A run that paints (its fill, its border) or sets its own type (a weight, a slant, a face, a size) is traced as its own piece in its own style, the pen advanced by that style's width. A line with `letter-spacing`, `word-spacing` or justify slack is traced glyph by glyph at the pens the live text is laid by (the kerned advance, the tracking after every glyph, the word gap and the slack after each space); a `glyph-x-scale` stretches the traced line from its left edge as the live `textLength` does. **Where it applies (2026-10).** Every text front-end the compiler lays out: a textbox in single
 flow, in paragraph mode (each paragraph and list item traced in its own style, generated markers
-with them) and bound to a shape, `<textArea>` (`x:outline="true"`), `<text inline-size>`, and the
-deforming text-on-path effects; `follow` and `stair` are live by design and have no outline form.
+with them) and bound to a shape, `<textArea>` and `<text inline-size>` (`x:outline="true"`), a
+standalone `<x:list>` (every item's lines and every generated number or text marker; a drawn
+bullet stays the shape it is), an `<x:table>` (every cell's lines; the cell boxes and rules stay
+rects), and the deforming text-on-path effects; `follow` and `stair` are live by design and have no outline form.
 **Point text** — a plain `<text>` — is traced on `x:outline="true"` or when forced: each pen
 position a path in the font the chunk composes from the `<text>` down, in its own paint (a
 `<tspan>`'s `fill`, its border), the `text-anchor` applied over each SVG text chunk (the run from

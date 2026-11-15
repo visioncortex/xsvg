@@ -10021,6 +10021,7 @@ fn the_manifest_declares_the_typography_matrix() {
                 "item-spacing",
                 "valign",
                 "fill",
+                "outline",
             ],
         ),
         (
@@ -10037,6 +10038,7 @@ fn the_manifest_declares_the_typography_matrix() {
                 "stripe",
                 "stroke",
                 "stroke-width",
+                "outline",
             ],
         ),
         (
@@ -10659,6 +10661,135 @@ fn linked_drawing_retains_root_paint_and_plain_text_font() {
     let out = compile_linked(&main, &[("drawing", file)]);
     assert!(
         out.contains("fill=\"#123456\" font-family=\"RootFont\""),
+        "{out}"
+    );
+}
+
+#[test]
+fn wrapped_text_outlines_like_point_text() {
+    // §6.12: `x:outline` on <text inline-size> traces the wrapped lines — it
+    // used to stay live, where point text and <textArea> outlined
+    let src = format!(
+        r##"{XW}<text x="10" y="20" inline-size="60" font-size="10" fill="#123" x:outline="true">one two three four five six</text></svg>"##
+    );
+    let out = compile_outlined(&src);
+    assert!(!out.contains("<text"), "{out}");
+    assert!(out.contains(r##"<g fill="#123""##), "{out}");
+    assert!(out.matches("<path").count() >= 2, "one per line: {out}");
+    // a run's paint and highlight survive
+    let runs = format!(
+        r##"{XW}<text x="10" y="20" inline-size="200" font-size="10" x:outline="true">plain <tspan fill="#c00" x:highlight="#ff0">red</tspan></text></svg>"##
+    );
+    let out = compile_outlined(&runs);
+    assert!(
+        !out.contains("<text") && out.contains(r##"fill="#c00""##),
+        "{out}"
+    );
+    assert!(out.contains(r##"<rect"##) && out.contains("#ff0"), "{out}");
+    // no font to trace: live, as every outline request degrades
+    let live = compile_test(&src);
+    assert!(live.contains("<text") && !live.contains("<path"), "{live}");
+    // and without the request nothing changes
+    let plain = compile_outlined(&src.replace(r#" x:outline="true""#, ""));
+    assert!(
+        plain.contains("<text") && !plain.contains("<path"),
+        "{plain}"
+    );
+}
+
+#[test]
+fn a_list_outlines_its_items_and_generated_markers() {
+    // §6.12 on <x:list>: every item's lines and every number traced; drawn
+    // bullets stay the shapes they are
+    let src = format!(
+        r##"{XW}<x:list x="0" y="0" width="200" font-size="10" list="number" outline="true"><x:li>one</x:li><x:li fill="#c00">two</x:li></x:list><x:list x="0" y="100" width="200" font-size="10" outline="true"><x:li>dot</x:li></x:list></svg>"##
+    );
+    let out = compile_outlined(&src);
+    assert!(!out.contains("<text"), "{out}");
+    // two numbers and two items in the first list, one item in the second
+    assert_eq!(out.matches("<path").count(), 5, "{out}");
+    assert!(out.contains(r##"fill="#c00""##), "{out}");
+    assert!(out.contains("<circle"), "the bullet is still drawn: {out}");
+    // all-or-nothing: with no font the whole list is live
+    let live = compile_test(&src);
+    assert!(live.contains("<text") && !live.contains("<path"), "{live}");
+    assert_eq!(
+        live,
+        compile_test(&src.replace(r#" outline="true""#, "")),
+        "an untraceable outline request changes nothing"
+    );
+}
+
+#[test]
+fn a_table_outlines_its_cells_and_keeps_its_grid() {
+    let src = format!(
+        r##"{XW}<x:table x="0" y="0" width="200" font-size="10" outline="true"><x:tr><x:th>H</x:th><x:th>I</x:th></x:tr><x:tr><x:td>a</x:td><x:td></x:td></x:tr></x:table></svg>"##
+    );
+    let out = compile_outlined(&src);
+    assert!(!out.contains("<text"), "{out}");
+    assert_eq!(
+        out.matches("<path").count(),
+        3,
+        "the three cells with text: {out}"
+    );
+    assert_eq!(
+        out.matches("<rect").count(),
+        4,
+        "every cell keeps its box: {out}"
+    );
+    let live = compile_test(&src);
+    assert_eq!(live, compile_test(&src.replace(r#" outline="true""#, "")));
+}
+
+#[test]
+fn to_path_converts_a_list_and_a_table() {
+    // the text-bearing blocks convert like a text box: glyphs as paths, the
+    // node's own attributes kept, the layout parameters spent
+    let src = format!(
+        r##"{XW}<x:list id="l" x="0" y="0" width="200" font-size="10" list="number" item-spacing="4" transform="rotate(3)" opacity="0.5"><x:li>one</x:li></x:list><x:table id="t" x="0" y="50" width="200" cols="1 1" cell-padding="4" stroke="#999" stroke-width="2" x:label="T"><x:tr><x:td>a</x:td><x:td>b</x:td></x:tr></x:table><x:textbox x="0" y="0" width="100" height="100"><x:list><x:li>in</x:li></x:list></x:textbox></svg>"##
+    );
+    let list = to_path_at(&src, "<x:list id").unwrap();
+    assert!(list.starts_with("<g") && !list.contains("<text"), "{list}");
+    for kept in [r#"id="l""#, r#"transform="rotate(3)""#, r#"opacity="0.5""#] {
+        assert!(list.contains(kept), "{kept}: {list}");
+    }
+    assert!(
+        !list.contains("item-spacing") && !list.contains("list="),
+        "{list}"
+    );
+    assert_eq!(list.matches("<path").count(), 2, "marker and item: {list}");
+
+    let table = to_path_at(&src, "<x:table").unwrap();
+    assert!(
+        table.starts_with("<g") && !table.contains("<text"),
+        "{table}"
+    );
+    assert!(
+        table.contains(r#"id="t""#) && table.contains(r#"x:label="T""#),
+        "{table}"
+    );
+    // the grid's stroke is on the cell boxes, not carried onto the group
+    let open = &table[..table.find('>').unwrap()];
+    assert!(!open.contains("stroke") && !open.contains("cols"), "{open}");
+    assert!(table.contains(r##"stroke="#999""##), "{table}");
+
+    // a boxed list is its box's to convert
+    let nested = to_path_at(&src, "<x:list><x:li>in").unwrap_err();
+    assert!(
+        format!("{nested:?}").contains("converts with its box"),
+        "{nested:?}"
+    );
+    // wrapped text converts too
+    let wrapped = format!(
+        r##"{XW}<text id="w" x="10" y="20" inline-size="60" font-size="10" class="k">one two three four</text></svg>"##
+    );
+    let out = to_path_at(&wrapped, "<text").unwrap();
+    assert!(
+        out.contains(r#"id="w""#) && out.contains(r#"class="k""#),
+        "{out}"
+    );
+    assert!(
+        !out.contains("<text") && !out.contains("inline-size"),
         "{out}"
     );
 }

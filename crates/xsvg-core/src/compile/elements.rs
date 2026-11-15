@@ -866,6 +866,11 @@ pub(super) struct List {
     pub valign: VAlignParam,
     #[param(color, default = "#111827")]
     pub fill: String,
+    #[param(
+        default = false,
+        doc = "bake the glyphs, generated markers included, to paths instead of live text"
+    )]
+    pub outline: bool,
 }
 
 #[derive(Params)]
@@ -907,6 +912,11 @@ pub(super) struct Table {
     pub stroke: String,
     #[param(default = 1.0, min = 0.0, max = 40.0)]
     pub stroke_width: f64,
+    #[param(
+        default = false,
+        doc = "bake the cells' glyphs to paths instead of live text"
+    )]
+    pub outline: bool,
 }
 
 /// Every built-in element, for the compiler's own `describe` surface — the same

@@ -509,14 +509,17 @@ byte starts, as for units (§9). The kit wraps the queries as its `queries` (xsv
 An editor's *Create outlines* / *Convert to path* replaces a node by the markup the compiler
 would draw for it, so the rule is: **`to_path(offset)` returns the compiler's own output for the
 element at `offset` with outlining forced, in the form that goes back into the source in the
-node's place.** One group (one `<path>` for a basic shape), its glyph paths and baked backdrop
-rects inside, and **every attribute the conversion did not spend kept as authored**: `id`,
+node's place.** It converts every text element — `<x:textbox>`, `<x:textpath>`, `<x:list>`,
+`<x:table>`, `<text>` (point or `inline-size`), `<textArea>` — the basic shapes and `<path>`, and
+`<x:boolean>`; a list inside a text box converts with its box. One group (one `<path>` for a basic shape), its glyph paths and baked backdrop
+rects inside (a list's drawn bullets, a table's cell boxes), and **every attribute the conversion did not spend kept as authored**: `id`,
 `class`, `x:label` and the editor's other `x:` attributes, `transform`, `opacity`, a `filter`
 list (lowered again at render), `clip-path`, `mask`, `style`, and every paint with its `var()`
 token, so the theme, the filter and the editor's tools see the converted element as they saw the
 text. Spent: the text and what laid it out — `x y width height`, `font-*` and `x:font`, the
-alignment, fit, overflow and spacing attributes, `in`, `outline`, and for point text the anchor
-and tspan geometry; `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
+alignment, fit, overflow and spacing attributes, `in`, `outline`, for point text the anchor
+and tspan geometry, and for a list or a table every parameter it declares (a table's `stroke` is
+its grid's, not the glyphs'); `x:border-*` lowers to `stroke`/`stroke-width`/`paint-order`. No source map,
 no key: the host re-keys the markup it inserts.
 
 A basic shape converts to the `<path>` of its geometry, exact. **Corners stay live**, as

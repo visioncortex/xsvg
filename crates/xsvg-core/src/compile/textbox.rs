@@ -60,6 +60,64 @@ pub(super) fn emit_inline_size_text(node: roxmltree::Node, out: &mut String, ctx
     let filter = lower_filter_attr(node, out, ctx, || {
         lines_bbox(&lines, anchor, false, &style, style.size, &emits, m)
     });
+    // Create-outlines (§6.12): the wrapped lines traced where they were laid,
+    // asked by `x:outline` or forced (a reference, `to_path`); live below when
+    // the outliner cannot trace every line
+    let outline = ctx.force_outline.get() || node.attribute((XSVG_NS, "outline")) == Some("true");
+    if outline {
+        let at = match anchor {
+            "middle" => Anchor::Middle,
+            "end" => Anchor::End,
+            _ => Anchor::Start,
+        };
+        let traced = trace_lines(
+            &lines,
+            at,
+            false,
+            &style,
+            style.size,
+            gx,
+            &emits,
+            m,
+            ctx.outliner,
+            ctx,
+        );
+        if let Some((paths, _)) = traced.filter(|(p, _)| !p.is_empty()) {
+            let start = node.range().start;
+            let pos = format!(
+                "{}{}{}",
+                pos_attr(node, ctx),
+                super::transform_attr(node),
+                ctx.carry_at(start, false)
+            );
+            // `to_path` replaces one node with one: backdrops and paths share
+            // a group carrying the node's attributes
+            let wrap = ctx.is_to_path_target(start) && has_backdrops(&lines, &emits);
+            if wrap {
+                out.push_str(&format!("<g{pos}>"));
+            }
+            open_filter_group(out, filter.as_deref());
+            emit_run_backdrops(
+                out,
+                &lines,
+                anchor,
+                false,
+                &style,
+                style.size,
+                node.attribute("fill").unwrap_or("#000"),
+                &emits,
+                Backdrops::All,
+                m,
+                ctx,
+            );
+            super::trace::push_text_paths(node, &paths, if wrap { "" } else { &pos }, out, ctx);
+            close_filter_group(out, filter.as_deref());
+            if wrap {
+                out.push_str("</g>");
+            }
+            return;
+        }
+    }
     // a run's highlight and decoration bake behind the text, as in a box
     emit_run_backdrops(
         out,

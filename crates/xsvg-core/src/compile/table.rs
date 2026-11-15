@@ -62,6 +62,22 @@ fn cell_prop<'a, 'i>(
 }
 
 pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // Create-outlines (§6.12) is all-or-nothing per element: a table whose
+    // every cell traces emits paths, any other emits live text
+    let tp: super::elements::Table = params_of(node);
+    if tp.outline || ctx.force_outline.get() {
+        let mut traced = String::new();
+        if emit_table_as(node, &mut traced, ctx, true) {
+            out.push_str(&traced);
+            return;
+        }
+    }
+    emit_table_as(node, out, ctx, false);
+}
+
+/// The table, live or (`outline`) traced; `false` when a cell's line could not
+/// be traced — the miss recorded for `to_path`, `out` to be discarded.
+fn emit_table_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bool) -> bool {
     let m = ctx.m;
     let style = style_from(node, ctx);
     let tp: super::elements::Table = params_of(node);
@@ -112,7 +128,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         .unwrap_or(0);
     if ncols == 0 {
         out.push_str("<!-- xsvg: <x:table> has no rows/cells -->");
-        return;
+        return !outline;
     }
     let colw = resolve_cols(tp.cols.as_deref(), ncols, width);
     let mut colx = vec![x; ncols + 1];
@@ -195,6 +211,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // scaling the table is this transform (found live by the editor: a
     // transform on a table was consumed and never re-emitted — immovable)
     out.push_str(&super::transform_attr(node));
+    out.push_str(&ctx.carry_at(node.range().start, false)); // `to_path`: what it keeps
     out.push('>');
     let mut body_row = 0usize;
     for (ri, row) in rows.iter().enumerate() {
@@ -279,6 +296,25 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                     m,
                     ctx,
                 );
+                if outline {
+                    let Some((paths, _)) = trace_lines(
+                        &layout.lines,
+                        layout.anchor,
+                        false,
+                        &st,
+                        layout.font_size,
+                        1.0,
+                        &emits,
+                        m,
+                        ctx.outliner,
+                        ctx,
+                    ) else {
+                        return false;
+                    };
+                    push_painted_paths(out, &paths, &fill, "", "", ctx);
+                    out.push_str("</g>");
+                    continue;
+                }
                 out.push_str(&format!("<text text-anchor=\"{}\"", layout.anchor.svg()));
                 push_font_attrs(out, &st, layout.font_size, &fill, ctx);
                 // the cell's spacing (cell › row › column › table), as a box's
@@ -298,4 +334,5 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         }
     }
     out.push_str("</g>");
+    true
 }

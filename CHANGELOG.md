@@ -158,6 +158,12 @@ supply but a hand-written impl must add.
   out of the core so a browser host can run it in its own Worker. Its seeded, memory-jailed fuzz
   harness (`examples/fuzz.rs`) ran three million cases; the crate's README has the account.
 
+- **Lists, tables and wrapped text outline and convert.** `outline="true"` on `<x:list>` and
+  `<x:table>` traces every item's and cell's lines (a list's generated numbers and text markers
+  with them), all-or-nothing per element like a text box; `x:outline="true"` on
+  `<text inline-size>` traces its wrapped lines, as the specification already said it did.
+  `to_path` converts all three, pinned pixel-for-pixel by `npm run check:outline`.
+
 - **Document queries.** `CompileSession` answers what the compiler does with a node, from the
   parse it compiles from: `resolved(offset, properties)` (each property's effective value and
   where it came from — own, token, inherited from the box, list, row, column, table or an

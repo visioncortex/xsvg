@@ -372,7 +372,8 @@ impl<'a> Parsed<'a> {
             .element_at(offset)
             .ok_or_else(|| super::ToPathError::limit("no element starts at this offset"))?;
         let (ns, name) = (node.tag_name().namespace(), node.tag_name().name());
-        let text = (ns == Some(super::XSVG_NS) && matches!(name, "textbox" | "textpath"))
+        let text = (ns == Some(super::XSVG_NS)
+            && matches!(name, "textbox" | "textpath" | "list" | "table"))
             || (ns == Some(super::SVG_NS) && matches!(name, "text" | "textArea"));
         let shape = ns == Some(super::SVG_NS)
             && matches!(
@@ -380,6 +381,18 @@ impl<'a> Parsed<'a> {
                 "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "path"
             );
         let boolean = ns == Some(super::XSVG_NS) && name == "boolean";
+        // a list inside a text box is one of the box's paragraphs (§6.16):
+        // the box lays it out, so the box is what converts
+        if ns == Some(super::XSVG_NS)
+            && name == "list"
+            && node.parent().is_some_and(|p| {
+                p.tag_name().namespace() == Some(super::XSVG_NS) && p.tag_name().name() == "textbox"
+            })
+        {
+            return Err(super::ToPathError::limit(
+                "an <x:list> inside an <x:textbox> converts with its box",
+            ));
+        }
         if !text && !shape && !boolean {
             return Err(super::ToPathError::limit(format!(
                 "<{name}> is not convertible"

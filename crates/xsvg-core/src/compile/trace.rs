@@ -118,12 +118,32 @@ const SPENT_X: &[&str] = &[
 /// into the source, where it is bound. `transform` rides along only when asked:
 /// the box emitters write it themselves.
 pub(super) fn carried_attrs(node: roxmltree::Node, with_transform: bool) -> String {
+    // a list or a table spends every parameter it declares: its `stroke` is
+    // the grid's, its `cols` the layout's — none of them the glyph paths'
+    let declared: Vec<&str> = if node.tag_name().namespace() == Some(XSVG_NS)
+        && matches!(node.tag_name().name(), "list" | "table")
+    {
+        super::elements::built_in_elements()
+            .iter()
+            .find(|e| e.ns.is_none() && e.name == node.tag_name().name())
+            .map(|e| {
+                e.all_params()
+                    .filter(|p| p.ns.is_none())
+                    .map(|p| p.name)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let mut s = String::new();
     for a in node.attributes() {
         let (prefix, spent) = match a.namespace() {
             None => (
                 "",
-                SPENT.contains(&a.name()) || (a.name() == "transform" && !with_transform),
+                SPENT.contains(&a.name())
+                    || declared.contains(&a.name())
+                    || (a.name() == "transform" && !with_transform),
             ),
             Some(XSVG_NS) => ("x:", SPENT_X.contains(&a.name())),
             _ => continue,
@@ -364,13 +384,27 @@ pub(super) fn emit_text_outlined(node: roxmltree::Node, out: &mut String, ctx: &
         transform_attr(node),
         ctx.carry_at(start, false)
     );
+    push_text_paths(node, &pieces, &pos, out, ctx);
+    true
+}
+
+/// The traced pieces of a plain `<text>` as the group that replaces it: in the
+/// text's own `fill` and border, or — with no fill of its own — inheriting, as
+/// the live text did. Point text and wrapped (`inline-size`) text both end here.
+pub(super) fn push_text_paths(
+    node: roxmltree::Node,
+    pieces: &[PaintedPath],
+    pos: &str,
+    out: &mut String,
+    ctx: &Ctx,
+) {
     let stroke = text_border_attrs(node, ctx);
     match node.attribute("fill") {
-        Some(fill) => push_painted_paths(out, &pieces, fill, &stroke, &pos, ctx),
+        Some(fill) => push_painted_paths(out, pieces, fill, &stroke, pos, ctx),
         None => {
             // no fill of its own: the paths inherit, as the text did
             out.push_str(&format!("<g{stroke}{pos}>"));
-            for p in &pieces {
+            for p in pieces {
                 out.push_str("<path d=\"");
                 push_escaped(out, &p.d, true);
                 out.push('"');
@@ -385,7 +419,6 @@ pub(super) fn emit_text_outlined(node: roxmltree::Node, out: &mut String, ctx: &
             out.push_str("</g>");
         }
     }
-    true
 }
 
 /// The font a chunk of a live `<text>` renders in: the element's, with what the

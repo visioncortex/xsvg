@@ -17,6 +17,22 @@ use super::*;
 /// content is exactly its own source text. Generated markers ("1.", "▸") live
 /// in a separate untagged `<text>` so they never pollute an item's char stream.
 pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    // Create-outlines (§6.12) is all-or-nothing per element: a list whose
+    // every item and marker traces emits paths, any other emits live text
+    let lp: super::elements::List = params_of(node);
+    if lp.outline || ctx.force_outline.get() {
+        let mut traced = String::new();
+        if emit_list_as(node, &mut traced, ctx, true) {
+            out.push_str(&traced);
+            return;
+        }
+    }
+    emit_list_as(node, out, ctx, false);
+}
+
+/// The list, live or (`outline`) traced; `false` when a line or a marker could
+/// not be traced — the miss recorded for `to_path`, `out` to be discarded.
+fn emit_list_as(node: roxmltree::Node, out: &mut String, ctx: &Ctx, outline: bool) -> bool {
     let m = ctx.m;
     let style = style_from(node, ctx);
     let lp: super::elements::List = params_of(node);
@@ -200,6 +216,24 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 let cy = item_baseline - item_fm.x_height * 0.5;
                 shapes.push_str(&shape_marker(tok, it.col, cy, item_r, &marker_fill));
             }
+            Marker::Text(mk) if outline => {
+                // traced at the same column, right-aligned by its own advance
+                let st = TextStyle {
+                    size: it.size,
+                    ..style.clone()
+                };
+                let traced = ctx.outliner.advances(mk, &st, it.size).and_then(|adv| {
+                    let w = adv.last().copied().unwrap_or(0.0);
+                    ctx.outline(mk, &st, it.size, it.col - w, item_baseline)
+                });
+                let Some(d) = traced else {
+                    ctx.record_miss(ToPathError::font(&st, "no font file to trace"));
+                    return false;
+                };
+                shapes.push_str(&format!("<path fill=\"{marker_fill}\" d=\""));
+                push_escaped(&mut shapes, &d, true);
+                shapes.push_str("\"/>");
+            }
             Marker::Text(mk) => {
                 // right-aligned into the gutter so "1." and "10." share a column edge
                 markers.push_str(&format!(
@@ -238,6 +272,24 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                 m,
                 ctx,
             );
+            if outline {
+                let Some((paths, _)) = trace_lines(
+                    &shifted,
+                    Anchor::Start,
+                    false,
+                    &it.style,
+                    it.size,
+                    1.0,
+                    &it.emits,
+                    m,
+                    ctx.outliner,
+                    ctx,
+                ) else {
+                    return false;
+                };
+                push_painted_paths(&mut body, &paths, &it.fill, "", &pos_attr(it.src, ctx), ctx);
+                continue;
+            }
             body.push_str("<text text-anchor=\"start\"");
             push_font_attrs(&mut body, &it.style, it.size, &it.fill, ctx);
             // the item's spacing, as a box's goes on its text
@@ -266,6 +318,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     out.push_str(&filter);
     out.push_str(&pos);
     out.push_str(&super::transform_attr(node)); // the list's own transform, as a table's (§6.15)
+    out.push_str(&ctx.carry_at(node.range().start, false)); // `to_path`: what it keeps
     out.push('>');
     out.push_str(&shapes);
     if !markers.is_empty() {
@@ -277,6 +330,7 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     }
     out.push_str(&body);
     out.push_str("</g>");
+    true
 }
 
 /// A resolved `<x:li>` marker: a drawn shape token, a literal text string
