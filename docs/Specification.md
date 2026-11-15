@@ -456,12 +456,15 @@ stays legible as "a rect, radius 8 on two corners". Uncompiled, the document ren
 <rect x="20" y="20" width="200" height="120" x:corners="24"/>              <!-- every corner -->
 <path d="M0 0 L100 0 L100 50 L0 50 Z" x:corners="0:8 1:var(radius-md)"/>   <!-- anchors 0 and 1 -->
 <polygon points="0,0 100,0 50,86.6" x:corners="10" x:corner-style="chamfer"/>
+<rect width="100" height="60" x:corners="12" x:corner-style="round 1:inverted"/> <!-- a style per anchor -->
 ```
 
 **Attributes.** `x:corners` on `<path>`, `<rect>`, `<polygon>` and `<polyline>`: one radius for
 every corner, or `anchor:radius` pairs (whitespace or comma separated) for some; a radius is a
 length or a `var()` token; a pair wins over the single value at its anchor. `x:corner-style` is
-`round` (the default), `chamfer` or `inverted`, for the element. On a `<rect>` the corners
+`round` (the default), `chamfer` or `inverted`, in the same shape: one style for every corner,
+or `anchor:style` pairs for some (`x:corner-style="chamfer 0:round"`), a pair winning at its
+anchor and an unknown style dropped. A style at an anchor with no radius draws nothing. On a `<rect>` the corners
 replace `rx`/`ry`. The `index:value` shape is the convention for every `x:` list value that keys
 some entries by index: `:` is reserved as the pair glue (it means nothing else inside an SVG
 attribute value, where `#` is a colour or a fragment), so one parser reads them all.

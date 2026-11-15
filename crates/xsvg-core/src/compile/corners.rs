@@ -49,7 +49,9 @@ impl CornerStyle {
 pub(super) struct CornerSpec {
     pub(super) all: Option<f64>,
     pub(super) at: Vec<(usize, f64)>,
+    /// `x:corner-style`: the style of every corner, and of some by anchor.
     pub(super) style: CornerStyle,
+    pub(super) style_at: Vec<(usize, CornerStyle)>,
 }
 
 impl CornerSpec {
@@ -61,6 +63,14 @@ impl CornerSpec {
             .or(self.all)
             .filter(|r| *r > 0.0)
     }
+
+    /// The style at `anchor`: its own pair, else the element's.
+    fn style(&self, anchor: usize) -> CornerStyle {
+        self.style_at
+            .iter()
+            .find(|(i, _)| *i == anchor)
+            .map_or(self.style, |(_, s)| *s)
+    }
 }
 
 /// `x:corners` and `x:corner-style` on `node`, tokens resolved. `None` when the
@@ -71,11 +81,20 @@ pub(super) fn corner_spec(node: roxmltree::Node, theme: &Theme) -> Option<Corner
     let mut spec = CornerSpec {
         all: None,
         at: Vec::new(),
-        style: node
-            .attribute((XSVG_NS, "corner-style"))
-            .and_then(CornerStyle::parse)
-            .unwrap_or(CornerStyle::Round),
+        style: CornerStyle::Round,
+        style_at: Vec::new(),
     };
+    // the same shape as the radii: one style for every corner, `anchor:style`
+    // pairs for some, a pair winning at its anchor; an unknown style is dropped
+    for (i, s) in super::indexed_items(node.attribute((XSVG_NS, "corner-style")).unwrap_or("")) {
+        let Some(s) = CornerStyle::parse(s) else {
+            continue;
+        };
+        match i {
+            Some(i) => spec.style_at.push((i, s)),
+            None => spec.style = s,
+        }
+    }
     for (i, r) in super::indexed_items(&v) {
         let Some(r) = parse_num(r) else { continue };
         match i {
@@ -98,6 +117,8 @@ pub struct CornerInfo {
     /// The radius drawn — smaller when the adjoining segments are too short.
     pub effective: f64,
     pub clamped: bool,
+    /// How this corner is drawn: its own `x:corner-style` pair, else the element's.
+    pub style: CornerStyle,
     /// Where the corner's curve leaves the incoming segment and joins the
     /// outgoing one.
     pub from: (f64, f64),
@@ -299,6 +320,7 @@ fn fillet(c: &Corner, d: f64, from: Point, to: Point, style: CornerStyle) -> Fil
             requested,
             effective: r,
             clamped: r + 1e-9 < requested,
+            style,
             from: (from.x, from.y),
             to: (to.x, to.y),
             center: (style != CornerStyle::Chamfer).then_some((center.x, center.y)),
@@ -422,7 +444,7 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
                 };
                 let from = trimmed(seg_in, 0.0, arclen(seg_in) - d).end();
                 let to = trimmed(seg_out, d, arclen(seg_out)).start();
-                Some(fillet(c, d, from, to, spec.style))
+                Some(fillet(c, d, from, to, spec.style(anchor + i)))
             })
             .collect();
         // each segment trimmed by the corner at its start and the one at its end
@@ -459,8 +481,8 @@ pub(super) fn apply_corners(d: &str, spec: &CornerSpec) -> Option<(String, Vec<C
             let next = if sub.closed { (i + 1) % n } else { i + 1 };
             if let Some(f) = fillets.get(next).and_then(|f| f.as_ref()) {
                 // a chamfer home is the Z itself
-                if !(last_of_closed && spec.style == CornerStyle::Chamfer) {
-                    push_corner(&mut out, f, spec.style);
+                if !(last_of_closed && f.info.style == CornerStyle::Chamfer) {
+                    push_corner(&mut out, f, f.info.style);
                 }
             }
         }

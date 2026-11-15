@@ -158,6 +158,10 @@ supply but a hand-written impl must add.
   out of the core so a browser host can run it in its own Worker. Its seeded, memory-jailed fuzz
   harness (`examples/fuzz.rs`) ran three million cases; the crate's README has the account.
 
+- **A corner style per anchor.** `x:corner-style` takes the shape `x:corners` does: one style
+  for every corner, or `anchor:style` pairs (`x:corner-style="chamfer 0:round"`). The `corners`
+  query reports each corner's style.
+
 - **Lists, tables and wrapped text outline and convert.** `outline="true"` on `<x:list>` and
   `<x:table>` traces every item's and cell's lines (a list's generated numbers and text markers
   with them), all-or-nothing per element like a text box; `x:outline="true"` on

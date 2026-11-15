@@ -465,7 +465,7 @@ session answers them from the parse it compiles from, by the same functions the 
 | `text_style(offset)` | the element's text as pieces, each in the style it renders in, offsets in UTF-16 code units of the text content (each `<tbreak/>` one) |
 | `blocks(offset)` | a box's paragraphs and list items (level, list, marker kind), or a list's items, in reading order |
 | `run_support(offset)` | which run attributes the element's text draws: typography, fill, border, highlight, decoration, baseline-shift, links |
-| `corners(offset)` | each corner a shape's `x:corners` draws (§5.4): anchor, the sharp point, requested and effective radius, `clamped`, the trim points, the arc's centre — for the corner widget |
+| `corners(offset)` | each corner a shape's `x:corners` draws (§5.4): anchor, the sharp point, requested and effective radius, `clamped`, its style, the trim points, the arc's centre — for the corner widget |
 
 **One cascade.** Style properties — the eight `<x:font>` token properties and `fill` — come from
 an ordered list of **levels** (`query.rs`): the element's own attributes, then its token, then each

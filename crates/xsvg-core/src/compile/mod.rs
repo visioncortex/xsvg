@@ -1403,6 +1403,7 @@ pub(super) const CORNER_PARAMS: &[xsvg_schema::ParamSpec] = &[
         ns: Some(XSVG_NS),
         default: Some("round"),
         values: &["round", "chamfer", "inverted"],
+        doc: Some("the style of every corner; the attribute also takes index:style pairs for corners by anchor"),
         ..ParamSpec::new("corner-style", xsvg_schema::ParamKind::Enum)
     },
 ];

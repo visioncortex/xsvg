@@ -10938,3 +10938,48 @@ fn direction_reaches_standalone_lists_and_table_cells() {
     assert_eq!(dir("e"), ("ltr".to_string(), Source::Initial));
     assert!(matches!(dir("f"), (v, Source::Inherited { .. }) if v == "rtl"));
 }
+
+#[test]
+fn a_corner_style_is_set_per_anchor_like_a_radius() {
+    // §5.4: `x:corner-style` takes the shape `x:corners` does — one style for
+    // every corner, `anchor:style` pairs for some, a pair winning at its anchor
+    use super::CornerStyle;
+    let src = format!(
+        r##"{XW}<rect x="20" y="20" width="200" height="120" x:corners="24" x:corner-style="chamfer 0:round 2:inverted 3:bogus"/><rect x="0" y="0" width="50" height="50" x:corners="5" x:corner-style="1:chamfer"/></svg>"##
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<rect", 0)).unwrap();
+    let styles: Vec<CornerStyle> = c.iter().map(|c| c.style).collect();
+    assert_eq!(
+        styles,
+        [
+            CornerStyle::Round,
+            CornerStyle::Chamfer,
+            CornerStyle::Inverted,
+            // an unknown style in a pair is dropped: the element's applies
+            CornerStyle::Chamfer
+        ]
+    );
+    // a chamfer has no centre; the others do
+    assert!(c[0].center.is_some() && c[1].center.is_none() && c[2].center.is_some());
+    // with pairs alone the rest stay round
+    let c = s.corners(nth_at(&src, "<rect", 1)).unwrap();
+    assert_eq!(c[0].style, CornerStyle::Round);
+    assert_eq!(c[1].style, CornerStyle::Chamfer);
+    // drawn: two arcs (anchors 0 and 2, sweeping opposite ways) and two chords
+    let out = compile_test(&src);
+    let d = out
+        .split(" d=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert_eq!(d.matches('A').count(), 2, "{d}");
+    assert!(
+        d.contains("A24 24 0 0 1") && d.contains("A24 24 0 0 0"),
+        "{d}"
+    );
+    // the chamfer at anchor 1 is the straight chord between its trim points
+    assert!(d.contains("L196 20 L220 44"), "{d}");
+}

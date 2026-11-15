@@ -95,6 +95,8 @@ const twinCases = [
   ["corners-quarter", `<rect x="20" y="20" width="160" height="160" x:corners="0:160" fill="#48a"/>`, `<clipPath id="q"><rect x="20" y="20" width="160" height="160"/></clipPath><circle cx="180" cy="180" r="160" clip-path="url(#q)" fill="#48a"/>`],
   // a chamfer is the polygon through the trim points
   ["corners-chamfer", `<rect x="20" y="20" width="200" height="120" x:corners="24" x:corner-style="chamfer" fill="#a40"/>`, `<polygon points="44,20 196,20 220,44 220,116 196,140 44,140 20,116 20,44" fill="#a40"/>`],
+  // a style per anchor: round at 0 and 2, the element's chamfer at 1 and 3
+  ["corners-mixed", `<rect x="20" y="20" width="200" height="120" x:corners="24" x:corner-style="chamfer 0:round 2:round" fill="#a40"/>`, `<path d="M44 20 H196 L220 44 V116 A24 24 0 0 1 196 140 H44 L20 116 V44 A24 24 0 0 1 44 20 Z" fill="#a40"/>`],
   // an inverted 90° corner is the quarter disc about the apex cut away
   ["corners-scallop", `<rect x="20" y="20" width="200" height="120" x:corners="30" x:corner-style="inverted" fill="#808"/>`, `<mask id="m"><rect x="20" y="20" width="200" height="120" fill="#fff"/><circle cx="20" cy="20" r="30"/><circle cx="220" cy="20" r="30"/><circle cx="220" cy="140" r="30"/><circle cx="20" cy="140" r="30"/></mask><rect width="400" height="200" fill="#808" mask="url(#m)"/>`],
   // the winding does not matter
