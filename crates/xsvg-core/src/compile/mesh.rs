@@ -132,7 +132,14 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // paint or alpha. Reuse the parser above and avoid rasterizing any pixels.
     if ctx.clip_geometry.get() {
         out.push_str("<g");
-        copy_attrs(node, out, &["cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity"], ctx);
+        copy_attrs(
+            node,
+            out,
+            &[
+                "cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity",
+            ],
+            ctx,
+        );
         out.push_str(&pos_attr(node, ctx));
         out.push('>');
         for face in &mesh.faces {
@@ -661,9 +668,13 @@ pub(super) fn parse_hex_color(s: &str) -> Option<(crate::gradient::LinRgb, f32)>
 }
 
 /// The same exact polygons bound both colour regions and authored clipping meshes.
-fn append_mesh_face(mesh: &crate::gradient::Mesh, face: &crate::gradient::mesh::Face, out: &mut String) {
+fn append_mesh_face(
+    mesh: &crate::gradient::Mesh,
+    face: &crate::gradient::mesh::Face,
+    out: &mut String,
+) {
     for c in 0..face.arity() {
-        let (x,y) = mesh.verts[face.v[c] as usize];
+        let (x, y) = mesh.verts[face.v[c] as usize];
         out.push(if c == 0 { 'M' } else { 'L' });
         out.push_str(&format!("{},{}", fmt(x as f64), fmt(y as f64)));
     }

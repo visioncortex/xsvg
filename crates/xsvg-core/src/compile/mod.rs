@@ -1065,7 +1065,10 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
                 emit_link(node, href, out, ctx);
                 return;
             }
-            if ctx.clip_geometry.get() && href.starts_with('#') && emit_clip_use(node, href, out, ctx) {
+            if ctx.clip_geometry.get()
+                && href.starts_with('#')
+                && emit_clip_use(node, href, out, ctx)
+            {
                 return;
             }
         }
