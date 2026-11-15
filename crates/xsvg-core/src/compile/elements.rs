@@ -367,6 +367,14 @@ pub(super) struct Textbox {
     pub fill: String,
     #[param(default = false, doc = "bake the glyphs to paths instead of live text")]
     pub outline: bool,
+    #[param(
+        default = 1.0,
+        min = 0.1,
+        max = 10.0,
+        step = 0.05,
+        doc = "horizontal glyph stretch, each line from its left edge"
+    )]
+    pub glyph_x_scale: f64,
 }
 
 /// Paragraph direction (§6.4): under `rtl` the start edge is the right one.
@@ -395,8 +403,10 @@ pub(super) enum DirectionParam {
 )]
 #[allow(dead_code)]
 pub(super) struct Paragraph {
-    pub align: AlignParam,
-    pub direction: DirectionParam,
+    #[param(doc = "defaults to the box's align")]
+    pub align: Option<AlignParam>,
+    #[param(doc = "defaults to the box's direction")]
+    pub direction: Option<DirectionParam>,
     #[param(default = 0.0, min = -400.0, max = 400.0, doc = "first-line indent")]
     pub text_indent: f64,
     #[param(default = 0.0, min = 0.0, max = 400.0, doc = "extra gap above")]
@@ -433,7 +443,8 @@ pub(super) struct ListItem {
     pub list: Option<String>,
     #[param(doc = "a drawn shape or literal marker text, overriding the list's")]
     pub marker: Option<String>,
-    pub direction: DirectionParam,
+    #[param(doc = "defaults to the box's direction; a standalone list is left-to-right")]
+    pub direction: Option<DirectionParam>,
     #[param(color, doc = "defaults to the list's fill")]
     pub fill: Option<String>,
 }
@@ -449,9 +460,10 @@ pub(super) struct ListItem {
 )]
 #[allow(dead_code)]
 pub(super) struct Cell {
-    pub align: AlignParam,
-    #[param(default = "middle")]
-    pub valign: VAlignParam,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub align: Option<AlignParam>,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub valign: Option<VAlignParam>,
     #[param(
         color,
         doc = "background; defaults to the table's cell-fill, stripe or header-fill"
@@ -471,9 +483,10 @@ pub(super) struct Cell {
 )]
 #[allow(dead_code)]
 pub(super) struct HeaderCell {
-    pub align: AlignParam,
-    #[param(default = "middle")]
-    pub valign: VAlignParam,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub align: Option<AlignParam>,
+    #[param(doc = "defaults to the row's, then the column's, then the table's")]
+    pub valign: Option<VAlignParam>,
     #[param(color, doc = "background; defaults to the table's header-fill")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour; defaults to the table's fill")]
@@ -490,9 +503,10 @@ pub(super) struct HeaderCell {
 )]
 #[allow(dead_code)]
 pub(super) struct Row {
-    pub align: AlignParam,
-    #[param(default = "middle")]
-    pub valign: VAlignParam,
+    #[param(doc = "defaults to the column's, then the table's")]
+    pub align: Option<AlignParam>,
+    #[param(doc = "defaults to the column's, then the table's")]
+    pub valign: Option<VAlignParam>,
     #[param(color, doc = "background for the row's cells")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour for the row's cells")]
@@ -508,9 +522,10 @@ pub(super) struct Row {
 )]
 #[allow(dead_code)]
 pub(super) struct Column {
-    pub align: AlignParam,
-    #[param(default = "middle")]
-    pub valign: VAlignParam,
+    #[param(doc = "defaults to the table's")]
+    pub align: Option<AlignParam>,
+    #[param(doc = "defaults to the table's")]
+    pub valign: Option<VAlignParam>,
     #[param(color, doc = "background for the column's cells")]
     pub bg: Option<String>,
     #[param(color, doc = "text colour for the column's cells")]
@@ -555,7 +570,9 @@ pub(super) enum DisplayAlignParam {
     ns = "http://www.w3.org/2000/svg",
     doc = "Plain SVG text — point text, or wrapped to inline-size; the compiler lays it out and may outline it.",
     children = "container",
-    group = TextFont
+    group = TextFont,
+    group = TextBorder,
+    group = SvgTextExtras
 )]
 #[allow(dead_code)]
 pub(super) struct SvgText {
@@ -572,8 +589,6 @@ pub(super) struct SvgText {
     pub text_anchor: TextAnchorParam,
     #[param(color, default = "#000")]
     pub fill: String,
-    #[param(name = "x:outline", default = false, doc = "bake the glyphs to paths")]
-    pub outline: bool,
 }
 
 /// `<textArea>`: the SVG Tiny 1.2 flowed text region (§6.3).
@@ -583,7 +598,9 @@ pub(super) struct SvgText {
     ns = "http://www.w3.org/2000/svg",
     doc = "SVG Tiny 1.2 flowed text: wraps inside a region with block and inline alignment.",
     children = "container",
-    group = TextFont
+    group = TextFont,
+    group = TextBorder,
+    group = SvgTextExtras
 )]
 #[allow(dead_code)]
 pub(super) struct SvgTextArea {
@@ -612,6 +629,124 @@ pub(super) struct SvgTextArea {
     pub overflow: OverflowVisibility,
     #[param(color, default = "#000")]
     pub fill: String,
+}
+
+/// `text-transform` (§6.18).
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum TextCaseParam {
+    #[default]
+    None,
+    Uppercase,
+    Lowercase,
+}
+
+/// `<tspan>`: a styled run inside any text element (§6.11).
+#[derive(Params)]
+#[element(
+    name = "tspan",
+    ns = "http://www.w3.org/2000/svg",
+    doc = "A styled run of text: its own face, size, case, colour, decoration, highlight and border over the element it sits in.",
+    children = "container",
+    group = TextBorder,
+    group = RunExtras
+)]
+#[allow(dead_code)]
+pub(super) struct Tspan {
+    #[param(
+        read_only = "changing the face needs it loaded first, which is asynchronous and affects the whole document"
+    )]
+    pub font_family: Option<String>,
+    #[param(doc = "a size in user units, or a percentage or em of the element's")]
+    pub font_size: Option<String>,
+    pub font_weight: Option<String>,
+    pub font_style: Option<String>,
+    pub text_transform: Option<TextCaseParam>,
+    #[param(color, doc = "defaults to the element's fill")]
+    pub fill: Option<String>,
+    #[param(doc = "underline, line-through, or both")]
+    pub text_decoration: Option<String>,
+    #[param(doc = "super, sub, or a length")]
+    pub baseline_shift: Option<String>,
+}
+
+/// The corner block (§5.4) on the plain SVG shapes that take it. One struct
+/// per shape, since the manifest is keyed by element name.
+macro_rules! cornered_shape {
+    ($ty:ident, $name:literal, $doc:literal) => {
+        pub(super) struct $ty;
+        impl Params for $ty {
+            const SPEC: ElementSpec = ElementSpec {
+                name: $name,
+                ns: Some(super::SVG_NS),
+                doc: Some($doc),
+                params: super::CORNER_PARAMS,
+                groups: &[],
+                input: xsvg_schema::InputMode::None,
+                children: xsvg_schema::ChildMode::None,
+            };
+            fn from_attrs(_: &dyn AttrSource) -> Self {
+                // corner_spec() does the reading, by namespace
+                $ty
+            }
+        }
+    };
+}
+cornered_shape!(
+    SvgRect,
+    "rect",
+    "A plain SVG rectangle; the compiler rounds its corners on request."
+);
+cornered_shape!(
+    SvgPolygon,
+    "polygon",
+    "A plain SVG polygon; the compiler rounds its corners on request."
+);
+cornered_shape!(
+    SvgPolyline,
+    "polyline",
+    "A plain SVG polyline; the compiler rounds its interior corners on request."
+);
+cornered_shape!(
+    SvgPath,
+    "path",
+    "A plain SVG path; the compiler rounds the corners between its segments on request."
+);
+
+/// The `x:` attributes the plain SVG text elements take: declared by hand
+/// because they live in the xsvg namespace (see [`TextBorder`]).
+pub(super) struct SvgTextExtras;
+
+impl Params for SvgTextExtras {
+    const SPEC: ElementSpec = ElementSpec {
+        name: "svg-text-extras",
+        ns: None,
+        doc: None,
+        params: super::SVG_TEXT_X_PARAMS,
+        groups: &[],
+        input: xsvg_schema::InputMode::None,
+        children: xsvg_schema::ChildMode::None,
+    };
+    fn from_attrs(_: &dyn AttrSource) -> Self {
+        SvgTextExtras
+    }
+}
+
+/// `x:highlight` on a run — namespaced, so declared by hand.
+pub(super) struct RunExtras;
+
+impl Params for RunExtras {
+    const SPEC: ElementSpec = ElementSpec {
+        name: "run-extras",
+        ns: None,
+        doc: None,
+        params: super::RUN_X_PARAMS,
+        groups: &[],
+        input: xsvg_schema::InputMode::None,
+        children: xsvg_schema::ChildMode::None,
+    };
+    fn from_attrs(_: &dyn AttrSource) -> Self {
+        RunExtras
+    }
 }
 
 /// The shared font block. Described beside [`super::style_from`], which reads it —
@@ -815,4 +950,10 @@ static ELEMENTS: &[ElementSpec] = &[
     Column::SPEC,
     SvgText::SPEC,
     SvgTextArea::SPEC,
+    Tspan::SPEC,
+    // the plain shapes, for the corner block alone (§5.4)
+    SvgRect::SPEC,
+    SvgPolygon::SPEC,
+    SvgPolyline::SPEC,
+    SvgPath::SPEC,
 ];

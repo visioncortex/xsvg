@@ -1364,6 +1364,49 @@ pub(super) const TEXT_BORDER_PARAMS: &[xsvg_schema::ParamSpec] = &[
     },
 ];
 
+/// The `x:` attributes on plain `<text>` and `<textArea>`, read by namespace in
+/// their emitters (textbox.rs, trace.rs).
+pub(super) const SVG_TEXT_X_PARAMS: &[xsvg_schema::ParamSpec] = &[
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        default: Some("false"),
+        doc: Some("bake the glyphs to paths instead of live text"),
+        ..ParamSpec::new("outline", xsvg_schema::ParamKind::Bool)
+    },
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        default: Some("1"),
+        min: Some(0.1),
+        max: Some(10.0),
+        step: Some(0.05),
+        doc: Some("horizontal glyph stretch, each line from its left edge"),
+        ..ParamSpec::new("glyph-x-scale", xsvg_schema::ParamKind::Number)
+    },
+];
+
+/// `x:highlight` on a `<tspan>` (§6.11), read in runs.rs.
+pub(super) const RUN_X_PARAMS: &[xsvg_schema::ParamSpec] = &[ParamSpec {
+    ns: Some(XSVG_NS),
+    doc: Some("a colour painted behind the run; none when absent"),
+    ..ParamSpec::new("highlight", xsvg_schema::ParamKind::Color)
+}];
+
+/// The corner block (§5.4) on `<rect>`, `<polygon>`, `<polyline>` and `<path>`,
+/// declared beside the emitter that reads it ([`corners::corner_spec`]).
+pub(super) const CORNER_PARAMS: &[xsvg_schema::ParamSpec] = &[
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        doc: Some("one radius for every corner, or index:radius pairs for corners by anchor; accepts var(token)"),
+        ..ParamSpec::new("corners", xsvg_schema::ParamKind::Text)
+    },
+    ParamSpec {
+        ns: Some(XSVG_NS),
+        default: Some("round"),
+        values: &["round", "chamfer", "inverted"],
+        ..ParamSpec::new("corner-style", xsvg_schema::ParamKind::Enum)
+    },
+];
+
 // ---- helpers ---------------------------------------------------------------
 
 /// The font block every text element accepts, declared beside the code that

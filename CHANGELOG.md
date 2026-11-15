@@ -171,8 +171,13 @@ supply but a hand-written impl must add.
   table: `<x:p>`, `<x:li>`, `<x:td>`, `<x:th>`, `<x:tr>`, `<x:col>`, and the plain `<text>` and
   `<textArea>` the compiler lays out, join the eleven `x:` elements (an element in another
   namespace carries `"ns"` in its entry — `ElementSpec::ns`, `#[element(ns = "…")]`).
-  `<x:textbox>` declares its `direction`, `paragraph-spacing` and `fill`, `<x:textpath>` its
-  `fill`, `<x:table>` its `cell-fill` and `stripe`.
+  `<x:textbox>` declares its `direction`, `paragraph-spacing`, `fill` and `glyph-x-scale`,
+  `<x:textpath>` its `fill`, `<x:table>` its `cell-fill` and `stripe`. `<tspan>` is declared with
+  what a run takes, and `<rect>`, `<polygon>`, `<polyline>` and `<path>` with the corner block.
+  The `x:` attributes on SVG elements (`x:outline`, `x:glyph-x-scale`, `x:highlight`,
+  `x:corners`, `x:corner-style`, `x:border-*`) are declared by namespace under their local name.
+  A parameter a block inherits — a cell's, row's or column's `align` and `valign`, a paragraph's
+  `align` and `direction` — declares no default, only where its value comes from.
 
 - **Units: incremental compilation one level down.** A direct child of a
   top-level passthrough container (an artboard's `<g>`) is now a unit of its own: `compile_unit`

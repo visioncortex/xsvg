@@ -221,7 +221,7 @@ pub(super) fn emit_textbox(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let style = style_from(node, ctx);
     let tb: elements::Textbox = params_of(node);
     let fill = tb.fill.as_str();
-    let gx = attr_num(node, "glyph-x-scale", 1.0);
+    let gx = tb.glyph_x_scale;
     let outline = tb.outline || ctx.force_outline.get();
     let stroke = text_border_attrs(node, ctx);
     let pos = format!(

@@ -523,9 +523,10 @@ element (Extensibility.md §11), and a panel should read it rather than keep a t
 | `padding` | ✓ | — | — | — | — | — | `cell-padding` | — | — | — | — |
 | `fit` / `fit-min` | ✓ | — | — | — | — | — | — | — | — | — | — |
 | overflow | `text-overflow`, `overflow` | — | `overflow` | — | — | — | — | — | — | — | — |
-| outlining | `outline` | `x:outline` | — | (always baked) | — | — | — | — | — | — | — |
-| `x:border-*` | ✓ | — | — | ✓ | — | — | — | — | — | — | ✓ |
+| outlining | `outline` | `x:outline` | `x:outline` | (always baked) | — | — | — | — | — | — | — |
+| `x:border-*` | ✓ | ✓ | ✓ | ✓ | — | — | — | — | — | — | ✓ |
 | `text-decoration`, `x:highlight`, `baseline-shift` | — | — | — | — | — | — | — | — | — | — | ✓ |
+| glyph stretch | `glyph-x-scale` | `x:glyph-x-scale` | `x:glyph-x-scale` | — | — | — | — | — | — | — | — |
 
 A cell's properties resolve cell › row › column › table (§6.15); a paragraph's and an item's over
 their box or list (§6.14, §6.16); a run's over its element (§6.11). A `<x:tr>`'s or `<x:col>`'s

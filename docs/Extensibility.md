@@ -499,10 +499,20 @@ lookup and a property panel never has to know which tier it is editing.
 All eleven `x:` elements are converted — `offset`, `boolean`, `warp`, `pie`, `plot`, `mesh`,
 `connector`, `textbox`, `textpath`, `list`, `table` — and beside them the **text blocks** their
 containers lay out (`p`, `li`, `td`, `th`, `tr`, `col`) and the two **plain SVG text elements**
-the compiler lays out (`text`, `textArea`), so a panel reads the typography matrix of
-Specification §6.1 from one manifest. An element in another namespace than the manifest's carries
-`"ns"` in its entry (the SVG one for `text` and `textArea`); `ElementSpec::ns` / `#[element(ns =
-"…")]`, `None` for the manifest's own.
+the compiler lays out (`text`, `textArea`), the run inside them (`tspan`), and the **plain shapes
+that take the corner block** of Specification §5.4 (`rect`, `polygon`, `polyline`, `path` — for
+`x:corners` and `x:corner-style` alone), so a panel reads the typography matrix of Specification
+§6.1 from one manifest. An element in another namespace than the manifest's carries `"ns"` in its
+entry (the SVG one for these); `ElementSpec::ns` / `#[element(ns = "…")]`, `None` for the
+manifest's own.
+
+Two conventions hold across every entry. An **`x:` attribute on an SVG element** (`x:outline`,
+`x:glyph-x-scale`, `x:highlight`, `x:corners`, `x:border-*`) is declared under its local name with
+`"ns"` set, never with a written prefix — the prefix is the document's to bind. And a parameter a
+block **inherits** from its container (a cell's `align` and `valign`, a paragraph's `align` and
+`direction`, any block's `fill`) declares **no default**: its `doc` says where the value comes
+from, and `resolved` (Incremental.md §10) reports the value in effect and its source. Only the
+element that originates a default declares one (`<x:table valign>` is `middle`).
 `connector`, `textbox`, `textpath`, `list`, `table` — and none has a declared field its emitter
 does not read.
 

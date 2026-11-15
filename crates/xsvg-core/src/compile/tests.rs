@@ -5419,13 +5419,17 @@ fn every_bordered_text_element_declares_the_border_block() {
     // `x:border-*` (§6.17) is read straight off the node by `text_border_attrs`,
     // which is exactly why it needs declaring: reading an attribute is invisible to
     // a host, so before this the convenience worked and no property panel could
-    // know it existed. Pinned against the emitters that call it — textbox and
-    // textpath — so adding a third caller without declaring the block fails here.
+    // know it existed. Pinned against the emitters that call it — textbox,
+    // textpath, plain <text> and <textArea>, and a run's <tspan> — so adding
+    // another caller without declaring the block fails here.
     for spec in crate::built_in_elements() {
         let declares = spec
             .all_params()
             .any(|p| p.name == "border-width" && p.ns == Some(XSVG_NS));
-        let expected = matches!(spec.name, "textbox" | "textpath");
+        let expected = matches!(
+            spec.name,
+            "textbox" | "textpath" | "text" | "textArea" | "tspan"
+        );
         assert_eq!(
             declares, expected,
             "<x:{}> declares the border block: {declares}, expected {expected}",
@@ -9954,6 +9958,10 @@ fn a_paragraph_sets_its_own_letter_and_word_spacing() {
     assert_eq!(layout.paras[1].style.word_spacing, 4.0);
 }
 
+fn ns_of_el(elements: &[xsvg_schema::ElementSpec], name: &str) -> Option<&'static str> {
+    elements.iter().find(|e| e.name == name).unwrap().ns
+}
+
 #[test]
 fn the_manifest_declares_the_typography_matrix() {
     // §6.1's matrix, as the describe manifest states it: which typography
@@ -10049,7 +10057,13 @@ fn the_manifest_declares_the_typography_matrix() {
         ("col", vec!["align", "valign", "bg", "fill"]),
         (
             "text",
-            vec!["inline-size", "text-anchor", "fill", "x:outline"],
+            vec![
+                "inline-size",
+                "text-anchor",
+                "fill",
+                "outline",
+                "glyph-x-scale",
+            ],
         ),
         (
             "textArea",
@@ -10061,6 +10075,8 @@ fn the_manifest_declares_the_typography_matrix() {
                 "line-increment",
                 "overflow",
                 "fill",
+                "outline",
+                "glyph-x-scale",
             ],
         ),
     ] {
@@ -10086,6 +10102,78 @@ fn the_manifest_declares_the_typography_matrix() {
             "<{name}> should not declare {not}"
         );
     }
+    // a run takes the face, size, case and paint — not the line's metrics
+    let tspan = params_of("tspan");
+    for p in [
+        "font-family",
+        "font-size",
+        "font-weight",
+        "font-style",
+        "text-transform",
+        "fill",
+        "text-decoration",
+        "baseline-shift",
+        "highlight",
+        "border-width",
+    ] {
+        assert!(tspan.contains(&p), "<tspan> should declare {p}: {tspan:?}");
+    }
+    for not in ["line-height", "letter-spacing", "align"] {
+        assert!(!tspan.contains(&not), "<tspan> should not declare {not}");
+    }
+    // the x: attributes on SVG elements are declared by namespace, never by
+    // a written prefix
+    let param = |el: &str, name: &str| {
+        elements
+            .iter()
+            .find(|e| e.name == el)
+            .unwrap()
+            .all_params()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("<{el}> should declare {name}"))
+    };
+    for (el, name) in [
+        ("text", "outline"),
+        ("textArea", "outline"),
+        ("text", "glyph-x-scale"),
+        ("tspan", "highlight"),
+        ("rect", "corners"),
+        ("polygon", "corners"),
+        ("polyline", "corner-style"),
+        ("path", "corners"),
+    ] {
+        assert_eq!(param(el, name).ns, Some(XSVG_NS), "<{el}> {name}");
+        assert_eq!(ns_of_el(elements, el), Some("http://www.w3.org/2000/svg"));
+    }
+    assert_eq!(param("textbox", "glyph-x-scale").ns, None);
+    for spec in elements {
+        assert!(
+            !spec.all_params().any(|p| p.name.starts_with("x:")),
+            "<{}> spells a prefix into a parameter name",
+            spec.name
+        );
+    }
+    // a property a block inherits declares no default of its own: the value
+    // comes from its container (`resolved` reports which)
+    for (el, name) in [
+        ("p", "align"),
+        ("p", "direction"),
+        ("li", "direction"),
+        ("td", "align"),
+        ("td", "valign"),
+        ("th", "valign"),
+        ("tr", "align"),
+        ("tr", "valign"),
+        ("col", "align"),
+        ("col", "valign"),
+    ] {
+        let p = param(el, name);
+        assert_eq!(p.default, None, "<x:{el}> {name} inherits");
+        assert!(p.doc.is_some(), "<x:{el}> {name} says where it comes from");
+        assert!(!p.values.is_empty(), "<x:{el}> {name} keeps its spellings");
+    }
+    assert_eq!(param("table", "valign").default, Some("middle"));
+    assert_eq!(param("textbox", "align").default, Some("start"));
     // the SVG text elements carry their namespace; the x: ones none
     let ns_of = |name: &str| elements.iter().find(|e| e.name == name).unwrap().ns;
     assert_eq!(ns_of("text"), Some("http://www.w3.org/2000/svg"));
