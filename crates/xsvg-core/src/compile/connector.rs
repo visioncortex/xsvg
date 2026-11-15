@@ -709,24 +709,39 @@ pub(super) fn emit_connector(node: roxmltree::Node, out: &mut String, ctx: &Ctx)
         }
     }
 
+    let filter = effect_attr(node, out, ctx, || {
+        svg_path_bbox(&d).map(|bb| bb.inflate(size, size))
+    });
+    let filtered = !filter.is_empty();
+    if filtered {
+        out.push_str("<g");
+        out.push_str(&filter);
+        out.push_str(&transform_attr(node));
+        out.push_str(&pos_attr(node, ctx));
+        out.push('>');
+    }
     out.push_str("<path");
-    copy_attrs(
-        node,
-        out,
-        &[
-            "from",
-            "to",
-            "from-point",
-            "to-point",
-            "route",
-            "arrow",
-            "arrow-size",
-            "bulge",
-            "fill",
-        ],
-        ctx,
-    );
-    out.push_str(&pos_attr(node, ctx));
+    let mut skip = vec![
+        "from",
+        "to",
+        "from-point",
+        "to-point",
+        "route",
+        "arrow",
+        "arrow-size",
+        "bulge",
+        "fill",
+    ];
+    if filtered {
+        skip.extend(["filter", "transform"]);
+    }
+    copy_attrs(node, out, &skip, ctx);
+    if !filtered {
+        out.push_str(&pos_attr(node, ctx));
+    }
     out.push_str(&format!(" fill=\"none\" d=\"{d}\"/>"));
     out.push_str(&heads); // arrowheads paint on top of the line
+    if filtered {
+        out.push_str("</g>");
+    }
 }

@@ -90,7 +90,9 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
                                           // inherits the list's size otherwise, keeping the list's line-height
                                           // the item's type block over the list's (§6.1): any of font-*,
                                           // line-height, the spacing, the case — and its colour
-        let item_levels = block_levels(li, Some(&ctx.theme)).map(|(l, _)| l).unwrap_or_default();
+        let item_levels = block_levels(li, Some(&ctx.theme))
+            .map(|(l, _)| l)
+            .unwrap_or_default();
         let item_style = overlay(&item_levels, &style);
         let item_fill = level_value(&item_levels, "fill")
             .map(|v| ctx.resolve_var(v).into_owned())
@@ -259,7 +261,9 @@ pub(super) fn emit_list(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     // wrap in a <g> so the block position/transform covers the drawn markers,
     // the generated-marker text, and the per-item texts
+    let filter = effect_attr(node, out, ctx, || None);
     out.push_str("<g");
+    out.push_str(&filter);
     out.push_str(&pos);
     out.push_str(&super::transform_attr(node)); // the list's own transform, as a table's (§6.15)
     out.push('>');

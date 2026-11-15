@@ -42,15 +42,13 @@ pub(super) fn emit_offset(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         ctx.quality.tolerance(),
     ) {
         Some(od) if !od.is_empty() => {
-            out.push_str("<path");
-            copy_attrs(node, out, skip, ctx);
+            open_effect_element(node, "path", out, skip, ctx, || svg_path_bbox(&od));
             out.push_str(&pos_attr(node, ctx));
             out.push_str(&format!(" d=\"{od}\"/>"));
         }
         Some(_) => {
             // legitimately empty (e.g. an inset larger than the region)
-            out.push_str("<g");
-            copy_attrs(node, out, skip, ctx);
+            open_effect_element(node, "g", out, skip, ctx, || None);
             out.push_str(&pos_attr(node, ctx));
             out.push_str("/>");
         }
@@ -130,9 +128,9 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         (f, _) => f,
     };
 
-    out.push_str("<g");
-    copy_attrs(
+    open_effect_element(
         node,
+        "g",
         out,
         &[
             "field",
@@ -147,6 +145,7 @@ pub(super) fn emit_warp(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             "start",
         ],
         ctx,
+        || None,
     );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
@@ -470,8 +469,7 @@ fn emit_boolean_result(
             node.attribute("op").unwrap_or("")
         ));
         out.push_str(markers);
-        out.push_str("<g");
-        copy_attrs(node, out, &["op"], ctx);
+        open_effect_element(node, "g", out, &["op"], ctx, || None);
         out.push_str(&pos_attr(node, ctx));
         out.push('>');
         for (m, _) in markups {
@@ -499,8 +497,7 @@ fn emit_boolean_result(
     let result = boolean_svg_paths(&operands, op, ctx.quality.tolerance());
     match result {
         Some(d) if !d.is_empty() => {
-            out.push_str("<path");
-            copy_attrs(node, out, &["op"], ctx);
+            open_effect_element(node, "path", out, &["op"], ctx, || svg_path_bbox(&d));
             if curved {
                 // the editor's own attributes, which copy_attrs consumes
                 for a in node.attributes().filter(|a| a.namespace() == Some(XSVG_NS)) {
@@ -516,8 +513,7 @@ fn emit_boolean_result(
         }
         Some(_) => {
             // a legitimately empty result (e.g. disjoint intersect)
-            out.push_str("<g");
-            copy_attrs(node, out, &["op"], ctx);
+            open_effect_element(node, "g", out, &["op"], ctx, || None);
             out.push_str(&pos_attr(node, ctx));
             out.push_str("/>");
         }

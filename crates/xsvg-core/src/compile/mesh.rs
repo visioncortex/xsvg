@@ -128,14 +128,15 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         return;
     }
 
-    out.push_str("<g");
-    copy_attrs(
+    open_effect_element(
         node,
+        "g",
         out,
         &[
             "cols", "rows", "x", "y", "width", "height", "fill", "points",
         ],
         ctx,
+        || None,
     );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
@@ -379,15 +380,22 @@ pub(super) fn emit_meshgradient_fill(
         return false;
     };
     let pos = gen_id_seed(node, ctx);
+    let filter = effect_attr(node, out, ctx, || svg_path_bbox(&shape_d));
+    let filtered = !filter.is_empty();
+    if filtered {
+        out.push_str("<g");
+        out.push_str(&filter);
+        out.push_str(&transform_attr(node));
+        out.push_str(&pos_attr(node, ctx));
+        out.push('>');
+    }
     out.push_str(&format!(
         "<clipPath id=\"x-mgc-{pos}\"><path d=\"{shape_d}\"/></clipPath><g clip-path=\"url(#x-mgc-{pos})\""
     ));
-    if let Some(t) = node.attribute("transform") {
-        out.push_str(" transform=\"");
-        push_escaped(out, t, true);
-        out.push('"');
+    if !filtered {
+        out.push_str(&transform_attr(node));
+        out.push_str(&pos_attr(node, ctx));
     }
-    out.push_str(&pos_attr(node, ctx));
     out.push('>');
     if !lower_mesh(&mesh, &pos, out, ctx) {
         out.push_str("<!-- xsvg: meshgradient degenerate extent -->");
@@ -396,16 +404,18 @@ pub(super) fn emit_meshgradient_fill(
     // the stroke still paints over the mesh fill
     if node.attribute("stroke").is_some() {
         out.push_str("<path");
-        copy_attrs(
-            node,
-            out,
-            &[
-                "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points",
-                "x1", "y1", "x2", "y2",
-            ],
-            ctx,
-        );
+        let mut skip = vec![
+            "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points", "x1",
+            "y1", "x2", "y2",
+        ];
+        if filtered {
+            skip.extend(["filter", "transform"]);
+        }
+        copy_attrs(node, out, &skip, ctx);
         out.push_str(&format!(" fill=\"none\" d=\"{shape_d}\"/>"));
+    }
+    if filtered {
+        out.push_str("</g>");
     }
     true
 }

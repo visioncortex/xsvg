@@ -152,7 +152,9 @@ pub(super) fn emit_pie(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
     // Each slice carries its own range for click mapping; the wrapper carries the
     // pie's, so an incremental re-emit can find the element it replaces.
+    let filter = effect_attr(node, out, ctx, || None);
     out.push_str("<g");
+    out.push_str(&filter);
     out.push_str(&pos_attr(node, ctx));
     // The chart is laid out in local coordinates; editor placement belongs
     // on the wrapper so slices, series, labels and grid move together.
@@ -291,7 +293,9 @@ pub(super) fn emit_plot(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     let label_fill = ctx.paint(&pl.label_fill);
     let label_size = pl.label_size;
 
+    let filter = effect_attr(node, out, ctx, || None);
     out.push_str("<g");
+    out.push_str(&filter);
     out.push_str(&pos_attr(node, ctx));
     // The chart is laid out in local coordinates; editor placement belongs
     // on the wrapper so slices, series, labels and grid move together.

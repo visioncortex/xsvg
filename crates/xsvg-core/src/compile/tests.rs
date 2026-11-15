@@ -10380,12 +10380,28 @@ fn theme_font_tokens_style_paragraphs_list_items_and_cells() {
 <x:table y="400" width="300"><x:col x:font="heading"/><x:col/><x:tr><x:td id="col">Delta</x:td><x:td id="cell" x:font="heading">Epsilon</x:td></x:tr><x:tr x:font="heading"><x:td id="row">Zeta</x:td><x:td id="override" x:font="body">Eta</x:td></x:tr></x:table></svg>"#;
     let parsed = ParsedDocument::new(svg).unwrap();
     let source = roxmltree::Document::parse(svg).unwrap();
-    for (id, size) in [("p", "30"), ("own", "12"), ("nested", "30"), ("li", "30"), ("col", "30"), ("cell", "30"), ("row", "30"), ("override", "16")] {
-        let node = source.descendants().find(|n| n.attribute("id") == Some(id)).unwrap();
+    for (id, size) in [
+        ("p", "30"),
+        ("own", "12"),
+        ("nested", "30"),
+        ("li", "30"),
+        ("col", "30"),
+        ("cell", "30"),
+        ("row", "30"),
+        ("override", "16"),
+    ] {
+        let node = source
+            .descendants()
+            .find(|n| n.attribute("id") == Some(id))
+            .unwrap();
         let resolved = parsed.resolved(node.range().start, &["font-size"]).unwrap();
         assert_eq!(resolved[0].value.as_deref(), Some(size), "{id}");
-        if id == "p" { assert_eq!(resolved[0].source, Source::Token("heading".into())); }
-        if id == "own" { assert_eq!(resolved[0].source, Source::Own); }
+        if id == "p" {
+            assert_eq!(resolved[0].source, Source::Token("heading".into()));
+        }
+        if id == "own" {
+            assert_eq!(resolved[0].source, Source::Own);
+        }
     }
     let layout = layout_at(svg, at(svg, "<x:textbox")).unwrap();
     assert_eq!(layout.paras[0].style.size, 30.0);
@@ -10395,9 +10411,104 @@ fn theme_font_tokens_style_paragraphs_list_items_and_cells() {
     assert_eq!(layout.paras[2].style.size, 30.0);
     let output = compile_test(svg);
     let rendered = roxmltree::Document::parse(&output).unwrap();
-    for (word, size) in [("Alpha", "30"), ("Beta", "12"), ("Gamma", "30"), ("Delta", "30"), ("Epsilon", "30"), ("Zeta", "30"), ("Eta", "16")] {
-        let text = rendered.descendants().find(|n| n.is_text() && n.text() == Some(word)).unwrap();
+    for (word, size) in [
+        ("Alpha", "30"),
+        ("Beta", "12"),
+        ("Gamma", "30"),
+        ("Delta", "30"),
+        ("Epsilon", "30"),
+        ("Zeta", "30"),
+        ("Eta", "16"),
+    ] {
+        let text = rendered
+            .descendants()
+            .find(|n| n.is_text() && n.text() == Some(word))
+            .unwrap();
         let actual = text.ancestors().find_map(|n| n.attribute("font-size"));
         assert_eq!(actual, Some(size), "{word}");
+    }
+}
+
+#[test]
+fn drop_shadows_on_generated_objects_cover_the_complete_result() {
+    let cases = [
+        r##"<x:pie SHADOW cx="100" cy="100" r="50"><x:slice value="30"/><x:slice value="70"/></x:pie>"##,
+        r##"<x:plot SHADOW x="20" y="20" width="200" height="100"><x:bars><x:bar value="5"/><x:bar value="10"/></x:bars></x:plot>"##,
+        r##"<x:boolean SHADOW op="union"><rect width="100" height="80"/><circle cx="100" cy="40" r="40"/></x:boolean>"##,
+        r##"<rect id="source" width="100" height="80"/><x:offset SHADOW in="#source" distance="5"/>"##,
+        r##"<x:warp SHADOW field="arch" bend="20"><rect width="100" height="80"/></x:warp>"##,
+        r##"<x:list SHADOW width="200"><x:li>First</x:li><x:li>Second</x:li></x:list>"##,
+        r##"<x:table SHADOW width="200"><x:tr><x:td>One</x:td><x:td>Two</x:td></x:tr></x:table>"##,
+        r##"<x:mesh SHADOW width="100" height="80" cols="1" rows="1" fill="#f00 #0f0 #00f #fff"/>"##,
+        r##"<rect id="a" width="20" height="20"/><rect id="b" x="150" width="20" height="20"/><x:connector SHADOW from="#a" to="#b" arrow="both"/>"##,
+        r##"<defs><meshgradient id="mesh"><meshrow><meshpatch><stop path="l 100 0" stop-color="#f00"/><stop path="l 0 80" stop-color="#0f0"/><stop path="l -100 0" stop-color="#00f"/><stop path="l 0 -80" stop-color="#fff"/></meshpatch></meshrow></meshgradient></defs><rect SHADOW width="100" height="80" fill="url(#mesh)" stroke="#123" stroke-width="3"/>"##,
+    ];
+    for body in cases {
+        let source = format!(
+            "{XW}{}</svg>",
+            body.replace(
+                "SHADOW",
+                r##"filter="drop-shadow(3 4 5 #1238)" transform="rotate(15)""##
+            )
+        );
+        let out = compile_test(&source);
+        assert_eq!(out.matches("<feDropShadow").count(), 1, "{source}: {out}");
+        assert_eq!(
+            out.matches("filter=\"url(#x-flt-").count(),
+            1,
+            "{source}: {out}"
+        );
+        assert_eq!(
+            out.matches("transform=\"rotate(15)\"").count(),
+            1,
+            "{source}: {out}"
+        );
+        assert!(!out.contains("filter=\"drop-shadow"), "{out}");
+        let doc = roxmltree::Document::parse(&out).unwrap();
+        let target = doc
+            .descendants()
+            .find(|n| {
+                n.attribute("filter")
+                    .is_some_and(|f| f.starts_with("url(#x-flt-"))
+            })
+            .unwrap();
+        assert_eq!(target.attribute("transform"), Some("rotate(15)"), "{out}");
+        if body.contains("meshgradient") {
+            assert!(
+                target
+                    .descendants()
+                    .any(|n| n.attribute("clip-path").is_some()),
+                "mesh clipping stays inside the shadow: {out}"
+            );
+            assert!(
+                target
+                    .descendants()
+                    .any(|n| n.attribute("stroke") == Some("#123")),
+                "stroke shares the shadow: {out}"
+            );
+            assert!(
+                target.attribute("clip-path").is_none(),
+                "shadow must not be clipped to the fill: {out}"
+            );
+        }
+        if body.contains("connector") {
+            assert_eq!(
+                target
+                    .descendants()
+                    .filter(|n| n.has_tag_name((SVG_NS, "path")))
+                    .count(),
+                3,
+                "path and both arrowheads share the effect: {out}"
+            );
+        }
+        let custom = compile_test(&format!(
+            "{XW}{}</svg>",
+            body.replace("SHADOW", r##"filter="url(#custom)""##)
+        ));
+        assert_eq!(
+            custom.matches("filter=\"url(#custom)\"").count(),
+            1,
+            "custom filters survive: {custom}"
+        );
     }
 }

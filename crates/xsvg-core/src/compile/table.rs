@@ -186,7 +186,9 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // The wrapper carries the table's own span as well: cell-level mapping is what a
     // click wants, but an incremental re-emit needs the element it replaces to be
     // findable by the range `fragment_range` reports (docs/Incremental.md §4).
+    let filter = effect_attr(node, out, ctx, || None);
     out.push_str("<g");
+    out.push_str(&filter);
     out.push_str(&pos_attr(node, ctx));
     // the table's own `transform` rides on the wrapper, as a textbox's does on
     // its <text>: cells are laid out in the table's user space, so rotating or

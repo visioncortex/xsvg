@@ -775,6 +775,43 @@ fn lower_filter_attr(
     Some(format!(" filter=\"url(#{id})\""))
 }
 
+/// Lower an effect, keeping custom SVG filter references verbatim. Extension
+/// emitters use this on the same element that carries their transform.
+fn effect_attr(
+    node: roxmltree::Node,
+    out: &mut String,
+    ctx: &Ctx,
+    bbox: impl FnOnce() -> Option<Rect>,
+) -> String {
+    lower_filter_attr(node, out, ctx, bbox).unwrap_or_else(|| {
+        let mut attr = String::new();
+        if let Some(value) = node.attribute("filter") {
+            attr.push_str(" filter=\"");
+            push_escaped(&mut attr, value, true);
+            attr.push('"');
+        }
+        attr
+    })
+}
+
+/// Open a generated shape/group with its ordinary attributes and effect.
+fn open_effect_element(
+    node: roxmltree::Node,
+    tag: &str,
+    out: &mut String,
+    skip: &[&str],
+    ctx: &Ctx,
+    bbox: impl FnOnce() -> Option<Rect>,
+) {
+    let filter = effect_attr(node, out, ctx, bbox);
+    out.push('<');
+    out.push_str(tag);
+    let mut skip = skip.to_vec();
+    skip.push("filter");
+    copy_attrs(node, out, &skip, ctx);
+    out.push_str(&filter);
+}
+
 /// Where a passthrough element draws, for its filter region: a shape's exact
 /// path bbox; a live `<text>`'s estimated extent. `None` for anything else
 /// (groups), which takes the relative fallback.
