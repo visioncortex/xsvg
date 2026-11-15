@@ -34,6 +34,9 @@ pub struct Options<'a> {
     /// byte-identical to its span in the whole compile (docs/Incremental.md).
     /// `None`: the whole document.
     pub fragment: Option<usize>,
+    /// Reconstruct fitted mesh textures at this many pixels per root user unit.
+    /// None keeps compact grid PNGs for interactive/vector rendering.
+    pub rasterize_at_display_resolution: Option<f64>,
 }
 
 impl Default for Options<'_> {
@@ -43,6 +46,7 @@ impl Default for Options<'_> {
             sourcemap: false,
             base: "",
             fragment: None,
+            rasterize_at_display_resolution: None,
         }
     }
 }
@@ -60,7 +64,8 @@ pub fn compile_with(
         options.quality,
         options.sourcemap,
         options.base,
-    )?;
+    )?
+    .with_display_resolution(options.rasterize_at_display_resolution)?;
     match options.fragment {
         Some(offset) => session.compile_fragment(offset),
         None => session.compile(),
@@ -173,6 +178,7 @@ pub fn compile_linked_keyed_impl(
             sourcemap,
             base,
             fragment: None,
+            rasterize_at_display_resolution: None,
         },
         &borrowed(m, shaper, outliner, resolver, keys),
     )
@@ -195,6 +201,7 @@ pub fn compile_platform_impl(
             sourcemap,
             base,
             fragment: None,
+            rasterize_at_display_resolution: None,
         },
         platform,
     )
@@ -296,6 +303,7 @@ pub fn compile_fragment_linked_keyed_impl(
             sourcemap,
             base,
             fragment: Some(offset),
+            rasterize_at_display_resolution: None,
         },
         &borrowed(m, shaper, outliner, resolver, keys),
     )
@@ -319,6 +327,7 @@ pub fn compile_fragment_platform_impl(
             sourcemap,
             base,
             fragment: Some(offset),
+            rasterize_at_display_resolution: None,
         },
         platform,
     )

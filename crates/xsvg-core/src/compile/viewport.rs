@@ -184,7 +184,7 @@ impl Viewport {
 
     /// The `viewBox` fit (SVG 2 §8.2): the scale of content to frame on each
     /// axis, and the offset of the content inside the frame.
-    fn fit(&self) -> (f64, f64, f64, f64) {
+    pub(super) fn fit(&self) -> (f64, f64, f64, f64) {
         let Some([_, _, vw, vh]) = self.view_box else {
             return (1.0, 1.0, 0.0, 0.0);
         };

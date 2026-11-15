@@ -83,6 +83,30 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
                 resolver: ctx.resolver,
                 keys: &NoKeys,
                 generators: ctx.generators,
+                rasterize_at_display_resolution: ctx.rasterize_at_display_resolution,
+                raster_parent: {
+                    let parent = super::mesh_texture::display_transform(node, ctx);
+                    if frag.is_none() {
+                        let root = parsed.doc.root_element();
+                        let (iw, ih) = intrinsic_size(root);
+                        let vp = Viewport {
+                            x: 0.0,
+                            y: 0.0,
+                            w: node.attribute("width").and_then(parse_num).unwrap_or(iw),
+                            h: node.attribute("height").and_then(parse_num).unwrap_or(ih),
+                            view_box: view_box_of(root),
+                            par: node
+                                .attribute("preserveAspectRatio")
+                                .and_then(Par::parse)
+                                .unwrap_or(Par::DEFAULT),
+                            clip: true,
+                        };
+                        let (sx, sy, _, _) = vp.fit();
+                        parent * crate::kurbo::Affine::scale_non_uniform(sx, sy)
+                    } else {
+                        parent
+                    }
+                },
             };
             let child = Ctx::new(&seams, ctx.quality, false, &key, &parsed);
             let mut files = ctx.files.borrow().clone();

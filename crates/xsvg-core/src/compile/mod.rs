@@ -79,6 +79,8 @@ struct Ctx<'a> {
     shaper: &'a dyn Shaper,
     outliner: &'a dyn GlyphOutliner,
     quality: QualityProfile,
+    rasterize_at_display_resolution: Option<f64>,
+    raster_parent: crate::kurbo::Affine,
     /// Whether to emit `data-xsvg-pos` source ranges. Toggled **off** while a linked
     /// dependency is compiled: its element ranges index the *dependency* file, not the
     /// entry document the viewer maps against, so baked content carries no range and a
@@ -177,6 +179,8 @@ pub struct Backend<'a> {
     pub resolver: &'a dyn Resolver,
     pub keys: &'a dyn NodeKeys,
     pub generators: &'a dyn GeneratorHost,
+    pub rasterize_at_display_resolution: Option<f64>,
+    pub raster_parent: crate::kurbo::Affine,
 }
 
 /// Everything the compiler needs from the world it runs in, owned and long-lived:
@@ -291,6 +295,8 @@ impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: Gene
             resolver: &self.resolver,
             keys: &self.keys,
             generators: &self.generators,
+            rasterize_at_display_resolution: None,
+            raster_parent: crate::kurbo::Affine::IDENTITY,
         }
     }
 }
@@ -334,6 +340,8 @@ impl<'a> Ctx<'a> {
             shaper: seams.shaper,
             outliner: seams.outliner,
             quality,
+            rasterize_at_display_resolution: seams.rasterize_at_display_resolution,
+            raster_parent: seams.raster_parent,
             sourcemap: std::cell::Cell::new(sourcemap),
             resolving: std::cell::RefCell::new(Vec::new()),
             resolved: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -1785,6 +1793,7 @@ mod clipping;
 use clipping::*;
 
 mod mesh;
+mod mesh_texture;
 use mesh::*;
 mod pathops;
 use pathops::*;

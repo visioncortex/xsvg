@@ -793,6 +793,7 @@ pub struct CompileSession<'a, P: Host> {
     quality: QualityProfile,
     sourcemap: bool,
     base: String,
+    rasterize_at_display_resolution: Option<f64>,
 }
 
 impl<'a, P: Host> CompileSession<'a, P> {
@@ -812,6 +813,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
             quality: QualityProfile::parse(quality),
             sourcemap,
             base: base.to_string(),
+            rasterize_at_display_resolution: None,
         })
     }
 
@@ -834,7 +836,23 @@ impl<'a, P: Host> CompileSession<'a, P> {
             quality: QualityProfile::parse(quality),
             sourcemap,
             base: base.to_string(),
+            rasterize_at_display_resolution: None,
         }
+    }
+
+    /// Request mesh textures at output density without changing the fitting profile.
+    pub fn with_display_resolution(mut self, pixels_per_unit: Option<f64>) -> Result<Self, String> {
+        if pixels_per_unit.is_some_and(|v| !v.is_finite() || v <= 0.0) {
+            return Err("Display resolution must be finite and positive.".into());
+        }
+        self.rasterize_at_display_resolution = pixels_per_unit;
+        Ok(self)
+    }
+
+    fn backend(&self) -> Backend<'_> {
+        let mut backend = self.platform.backend();
+        backend.rasterize_at_display_resolution = self.rasterize_at_display_resolution;
+        backend
     }
 
     /// The parsed document this session compiles: its queries
@@ -852,12 +870,8 @@ impl<'a, P: Host> CompileSession<'a, P> {
 
     /// The whole document — byte-identical to [`super::compile_platform_impl`].
     pub fn compile(&self) -> Result<String, String> {
-        self.parsed().compile(
-            &self.platform.backend(),
-            self.quality,
-            self.sourcemap,
-            &self.base,
-        )
+        self.parsed()
+            .compile(&self.backend(), self.quality, self.sourcemap, &self.base)
     }
 
     /// The top-level element containing byte `offset` — byte-identical to
@@ -866,7 +880,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn compile_fragment(&self, offset: usize) -> Result<String, String> {
         self.parsed().compile_fragment(
             offset,
-            &self.platform.backend(),
+            &self.backend(),
             self.quality,
             self.sourcemap,
             &self.base,
@@ -885,7 +899,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn compile_unit(&self, offset: usize) -> Result<String, String> {
         self.parsed().compile_unit(
             offset,
-            &self.platform.backend(),
+            &self.backend(),
             self.quality,
             self.sourcemap,
             &self.base,
@@ -901,7 +915,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     ) -> Result<(String, Vec<super::UnitSpan>), String> {
         self.parsed().compile_fragment_spans(
             offset,
-            &self.platform.backend(),
+            &self.backend(),
             self.quality,
             self.sourcemap,
             &self.base,
@@ -925,7 +939,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// textbox or the box resolves to nothing renderable.
     pub fn text_layout(&self, offset: usize) -> Option<TextLayout> {
         self.parsed()
-            .text_layout(offset, &self.platform.backend(), self.quality)
+            .text_layout(offset, &self.backend(), self.quality)
     }
 
     /// How big the `<x:textbox>` at byte `offset` must be to hold its content —
@@ -933,14 +947,14 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// is not a rectangular textbox.
     pub fn measure_textbox(&self, offset: usize) -> Option<super::TextboxSize> {
         self.parsed()
-            .measure_textbox(offset, &self.platform.backend(), self.quality)
+            .measure_textbox(offset, &self.backend(), self.quality)
     }
 
     /// Caret stops on the outlined text element at byte `offset` — the same
     /// answer as [`super::caret_stops_impl`]. `None` when nothing there outlines.
     pub fn caret_stops(&self, offset: usize) -> Option<super::CaretStops> {
         self.parsed()
-            .caret_stops(offset, &self.platform.backend(), self.quality)
+            .caret_stops(offset, &self.backend(), self.quality)
     }
 
     /// Convert to path (docs/Incremental.md §11): the element at `offset` as the
@@ -950,7 +964,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// [`super::to_path_impl`].
     pub fn to_path(&self, offset: usize) -> Result<String, super::ToPathError> {
         self.parsed()
-            .to_path(offset, &self.platform.backend(), self.quality, false)
+            .to_path(offset, &self.backend(), self.quality, false)
     }
 
     /// The operands of the `<x:boolean>` at `offset`, for `xsvg-path-ops`
@@ -959,7 +973,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// answer as [`super::boolean_operands_impl`].
     pub fn boolean_operands(&self, offset: usize) -> Option<super::BooleanOperands> {
         self.parsed()
-            .boolean_operands(offset, &self.platform.backend(), self.quality)
+            .boolean_operands(offset, &self.backend(), self.quality)
     }
 
     /// Convert to spline (docs/Incremental.md §11): [`Self::to_path`] with the
@@ -968,7 +982,7 @@ impl<'a, P: Host> CompileSession<'a, P> {
     /// paths are Béziers only. The same answer as [`super::to_spline_impl`].
     pub fn to_spline(&self, offset: usize) -> Result<String, super::ToPathError> {
         self.parsed()
-            .to_path(offset, &self.platform.backend(), self.quality, true)
+            .to_path(offset, &self.backend(), self.quality, true)
             .map(|m| super::spline::markup_to_spline(&m))
     }
 

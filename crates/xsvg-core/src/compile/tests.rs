@@ -11269,3 +11269,87 @@ fn path_data_is_found_in_tags_only() {
         None
     );
 }
+
+#[test]
+fn display_resolution_meshes_are_emitted_at_transformed_density() {
+    let mesh = r##"<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##;
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let sizes = |svg: &str| {
+        let bytes = b64_prefix(svg, 24);
+        (
+            u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+            u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
+        )
+    };
+    for (open, close, sx, sy) in [
+        ("", "", 1.0, 1.0),
+        ("<g transform=\"rotate(30)\"><g transform=\"matrix(0 3 -2 0 0 0)\">", "</g></g>", 3.0, 2.0),
+        ("<svg width=\"400\" height=\"100\" viewBox=\"0 0 100 50\" preserveAspectRatio=\"none\">", "</svg>", 4.0, 2.0),
+    ] {
+        let source = format!("{XW}{open}{mesh}{close}</svg>");
+        let compact = compile_test(&source);
+        let options = Options { rasterize_at_display_resolution: Some(1.0), ..Default::default() };
+        let display = compile_with(&source, &options, &platform).unwrap();
+        let dense = sizes(&display);
+        let doc = roxmltree::Document::parse(&display).unwrap();
+        let image = doc.descendants().find(|n| n.has_tag_name("image")).unwrap();
+        let w: f64 = image.attribute("width").unwrap().parse().unwrap();
+        let h: f64 = image.attribute("height").unwrap().parse().unwrap();
+        assert!((dense.0 as f64 - (w * sx).ceil()).abs() <= 1.0, "{dense:?}");
+        assert!((dense.1 as f64 - (h * sy).ceil()).abs() <= 1.0, "{dense:?}");
+        assert!(dense.0 > sizes(&compact).0);
+        let old = roxmltree::Document::parse(&compact).unwrap();
+        let original = old.descendants().find(|n| n.has_tag_name("image")).unwrap();
+        for attr in original.attributes().filter(|a| a.name() != "href") { assert_eq!(image.attribute(attr.name()), Some(attr.value())); }
+        let twice = compile_with(&source, &Options { rasterize_at_display_resolution: Some(2.0), ..options }, &platform).unwrap();
+        assert!((sizes(&twice).0 as i64 - 2 * dense.0 as i64).abs() <= 1);
+        let fragment = compile_with(&source, &Options { fragment: Some(source.find("<x:mesh").unwrap()), ..options }, &platform).unwrap();
+        assert_eq!(sizes(&fragment), dense);
+        assert_eq!(compile_with(&source, &Options::default(), &platform).unwrap(), compact);
+    }
+    for invalid in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+        assert!(compile_with(
+            &format!("{XW}{mesh}</svg>"),
+            &Options {
+                rasterize_at_display_resolution: Some(invalid),
+                ..Default::default()
+            },
+            &platform
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn display_resolution_covers_curved_and_linked_meshes() {
+    let sizes = |svg: &str| {
+        let bytes = b64_prefix(svg, 24);
+        (
+            u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+            u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
+        )
+    };
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let options = Options {
+        rasterize_at_display_resolution: Some(1.0),
+        ..Default::default()
+    };
+    let curved = format!(
+        r##"{XW}{INKMESH}<rect width="200" height="80" transform="scale(2)" fill="url(#m)"/></svg>"##
+    );
+    let out = compile_with(&curved, &options, &platform).unwrap();
+    let (w, h) = sizes(&out);
+    assert!(w >= 400 && h >= 160, "{w}x{h}");
+    let dep = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="https://xsvg.visioncortex.org" width="100" height="50" viewBox="0 0 100 50"><x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></svg>"##;
+    let resolver = MapResolver(std::collections::HashMap::from([(
+        "mesh.svg".into(),
+        dep.into(),
+    )]));
+    let platform = platform.with_resolver(resolver);
+    let source = format!(
+        r##"{XW}<g transform="scale(2)"><use href="mesh.svg" width="300" height="200" preserveAspectRatio="none"/></g></svg>"##
+    );
+    let out = compile_with(&source, &options, &platform).unwrap();
+    let (w, h) = sizes(&out);
+    assert!(w >= 600 && h >= 400, "{w}x{h}");
+}

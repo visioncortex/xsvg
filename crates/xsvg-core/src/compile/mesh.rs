@@ -12,6 +12,8 @@ use super::*;
 /// image filter reconstructs the field (a single patch is exactly a stretched
 /// 2×2). Regions are clipped by the exact union of their face polygons
 /// (nonzero), so cracks stay geometry-sharp regardless of raster resolution.
+/// Display-resolution compilation samples that same fitted field before the
+/// first PNG encoding, for bitmap consumers with coarse texture interpolation.
 pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     use crate::gradient::Mesh;
 
@@ -163,7 +165,7 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     );
     out.push_str(&pos_attr(node, ctx));
     out.push('>');
-    if !lower_mesh(&mesh, &gen_id_seed(node, ctx), out, ctx) {
+    if !lower_mesh(&mesh, &gen_id_seed(node, ctx), node, out, ctx) {
         out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
     }
     out.push_str("</g>");
@@ -171,12 +173,14 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
 
 /// The shared mesh lowering (§8.2 stage 1 + 2): rasterize at a profile-graded
 /// resolution, fit each crack region with a grown grid field, and emit one
-/// texel-aligned tiny PNG (or plain path for constant regions) per region.
+/// texel-aligned PNG (or plain path for constant regions) per region. Compact
+/// by default; display-resolution output samples the field at its painted size.
 /// `seed` namespaces the clip ids (the caller's source position). Returns
 /// `false` on a degenerate extent (caller emits its marker).
 pub(super) fn lower_mesh(
     mesh: &crate::gradient::Mesh,
     seed: &str,
+    node: roxmltree::Node,
     out: &mut String,
     ctx: &Ctx,
 ) -> bool {
@@ -317,15 +321,19 @@ pub(super) fn lower_mesh(
                 px.push(v.round().clamp(0.0, 255.0) as u8);
             }
         }
-        let png = if opaque {
-            crate::gradient::png::encode_rgb_png(tw as u32, th as u32, &px)
-        } else {
-            crate::gradient::png::encode_rgba_png(tw as u32, th as u32, &px)
-        };
         let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
-        // raster pixel space -> user units
+        // Keep the fitted grid's placement regardless of output texture density.
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
         let (uw, uh) = (iw * scale as f64, ih * scale as f64);
+        let (pw, ph) = super::mesh_texture::dimensions(node, ctx, (uw, uh), (tw, th));
+        let pixels = if (pw, ph) == (tw, th) { px } else {
+            super::mesh_texture::interpolate(&px, (tw, th), (pw, ph), ch)
+        };
+        let png = if opaque {
+            crate::gradient::png::encode_rgb_png(pw as u32, ph as u32, &pixels)
+        } else {
+            crate::gradient::png::encode_rgba_png(pw as u32, ph as u32, &pixels)
+        };
         let cid = format!("x-mesh-{seed}-{r}");
         // The texel grid is placed so that *bilinear* reconstruction reproduces the
         // fitted field exactly, so the image must ask for bilinear by name. `auto` is
@@ -414,7 +422,7 @@ pub(super) fn emit_meshgradient_fill(
         out.push_str(&pos_attr(node, ctx));
     }
     out.push('>');
-    if !lower_mesh(&mesh, &pos, out, ctx) {
+    if !lower_mesh(&mesh, &pos, node, out, ctx) {
         out.push_str("<!-- xsvg: meshgradient degenerate extent -->");
     }
     out.push_str("</g>");
