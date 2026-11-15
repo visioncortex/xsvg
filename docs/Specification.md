@@ -319,6 +319,7 @@ in any plain viewer** (in document order); the compiler reorders and strips the 
 |---|---|
 | `x:layer` | z-band: **`background`** sinks (−1), **`foreground`** floats (+1), any other value is the content band (0) |
 | `x:order` | within-band z-key (number, default 0); also works standalone as a plain z-index on any sibling |
+| `x:layer-key` | optional shared logical-layer identity across artboards; authoring metadata, stripped |
 | `x:label` | human name — authoring metadata, stripped |
 | `x:hidden` | any value but `false` → the element and its subtree **compile to nothing** (the eyeball toggle) |
 
@@ -330,6 +331,23 @@ whitespace text nodes are dropped. The `x:` attributes are stripped on emit (a l
 plain `<g>`), so the output carries no trace of the layering. Because `<x:layer>` as an *element*
 would hide its content in an uncompiled viewer (§3 skips unknown elements with their subtree), the
 **attribute-on-`<g>` form is the primitive** — it never degrades to empty.
+
+**Shared layer identity.** A nonempty `x:layer-key` on a layer group associates it
+with other layer groups carrying the same case-sensitive key in this document.
+Editors may use this identity to rename, show/hide or reorder every instance in
+one operation, writing `x:label`, `x:hidden`, `x:layer` and `x:order` on the groups.
+The key is independent of the display label and is not an SVG `id`: it may repeat,
+is not a reference target, and does not require duplicate IDs. Absent or blank
+keys leave layers independent. Leading and trailing whitespace is ignored by
+editors when comparing keys. Keys are scoped to one document, not the entire
+bundle of referenced drawings.
+
+The compiler does **not** merge groups, move objects between artboards, or infer
+one instance's properties from another. Each instance retains its local parent,
+transform, visibility and ordering; mismatched authored values remain meaningful.
+`x:layer-key` is stripped from rendered SVG just like the other layer metadata.
+An editor can represent a logical layer missing on an artboard without creating
+an empty group until needed.
 
 ### 5.2 Artboards — named slide frames [implemented]
 

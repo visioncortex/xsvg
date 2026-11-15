@@ -1224,6 +1224,20 @@ fn layers_restack_by_band_and_order_and_strip_metadata() {
 }
 
 #[test]
+fn shared_layer_keys_keep_artboard_instances_local() {
+    let svg = format!(
+        r##"{XW}<g x:artboard="A" transform="translate(10 20)"><g id="a" x:layer="content" x:layer-key="notes" x:order="2"><rect width="9" height="9" fill="#aa0000"/></g><g x:layer="content" x:order="1"><rect width="9" height="9" fill="#00aa00"/></g></g><g x:artboard="B" transform="translate(100 200)"><g id="b" x:layer="content" x:layer-key="notes" x:hidden="true"><rect width="9" height="9" fill="#0000aa"/></g></g></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(out.contains("#aa0000") && !out.contains("#0000aa"), "{out}");
+    assert!(out.find("#00aa00").unwrap() < out.find("#aa0000").unwrap(), "{out}");
+    assert!(out.contains("translate(10 20)") && out.contains("translate(100 200)"), "{out}");
+    assert!(!out.contains("layer-key"), "{out}");
+    let visible = compile_test(&svg.replace(r#"x:hidden="true""#, r#"x:hidden="false""#));
+    assert!(visible.contains("#aa0000") && visible.contains("#0000aa"), "{visible}");
+}
+
+#[test]
 fn layer_order_breaks_ties_within_a_band() {
     // two backgrounds, authored 5 then 1: order 1 paints first
     let svg = format!(
