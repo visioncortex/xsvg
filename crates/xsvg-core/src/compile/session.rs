@@ -160,7 +160,9 @@ impl<'a> Parsed<'a> {
             let Some(child) = unit.children().filter(|c| c.is_element()).find(|c| {
                 let r = c.range();
                 r.start <= offset && offset < r.end
-            }) else { break };
+            }) else {
+                break;
+            };
             unit = child;
         }
         Some(unit)
@@ -565,13 +567,20 @@ impl<'a> Parsed<'a> {
         fn collect<'a>(node: roxmltree::Node<'a, 'a>, out: &mut Vec<roxmltree::Node<'a, 'a>>) {
             let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
             if super::is_unit_container(node) && !children.is_empty() {
-                for child in children { collect(child, out); }
+                for child in children {
+                    collect(child, out);
+                }
             } else {
                 out.push(node);
             }
         }
         let mut units = Vec::new();
-        for top in self.doc.root_element().children().filter(|c| c.is_element()) {
+        for top in self
+            .doc
+            .root_element()
+            .children()
+            .filter(|c| c.is_element())
+        {
             collect(top, &mut units);
         }
         self.dependents_among(seeds, |off| self.unit_at(off), units)
@@ -604,7 +613,11 @@ impl<'a> Parsed<'a> {
         // ids whose (compiled) geometry has changed; grows as dependents join
         let mut live: Vec<&str> = targets
             .iter()
-            .flat_map(|t| super::visible(*t).chain(t.ancestors().skip(1)).filter_map(|n| n.attribute("id")))
+            .flat_map(|t| {
+                super::visible(*t)
+                    .chain(t.ancestors().skip(1))
+                    .filter_map(|n| n.attribute("id"))
+            })
             .collect();
         // Editing an <x:import> rebinds a whole namespace — every element in it lowers
         // through a different module, so all of them are dependents (§Extensibility §3).
@@ -643,7 +656,10 @@ impl<'a> Parsed<'a> {
                     included[i] = true;
                     changed = true;
                     // its output changed, so ids it defines go live too
-                    for id in super::visible(*tl).chain(tl.ancestors().skip(1)).filter_map(|n| n.attribute("id")) {
+                    for id in super::visible(*tl)
+                        .chain(tl.ancestors().skip(1))
+                        .filter_map(|n| n.attribute("id"))
+                    {
                         if !live.contains(&id) {
                             live.push(id);
                         }

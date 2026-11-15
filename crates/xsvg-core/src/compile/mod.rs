@@ -630,7 +630,9 @@ pub(super) fn is_passthrough_container(node: roxmltree::Node) -> bool {
 pub(super) fn is_unit_container(node: roxmltree::Node) -> bool {
     is_passthrough_container(node)
         && node.attribute("filter").is_none()
-        && !node.attribute("style").is_some_and(|s| s.contains("filter"))
+        && !node
+            .attribute("style")
+            .is_some_and(|s| s.contains("filter"))
 }
 
 /// Where one unit of a top-level element landed in that element's fragment
@@ -1233,9 +1235,11 @@ fn emit_children(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         && is_unit_container(node);
     let emit_child = |child: roxmltree::Node, out: &mut String| {
         let start = out.len();
-        let descend = record && is_unit_container(child)
-            && child.children().any(|c| c.is_element());
-        let previous = ctx.unit_container.replace(if descend { Some(child.id()) } else { None });
+        let descend =
+            record && is_unit_container(child) && child.children().any(|c| c.is_element());
+        let previous = ctx
+            .unit_container
+            .replace(if descend { Some(child.id()) } else { None });
         serialize(child, out, false, ctx);
         ctx.unit_container.set(previous);
         if record && child.is_element() && !descend {

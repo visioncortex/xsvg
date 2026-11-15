@@ -1225,7 +1225,9 @@ fn layers_restack_by_band_and_order_and_strip_metadata() {
 
 #[test]
 fn layer_identity_is_editor_metadata_only() {
-    let svg = format!(r#"{XW}<g x:layer="foreground"><rect width="10" height="10"/></g><g><circle r="2"/></g></svg>"#);
+    let svg = format!(
+        r#"{XW}<g x:layer="foreground"><rect width="10" height="10"/></g><g><circle r="2"/></g></svg>"#
+    );
     let edit = compile_impl(&svg, "fast", true, &Mono, &NoShaper, &BoxOutliner).unwrap();
     assert_eq!(edit.matches("data-xsvg-layer=\"true\"").count(), 1);
     assert!(!compile_test(&svg).contains("data-xsvg-layer"));
