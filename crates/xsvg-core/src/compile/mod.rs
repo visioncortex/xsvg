@@ -107,6 +107,8 @@ struct Ctx<'a> {
     /// forces `outline="true"` semantics while scratch-serializing a reference
     /// target, so referenced text contributes glyph geometry instead of nothing.
     force_outline: std::cell::Cell<bool>,
+    /// Geometry-only lowering while compiling authored clipping shapes.
+    clip_geometry: std::cell::Cell<bool>,
     /// `to_path` (trace.rs): the output goes back into the SOURCE, so paints
     /// keep their `var()` tokens and a `filter` list stays as authored.
     to_path: std::cell::Cell<bool>,
@@ -337,6 +339,7 @@ impl<'a> Ctx<'a> {
             cuts: std::cell::Cell::new(0),
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
+            clip_geometry: std::cell::Cell::new(false),
             to_path: std::cell::Cell::new(false),
             live_corners: std::cell::Cell::new(false),
             to_path_carry: std::cell::RefCell::new(None),
@@ -597,7 +600,7 @@ pub(super) fn is_passthrough_container(node: roxmltree::Node) -> bool {
         && node.tag_name().namespace() == Some(SVG_NS)
         && matches!(
             node.tag_name().name(),
-            "g" | "a" | "defs" | "symbol" | "marker" | "pattern" | "mask" | "clipPath" | "switch"
+            "g" | "a" | "defs" | "symbol" | "marker" | "pattern" | "mask" | "switch"
         )
         && !is_hidden(node)
 }
@@ -965,6 +968,11 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    if node.tag_name().namespace() == Some(SVG_NS) && node.tag_name().name() == "clipPath" {
+        emit_clip_path(node, out, ctx);
+        return;
+    }
+
     // A plain SVG container copies its children through — the unit boundary of
     // incremental compilation (docs/Incremental.md §9), routed here by the same
     // predicate `unit_at` partitions by. Byte-identical to the fallthrough below:
@@ -1037,6 +1045,9 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
                 emit_link(node, href, out, ctx);
                 return;
             }
+            if ctx.clip_geometry.get() && href.starts_with('#') && emit_clip_use(node, href, out, ctx) {
+                return;
+            }
         }
     }
 
@@ -1083,7 +1094,7 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
 
     // A fill referencing an SVG 2 <meshgradient> (the Inkscape dialect no
     // browser renders) compiles to the mesh pipeline, clipped by the shape.
-    if let Some(mg) = mesh_fill_target(node, ctx) {
+    if let Some(mg) = mesh_fill_target(node, ctx).filter(|_| !ctx.clip_geometry.get()) {
         if emit_meshgradient_fill(node, mg, out, ctx) {
             return;
         }
@@ -1658,6 +1669,9 @@ mod charts;
 use charts::*;
 mod list;
 use list::*;
+mod clipping;
+use clipping::*;
+
 mod mesh;
 use mesh::*;
 mod pathops;

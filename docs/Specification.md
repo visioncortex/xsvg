@@ -290,6 +290,15 @@ not a CDATA blob. A nested `<x:doc>` is dropped the same way.
 through. Defined lowerings:
 
 - **`<rect>`** with no `rx`/`ry` → `<path>`; rounded rects pass through unchanged.
+- **`<clipPath>`** accepts editable xsvg graphics as source children. Compiled
+  groups are flattened to legal SVG clip shapes with composed transforms and
+  inherited text/winding properties. Text boxes use glyph outlines when the
+  font seam can supply them, otherwise positioned SVG text. An `<x:mesh>` uses
+  its exact face polygons (both grid and indexed syntax), without rasterization;
+  colours and alpha do not change its clipping geometry. Images contribute their
+  rectangular viewports. Referenced groups expand with cycle/depth/fuel guards.
+  This changes compiled output only: the authored objects remain intact for editing.
+
 
 **Passthrough (normative).** Any element in the **SVG namespace** the compiler doesn't recognize —
 filters, gradients, masks, markers, `foreignObject`, future or unknown elements — passes through

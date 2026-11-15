@@ -128,6 +128,22 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         return;
     }
 
+    // A clipping mesh contributes its exact face polygons, irrespective of
+    // paint or alpha. Reuse the parser above and avoid rasterizing any pixels.
+    if ctx.clip_geometry.get() {
+        out.push_str("<g");
+        copy_attrs(node, out, &["cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity"], ctx);
+        out.push_str(&pos_attr(node, ctx));
+        out.push('>');
+        for face in &mesh.faces {
+            out.push_str("<path d=\"");
+            append_mesh_face(&mesh, face, out);
+            out.push_str("\"/>");
+        }
+        out.push_str("</g>");
+        return;
+    }
+
     open_effect_element(
         node,
         "g",
@@ -219,13 +235,7 @@ pub(super) fn lower_mesh(
             if raster.face_regions[f] != r as u32 {
                 continue;
             }
-            let n = face.arity();
-            for c in 0..n {
-                let (px, py) = mesh.verts[face.v[c] as usize];
-                clip_d.push(if c == 0 { 'M' } else { 'L' });
-                clip_d.push_str(&format!("{},{}", fmt(px as f64), fmt(py as f64)));
-            }
-            clip_d.push('Z');
+            append_mesh_face(mesh, face, &mut clip_d);
         }
 
         let single = fit_field(&region_px[r], w, &rgba, 2.0);
@@ -648,4 +658,14 @@ pub(super) fn parse_hex_color(s: &str) -> Option<(crate::gradient::LinRgb, f32)>
         crate::gradient::RgbColor::new(r, g, bl).to_linear(),
         a as f32 / 255.0,
     ))
+}
+
+/// The same exact polygons bound both colour regions and authored clipping meshes.
+fn append_mesh_face(mesh: &crate::gradient::Mesh, face: &crate::gradient::mesh::Face, out: &mut String) {
+    for c in 0..face.arity() {
+        let (x,y) = mesh.verts[face.v[c] as usize];
+        out.push(if c == 0 { 'M' } else { 'L' });
+        out.push_str(&format!("{},{}", fmt(x as f64), fmt(y as f64)));
+    }
+    out.push('Z');
 }
