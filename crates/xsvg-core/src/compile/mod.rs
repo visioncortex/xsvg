@@ -625,14 +625,17 @@ pub(super) fn is_passthrough_container(node: roxmltree::Node) -> bool {
         && !is_hidden(node)
 }
 
-/// Containers whose children can be cached independently. A generated filter
-/// region depends on descendant geometry, so that entire container is a unit.
+/// Containers whose children can be cached independently. A `filter` list the
+/// compiler lowers ([`lower_filter_attr`]) gets a region measured from the
+/// descendants' geometry, so that container's output depends on its children
+/// and the whole of it is one unit. Only the attribute is ever lowered: a
+/// `url(#…)` reference, a declined list, or a filter set through `style` or a
+/// class passes through as authored and leaves the children independent.
 pub(super) fn is_unit_container(node: roxmltree::Node) -> bool {
     is_passthrough_container(node)
-        && node.attribute("filter").is_none()
-        && !node
-            .attribute("style")
-            .is_some_and(|s| s.contains("filter"))
+        && node
+            .attribute("filter")
+            .is_none_or(|f| parse_filter_functions(f).is_none())
 }
 
 /// Where one unit of a top-level element landed in that element's fragment
@@ -709,6 +712,27 @@ fn baked_refs<'a>(
             n.attribute("href")
                 .or_else(|| n.attribute((XLINK_NS, "href"))),
         );
+    }
+    // Inside a <clipPath> the compiler flattens (clipping.rs): a <use> of a
+    // group or xsvg element is expanded in place, and a `clip-path` there may
+    // be re-emitted as a derived clip — both bake the target's geometry.
+    if n.ancestors()
+        .skip(1)
+        .any(|a| a.tag_name().namespace() == Some(SVG_NS) && a.tag_name().name() == "clipPath")
+    {
+        if n.tag_name().name() == "use" && n.tag_name().namespace() == Some(SVG_NS) {
+            out.extend(
+                n.attribute("href")
+                    .or_else(|| n.attribute((XLINK_NS, "href"))),
+            );
+        }
+        if let Some(id) = n
+            .attribute("clip-path")
+            .and_then(|c| c.trim().strip_prefix("url(#"))
+            .and_then(|c| c.strip_suffix(')'))
+        {
+            out.push(id);
+        }
     }
     // a fill referencing a <meshgradient> is compiled, not live (§8.2)
     if let Some(id) = n

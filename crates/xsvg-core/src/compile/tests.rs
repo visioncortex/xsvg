@@ -6880,6 +6880,96 @@ fn unit_at_follows_the_serializer() {
 }
 
 #[test]
+fn units_are_the_deepest_leaves_under_nested_containers() {
+    let svg = format!(
+        r##"{XW}<defs><filter id="f"><feOffset dx="1"/></filter></defs><g id="board" x:artboard="1"><g x:layer="foreground"><g id="inner"><x:textbox x="0" y="20" width="80" height="20" font-size="10">words</x:textbox><rect id="deep" x="0" y="0" width="4" height="4"/></g><circle cx="5" cy="5" r="2"/></g><g id="blurred" filter="blur(2)"><rect id="inblur" x="0" y="0" width="6" height="6"/><circle cx="9" cy="9" r="1"/></g><g filter="url(#f)"><rect id="inref" x="0" y="0" width="7" height="7"/></g><g style="filter:blur(1px)"><rect id="instyle" x="0" y="0" width="8" height="8"/></g><g id="empty"/></g></svg>"##
+    );
+    let p = unit_platform();
+    let at = |needle: &str| svg.find(needle).unwrap();
+    let unit = |needle: &str| unit_range_impl(&svg, at(needle)).map(|r| r.0);
+    // two plain containers down, the unit is still the leaf itself
+    assert_eq!(unit("<x:textbox"), Some(at("<x:textbox")));
+    assert_eq!(unit(r#"<rect id="deep""#), Some(at(r#"<rect id="deep""#)));
+    // a container's own tag is that container, at any depth
+    assert_eq!(
+        unit_range_impl(&svg, at(r#"<g id="inner""#) + 3).map(|r| r.0),
+        Some(at(r#"<g id="inner""#))
+    );
+    // a lowered filter's region is measured from the children: one unit
+    assert_eq!(unit(r#"<rect id="inblur""#), Some(at(r#"<g id="blurred""#)));
+    // a filter the compiler passes through leaves the children independent
+    assert_eq!(unit(r#"<rect id="inref""#), Some(at(r#"<rect id="inref""#)));
+    assert_eq!(
+        unit(r#"<rect id="instyle""#),
+        Some(at(r#"<rect id="instyle""#))
+    );
+
+    // the fragment lists exactly those units, in output order, each the
+    // byte-identical compile of that unit alone
+    let board = at(r#"<g id="board""#);
+    for sourcemap in [false, true] {
+        let (frag, spans) =
+            compile_fragment_spans_platform_impl(&svg, "balanced", sourcemap, board, "", &p)
+                .unwrap();
+        // OUTPUT order: the foreground layer restacks above its siblings
+        let want = [
+            at(r#"<g id="blurred""#),
+            at(r#"<rect id="inref""#),
+            at(r#"<rect id="instyle""#),
+            at(r#"<g id="empty""#),
+            at("<x:textbox"),
+            at(r#"<rect id="deep""#),
+            at("<circle cx=\"5\""),
+        ];
+        let got: Vec<usize> = spans.iter().map(|s| s.source.0).collect();
+        assert_eq!(got, want, "{spans:?}");
+        let mut cursor = 0;
+        for span in &spans {
+            assert!(span.output.0 >= cursor, "{spans:?}");
+            cursor = span.output.1;
+            assert_eq!(
+                &frag[span.output.0..span.output.1],
+                compile_unit_platform_impl(&svg, "balanced", sourcemap, span.source.0, "", &p)
+                    .unwrap()
+            );
+            assert_eq!(unit_range_impl(&svg, span.source.0), Some(span.source));
+        }
+        // the filtered group's span holds its generated <filter> and both children
+        let blurred = &frag[spans[0].output.0..spans[0].output.1];
+        assert!(
+            blurred.starts_with("<filter") && blurred.contains("<circle"),
+            "{blurred}"
+        );
+    }
+}
+
+#[test]
+fn unit_dependents_follow_ancestors_and_clip_geometry() {
+    let svg = format!(
+        r##"{XW}<defs><g id="drawing"><g><rect id="leaf" x="0" y="0" width="10" height="20"/></g></g><clipPath id="src"><circle id="hole" r="9"/></clipPath><clipPath id="cut"><use href="#drawing"/></clipPath><clipPath id="chained"><g clip-path="url(#src)"><circle r="5" transform="translate(3 0)"/></g></clipPath><clipPath id="plain"><circle r="3"/></clipPath></defs><g id="board"><g id="layer"><rect id="deep" x="0" y="0" width="5" height="5"/></g><x:offset in="#layer" d="2"/><x:offset in="#deep" d="1"/><use href="#layer"/></g></svg>"##
+    );
+    let at = |needle: &str| svg.find(needle).unwrap();
+    let deps = |needle: &str| -> Vec<usize> {
+        unit_dependents_impl(&svg, &[at(needle)])
+            .iter()
+            .map(|d| d.0)
+            .collect()
+    };
+    // a nested leaf changes what every ancestor draws: both offsets re-emit,
+    // the one tracing the leaf and the one tracing its group (the live <use>
+    // re-resolves in the DOM and is not reported)
+    let offsets: Vec<usize> = svg.match_indices("<x:offset").map(|(i, _)| i).collect();
+    assert_eq!(deps(r#"<rect id="deep""#), offsets);
+    // a clip expands a referenced group in place, so it bakes that geometry
+    assert_eq!(deps(r#"<rect id="leaf""#), [at(r#"<clipPath id="cut""#)]);
+    // and re-emits another clip as a derived one when a wrapper asks for it
+    assert_eq!(
+        deps(r#"<circle id="hole""#),
+        [at(r#"<clipPath id="chained""#)]
+    );
+}
+
+#[test]
 fn unit_dependents_see_inside_a_container() {
     // the deck's case: an outlined word inside a warp, traced by an <x:offset>
     // beside it in the same artboard. Editing the word is editing the warp's
