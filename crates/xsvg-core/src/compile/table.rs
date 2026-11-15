@@ -125,7 +125,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
     // a cell's style: cell › row › column › a header cell's bold › the table
     // (query.rs, the same levels a query reads)
     let cell_style = |cell: roxmltree::Node, row: roxmltree::Node, _ci: usize| {
-        overlay(&cell_levels(cell, row, node, Some(&ctx.theme)), &style)
+        overlay(&cell_levels(cell, row, node, Some(ctx.theme)), &style)
     };
     // content width available for a cell's text
     let content_w = |ci: usize| (colw[ci] - 2.0 * pad).max(0.0);
@@ -243,7 +243,7 @@ pub(super) fn emit_table(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             let (segments, styles, emits) = collect_runs(cell, &st);
             let plain: String = segments.iter().map(|(t, _)| t.as_str()).collect();
             if !plain.trim().is_empty() {
-                let fill = level_value(&cell_levels(cell, *row, node, Some(&ctx.theme)), "fill")
+                let fill = level_value(&cell_levels(cell, *row, node, Some(ctx.theme)), "fill")
                     .map(|v| ctx.resolve_var(v).into_owned())
                     .unwrap_or_else(|| text_fill.clone());
                 let spec = AreaSpec {

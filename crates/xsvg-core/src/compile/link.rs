@@ -71,35 +71,30 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
         return;
     }
 
-    // Compile the dependency (recursively — its own <use>/x: elements lower too), with
-    // base = its key and the key pushed so a link back to it is caught as a cycle.
-    ctx.files.borrow_mut().push(key.clone());
-    let prev_base = ctx.base.replace(key);
-    // The dependency's node ranges index its *own* source, not the entry document, so
-    // no source map inside it — the baked block resolves up to the `<use>` (§4.2).
-    let prev_sm = ctx.sourcemap.replace(false);
-    // Compiled-output refs (`#id`) never cross a file boundary, but the memo and cycle
-    // stack are keyed by bare id — so give the dependency its own scope. Otherwise a
-    // `#mark` here and a `#mark` in the referrer collide: the memo hands back the wrong
-    // file's geometry, and the shared stack reports a false cycle. (`fuel`/`cuts` stay
-    // shared on purpose — they are a whole-compile work budget.)
-    let prev_resolved = ctx.resolved.replace(std::collections::HashMap::new());
-    let prev_resolving = ctx.resolving.replace(Vec::new());
-    // the linked file's spans are its own, not this document's: no caret stops
-    let _stops = ctx.suspend_stops();
-    let compiled = match session::parse_document(&source) {
-        Ok(d) => {
+    // Each file owns its tokens, imports and reference memo. Only the link
+    // ancestry and resolution budget cross the boundary; source identities and
+    // caret positions belong to the containing <use>, never to its baked nodes.
+    let compiled = match session::Parsed::new(&source) {
+        Ok(parsed) => {
+            let seams = Backend { m: ctx.m, shaper: ctx.shaper, outliner: ctx.outliner,
+                resolver: ctx.resolver, keys: &NoKeys, generators: ctx.generators };
+            let child = Ctx::new(&seams, ctx.quality, false, &key, &parsed);
+            let mut files = ctx.files.borrow().clone();
+            files.push(key);
+            child.files.replace(files);
+            child.fuel.set(ctx.fuel.get());
+            child.cuts.set(ctx.cuts.get());
+            child.force_outline.set(ctx.force_outline.get());
+            child.in_plugin.set(ctx.in_plugin.get());
             let mut s = String::new();
-            serialize(d.root_element(), &mut s, true, ctx);
+            serialize(parsed.doc.root_element(), &mut s, true, &child);
+            ctx.fuel.set(child.fuel.get());
+            ctx.cuts.set(child.cuts.get());
+            if let Some(miss) = child.outline_miss.into_inner() { ctx.record_miss(miss); }
             Some(s)
         }
         Err(_) => None,
     };
-    ctx.resolving.replace(prev_resolving);
-    ctx.resolved.replace(prev_resolved);
-    ctx.sourcemap.set(prev_sm);
-    ctx.base.replace(prev_base);
-    ctx.files.borrow_mut().pop();
 
     let Some(compiled) = compiled else {
         out.push_str("<!-- xsvg: <use> dependency parse error -->");
@@ -141,7 +136,19 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
                 clip: true,
             };
             let close = open_viewport(out, &vp, node, &["href", "x", "y", "width", "height"], ctx);
+            // The root's inherited paint and font still apply after its viewport
+            // has been fitted. Dropping the <svg> must not drop its presentation.
+            let mut attrs = String::new();
+            for attr in root.attributes() {
+                if ["id", "x", "y", "width", "height", "viewBox", "preserveAspectRatio", "version"].contains(&attr.name()) { continue; }
+                let prefix = match attr.namespace() { None => "", Some(XML_NS) => "xml:", _ => continue };
+                attrs.push_str(&format!(" {prefix}{}=\"", attr.name()));
+                push_escaped(&mut attrs, attr.value(), true);
+                attrs.push('"');
+            }
+            if !attrs.is_empty() { out.push_str(&format!("<g{attrs}>")); }
             out.push_str(&inner);
+            if !attrs.is_empty() { out.push_str("</g>"); }
             out.push_str(close);
         }
         Some(id) => {
