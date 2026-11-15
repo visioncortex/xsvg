@@ -326,7 +326,9 @@ pub(super) fn lower_mesh(
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
         let (uw, uh) = (iw * scale as f64, ih * scale as f64);
         let (pw, ph) = super::mesh_texture::dimensions(node, ctx, (uw, uh), (tw, th));
-        let pixels = if (pw, ph) == (tw, th) { px } else {
+        let pixels = if (pw, ph) == (tw, th) {
+            px
+        } else {
             super::mesh_texture::interpolate(&px, (tw, th), (pw, ph), ch)
         };
         let png = if opaque {
