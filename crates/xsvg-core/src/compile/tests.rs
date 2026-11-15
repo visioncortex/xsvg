@@ -10546,11 +10546,19 @@ fn drop_shadows_on_generated_objects_cover_the_complete_result() {
 
 #[test]
 fn linked_drawings_resolve_their_own_theme_and_restore_the_parent_scope() {
-    let leaf = format!(r##"{XW}<x:theme><x:color name="accent" value="#abcdef"/><x:color name="local" value="#123456"/><x:font name="label" font-family="LeafFont" font-size="23"/></x:theme><rect width="20" height="10" fill="var(local)" stroke="var(accent)"/><x:textbox x:font="label" width="100" height="40">Leaf</x:textbox></svg>"##);
-    let middle = format!(r##"{XW}<x:theme><x:color name="accent" value="#112233"/></x:theme><use href="leaf"/><rect width="10" height="10" fill="var(accent)"/></svg>"##);
-    let main = format!(r##"{XW}<x:theme><x:color name="accent" value="#ff0000"/><x:font name="label" font-family="ParentFont" font-size="12"/></x:theme><use href="middle"/><use href="leaf"/><rect width="10" height="10" fill="var(accent)"/></svg>"##);
+    let leaf = format!(
+        r##"{XW}<x:theme><x:color name="accent" value="#abcdef"/><x:color name="local" value="#123456"/><x:font name="label" font-family="LeafFont" font-size="23"/></x:theme><rect width="20" height="10" fill="var(local)" stroke="var(accent)"/><x:textbox x:font="label" width="100" height="40">Leaf</x:textbox></svg>"##
+    );
+    let middle = format!(
+        r##"{XW}<x:theme><x:color name="accent" value="#112233"/></x:theme><use href="leaf"/><rect width="10" height="10" fill="var(accent)"/></svg>"##
+    );
+    let main = format!(
+        r##"{XW}<x:theme><x:color name="accent" value="#ff0000"/><x:font name="label" font-family="ParentFont" font-size="12"/></x:theme><use href="middle"/><use href="leaf"/><rect width="10" height="10" fill="var(accent)"/></svg>"##
+    );
     let out = compile_linked(&main, &[("middle", &middle), ("leaf", &leaf)]);
-    for value in ["#abcdef", "#123456", "#112233", "#ff0000", "LeafFont"] { assert!(out.contains(value), "{value}: {out}"); }
+    for value in ["#abcdef", "#123456", "#112233", "#ff0000", "LeafFont"] {
+        assert!(out.contains(value), "{value}: {out}");
+    }
     assert!(!out.contains("var("), "tokens unresolved: {out}");
     assert_eq!(out.matches("font-size=\"23\"").count(), 2, "{out}");
     assert!(!out.contains("ParentFont"), "parent font leaked: {out}");
@@ -10561,5 +10569,8 @@ fn linked_drawing_retains_root_paint_and_plain_text_font() {
     let file = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" fill="#123456" font-family="RootFont"><rect width="10" height="10"/><text y="30">Root style</text></svg>"##;
     let main = format!(r##"{XW}<use href="drawing" width="200" height="100"/></svg>"##);
     let out = compile_linked(&main, &[("drawing", file)]);
-    assert!(out.contains("fill=\"#123456\" font-family=\"RootFont\""), "{out}");
+    assert!(
+        out.contains("fill=\"#123456\" font-family=\"RootFont\""),
+        "{out}"
+    );
 }

@@ -76,8 +76,14 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
     // caret positions belong to the containing <use>, never to its baked nodes.
     let compiled = match session::Parsed::new(&source) {
         Ok(parsed) => {
-            let seams = Backend { m: ctx.m, shaper: ctx.shaper, outliner: ctx.outliner,
-                resolver: ctx.resolver, keys: &NoKeys, generators: ctx.generators };
+            let seams = Backend {
+                m: ctx.m,
+                shaper: ctx.shaper,
+                outliner: ctx.outliner,
+                resolver: ctx.resolver,
+                keys: &NoKeys,
+                generators: ctx.generators,
+            };
             let child = Ctx::new(&seams, ctx.quality, false, &key, &parsed);
             let mut files = ctx.files.borrow().clone();
             files.push(key);
@@ -91,7 +97,9 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
             serialize(parsed.doc.root_element(), &mut s, true, &child);
             ctx.fuel.set(child.fuel.get());
             ctx.cuts.set(child.cuts.get());
-            if let Some(miss) = child.outline_miss.into_inner() { ctx.record_miss(miss); }
+            if let Some(miss) = child.outline_miss.into_inner() {
+                ctx.record_miss(miss);
+            }
             Some(s)
         }
         Err(_) => None,
@@ -141,15 +149,36 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
             // has been fitted. Dropping the <svg> must not drop its presentation.
             let mut attrs = String::new();
             for attr in root.attributes() {
-                if ["id", "x", "y", "width", "height", "viewBox", "preserveAspectRatio", "version"].contains(&attr.name()) { continue; }
-                let prefix = match attr.namespace() { None => "", Some(XML_NS) => "xml:", _ => continue };
+                if [
+                    "id",
+                    "x",
+                    "y",
+                    "width",
+                    "height",
+                    "viewBox",
+                    "preserveAspectRatio",
+                    "version",
+                ]
+                .contains(&attr.name())
+                {
+                    continue;
+                }
+                let prefix = match attr.namespace() {
+                    None => "",
+                    Some(XML_NS) => "xml:",
+                    _ => continue,
+                };
                 attrs.push_str(&format!(" {prefix}{}=\"", attr.name()));
                 push_escaped(&mut attrs, attr.value(), true);
                 attrs.push('"');
             }
-            if !attrs.is_empty() { out.push_str(&format!("<g{attrs}>")); }
+            if !attrs.is_empty() {
+                out.push_str(&format!("<g{attrs}>"));
+            }
             out.push_str(&inner);
-            if !attrs.is_empty() { out.push_str("</g>"); }
+            if !attrs.is_empty() {
+                out.push_str("</g>");
+            }
             out.push_str(close);
         }
         Some(id) => {
