@@ -1,39 +1,164 @@
 //! Texture serialization at the requested output density. The fitted field,
 //! clip geometry and texel placement are identical in compact and raster modes.
-use super::{element_transform, Ctx, Viewport};
+use super::{
+    attr_num, element_transform, parse_num, view_box_of, Ctx, Par, Viewport, SVG_NS, XLINK_NS,
+};
 use crate::kurbo::Affine;
 
-/// Root user coordinates, including nested viewport fits. Translation is
-/// irrelevant to density, but retaining the full affine keeps composition exact.
+/// The placement with the largest scale: what a linked document, which takes
+/// one parent transform, should be rasterized for.
 pub(super) fn display_transform(node: roxmltree::Node, ctx: &Ctx) -> Affine {
-    let mut ancestors: Vec<_> = node.ancestors().filter(|n| n.is_element()).collect();
-    ancestors.reverse();
-    ancestors.into_iter().fold(ctx.raster_parent, |matrix, n| {
-        let mut local = element_transform(n);
-        if n.parent_element().is_some() && n.tag_name().name() == "svg" {
-            if let Some(viewport) = Viewport::of(n) {
-                let (sx, sy, _, _) = viewport.fit();
-                local *= Affine::scale_non_uniform(sx, sy);
+    display_transforms(node, ctx)
+        .into_iter()
+        .max_by(|a, b| a.determinant().abs().total_cmp(&b.determinant().abs()))
+        .unwrap_or(ctx.raster_parent)
+}
+
+/// Root user coordinates of every place `node` is drawn, including nested
+/// viewport fits: where it stands, and once per `<use>` that instances it or
+/// an ancestor. Translation is irrelevant to density, but retaining the full
+/// affine keeps composition exact.
+pub(super) fn display_transforms(node: roxmltree::Node, ctx: &Ctx) -> Vec<Affine> {
+    let uses: Vec<(&str, roxmltree::Node)> = node
+        .document()
+        .descendants()
+        .filter(|n| n.tag_name().name() == "use" && n.tag_name().namespace() == Some(SVG_NS))
+        .filter_map(|n| {
+            let href = n.attribute("href").or(n.attribute((XLINK_NS, "href")))?;
+            Some((href.strip_prefix('#')?, n))
+        })
+        .collect();
+    let mut found = Vec::new();
+    placements(node, ctx, &uses, Affine::IDENTITY, 0, &mut found);
+    if found.is_empty() {
+        // Drawn by no `<use>` and standing somewhere that is not rendered in
+        // place (a `<pattern>`, a `<marker>`): its own coordinates are the
+        // only evidence there is.
+        found.push(
+            node.ancestors()
+                .filter(|n| n.is_element())
+                .fold(Affine::IDENTITY, |below, n| local(n, None) * below),
+        );
+        found[0] = ctx.raster_parent * found[0];
+    }
+    found
+}
+
+/// Bounds for instancing that feeds on itself: `<use>` chains deeper than
+/// this, or fanning out wider, stop adding placements.
+const MAX_USE_DEPTH: usize = 8;
+const MAX_PLACEMENTS: usize = 64;
+
+/// Walk from `node` to the root, carrying `below`: the transform from `node`'s
+/// content up to (not including) the element in hand.
+fn placements(
+    node: roxmltree::Node,
+    ctx: &Ctx,
+    uses: &[(&str, roxmltree::Node)],
+    mut below: Affine,
+    depth: usize,
+    found: &mut Vec<Affine>,
+) {
+    for n in node.ancestors().filter(|n| n.is_element()) {
+        if depth < MAX_USE_DEPTH && n.parent_element().is_some() {
+            if let Some(id) = n.attribute("id") {
+                for (_, instance) in uses.iter().filter(|(href, _)| *href == id) {
+                    if found.len() >= MAX_PLACEMENTS {
+                        return;
+                    }
+                    // the referenced element is drawn at the `<use>`'s x/y,
+                    // inside the `<use>`'s own transform (the walk applies it)
+                    let at = Affine::translate((
+                        attr_num(*instance, "x", 0.0),
+                        attr_num(*instance, "y", 0.0),
+                    ));
+                    let inner = at * local(n, Some(*instance)) * below;
+                    placements(*instance, ctx, uses, inner, depth + 1, found);
+                }
             }
         }
-        matrix * local
-    })
+        // never rendered where it stands: only its instances count
+        if n.tag_name().namespace() == Some(SVG_NS)
+            && matches!(
+                n.tag_name().name(),
+                "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "marker"
+            )
+        {
+            return;
+        }
+        below = local(n, None) * below;
+    }
+    found.push(ctx.raster_parent * below);
+}
+
+/// An element's own contribution: its transform, and for a viewport element
+/// the `viewBox` fit — sized by the instancing `<use>` when there is one,
+/// whose `width`/`height` override the target's.
+fn local(n: roxmltree::Node, instance: Option<roxmltree::Node>) -> Affine {
+    let name = n.tag_name().name();
+    let viewport = match instance {
+        _ if n.tag_name().namespace() != Some(SVG_NS) => None,
+        None if name == "svg" && n.parent_element().is_some() => Viewport::of(n),
+        Some(u) if matches!(name, "svg" | "symbol") => {
+            let side = |a: &str| {
+                let own = |e: roxmltree::Node| e.attribute(a).and_then(parse_num);
+                own(u).or_else(|| own(n)).filter(|v| *v > 0.0)
+            };
+            match (side("width"), side("height")) {
+                (Some(w), Some(h)) => Some(Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    w,
+                    h,
+                    view_box: view_box_of(n),
+                    par: n
+                        .attribute("preserveAspectRatio")
+                        .and_then(Par::parse)
+                        .unwrap_or(Par::DEFAULT),
+                    clip: false,
+                }),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    // a `<symbol>` takes no transform of its own
+    let mut matrix = if name == "symbol" && n.tag_name().namespace() == Some(SVG_NS) {
+        Affine::IDENTITY
+    } else {
+        element_transform(n)
+    };
+    if let Some(viewport) = viewport {
+        let (sx, sy, _, _) = viewport.fit();
+        matrix *= Affine::scale_non_uniform(sx, sy);
+    }
+    matrix
+}
+
+/// Texels per user unit on each axis for `node`, or `None` when textures stay
+/// compact. Where the node is drawn more than once, the densest placement
+/// decides: every instance shares the one texture.
+pub(super) fn density(node: roxmltree::Node, ctx: &Ctx) -> Option<(f64, f64)> {
+    let density = ctx.rasterize_at_display_resolution?;
+    Some(
+        display_transforms(node, ctx)
+            .iter()
+            .fold((0.0_f64, 0.0_f64), |(x, y), matrix| {
+                let [a, b, c, d, _, _] = matrix.as_coeffs();
+                (x.max(a.hypot(b) * density), y.max(c.hypot(d) * density))
+            }),
+    )
 }
 
 pub(super) fn dimensions(
-    node: roxmltree::Node,
-    ctx: &Ctx,
+    density: Option<(f64, f64)>,
     size: (f64, f64),
     grid: (usize, usize),
 ) -> (usize, usize) {
-    let Some(density) = ctx.rasterize_at_display_resolution else {
-        return grid;
-    };
-    let [a, b, c, d, _, _] = display_transform(node, ctx).as_coeffs();
-    bounded_dimensions(
-        (size.0 * a.hypot(b) * density, size.1 * c.hypot(d) * density),
-        grid,
-    )
+    match density {
+        Some((x, y)) => bounded_dimensions((size.0 * x, size.1 * y), grid),
+        None => grid,
+    }
 }
 
 fn bounded_dimensions(size: (f64, f64), grid: (usize, usize)) -> (usize, usize) {
@@ -59,6 +184,17 @@ fn bounded_dimensions(size: (f64, f64), grid: (usize, usize)) -> (usize, usize) 
         target
     }
 }
+
+/// A smooth field filters down to near-constant residuals, so a fast DEFLATE
+/// level already removes almost all of it; higher levels cost time for bytes
+/// that are not there.
+pub(super) fn encode(w: usize, h: usize, pixels: &[u8], channels: usize) -> Vec<u8> {
+    crate::gradient::png::encode_png_with(w as u32, h as u32, pixels, channels, |raw| {
+        miniz_oxide::deflate::compress_to_vec_zlib(raw, DEFLATE_LEVEL)
+    })
+}
+
+const DEFLATE_LEVEL: u8 = 3;
 
 /// Bilinear sampling of the grid's quantized vertex colours, in premultiplied
 /// sRGB like native image compositing. No PNG is encoded/decoded on the way.

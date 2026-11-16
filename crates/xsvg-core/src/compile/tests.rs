@@ -3215,7 +3215,7 @@ fn b64_prefix(out: &str, n: usize) -> Vec<u8> {
     let mut buf = 0u32;
     let mut bits = 0;
     for &c in &out.as_bytes()[k..] {
-        if c == b'"' || bytes.len() >= n {
+        if c == b'"' || c == b'=' || bytes.len() >= n {
             break;
         }
         let v = T.iter().position(|&t| t == c).unwrap() as u32;
@@ -11352,4 +11352,194 @@ fn display_resolution_covers_curved_and_linked_meshes() {
     let out = compile_with(&source, &options, &platform).unwrap();
     let (w, h) = sizes(&out);
     assert!(w >= 600 && h >= 400, "{w}x{h}");
+}
+
+/// Decode a PNG the compiler emitted: inflate IDAT and undo the scanline
+/// filters, independently of the encoder. Returns (width, height, channels, pixels).
+fn decode_png(png: &[u8]) -> (usize, usize, usize, Vec<u8>) {
+    let be = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+    let (w, h) = (be(16), be(20));
+    let bpp = if png[25] == 6 { 4 } else { 3 };
+    let (mut at, mut idat) = (8, Vec::new());
+    while at < png.len() {
+        let len = be(at);
+        if &png[at + 4..at + 8] == b"IDAT" {
+            idat.extend_from_slice(&png[at + 8..at + 8 + len]);
+        }
+        at += 12 + len;
+    }
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&idat).unwrap();
+    let stride = w * bpp;
+    assert_eq!(raw.len(), (stride + 1) * h);
+    let mut px = vec![0u8; stride * h];
+    for row in 0..h {
+        let line = &raw[row * (stride + 1)..(row + 1) * (stride + 1)];
+        for i in 0..stride {
+            let a = if i >= bpp {
+                px[row * stride + i - bpp] as i16
+            } else {
+                0
+            };
+            let b = if row > 0 {
+                px[(row - 1) * stride + i] as i16
+            } else {
+                0
+            };
+            let c = if row > 0 && i >= bpp {
+                px[(row - 1) * stride + i - bpp] as i16
+            } else {
+                0
+            };
+            let predicted = match line[0] {
+                0 => 0,
+                1 => a,
+                2 => b,
+                3 => (a + b) / 2,
+                4 => {
+                    let (pa, pb, pc) = ((b - c).abs(), (a - c).abs(), (a + b - 2 * c).abs());
+                    if pa <= pb && pa <= pc {
+                        a
+                    } else if pb <= pc {
+                        b
+                    } else {
+                        c
+                    }
+                }
+                other => panic!("filter {other}"),
+            };
+            px[row * stride + i] = line[1 + i].wrapping_add(predicted as u8);
+        }
+    }
+    (w, h, bpp, px)
+}
+
+fn first_png(svg: &str) -> Vec<u8> {
+    b64_prefix(svg, usize::MAX)
+}
+
+fn display_options(density: f64) -> Options<'static> {
+    Options {
+        rasterize_at_display_resolution: Some(density),
+        ..Default::default()
+    }
+}
+
+const QUAD_MESH: &str = r##"<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##;
+
+#[test]
+fn display_resolution_textures_are_compressed_and_match_the_compact_field() {
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let source = format!(r#"{XW}<g transform="scale(8 9)">{QUAD_MESH}</g></svg>"#);
+    let compact = compile_test(&source);
+    let dense = compile_with(&source, &display_options(1.0), &platform).unwrap();
+
+    let (cw, ch, cc, cpx) = decode_png(&first_png(&compact));
+    let (w, h, c, px) = decode_png(&first_png(&dense));
+    assert_eq!(c, cc);
+    assert!(w >= 800 && h >= 450, "{w}x{h}");
+    // megapixel-scale raw data, and the whole document is a small fraction of it
+    assert!(w * h * c > 1_000_000);
+    assert!(
+        dense.len() < w * h * c / 20,
+        "{} bytes for {w}x{h}",
+        dense.len()
+    );
+
+    // The dense texture is the compact one, bilinearly reconstructed: the
+    // corners are the grid's corner texels and every pixel sits within
+    // rounding of the reconstruction a renderer would have made.
+    let texel = |x: usize, y: usize, k: usize| cpx[(y * cw + x) * cc + k] as f64;
+    let mut worst = 0.0_f64;
+    for y in (0..h).step_by(7) {
+        for x in (0..w).step_by(11) {
+            let u = ((x as f64 + 0.5) * cw as f64 / w as f64 - 0.5).clamp(0.0, (cw - 1) as f64);
+            let v = ((y as f64 + 0.5) * ch as f64 / h as f64 - 0.5).clamp(0.0, (ch - 1) as f64);
+            let (x0, y0) = (u.floor() as usize, v.floor() as usize);
+            let (x1, y1) = ((x0 + 1).min(cw - 1), (y0 + 1).min(ch - 1));
+            let (fx, fy) = (u - x0 as f64, v - y0 as f64);
+            for k in 0..3 {
+                let expected = (texel(x0, y0, k) * (1.0 - fx) + texel(x1, y0, k) * fx) * (1.0 - fy)
+                    + (texel(x0, y1, k) * (1.0 - fx) + texel(x1, y1, k) * fx) * fy;
+                worst = worst.max((px[(y * w + x) * c + k] as f64 - expected).abs());
+            }
+        }
+    }
+    assert!(worst <= 0.51, "off the compact field by {worst}");
+    for (dx, dy, sx, sy) in [
+        (0, 0, 0, 0),
+        (w - 1, 0, cw - 1, 0),
+        (0, h - 1, 0, ch - 1),
+        (w - 1, h - 1, cw - 1, ch - 1),
+    ] {
+        assert_eq!(
+            px[(dy * w + dx) * c..][..3],
+            cpx[(sy * cw + sx) * cc..][..3]
+        );
+    }
+    // the compact path is untouched: still the stored encoding
+    assert_eq!(first_png(&compact)[41..43], [0x78, 0x01]);
+}
+
+#[test]
+fn display_resolution_follows_use_instances() {
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let width = |body: &str| {
+        let source = format!("{XW}{body}</svg>");
+        let out = compile_with(&source, &display_options(1.0), &platform).unwrap();
+        let png = b64_prefix(&out, 24);
+        let size = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as f64;
+        (size(16), size(20))
+    };
+    let (w1, h1) = width(QUAD_MESH);
+    let near = |got: (f64, f64), sx: f64, sy: f64| {
+        assert!(
+            (got.0 - w1 * sx).abs() <= sx + 1.0 && (got.1 - h1 * sy).abs() <= sy + 1.0,
+            "{got:?} vs {w1}x{h1} * {sx},{sy}"
+        );
+    };
+    // a definition drawn only through a scaled <use>
+    near(
+        width(&format!(
+            r##"<defs><g id="m">{QUAD_MESH}</g></defs><use href="#m" transform="scale(8)"/>"##
+        )),
+        8.0,
+        8.0,
+    );
+    // a <symbol> fitted to the size its <use> gives it
+    near(
+        width(&format!(
+            r##"<symbol id="s" viewBox="0 0 100 50" preserveAspectRatio="none">{QUAD_MESH}</symbol><use href="#s" width="800" height="200"/>"##
+        )),
+        8.0,
+        4.0,
+    );
+    // the densest of several placements decides, the definition's own included
+    near(
+        width(&format!(
+            r##"<g id="m">{QUAD_MESH}</g><use href="#m" transform="scale(2)"/><g transform="scale(1 5)"><use href="#m" x="10"/></g>"##
+        )),
+        2.0,
+        5.0,
+    );
+    // a <use> of a <use>
+    near(
+        width(&format!(
+            r##"<defs><g id="m" transform="scale(2)">{QUAD_MESH}</g><use id="u" href="#m" transform="scale(3)"/></defs><use href="#u"/>"##
+        )),
+        6.0,
+        6.0,
+    );
+    // an unused definition and a self-referencing chain both fall back to their own space
+    near(
+        width(&format!(r##"<defs><g id="m">{QUAD_MESH}</g></defs>"##)),
+        1.0,
+        1.0,
+    );
+    near(
+        width(&format!(
+            r##"<defs><g id="m">{QUAD_MESH}<use href="#m" transform="scale(2)"/></g></defs>"##
+        )),
+        1.0,
+        1.0,
+    );
 }

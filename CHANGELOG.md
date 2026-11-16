@@ -14,6 +14,19 @@ partial one.
 
 ## [Unreleased]
 
+### Added
+
+- **Mesh textures at display resolution** (`Options::rasterize_at_display_resolution`,
+  `CompileSession::with_display_resolution`): a fitted mesh's texture is emitted at the given
+  number of pixels per root user unit instead of as its compact grid, for consumers that cannot
+  rely on the renderer's bilinear image filter. Density follows every transform and viewport fit
+  the mesh is drawn through, including each `<use>` that instances it (the densest placement
+  decides), capped at 8192 px a side and 16.7 Mpx. These textures are filtered and
+  DEFLATE-compressed (`miniz_oxide`, pure Rust); the default compact output is byte-identical.
+  `xsvg-gradient` gains `png::encode_png_with`, which takes the zlib compressor from its caller
+  and so stays dependency-free. `Options` and `Backend` gain public fields: build them with
+  `..Default::default()`.
+
 ## [0.3.0] — 2026-11-13
 
 **Live corners, text that behaves the same outlined as live, and an editor's view of the

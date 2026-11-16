@@ -236,6 +236,8 @@ pub(super) fn lower_mesh(
         QualityProfile::Highest | QualityProfile::Raster => (0.5, 48),
     };
 
+    // one answer for the whole mesh: every region shares its placements
+    let density = super::mesh_texture::density(node, ctx);
     for r in 0..raster.regions {
         if region_px[r].is_empty() {
             continue;
@@ -325,13 +327,17 @@ pub(super) fn lower_mesh(
         // Keep the fitted grid's placement regardless of output texture density.
         let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
         let (uw, uh) = (iw * scale as f64, ih * scale as f64);
-        let (pw, ph) = super::mesh_texture::dimensions(node, ctx, (uw, uh), (tw, th));
+        let (pw, ph) = super::mesh_texture::dimensions(density, (uw, uh), (tw, th));
         let pixels = if (pw, ph) == (tw, th) {
             px
         } else {
             super::mesh_texture::interpolate(&px, (tw, th), (pw, ph), ch)
         };
-        let png = if opaque {
+        // The compact grid stays byte-for-byte what it always was (a few
+        // texels, stored); a resampled texture is megapixels and is compressed.
+        let png = if (pw, ph) != (tw, th) {
+            super::mesh_texture::encode(pw, ph, &pixels, ch)
+        } else if opaque {
             crate::gradient::png::encode_rgb_png(pw as u32, ph as u32, &pixels)
         } else {
             crate::gradient::png::encode_rgba_png(pw as u32, ph as u32, &pixels)
