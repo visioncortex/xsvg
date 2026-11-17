@@ -11543,3 +11543,188 @@ fn display_resolution_follows_use_instances() {
         1.0,
     );
 }
+
+/// An `n×n`-patch `<meshgradient id="m">` over `n·cell` units, in the
+/// Inkscape dialect: curved edges, smoothly varying corner colours.
+fn patch_grid_meshgradient(n: usize, cell: f64) -> String {
+    let col = |i: usize, j: usize| {
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            40 + (i * 200 / n) % 216,
+            60 + (j * 180 / n) % 196,
+            255 - ((i + j) * 110 / n) % 200
+        )
+    };
+    let (c, b, t) = (cell, cell * 0.12, cell / 3.0);
+    let mut s = String::from(r#"<meshgradient id="m" x="0" y="0">"#);
+    for j in 0..n {
+        s.push_str("<meshrow>");
+        for i in 0..n {
+            s.push_str("<meshpatch>");
+            if j == 0 {
+                s.push_str(&format!(
+                    r#"<stop path="c {t},{b} {},{} {c},0" stop-color="{}"/>"#,
+                    2.0 * t,
+                    -b,
+                    col(i + 1, j)
+                ));
+            }
+            s.push_str(&format!(
+                r#"<stop path="c {b},{t} {},{} 0,{c}" stop-color="{}"/>"#,
+                -b,
+                2.0 * t,
+                col(i + 1, j + 1)
+            ));
+            s.push_str(&format!(
+                r#"<stop path="c {},{b} {},{} {},0" stop-color="{}"/>"#,
+                -t,
+                -2.0 * t,
+                -b,
+                -c,
+                col(i, j + 1)
+            ));
+            if i == 0 {
+                s.push_str(&format!(
+                    r#"<stop path="c {b},{} {},{} 0,{}" stop-color="{}"/>"#,
+                    -t,
+                    -b,
+                    -2.0 * t,
+                    -c,
+                    col(i, j)
+                ));
+            }
+            s.push_str("</meshpatch>");
+        }
+        s.push_str("</meshrow>");
+    }
+    s.push_str("</meshgradient>");
+    s
+}
+
+/// Every mesh region clip in compiled output: (subpaths, vertices, twice the
+/// signed area) of each `<clipPath id="x-mesh-…">`'s path.
+fn region_clips(out: &str) -> Vec<(usize, usize, f64)> {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    doc.descendants()
+        .filter(|n| {
+            n.has_tag_name("clipPath")
+                && n.attribute("id").is_some_and(|i| i.starts_with("x-mesh-"))
+        })
+        .map(|clip| {
+            let d = clip.first_element_child().unwrap().attribute("d").unwrap();
+            let (mut vertices, mut area) = (0, 0.0);
+            let subpaths: Vec<&str> = d.split('Z').filter(|s| !s.is_empty()).collect();
+            for sub in &subpaths {
+                let pts: Vec<(f64, f64)> = sub
+                    .trim_start_matches('M')
+                    .split('L')
+                    .map(|p| {
+                        let (x, y) = p.split_once(',').unwrap();
+                        (x.parse().unwrap(), y.parse().unwrap())
+                    })
+                    .collect();
+                vertices += pts.len();
+                for i in 0..pts.len() {
+                    let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                    area += a.0 * b.1 - b.0 * a.1;
+                }
+            }
+            (subpaths.len(), vertices, area)
+        })
+        .collect()
+}
+
+#[test]
+fn a_mesh_region_is_clipped_by_its_outline_not_by_every_face() {
+    // 8×8 patches, 12×12 quads each at this quality: 9,216 faces, one region
+    let svg = format!(
+        r##"{XW}{}<rect width="400" height="400" fill="url(#m)"/></svg>"##,
+        patch_grid_meshgradient(8, 50.0)
+    );
+    let out = compile_test(&svg);
+    let clips = region_clips(&out);
+    assert_eq!(clips.len(), 1, "one smooth region");
+    let (subpaths, vertices, area) = clips[0];
+    assert_eq!(subpaths, 1);
+    // the rim of a 96×96 grid of quads
+    assert_eq!(vertices, 4 * 96);
+    // the patch edges bow in and out by equal amounts: the area is the square's
+    assert!((area.abs() / 2.0 - 160_000.0).abs() < 160.0, "{area}");
+    // it was 554 KB when every face was named
+    assert!(out.len() < 24 * 1024, "{} bytes", out.len());
+    assert_eq!(out.matches("<image").count(), 1);
+}
+
+#[test]
+fn mesh_region_clips_cover_exactly_their_faces() {
+    // authored meshes, where the answer can be written down
+    for (mesh, expected) in [
+        // one quad
+        (
+            r##"<x:mesh points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##,
+            vec![(1, 4, 10_000.0)],
+        ),
+        // two quads agreeing along their shared edge: one region, the seam gone
+        (
+            r##"<x:mesh points="0,0 50,0 100,0 0,50 50,50 100,50"><x:face v="0 1 4 3" fill="#f00 #0f0 #00f #fff"/><x:face v="1 2 5 4" fill="#0f0 #f0f #ff0 #00f"/></x:mesh>"##,
+            vec![(1, 6, 10_000.0)],
+        ),
+        // the same two with a colour crack between them: a region each
+        (
+            r##"<x:mesh points="0,0 50,0 100,0 0,50 50,50 100,50"><x:face v="0 1 4 3" fill="#f00 #0f0 #00f #fff"/><x:face v="1 2 5 4" fill="#000 #f0f #ff0 #000"/></x:mesh>"##,
+            vec![(1, 4, 5_000.0), (1, 4, 5_000.0)],
+        ),
+        // wound the other way round, and a triangle
+        (
+            r##"<x:mesh points="0,0 50,0 100,0 0,50 50,50"><x:face v="3 4 1 0" fill="#fff #00f #0f0 #f00"/><x:face v="1 2 4" fill="#0f0 #f0f #00f"/></x:mesh>"##,
+            vec![(1, 5, 7_500.0)],
+        ),
+    ] {
+        let out = compile_test(&format!("{XW}{mesh}</svg>"));
+        let clips: Vec<(usize, usize, f64)> = region_clips(&out)
+            .into_iter()
+            .map(|(s, v, a)| (s, v, a.abs()))
+            .collect();
+        assert_eq!(clips, expected, "{out}");
+    }
+}
+
+#[test]
+fn a_flat_mesh_region_is_one_path() {
+    // every corner the same colour: no image, the outline filled directly
+    let out = compile_test(&format!(
+        r##"{XW}<x:mesh points="0,0 50,0 100,0 0,50 50,50 100,50"><x:face v="0 1 4 3" fill="#369 #369 #369 #369"/><x:face v="1 2 5 4" fill="#369 #369 #369 #369"/></x:mesh></svg>"##
+    ));
+    assert!(!out.contains("<image"), "{out}");
+    assert!(
+        out.contains(r##"d="M0,0L50,0L100,0L100,50L50,50L0,50Z""##),
+        "{out}"
+    );
+}
+
+#[test]
+fn mesh_outlines_are_stable_across_compiles_and_fragments() {
+    let svg = format!(
+        r##"{XW}{}<rect width="200" height="200" fill="url(#m)"/></svg>"##,
+        patch_grid_meshgradient(3, 200.0 / 3.0)
+    );
+    let whole = compile_test(&svg);
+    for _ in 0..4 {
+        assert_eq!(compile_test(&svg), whole);
+    }
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let fragment = compile_with(
+        &svg,
+        &Options {
+            fragment: Some(svg.find("<rect").unwrap()),
+            ..Default::default()
+        },
+        &platform,
+    )
+    .unwrap();
+    assert!(
+        whole.contains(&fragment),
+        "a fragment is its span in the whole compile"
+    );
+    assert_eq!(region_clips(&whole).len(), 1);
+}

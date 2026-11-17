@@ -144,11 +144,11 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         );
         out.push_str(&pos_attr(node, ctx));
         out.push('>');
-        for face in &mesh.faces {
-            out.push_str("<path d=\"");
-            append_mesh_face(&mesh, face, out);
-            out.push_str("\"/>");
-        }
+        // one path: the outline of all the faces together
+        let whole = mesh.region_outlines(&vec![0; mesh.faces.len()], 1);
+        out.push_str("<path d=\"");
+        append_outline(&mesh, &whole[0], out);
+        out.push_str("\"/>");
         out.push_str("</g>");
         return;
     }
@@ -238,18 +238,16 @@ pub(super) fn lower_mesh(
 
     // one answer for the whole mesh: every region shares its placements
     let density = super::mesh_texture::density(node, ctx);
+    // Exact clip geometry: each region's outline. Naming every face instead
+    // costs a polygon per tessellated quad — megabytes for a fine mesh, all of
+    // it interior edges that cancel (crates/gradient `region_outlines`).
+    let outlines = mesh.region_outlines(&raster.face_regions, raster.regions);
     for r in 0..raster.regions {
         if region_px[r].is_empty() {
             continue;
         }
-        // exact clip geometry: union of the region's face polygons (nonzero)
         let mut clip_d = String::new();
-        for (f, face) in mesh.faces.iter().enumerate() {
-            if raster.face_regions[f] != r as u32 {
-                continue;
-            }
-            append_mesh_face(mesh, face, &mut clip_d);
-        }
+        append_outline(mesh, &outlines[r], &mut clip_d);
 
         let single = fit_field(&region_px[r], w, &rgba, 2.0);
         if single.dof == Dof::Solid {
@@ -683,16 +681,18 @@ pub(super) fn parse_hex_color(s: &str) -> Option<(crate::gradient::LinRgb, f32)>
     ))
 }
 
-/// The same exact polygons bound both colour regions and authored clipping meshes.
-fn append_mesh_face(
-    mesh: &crate::gradient::Mesh,
-    face: &crate::gradient::mesh::Face,
-    out: &mut String,
-) {
-    for c in 0..face.arity() {
-        let (x, y) = mesh.verts[face.v[c] as usize];
-        out.push(if c == 0 { 'M' } else { 'L' });
-        out.push_str(&format!("{},{}", fmt(x as f64), fmt(y as f64)));
+/// A set of closed vertex loops as path data, one subpath each — the outline
+/// of a colour region, or of an authored clipping mesh. Filled nonzero it is
+/// exactly the faces it was traced from.
+fn append_outline(mesh: &crate::gradient::Mesh, loops: &[Vec<u32>], out: &mut String) {
+    for ring in loops {
+        for (i, &v) in ring.iter().enumerate() {
+            let (x, y) = mesh.verts[v as usize];
+            out.push(if i == 0 { 'M' } else { 'L' });
+            out.push_str(&fmt(x as f64));
+            out.push(',');
+            out.push_str(&fmt(y as f64));
+        }
+        out.push('Z');
     }
-    out.push('Z');
 }

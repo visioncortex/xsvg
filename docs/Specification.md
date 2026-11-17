@@ -294,7 +294,7 @@ through. Defined lowerings:
   groups are flattened to legal SVG clip shapes with composed transforms and
   inherited text/winding properties. Text boxes use glyph outlines when the
   font seam can supply them, otherwise positioned SVG text. An `<x:mesh>` uses
-  its exact face polygons (both grid and indexed syntax), without rasterization;
+  the exact outline of its faces (both grid and indexed syntax), without rasterization;
   colours and alpha do not change its clipping geometry. Images contribute their
   rectangular viewports. Referenced groups expand with cycle/depth/fuel guards;
   the expanded copies carry no `id`. A plain SVG shape's `fill-rule` is dropped
@@ -1766,7 +1766,9 @@ placed so its **texel centers land exactly on the grid vertices**: the image spa
 the region's bbox span `s`, offset by half a texel-interval — the renderer's own smooth bilinear
 image filter then interpolates the exact tensor-product basis of the fitted field. Fitting happens
 in the encoded (sRGB) domain because that is the space image samplers interpolate in. Each region
-is clipped by the **exact union of its face polygons** (nonzero), so cracks stay geometry-sharp at
+is clipped by the **exact union of its face polygons** (nonzero), written as that union's outline —
+the edges two faces of a region share cancel, so a finely tessellated mesh costs its rim, not its
+area — so cracks stay geometry-sharp at
 any zoom; a region whose fit collapses to a constant emits a plain `<path fill>` (with `fill-opacity` when
 translucent). **Feathering**: alpha is a fourth fitted channel — a region carrying any
 transparency serializes an **RGBA** PNG (fully opaque regions stay RGB), so soft fades ride the

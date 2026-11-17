@@ -456,20 +456,29 @@ mod tests {
     }
 
     #[test]
-    fn clipping_mesh_uses_exact_faces_without_paint_or_rasterization() {
-        for body in [
-            r##"<x:mesh x="10" y="20" width="80" height="40" cols="2" rows="1" fill="#f000 #0f0 #00f #ff0 #f0f #0ff"/>"##,
-            r##"<x:mesh points="0,0 40,0 10,30 60,0 90,0 90,30" transform="rotate(30)"><x:face v="0 1 2" fill="#f00 #0f0 #00f"/><x:face v="3 4 5" fill="#0000"/></x:mesh>"##,
+    fn clipping_mesh_uses_its_exact_outline_without_paint_or_rasterization() {
+        for (body, d) in [
+            // two cells sharing an edge: one outline, the seam gone
+            (
+                r##"<x:mesh x="10" y="20" width="80" height="40" cols="2" rows="1" fill="#f000 #0f0 #00f #ff0 #f0f #0ff"/>"##,
+                "M10,20L50,20L90,20L90,60L50,60L10,60Z",
+            ),
+            // two faces that do not touch: a subpath each
+            (
+                r##"<x:mesh points="0,0 40,0 10,30 60,0 90,0 90,30" transform="rotate(30)"><x:face v="0 1 2" fill="#f00 #0f0 #00f"/><x:face v="3 4 5" fill="#0000"/></x:mesh>"##,
+                "M0,0L40,0L10,30ZM60,0L90,0L90,30Z",
+            ),
         ] {
             let out = compile(body);
             let doc = roxmltree::Document::parse(&out).unwrap();
             let nodes: Vec<_> = clip(&doc).children().filter(|n| n.is_element()).collect();
-            assert_eq!(nodes.len(), 2, "{out}");
-            assert!(nodes.iter().all(|n| n.tag_name().name() == "path"));
+            assert_eq!(nodes.len(), 1, "{out}");
+            assert_eq!(nodes[0].tag_name().name(), "path");
+            assert_eq!(nodes[0].attribute("d"), Some(d), "{out}");
             assert!(!out.contains("data:image"));
-            assert!(nodes
-                .iter()
-                .all(|n| n.attribute("opacity").is_none() && n.attribute("fill").is_none()));
+            assert!(
+                nodes[0].attribute("opacity").is_none() && nodes[0].attribute("fill").is_none()
+            );
         }
     }
 

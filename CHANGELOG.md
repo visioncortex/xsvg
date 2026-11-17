@@ -14,6 +14,17 @@ partial one.
 
 ## [Unreleased]
 
+### Changed
+
+- **Mesh region clips are outlines.** A mesh region's clip path (and an `<x:mesh>` inside a
+  `<clipPath>`) is the outline of its faces instead of one polygon per tessellated face. The
+  filled area is the same; the output is far smaller — a 12×12-patch `<meshgradient>` at
+  `highest` went from 3.5 MB to 53 KB, and the dataset's mesh samples shrank by 20–80% — and the
+  compile is faster for it. Rendered through resvg, before and after differ by at most 4/255 on
+  a few dozen antialiased edge pixels. Faces that overlap with opposite winding, which used to
+  cancel to a hole, now stay filled, matching what the mesh paints. `xsvg-gradient` gains
+  `Mesh::region_outlines`.
+
 ### Added
 
 - **Mesh textures at display resolution** (`Options::rasterize_at_display_resolution`,
