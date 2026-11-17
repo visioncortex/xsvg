@@ -1801,8 +1801,11 @@ each patch, which zeroes the tangential derivative at every patch boundary so ad
 meet C¹ and the bilinear Mach bands at seams disappear. Adjacent patches join smoothly by
 construction (shared edges tessellate to shared vertices with matching colors). The reference is
 **compile-time baked**, so the incremental `dependents` scan treats `fill="url(#mesh)"` like an
-`in=` edge. An unparseable dialect leaves the element as authored with a marker (unrendered live,
-exactly as in a browser).
+`in=` edge. The `<meshgradient>` element itself is a **definition the compiler consumes**: like
+`<x:theme>` it emits nothing, wherever it stands, so the output carries the lowered paint and not
+the patches it was lowered from (§9). An unparseable dialect leaves the shape as authored with a
+marker; its reference then names nothing and paints nothing — exactly what it painted in a
+browser, where the element is not a paint server.
 
 ## 9. Lowering target [implemented]
 

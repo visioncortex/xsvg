@@ -24,6 +24,11 @@ partial one.
   a few dozen antialiased edge pixels. Faces that overlap with opposite winding, which used to
   cancel to a hole, now stay filled, matching what the mesh paints. `xsvg-gradient` gains
   `Mesh::region_outlines`.
+- **`<meshgradient>` definitions are not emitted.** The element is consumed at compile, like
+  `<x:theme>`: the output carries the lowered paint only, as §9 always said. It used to pass
+  through unrendered, often outweighing the paint it compiled to. A host that compiles
+  fragments gets an empty one for the definition; the shapes it fills are still reported as its
+  dependents.
 
 ### Added
 

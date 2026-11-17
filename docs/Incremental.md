@@ -131,7 +131,7 @@ Implemented by `<xsvg-view-interactive>` (`packages/xsvg-viewer/src/interactive.
 6. Everything not replaced is left completely alone — no attribute rewriting of any kind. That
    is the payoff of step 3: unedited output is byte-identical, so there is nothing to fix up.
 7. Fall back to a full compile when: the fragment carries no anchor of its own (it emitted
-   nothing — a declaration like `<x:theme>`, or a hidden layer; **not** `<x:doc>`: an edit
+   nothing — a declaration like `<x:theme>` or a `<meshgradient>`, or a hidden layer; **not** `<x:doc>`: an edit
    inside the editor's island compiles to nothing *and invalidates nothing*, Specification §4.4,
    so a host skips the render rather than recompiling), the edit touches the root
    element's own tag/attributes, a dependency would have to be fetched, fonts finish loading

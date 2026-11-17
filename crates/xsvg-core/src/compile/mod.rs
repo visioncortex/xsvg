@@ -1126,6 +1126,14 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         ));
         return;
     }
+    // A <meshgradient> is a definition the compiler consumes (§8.2): every
+    // fill naming it is lowered from the source, and no renderer in the output
+    // contract draws the element (§9), so it emits nothing — like <x:theme>.
+    // A reference the compiler could not lower dangles, which paints exactly
+    // what a reference to an unsupported paint server did: nothing.
+    if name == "meshgradient" {
+        return;
+    }
 
     if name == "text" && node.attribute("inline-size").is_some() {
         emit_inline_size_text(node, out, ctx);

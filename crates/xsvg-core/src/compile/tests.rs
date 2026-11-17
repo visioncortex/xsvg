@@ -2251,7 +2251,8 @@ fn fragments_are_verbatim_slices_of_the_full_compile() {
                 &BoxOutliner,
             )
             .unwrap();
-            assert!(!frag.is_empty());
+            // a definition the compiler consumes emits nothing (§8.2)
+            assert_eq!(frag.is_empty(), INC[off..].starts_with("<meshgradient"));
             let at = full[cursor..]
                 .find(&frag)
                 .unwrap_or_else(|| panic!("fragment not found in order: {frag}\n{full}"));
@@ -4576,7 +4577,7 @@ fn keyed_fragments_are_verbatim_slices_of_the_full_compile() {
             &BoxOutliner,
         )
         .unwrap();
-        assert!(!frag.is_empty());
+        assert_eq!(frag.is_empty(), INC[off..].starts_with("<meshgradient"));
         let at = full[cursor..]
             .find(&frag)
             .unwrap_or_else(|| panic!("keyed fragment not found in order: {frag}\n{full}"));
@@ -11727,4 +11728,92 @@ fn mesh_outlines_are_stable_across_compiles_and_fragments() {
         "a fragment is its span in the whole compile"
     );
     assert_eq!(region_clips(&whole).len(), 1);
+}
+
+#[test]
+fn a_meshgradient_definition_is_consumed_not_emitted() {
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    for (source, images) in [
+        // in <defs>, where Inkscape writes it, and at the top level
+        (
+            format!(
+                r##"{XW}<defs>{INKMESH}</defs><rect width="200" height="80" fill="url(#m)"/></svg>"##
+            ),
+            1,
+        ),
+        (
+            format!(r##"{XW}{INKMESH}<rect width="200" height="80" fill="url(#m)"/></svg>"##),
+            1,
+        ),
+        // filling two shapes, and after its first use
+        (
+            format!(
+                r##"{XW}<rect width="200" height="80" fill="url(#m)"/><circle cx="100" cy="40" r="30" fill="url(#m)"/><defs>{INKMESH}</defs></svg>"##
+            ),
+            2,
+        ),
+        // referenced by nothing
+        (
+            format!(r##"{XW}<defs>{INKMESH}</defs><rect width="200" height="80"/></svg>"##),
+            0,
+        ),
+    ] {
+        let out = compile_test(&source);
+        assert!(!out.contains("meshgradient"), "{out}");
+        assert!(
+            !out.contains("meshpatch") && !out.contains("<stop"),
+            "{out}"
+        );
+        assert_eq!(out.matches("<image").count(), images, "{out}");
+        roxmltree::Document::parse(&out).unwrap();
+        // the definition's own fragment is empty; a shape's is unchanged
+        let at = source.find("<meshgradient").unwrap();
+        let own = compile_with(
+            &source,
+            &Options {
+                fragment: Some(at),
+                ..Default::default()
+            },
+            &platform,
+        )
+        .unwrap();
+        assert!(!own.contains("meshgradient"), "{own}");
+    }
+}
+
+#[test]
+fn an_unlowered_meshgradient_reference_dangles_like_an_unsupported_paint() {
+    // a dialect the compiler cannot parse: the shape stays as authored, with
+    // its marker, and the definition is still not part of the output (§9)
+    let out = compile_test(&format!(
+        r##"{XW}<defs><meshgradient id="m"><meshrow><meshpatch><stop path="q 1,2 3,4"/></meshpatch></meshrow></meshgradient></defs><rect width="20" height="20" rx="2" fill="url(#m)" stroke="url(#m)"/></svg>"##
+    ));
+    assert!(!out.contains("<meshgradient"), "{out}");
+    assert!(out.contains("meshgradient fill left live"), "{out}");
+    assert!(out.contains(r##"fill="url(#m)""##), "{out}");
+    // other gradients are untouched
+    let out = compile_test(&format!(
+        r##"{XW}<defs><linearGradient id="l"><stop offset="0" stop-color="#f00"/></linearGradient></defs><rect width="20" height="20" rx="2" fill="url(#l)"/></svg>"##
+    ));
+    assert!(
+        out.contains("<linearGradient") && out.contains("<stop"),
+        "{out}"
+    );
+}
+
+#[test]
+fn editing_a_meshgradient_still_re_emits_the_shapes_it_fills() {
+    let source = format!(
+        r##"{XW}<defs>{INKMESH}</defs><rect width="200" height="80" fill="url(#m)"/><rect y="90" width="20" height="20"/></svg>"##
+    );
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let session = CompileSession::new(&platform, &source, "balanced", false, "").unwrap();
+    let mesh = source.find("<meshgradient").unwrap();
+    let filled = source.find("<rect width=\"200\"").unwrap();
+    let deps = session.unit_dependents(&[mesh]);
+    assert_eq!(
+        deps.iter().map(|d| d.0).collect::<Vec<_>>(),
+        vec![filled],
+        "{deps:?}"
+    );
 }
