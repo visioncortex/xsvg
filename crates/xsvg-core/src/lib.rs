@@ -34,9 +34,9 @@ pub use compile::{
     compile_linked_keyed_impl, compile_platform_impl, compile_unit_linked_keyed_impl,
     compile_unit_platform_impl, compile_with, dependents_impl, dependents_multi_impl,
     fragment_range_impl, measure_textbox_impl, node_spans_impl, text_layout_impl,
-    unit_dependents_impl, unit_range_impl, CaretStop, CaretStops, CompileSession, Host, NoKeys,
-    NoResolver, NodeKeys, Options, Platform, Resolver, StopRun, TextLayout, TextLayoutLine,
-    TextLayoutPara, TextboxSize, UnitSpan,
+    unit_dependents_impl, unit_range_impl, CaretStop, CaretStops, CompileSession, FittedMesh, Host,
+    MeshCache, MeshFits, MeshKey, MeshSwatch, NoKeys, NoMeshCache, NoResolver, NodeKeys, Options,
+    Platform, Resolver, StopRun, TextLayout, TextLayoutLine, TextLayoutPara, TextboxSize, UnitSpan,
 };
 // Document queries (xsvg-kit docs/Queries.md): what the compiler does with a node,
 // asked of a session's parse.

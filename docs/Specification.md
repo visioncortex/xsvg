@@ -1863,6 +1863,18 @@ fallback is unused once the mesh is lowered.
   user space); a dash pattern that would outline into more than 20 000 dashes. A stroke of no
   width paints nothing and leaves no reference.
 
+**A mesh on its own — swatches.** `CompileSession::mesh_swatch(offset)` compiles one mesh
+definition (`<x:mesh>` or `<meshgradient>`) into a standalone SVG of its paint: `viewBox` the
+mesh's bounds, under the mesh's own `transform` / `gradientTransform` and nothing else
+(bounding-box units stay the unit square they are written in), ids derived from the mesh's
+content so several can share a DOM. `mesh_definitions()` lists the definitions in document
+order. This is what an editor shows in a palette; the swatch carries a `key` that changes
+exactly when the picture does.
+
+**Fits are kept.** Fitting is a pure function of the mesh and the quality profile, and a
+platform may keep fits between compiles (`Platform::with_mesh_cache`, docs/Compile Session.md
+§5). Output is byte-identical with or without.
+
 **Fitting a sliver.** A mesh more elongated than 256:1 is fitted with its long axis squeezed to
 that ratio and the result stretched back — the fit raster gives the short axis a minimum of rows,
 which would otherwise cost the long axis pixels without limit. The map is affine, so the field

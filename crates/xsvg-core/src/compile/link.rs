@@ -83,6 +83,8 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
                 resolver: ctx.resolver,
                 keys: &NoKeys,
                 generators: ctx.generators,
+                // a fit is the mesh's alone: a linked file shares the store
+                meshes: ctx.meshes,
                 rasterize_at_display_resolution: ctx.rasterize_at_display_resolution,
                 raster_parent: {
                     let parent = super::mesh_texture::display_transform(node, ctx);

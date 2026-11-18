@@ -372,6 +372,28 @@ impl<'a> Parsed<'a> {
         super::boolean_operands_at(node, &ctx)
     }
 
+    /// The mesh definition at `offset` compiled on its own (mesh.rs).
+    pub(super) fn mesh_swatch(
+        &self,
+        offset: usize,
+        backend: &Backend,
+        quality: QualityProfile,
+    ) -> Result<super::MeshSwatch, String> {
+        let node = self
+            .element_at(offset)
+            .ok_or("no element starts at this offset")?;
+        let ctx = Ctx::new(backend, quality, false, "", self);
+        super::mesh::mesh_swatch(node, &ctx)
+    }
+
+    /// Source ranges of the mesh definitions, in document order.
+    pub(super) fn mesh_definitions(&self) -> Vec<(usize, usize)> {
+        super::visible(self.doc.root())
+            .filter(|n| n.is_element() && super::is_mesh_paint(*n))
+            .map(|n| (n.range().start, n.range().end))
+            .collect()
+    }
+
     /// Convert to path (trace.rs; docs/Incremental.md §11): the element at
     /// `offset` compiled on its own with outlining forced — its glyphs as paths,
     /// its backdrops as rects, a shape as its `<path>` — every attribute the
@@ -965,6 +987,25 @@ impl<'a, P: Host> CompileSession<'a, P> {
     pub fn to_path(&self, offset: usize) -> Result<String, super::ToPathError> {
         self.parsed()
             .to_path(offset, &self.backend(), self.quality, false)
+    }
+
+    /// Source byte ranges of every mesh definition in the document — each
+    /// `<x:mesh>` and `<meshgradient>`, wherever it stands, in document order:
+    /// what a palette lists. The start of a range is the offset
+    /// [`Self::mesh_swatch`] takes.
+    pub fn mesh_definitions(&self) -> Vec<(usize, usize)> {
+        self.parsed().mesh_definitions()
+    }
+
+    /// The mesh definition starting at `offset` compiled on its own, at this
+    /// session's quality: a small standalone SVG of its paint, for a palette
+    /// (§8.2). It shares its fit with the document's compile through the
+    /// platform's mesh store, so with one a swatch of a mesh already compiled
+    /// costs no fit, and [`super::MeshSwatch::key`] says when one needs redoing.
+    /// `Err` when `offset` is not a mesh or the mesh has nothing to draw.
+    pub fn mesh_swatch(&self, offset: usize) -> Result<super::MeshSwatch, String> {
+        self.parsed()
+            .mesh_swatch(offset, &self.backend(), self.quality)
     }
 
     /// The operands of the `<x:boolean>` at `offset`, for `xsvg-path-ops`

@@ -140,6 +140,9 @@ struct Ctx<'a> {
     /// xsvg-kit). With keys, emitted identity and generated filter ids become
     /// independent of byte offsets. [`NoKeys`] preserves byte-span behavior.
     keys: &'a dyn NodeKeys,
+    /// Where mesh fits are kept between compiles (mesh_fit.rs); inert unless
+    /// the platform was given a store.
+    meshes: &'a dyn MeshFits,
     /// Byte starts an **active** key provider answered `None` for — elements the
     /// host was required to name and did not. A set, not a count: the same node can
     /// be asked twice (identity stamping and def-id seeding, plus scratch passes).
@@ -183,6 +186,7 @@ pub struct Backend<'a> {
     pub resolver: &'a dyn Resolver,
     pub keys: &'a dyn NodeKeys,
     pub generators: &'a dyn GeneratorHost,
+    pub meshes: &'a dyn MeshFits,
     pub rasterize_at_display_resolution: Option<f64>,
     pub raster_parent: crate::kurbo::Affine,
 }
@@ -200,13 +204,14 @@ pub struct Backend<'a> {
 /// rather than being erased, so `Send` and `Sync` follow from them: a platform of
 /// thread-safe adapters gives `Send` sessions with nothing asserted, and a browser
 /// platform over JS handles simply is not, which on a single thread costs nothing.
-pub struct Platform<M, S, O, R = NoResolver, K = NoKeys, G = NoGenerators> {
+pub struct Platform<M, S, O, R = NoResolver, K = NoKeys, G = NoGenerators, C = NoMeshCache> {
     m: M,
     shaper: S,
     outliner: O,
     resolver: R,
     keys: K,
     generators: G,
+    meshes: C,
 }
 
 impl<M: Measurer, S: Shaper, O: GlyphOutliner> Platform<M, S, O> {
@@ -220,12 +225,13 @@ impl<M: Measurer, S: Shaper, O: GlyphOutliner> Platform<M, S, O> {
             resolver: NoResolver,
             keys: NoKeys,
             generators: NoGenerators,
+            meshes: NoMeshCache,
         }
     }
 }
 
-impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
-    pub fn with_resolver<R2: Resolver>(self, resolver: R2) -> Platform<M, S, O, R2, K, G> {
+impl<M, S, O, R, K, G, C> Platform<M, S, O, R, K, G, C> {
+    pub fn with_resolver<R2: Resolver>(self, resolver: R2) -> Platform<M, S, O, R2, K, G, C> {
         Platform {
             m: self.m,
             shaper: self.shaper,
@@ -233,10 +239,11 @@ impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
             resolver,
             keys: self.keys,
             generators: self.generators,
+            meshes: self.meshes,
         }
     }
 
-    pub fn with_keys<K2: NodeKeys>(self, keys: K2) -> Platform<M, S, O, R, K2, G> {
+    pub fn with_keys<K2: NodeKeys>(self, keys: K2) -> Platform<M, S, O, R, K2, G, C> {
         Platform {
             m: self.m,
             shaper: self.shaper,
@@ -244,10 +251,14 @@ impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
             resolver: self.resolver,
             keys,
             generators: self.generators,
+            meshes: self.meshes,
         }
     }
 
-    pub fn with_generators<G2: GeneratorHost>(self, generators: G2) -> Platform<M, S, O, R, K, G2> {
+    pub fn with_generators<G2: GeneratorHost>(
+        self,
+        generators: G2,
+    ) -> Platform<M, S, O, R, K, G2, C> {
         Platform {
             m: self.m,
             shaper: self.shaper,
@@ -255,13 +266,14 @@ impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
             resolver: self.resolver,
             keys: self.keys,
             generators,
+            meshes: self.meshes,
         }
     }
 
     /// Put a [`MeasureCache`] in front of the measurer, so a word measured once in a
     /// font is never measured again while this platform lives (docs/Compile
     /// Session.md §5). Output is unchanged; only the calls that reach the adapter are.
-    pub fn with_measure_cache(self) -> Platform<MeasureCache<M>, S, O, R, K, G>
+    pub fn with_measure_cache(self) -> Platform<MeasureCache<M>, S, O, R, K, G, C>
     where
         M: Measurer,
     {
@@ -272,12 +284,37 @@ impl<M, S, O, R, K, G> Platform<M, S, O, R, K, G> {
             resolver: self.resolver,
             keys: self.keys,
             generators: self.generators,
+            meshes: self.meshes,
+        }
+    }
+
+    /// Keep mesh fits in `meshes` — a [`MeshCache`], owned or borrowed, or any
+    /// [`MeshFits`] store — so a mesh fitted once is not fitted again while that
+    /// store lives (docs/Compile Session.md §5). Output is unchanged; only which
+    /// meshes are fitted is. A store outliving the platform (`&cache`) is how an
+    /// embedder that builds a platform per flush keeps its fits across them.
+    pub fn with_mesh_cache<C2: MeshFits>(self, meshes: C2) -> Platform<M, S, O, R, K, G, C2> {
+        Platform {
+            m: self.m,
+            shaper: self.shaper,
+            outliner: self.outliner,
+            resolver: self.resolver,
+            keys: self.keys,
+            generators: self.generators,
+            meshes,
         }
     }
 }
 
-impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost>
-    Platform<M, S, O, R, K, G>
+impl<
+        M: Measurer,
+        S: Shaper,
+        O: GlyphOutliner,
+        R: Resolver,
+        K: NodeKeys,
+        G: GeneratorHost,
+        C: MeshFits,
+    > Platform<M, S, O, R, K, G, C>
 {
     /// One document, parsed once, ready to compile any number of its fragments on
     /// this platform (docs/Compile Session.md).
@@ -299,6 +336,7 @@ impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: Gene
             resolver: &self.resolver,
             keys: &self.keys,
             generators: &self.generators,
+            meshes: &self.meshes,
             rasterize_at_display_resolution: None,
             raster_parent: crate::kurbo::Affine::IDENTITY,
         }
@@ -317,13 +355,27 @@ mod sealed {
     pub trait Sealed {}
 }
 
-impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost>
-    sealed::Sealed for Platform<M, S, O, R, K, G>
+impl<
+        M: Measurer,
+        S: Shaper,
+        O: GlyphOutliner,
+        R: Resolver,
+        K: NodeKeys,
+        G: GeneratorHost,
+        C: MeshFits,
+    > sealed::Sealed for Platform<M, S, O, R, K, G, C>
 {
 }
 
-impl<M: Measurer, S: Shaper, O: GlyphOutliner, R: Resolver, K: NodeKeys, G: GeneratorHost> Host
-    for Platform<M, S, O, R, K, G>
+impl<
+        M: Measurer,
+        S: Shaper,
+        O: GlyphOutliner,
+        R: Resolver,
+        K: NodeKeys,
+        G: GeneratorHost,
+        C: MeshFits,
+    > Host for Platform<M, S, O, R, K, G, C>
 {
     fn backend(&self) -> Backend<'_> {
         Platform::backend(self)
@@ -362,6 +414,7 @@ impl<'a> Ctx<'a> {
             files: std::cell::RefCell::new(vec![base.to_string()]),
             base: std::cell::RefCell::new(base.to_string()),
             keys: seams.keys,
+            meshes: seams.meshes,
             key_misses: std::cell::RefCell::new(std::collections::HashSet::new()),
             generators: seams.generators,
             imports: &parsed.imports,
@@ -1804,6 +1857,9 @@ mod clipping;
 use clipping::*;
 
 mod mesh;
+mod mesh_fit;
+pub use mesh::MeshSwatch;
+pub use mesh_fit::{FittedMesh, MeshCache, MeshFits, MeshKey, NoMeshCache};
 mod mesh_texture;
 use mesh::*;
 mod pathops;

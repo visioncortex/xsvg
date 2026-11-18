@@ -1,6 +1,7 @@
 //! Extracted from the compiler core (see `compile/mod.rs`). `use super::*` pulls in
 //! the shared helpers, `Ctx`, and re-exported primitives.
 
+use super::mesh_fit::{FittedMesh, MeshKey};
 use super::*;
 
 /// `<x:mesh>` (§8.2) — a quad-dominant mesh gradient with per-corner colors and
@@ -186,18 +187,13 @@ pub(super) fn parse_mesh(
     Ok(mesh)
 }
 
-/// The most elongated a mesh is fitted at. The raster gives the short axis a
-/// minimum of rows, so the long axis of a sliver would otherwise cost pixels
-/// without limit; past this ratio the long axis is squeezed for the fit and
-/// the result stretched back (an affine map, which the field survives).
-const MAX_FIT_ASPECT: f32 = 256.0;
-
-/// The shared mesh lowering (§8.2 stage 1 + 2): rasterize at a profile-graded
-/// resolution, fit each crack region with a grown grid field, and emit one
-/// texel-aligned PNG (or plain path for constant regions) per region. Compact
-/// by default; display-resolution output samples the field at its painted size.
-/// `seed` namespaces the clip ids (the caller's source position). Returns
-/// `false` on a degenerate extent (caller emits its marker).
+/// The shared mesh lowering (§8.2 stage 1 + 2): fit the mesh — or take the
+/// fit the platform kept from the last time this mesh was seen — and write it
+/// here: one texel-aligned PNG (or plain path for a constant region) per crack
+/// region, each inside its outline. Compact by default; display-resolution
+/// output samples the field at its painted size. `seed` namespaces the clip
+/// ids (the caller's source position). Returns `false` on a degenerate extent
+/// (caller emits its marker).
 pub(super) fn lower_mesh(
     mesh: &crate::gradient::Mesh,
     seed: &str,
@@ -205,216 +201,157 @@ pub(super) fn lower_mesh(
     out: &mut String,
     ctx: &Ctx,
 ) -> bool {
-    use crate::gradient::{fit_field, fit_grid, texel_placement, Dof};
+    let Some(fitted) = fitted_mesh(mesh, ctx) else {
+        return false;
+    };
+    emit_fitted(&fitted, seed, node, out, ctx);
+    true
+}
 
-    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+/// The fit of `mesh` at this compile's quality: from the platform's store
+/// when it has one ([`MeshFits`]), fitted here — and offered to the store —
+/// when it does not.
+fn fitted_mesh(mesh: &crate::gradient::Mesh, ctx: &Ctx) -> Option<std::sync::Arc<FittedMesh>> {
+    use super::mesh_fit::{fit, FitClass};
+    let class = FitClass::of(ctx.quality);
+    if !ctx.meshes.active() {
+        return fit(mesh, class).map(std::sync::Arc::new);
+    }
+    let key = MeshKey::of(mesh, class);
+    if let Some(kept) = ctx.meshes.fitted(&key) {
+        return Some(kept);
+    }
+    // a mesh with no extent has no fit, and nothing to keep
+    let fitted = std::sync::Arc::new(fit(mesh, class)?);
+    ctx.meshes.keep(key, &fitted);
+    Some(fitted)
+}
+
+/// A mesh definition compiled on its own (§8.2): what an editor shows for it
+/// in a palette.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshSwatch {
+    /// A complete SVG document: the mesh's paint, its `viewBox` the mesh's
+    /// bounds. Its ids are derived from [`Self::key`], so swatches of
+    /// different meshes can share one DOM.
+    pub svg: String,
+    /// The mesh's bounds — `x, y, width, height` — in its own coordinates
+    /// (for bounding-box units, within the unit square).
+    pub bounds: [f64; 4],
+    /// The mesh's identity at this quality: unchanged exactly while the
+    /// swatch is, so it is what a palette keys and caches its swatches by.
+    pub key: MeshKey,
+}
+
+/// Compile the mesh definition `node` — an `<x:mesh>` or a `<meshgradient>` —
+/// on its own: the paint it is, under its own `transform` /
+/// `gradientTransform` and nothing else, in a document of its own. The fit is
+/// the one the document's compile makes for a mesh drawn or used in those
+/// coordinates, so with a [`MeshFits`] store it is usually already there.
+pub(super) fn mesh_swatch(node: roxmltree::Node, ctx: &Ctx) -> Result<MeshSwatch, String> {
+    if !is_mesh_paint(node) {
+        return Err("not a mesh: expected an <x:mesh> or a <meshgradient>".into());
+    }
+    let mut said = String::new();
+    // no element is being painted, so there is no box: bounding-box units
+    // are the unit square they are written in
+    let mesh = paint_mesh(node, None, false, &mut said, ctx)
+        .ok_or("the mesh has nothing to draw (no usable face, or a malformed dialect)")?;
+    let fitted = fitted_mesh(&mesh, ctx).ok_or("the mesh has no extent")?;
+    let key = MeshKey::of_quality(&mesh, ctx.quality);
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for &(x, y) in &mesh.verts {
-        x0 = x0.min(x);
-        y0 = y0.min(y);
-        x1 = x1.max(x);
-        y1 = y1.max(y);
+        x0 = x0.min(x as f64);
+        y0 = y0.min(y as f64);
+        x1 = x1.max(x as f64);
+        y1 = y1.max(y as f64);
     }
-    if !(x1 > x0 && y1 > y0) {
-        return false;
-    }
-    // fit space = user space ÷ (kx, ky); all of it but a sliver is 1:1
-    let (kx, ky) = {
-        let (ex, ey) = (x1 - x0, y1 - y0);
-        if ex > ey * MAX_FIT_ASPECT {
-            (ex / (ey * MAX_FIT_ASPECT), 1.0)
-        } else if ey > ex * MAX_FIT_ASPECT {
-            (1.0, ey / (ex * MAX_FIT_ASPECT))
-        } else {
-            (1.0f32, 1.0f32)
-        }
-    };
-    if !(kx.is_finite() && ky.is_finite()) {
-        return false;
-    }
-    let squeezed;
-    let (user, mesh) = (mesh, {
-        if (kx, ky) == (1.0, 1.0) {
-            mesh
-        } else {
-            let mut m = mesh.clone();
-            for v in &mut m.verts {
-                *v = (v.0 / kx, v.1 / ky);
-            }
-            squeezed = m;
-            &squeezed
-        }
-    });
-    let (x0, y0, x1, y1) = (x0 / kx, y0 / ky, x1 / kx, y1 / ky);
-    let (max_px, min_px) = match ctx.quality {
-        QualityProfile::Fast => (64.0f32, 24.0f32),
-        QualityProfile::Balanced => (128.0, 32.0),
-        QualityProfile::Highest | QualityProfile::Raster => (384.0, 48.0),
-    };
-    // resolution from the LONG axis, but never starve the short one — a thin
-    // strip still needs rows for its cross-axis fit
-    let (dim_max, dim_min) = ((x1 - x0).max(y1 - y0), (x1 - x0).min(y1 - y0));
-    let scale = (dim_max / max_px).min(dim_min / min_px).max(1e-6);
-    let (w, h) = (
-        (((x1 - x0) / scale).ceil() as usize).max(1),
-        (((y1 - y0) / scale).ceil() as usize).max(1),
+    // to the output's precision, so the bounds are the `viewBox` exactly
+    // (a tessellated patch lands a few ulps off its corners)
+    let bounds = [x0, y0, x1 - x0, y1 - y0].map(|v| (v * 1000.0).round() / 1000.0);
+    let mut svg = format!(
+        "<svg xmlns=\"{SVG_NS}\" viewBox=\"{} {} {} {}\">",
+        fmt(bounds[0]),
+        fmt(bounds[1]),
+        fmt(bounds[2]),
+        fmt(bounds[3])
     );
-    let raster = mesh.rasterize(w, h, (x0, y0), scale, 1e-3);
-    let rgba = raster.to_rgba8();
-    let opaque = raster.fully_opaque();
+    emit_fitted(&fitted, &key.to_string(), node, &mut svg, ctx);
+    svg.push_str("</svg>");
+    Ok(MeshSwatch { svg, bounds, key })
+}
 
-    // per-region pixel index lists + pixel bboxes
-    let mut region_px: Vec<Vec<u32>> = vec![Vec::new(); raster.regions];
-    let mut bbox: Vec<(u32, u32, u32, u32)> = vec![(u32::MAX, u32::MAX, 0, 0); raster.regions];
-    for (i, &l) in raster.labels.iter().enumerate() {
-        if l == crate::gradient::mesh::NONE {
-            continue;
-        }
-        region_px[l as usize].push(i as u32);
-        let (px, py) = ((i % w) as u32, (i / w) as u32);
-        let b = &mut bbox[l as usize];
-        b.0 = b.0.min(px);
-        b.1 = b.1.min(py);
-        b.2 = b.2.max(px);
-        b.3 = b.3.max(py);
-    }
-
-    // rmse tolerance (sRGB units) and grid cap by profile
-    let (tol, cap) = match ctx.quality {
-        QualityProfile::Fast => (4.0f32, 10usize),
-        QualityProfile::Balanced => (1.5, 24),
-        QualityProfile::Highest | QualityProfile::Raster => (0.5, 48),
-    };
-
+/// Write a fit into the document: the half of the lowering that depends on
+/// where the mesh is drawn — the clip ids (`seed`) and, at display resolution,
+/// the density it is seen at.
+fn emit_fitted(
+    fitted: &FittedMesh,
+    seed: &str,
+    node: roxmltree::Node,
+    out: &mut String,
+    ctx: &Ctx,
+) {
+    use super::mesh_fit::RegionPaint;
     // one answer for the whole mesh: every region shares its placements
     let density = super::mesh_texture::density(node, ctx);
-    // Exact clip geometry: each region's outline. Naming every face instead
-    // costs a polygon per tessellated quad — megabytes for a fine mesh, all of
-    // it interior edges that cancel (crates/gradient `region_outlines`).
-    let outlines = user.region_outlines(&raster.face_regions, raster.regions);
-    for r in 0..raster.regions {
-        if region_px[r].is_empty() {
-            continue;
-        }
-        let mut clip_d = String::new();
-        append_outline(user, &outlines[r], &mut clip_d);
-
-        let single = fit_field(&region_px[r], w, &rgba, 2.0);
-        if single.dof == Dof::Solid {
-            let c = single.corners[0];
-            let a = (c[3] / 255.0).clamp(0.0, 1.0);
-            let opacity = if a < 254.5 / 255.0 {
-                format!(" fill-opacity=\"{}\"", fmt(a as f64))
-            } else {
-                String::new()
-            };
-            out.push_str(&format!(
-                "<path fill=\"#{:02x}{:02x}{:02x}\"{opacity} d=\"{clip_d}\"/>",
-                c[0].round().clamp(0.0, 255.0) as u8,
-                c[1].round().clamp(0.0, 255.0) as u8,
-                c[2].round().clamp(0.0, 255.0) as u8
-            ));
-            continue;
-        }
-
-        // grow the shared-vertex grid until the residual passes the tolerance.
-        // The gx:gy aspect comes from the FIELD's measured directional
-        // variation (sum of |∂/∂x| vs |∂/∂y| over the region), not the bbox —
-        // a wide region with purely vertical structure gets rows, not
-        // stretched-wide column padding, so texels stay meaningful. (A greedy
-        // per-axis search stalls here: row counts that straddle an interior
-        // color kink are transiently WORSE, which lets no-op column growth win
-        // ties all the way to the cap.)
-        let (bx0, by0, bx1, by1) = bbox[r];
-        let (mut vx, mut vy) = (1e-6f64, 1e-6f64);
-        for &idx in &region_px[r] {
-            let i = idx as usize;
-            let (px, py) = (i % w, i / w);
-            if px + 1 < w && raster.labels[i + 1] == r as u32 {
-                for c in 0..4 {
-                    vx += (rgba[(i + 1) * 4 + c] as f64 - rgba[i * 4 + c] as f64).abs();
-                }
+    let ch = fitted.channels;
+    for region in &fitted.regions {
+        let (r, clip_d) = (region.index, &region.clip_d);
+        match &region.paint {
+            RegionPaint::Solid { rgb, alpha } => {
+                let opacity = if *alpha < 254.5 / 255.0 {
+                    format!(" fill-opacity=\"{}\"", fmt(*alpha as f64))
+                } else {
+                    String::new()
+                };
+                out.push_str(&format!(
+                    "<path fill=\"#{:02x}{:02x}{:02x}\"{opacity} d=\"{clip_d}\"/>",
+                    rgb[0], rgb[1], rgb[2]
+                ));
             }
-            if py + 1 < h && raster.labels[i + w] == r as u32 {
-                for c in 0..4 {
-                    vy += (rgba[(i + w) * 4 + c] as f64 - rgba[i * 4 + c] as f64).abs();
-                }
-            }
-        }
-        // blend the field ratio with the bbox aspect: the field says where the
-        // STRUCTURE is, the bbox keeps enough of the other axis that localized
-        // cross-structure (a rim hugging a wide region's end caps) still gets
-        // texels the global sum can't see
-        let field_s = (vx / vy).sqrt();
-        let bbox_s = (((bx1 - bx0).max(1) as f64) / ((by1 - by0).max(1) as f64)).sqrt();
-        let s = ((field_s * bbox_s).sqrt().clamp(1.0 / 6.0, 6.0)) as f32;
-        let mut best = None;
-        for g in [1usize, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48] {
-            let gx = ((g as f32 * s).round() as usize).clamp(1, cap);
-            let gy = ((g as f32 / s).round() as usize).clamp(1, cap);
-            let grid = fit_grid(&region_px[r], w, &rgba, gx, gy);
-            let done = grid.rmse <= tol || (gx >= cap && gy >= cap);
-            best = Some(grid);
-            if done {
-                break;
+            RegionPaint::Texture {
+                texels,
+                size,
+                place,
+                compact,
+            } => {
+                let (ux, uy, uw, uh) = *place;
+                // Keep the fitted grid's placement regardless of output texture
+                // density. The compact grid is the fit's own stored PNG; a
+                // resampled texture is megapixels and is compressed.
+                let (pw, ph) = super::mesh_texture::dimensions(density, (uw, uh), *size);
+                let resampled;
+                let href: &str = if (pw, ph) == *size {
+                    compact
+                } else {
+                    let pixels = super::mesh_texture::interpolate(texels, *size, (pw, ph), ch);
+                    resampled = crate::gradient::base64::encode(&super::mesh_texture::encode(
+                        pw, ph, &pixels, ch,
+                    ));
+                    &resampled
+                };
+                let cid = format!("x-mesh-{seed}-{r}");
+                // The texel grid is placed so that *bilinear* reconstruction reproduces the
+                // fitted field exactly, so the image must ask for bilinear by name. `auto` is
+                // the renderer's choice, and resvg chooses bicubic: measured, that drifts up to
+                // ~9/255 off the field, while bilinear lands within 0.5/255 (8-bit rounding).
+                //
+                // Both spellings, because they reach different consumers. resvg honours only
+                // the CSS form (the attribute is parsed and dropped); the attribute survives
+                // tools that strip or flatten `style`, and SVG 2 reads it as a CSS value. Where
+                // both apply, CSS wins and they agree. A renderer that does not know `smooth`
+                // treats it as invalid and keeps `auto` — Chromium renders identically with or
+                // without it.
+                out.push_str(&format!(
+                    "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" image-rendering=\"smooth\" style=\"image-rendering:smooth\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{href}\"/>",
+                    fmt(ux),
+                    fmt(uy),
+                    fmt(uw),
+                    fmt(uh),
+                ));
             }
         }
-        let grid = best.unwrap();
-
-        // tiny PNG: (gx+1)×(gy+1) texels, one per grid vertex; opaque meshes
-        // stay RGB, feathered ones carry the alpha channel
-        let (tw, th) = (grid.gx + 1, grid.gy + 1);
-        let ch = if opaque { 3 } else { 4 };
-        let mut px = Vec::with_capacity(tw * th * ch);
-        for vert in &grid.verts {
-            for v in &vert[..ch] {
-                px.push(v.round().clamp(0.0, 255.0) as u8);
-            }
-        }
-        let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
-        // Keep the fitted grid's placement regardless of output texture density.
-        let (kx, ky) = (kx as f64, ky as f64);
-        let (ux, uy) = (
-            (x0 as f64 + ix * scale as f64) * kx,
-            (y0 as f64 + iy * scale as f64) * ky,
-        );
-        let (uw, uh) = (iw * scale as f64 * kx, ih * scale as f64 * ky);
-        let (pw, ph) = super::mesh_texture::dimensions(density, (uw, uh), (tw, th));
-        let pixels = if (pw, ph) == (tw, th) {
-            px
-        } else {
-            super::mesh_texture::interpolate(&px, (tw, th), (pw, ph), ch)
-        };
-        // The compact grid stays byte-for-byte what it always was (a few
-        // texels, stored); a resampled texture is megapixels and is compressed.
-        let png = if (pw, ph) != (tw, th) {
-            super::mesh_texture::encode(pw, ph, &pixels, ch)
-        } else if opaque {
-            crate::gradient::png::encode_rgb_png(pw as u32, ph as u32, &pixels)
-        } else {
-            crate::gradient::png::encode_rgba_png(pw as u32, ph as u32, &pixels)
-        };
-        let cid = format!("x-mesh-{seed}-{r}");
-        // The texel grid is placed so that *bilinear* reconstruction reproduces the
-        // fitted field exactly, so the image must ask for bilinear by name. `auto` is
-        // the renderer's choice, and resvg chooses bicubic: measured, that drifts up to
-        // ~9/255 off the field, while bilinear lands within 0.5/255 (8-bit rounding).
-        //
-        // Both spellings, because they reach different consumers. resvg honours only
-        // the CSS form (the attribute is parsed and dropped); the attribute survives
-        // tools that strip or flatten `style`, and SVG 2 reads it as a CSS value. Where
-        // both apply, CSS wins and they agree. A renderer that does not know `smooth`
-        // treats it as invalid and keeps `auto` — Chromium renders identically with or
-        // without it.
-        out.push_str(&format!(
-            "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" image-rendering=\"smooth\" style=\"image-rendering:smooth\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{}\"/>",
-            fmt(ux),
-            fmt(uy),
-            fmt(uw),
-            fmt(uh),
-            crate::gradient::base64::encode(&png)
-        ));
     }
-    true
 }
 
 /// Whether `node` is a mesh a fill may name (§8.2): an SVG 2 `<meshgradient>`
@@ -619,8 +556,8 @@ pub(super) fn emit_mesh_paint(node: roxmltree::Node, out: &mut String, ctx: &Ctx
             }
         }
     }
-    let fill_mesh = fill_paint.and_then(|p| paint_mesh(p, bbox, out, ctx));
-    let stroke_mesh = stroke_paint.and_then(|p| paint_mesh(p, bbox, out, ctx));
+    let fill_mesh = fill_paint.and_then(|p| paint_mesh(p, bbox, true, out, ctx));
+    let stroke_mesh = stroke_paint.and_then(|p| paint_mesh(p, bbox, true, out, ctx));
     if fill_mesh.is_none() && stroke_mesh.is_none() {
         return false;
     }
@@ -898,10 +835,12 @@ fn stroke_outline(
 
 /// The mesh a paint server stands for, in the user space of the element it
 /// paints (`bbox` is that element's fill bounding box, for bounding-box
-/// units). `None` leaves its marker and the paint as authored.
+/// units) — or, when it is not `painting` anything, as it is written. `None`
+/// leaves its marker and the paint as authored.
 fn paint_mesh(
     paint: roxmltree::Node,
     bbox: Option<Rect>,
+    painting: bool,
     out: &mut String,
     ctx: &Ctx,
 ) -> Option<crate::gradient::Mesh> {
@@ -916,7 +855,7 @@ fn paint_mesh(
     // objectBoundingBox units: coordinates live in the unit square of the
     // element's bbox. A box with no width or height has no such square, and
     // the paint is then nothing at all (SVG's rule for every paint server).
-    let unit_map = if boxed {
+    let unit_map = if boxed && painting {
         match bbox.filter(|bb| bb.width() > 0.0 && bb.height() > 0.0) {
             Some(bb) => {
                 Affine::translate((bb.x0, bb.y0))
@@ -1190,7 +1129,7 @@ pub(super) fn parse_hex_color(s: &str) -> Option<(crate::gradient::LinRgb, f32)>
 /// A set of closed vertex loops as path data, one subpath each — the outline
 /// of a colour region, or of an authored clipping mesh. Filled nonzero it is
 /// exactly the faces it was traced from.
-fn append_outline(mesh: &crate::gradient::Mesh, loops: &[Vec<u32>], out: &mut String) {
+pub(super) fn append_outline(mesh: &crate::gradient::Mesh, loops: &[Vec<u32>], out: &mut String) {
     for ring in loops {
         for (i, &v) in ring.iter().enumerate() {
             let (x, y) = mesh.verts[v as usize];

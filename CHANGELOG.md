@@ -16,6 +16,18 @@ partial one.
 
 ### Added
 
+- **Mesh fits are kept between compiles.** `Platform::with_mesh_cache(store)` gives the
+  compiler a place to keep fitted meshes — a `MeshCache` (in memory, bounded, `Send + Sync`),
+  owned or lent, or any `MeshFits` store — keyed by `MeshKey`, a fingerprint of the mesh and
+  the quality's fit class. A mesh is then fitted once: recompiling, moving or restyling
+  anything it paints, or painting ten shapes with it, reuses the fit; only a changed mesh is
+  fitted again. On a 12×12-patch `<meshgradient>` at `highest`, a recompile goes from 118 ms
+  to 5 ms. Output is byte-identical with or without. `Platform` gains a seventh, defaulted
+  type parameter for the store.
+- **Mesh swatches.** `CompileSession::mesh_definitions()` lists a document's `<x:mesh>` and
+  `<meshgradient>` definitions and `CompileSession::mesh_swatch(offset)` compiles one on its
+  own into a standalone SVG (`MeshSwatch { svg, bounds, key }`) — for a palette. It shares
+  its fit with the document's compile.
 - **A mesh as any paint.** An element may name an `<x:mesh>` — as it already could an SVG 2
   `<meshgradient>` — as its **fill, its stroke, or both**: `<path d="…" fill="url(#a)"
   stroke="url(#b)">`. A fill is the mesh's paint inside a clip of the geometry; a stroke is the

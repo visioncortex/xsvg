@@ -179,7 +179,47 @@ passes `&mut` storage and keeps it as long as it likes.
   spec)` lets the core skip paragraphs whose inputs did not change; the
   caller invalidates nothing (the key is the content) and bounds the size.
 
-Both are opt-in; a platform without them is today's behaviour.
+- **Mesh fits** (built: `MeshCache`, behind the `MeshFits` seam). Lowering a
+  mesh (Specification §8.2) is two halves. *Fitting* — rasterize, label the
+  crack regions, grow a grid field per region — is nearly all of the cost and
+  a pure function of the mesh and the quality profile. *Writing* the fit into
+  a document depends on where the mesh is drawn (clip ids, display density)
+  and costs almost nothing. `mesh_fit.rs` holds the first half: `fit(mesh,
+  class) -> FittedMesh`, and `MeshKey`, a 128-bit fingerprint of everything
+  the fit reads — every vertex, face, corner colour and alpha, bit for bit,
+  the fit class (`highest` and `raster` share one) and a fitter version.
+  `MeshFits` is the platform's seam for keeping fits, shaped like the other
+  seams: a trait with an inert default (`NoMeshCache`), implemented for
+  references, concrete on the `Platform` (`Platform::with_mesh_cache(store)`).
+  The compiler asks `fitted(key)` before fitting and offers `keep(key, fit)`
+  after. `MeshCache` is the in-memory store: bounded by bytes and by entries,
+  starting over when full, `Send + Sync`, counting its hits and misses. An
+  embedder that builds a platform per flush owns one and lends it
+  (`.with_mesh_cache(&cache)`), as the kit does its `MeasureCache`.
+  The key is the whole invalidation: a mesh that changed in any way has
+  another key, so nothing is ever stale and a store only bounds itself. What a
+  fit is shared across follows from the mesh the fitter is handed, which is in
+  the coordinates it is drawn in: moving, reshaping or restyling an element a
+  mesh paints leaves the mesh alone (a hit); a mesh drawn where it stands and
+  naming any number of shapes in user space is one fit; a paint's own
+  `transform` or bounding-box units move the mesh itself, so each distinct
+  placement is its own fit; editing the mesh is a new key every time.
+  Measured on a 12×12-patch `<meshgradient>` (native, release): a compile at
+  `highest` is 118 ms without a store, 120 ms cold with one (the fingerprint),
+  5 ms warm; at `balanced` 18 → 1.6 ms.
+  The same split is what `CompileSession::mesh_swatch(offset)` stands on: one
+  mesh definition compiled on its own into a standalone SVG — a palette
+  swatch — with `mesh_definitions()` listing what there is to show. Its ids
+  are derived from the key rather than a source position, so swatches share a
+  DOM, and `MeshSwatch::key` is what a palette caches its swatches by.
+- **Still open: fits by URL.** The key is also the address a fit would have
+  outside the document — an `<image href>` to a store that compiles a mesh on
+  request — which would take the fit out of the compile entirely and let a
+  browser cache it. Not built; the fingerprint is not a cryptographic digest,
+  and a store shared between parties that do not trust each other would want
+  one.
+
+All are opt-in; a platform without them is today's behaviour.
 
 ## 6. Tests
 
@@ -203,6 +243,16 @@ Both are opt-in; a platform without them is today's behaviour.
   byte-identical output for every fragment and every layout; a counting
   measurer shows a second flush over unchanged text reaches the adapter
   zero times, and an edit costs only its new word.
+
+- **The mesh cache is transparent too** (`tests/session.rs`). One `MeshCache`
+  carried across every mesh sample, at every quality, cold and warm, whole
+  documents, fragments and display-resolution textures, emits what a platform
+  without one emits, byte for byte; so do 60 random meshes (jitter, cracks,
+  triangles, alpha, degenerate faces, slivers), also after the cache starts
+  over. Its counters show a second flush fits nothing, an edit to a painted
+  shape fits nothing, an edit to the mesh fits once. The key's tests
+  (`mesh_fit.rs`) change each thing the fit reads in turn, and flip single
+  bits 4000 times, and never see a key repeat.
 
 ## 7. What the embedder does with it (informative)
 
