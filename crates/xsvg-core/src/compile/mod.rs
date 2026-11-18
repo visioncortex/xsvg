@@ -742,14 +742,15 @@ fn baked_refs<'a>(
             out.push(id);
         }
     }
-    // a fill referencing a <meshgradient> is compiled, not live (§8.2)
+    // a fill referencing a mesh — <meshgradient> or <x:mesh> — is compiled,
+    // not live (§8.2)
     if let Some(id) = n
         .attribute("fill")
         .and_then(|f| f.strip_prefix("url(#"))
         .and_then(|f| f.strip_suffix(')'))
     {
         let target = ids.get(id).and_then(|&nid| n.document().get_node(nid));
-        if target.is_some_and(|t| t.tag_name().name() == "meshgradient") {
+        if target.is_some_and(is_mesh_paint) {
             out.push(id);
         }
     }
@@ -1157,10 +1158,11 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
-    // A fill referencing an SVG 2 <meshgradient> (the Inkscape dialect no
-    // browser renders) compiles to the mesh pipeline, clipped by the shape.
-    if let Some(mg) = mesh_fill_target(node, ctx).filter(|_| !ctx.clip_geometry.get()) {
-        if emit_meshgradient_fill(node, mg, out, ctx) {
+    // A fill referencing a mesh — an SVG 2 <meshgradient> (the Inkscape
+    // dialect no browser renders) or an <x:mesh> — compiles to the mesh
+    // pipeline, clipped by the shape.
+    if let Some(paint) = mesh_fill_target(node, ctx).filter(|_| !ctx.clip_geometry.get()) {
+        if emit_mesh_fill(node, paint, out, ctx) {
             return;
         }
     }

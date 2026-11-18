@@ -14,6 +14,12 @@ partial one.
 
 ## [Unreleased]
 
+- **`<x:mesh>` as a fill.** A shape may name an `<x:mesh>` as its paint —
+  `<path d="…" fill="url(#mesh)">` — as it already could an SVG 2 `<meshgradient>`. It lowers to
+  the mesh's paint inside a clip of the shape, with the stroke on top. The mesh's coordinates
+  are the shape's user space, under the mesh's own `transform`; the reference is baked, so
+  editing the mesh re-emits the shapes it fills.
+
 ### Changed
 
 - **Mesh region clips are outlines.** A mesh region's clip path (and an `<x:mesh>` inside a

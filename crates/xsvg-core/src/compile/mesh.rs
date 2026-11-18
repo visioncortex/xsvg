@@ -15,11 +15,67 @@ use super::*;
 /// Display-resolution compilation samples that same fitted field before the
 /// first PNG encoding, for bitmap consumers with coarse texture interpolation.
 pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
+    let mesh = match parse_mesh(node, out) {
+        Ok(mesh) => mesh,
+        Err(why) => {
+            out.push_str(why);
+            return;
+        }
+    };
+
+    // A clipping mesh contributes its exact face polygons, irrespective of
+    // paint or alpha. Reuse the parser above and avoid rasterizing any pixels.
+    if ctx.clip_geometry.get() {
+        out.push_str("<g");
+        copy_attrs(
+            node,
+            out,
+            &[
+                "cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity",
+            ],
+            ctx,
+        );
+        out.push_str(&pos_attr(node, ctx));
+        out.push('>');
+        // one path: the outline of all the faces together
+        let whole = mesh.region_outlines(&vec![0; mesh.faces.len()], 1);
+        out.push_str("<path d=\"");
+        append_outline(&mesh, &whole[0], out);
+        out.push_str("\"/>");
+        out.push_str("</g>");
+        return;
+    }
+
+    open_effect_element(
+        node,
+        "g",
+        out,
+        &[
+            "cols", "rows", "x", "y", "width", "height", "fill", "points",
+        ],
+        ctx,
+        || None,
+    );
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+    if !lower_mesh(&mesh, &gen_id_seed(node, ctx), node, out, ctx) {
+        out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
+    }
+    out.push_str("</g>");
+}
+
+/// An `<x:mesh>`'s geometry and colours, in its own coordinates: the grid
+/// sugar (`cols`/`rows`) or `points` + `<x:face>`. A skipped face leaves its
+/// marker in `markers`; `Err` is the marker for a mesh with nothing to draw.
+/// Shared by the element itself and by a shape it fills (`fill="url(#id)"`).
+pub(super) fn parse_mesh(
+    node: roxmltree::Node,
+    markers: &mut String,
+) -> Result<crate::gradient::Mesh, &'static str> {
     use crate::gradient::Mesh;
 
     // ---- parse: grid sugar (cols/rows attributes) or points= + <x:face>
     let mut mesh = Mesh::default();
-    let mut markers = String::new();
     let grid_sugar = node.attribute("cols").is_some() || node.attribute("rows").is_some();
     if grid_sugar {
         // <x:mesh x y width height cols rows fill="(cols+1)·(rows+1) vertex
@@ -38,10 +94,9 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             .filter_map(parse_hex_color)
             .collect();
         if !cols_ok || gw <= 0.0 || gh <= 0.0 || vcols.len() != (cols + 1) * (rows + 1) {
-            out.push_str(
+            return Err(
                 "<!-- xsvg: <x:mesh> grid form needs cols/rows in 1..64, positive width/height, and (cols+1)*(rows+1) fill colors -->",
             );
-            return;
         }
         for j in 0..=rows {
             for i in 0..=cols {
@@ -124,51 +179,10 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             );
         }
     }
-    out.push_str(&markers);
     if mesh.faces.is_empty() {
-        out.push_str("<!-- xsvg: <x:mesh> no usable faces -->");
-        return;
+        return Err("<!-- xsvg: <x:mesh> no usable faces -->");
     }
-
-    // A clipping mesh contributes its exact face polygons, irrespective of
-    // paint or alpha. Reuse the parser above and avoid rasterizing any pixels.
-    if ctx.clip_geometry.get() {
-        out.push_str("<g");
-        copy_attrs(
-            node,
-            out,
-            &[
-                "cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity",
-            ],
-            ctx,
-        );
-        out.push_str(&pos_attr(node, ctx));
-        out.push('>');
-        // one path: the outline of all the faces together
-        let whole = mesh.region_outlines(&vec![0; mesh.faces.len()], 1);
-        out.push_str("<path d=\"");
-        append_outline(&mesh, &whole[0], out);
-        out.push_str("\"/>");
-        out.push_str("</g>");
-        return;
-    }
-
-    open_effect_element(
-        node,
-        "g",
-        out,
-        &[
-            "cols", "rows", "x", "y", "width", "height", "fill", "points",
-        ],
-        ctx,
-        || None,
-    );
-    out.push_str(&pos_attr(node, ctx));
-    out.push('>');
-    if !lower_mesh(&mesh, &gen_id_seed(node, ctx), node, out, ctx) {
-        out.push_str("<!-- xsvg: <x:mesh> degenerate extent -->");
-    }
-    out.push_str("</g>");
+    Ok(mesh)
 }
 
 /// The shared mesh lowering (§8.2 stage 1 + 2): rasterize at a profile-graded
@@ -364,8 +378,17 @@ pub(super) fn lower_mesh(
     true
 }
 
-/// The `fill="url(#id)"` target, when it is an SVG 2 `<meshgradient>` — the
-/// Inkscape mesh dialect no browser renders; xsvg compiles it (§8.2).
+/// Whether `node` is a mesh a fill may name (§8.2): an SVG 2 `<meshgradient>`
+/// — the Inkscape dialect no browser renders — or xsvg's own `<x:mesh>`.
+/// Either way the reference is compiled, never live.
+pub(super) fn is_mesh_paint(node: roxmltree::Node) -> bool {
+    matches!(
+        (node.tag_name().namespace(), node.tag_name().name()),
+        (Some(SVG_NS), "meshgradient") | (Some(XSVG_NS), "mesh")
+    )
+}
+
+/// The `fill="url(#id)"` target, when it is a mesh ([`is_mesh_paint`]).
 pub(super) fn mesh_fill_target<'a>(
     node: roxmltree::Node<'a, 'a>,
     ctx: &Ctx,
@@ -373,42 +396,69 @@ pub(super) fn mesh_fill_target<'a>(
     let fill = node.attribute("fill")?;
     let id = fill.strip_prefix("url(#")?.strip_suffix(')')?;
     let target = ctx.resolve_ref(node, id)?;
-    (target.tag_name().name() == "meshgradient").then_some(target)
+    is_mesh_paint(target).then_some(target)
 }
 
-/// Lower a shape whose fill references an SVG 2 `<meshgradient>`: tessellate
-/// the Coons patches into the straight-quad mesh (polycurve → points), lower
-/// it through the standard pipeline, clip by the shape's geometry, and re-emit
-/// the stroke (if any) on top. Returns `false` (caller falls through to normal
-/// emission, mesh unrendered as in any browser) when the dialect doesn't parse.
-pub(super) fn emit_meshgradient_fill(
+/// Lower a shape whose fill references a mesh: build the mesh in the shape's
+/// user space, lower it through the standard pipeline, clip by the shape's
+/// geometry, and re-emit the stroke (if any) on top.
+///
+/// A `<meshgradient>` tessellates its Coons patches into the straight-quad
+/// mesh (polycurve → points), under `gradientTransform` and `gradientUnits`.
+/// An `<x:mesh>` is that mesh already: its `points` are read as the shape's
+/// user space, under the mesh's own `transform` — the same role, and nothing
+/// above the mesh applies, as with any paint server.
+///
+/// Returns `false` (caller falls through to normal emission, the fill
+/// unrendered as in any browser) when the mesh does not parse.
+pub(super) fn emit_mesh_fill(
     node: roxmltree::Node,
-    mg: roxmltree::Node,
+    paint: roxmltree::Node,
     out: &mut String,
     ctx: &Ctx,
 ) -> bool {
     let Some(shape_d) = shape_to_path_d(node, ctx) else {
         return false;
     };
-    let tess = match ctx.quality {
-        QualityProfile::Fast => 8usize,
-        QualityProfile::Balanced => 12,
-        QualityProfile::Highest | QualityProfile::Raster => 20,
-    };
-    // objectBoundingBox units: patch coordinates live in the unit square of
-    // the shape's bbox
-    let unit_map = if mg.attribute("gradientUnits") == Some("objectBoundingBox") {
-        let Some(bb) = svg_path_bbox(&shape_d) else {
+    let mesh = if paint.tag_name().name() == "mesh" {
+        // its own markers (a skipped face) are said where the mesh stands
+        let mut mesh = match parse_mesh(paint, &mut String::new()) {
+            Ok(mesh) => mesh,
+            Err(_) => {
+                out.push_str("<!-- xsvg: x:mesh fill left live (no usable mesh) -->");
+                return false;
+            }
+        };
+        let placed = element_transform(paint);
+        if placed != crate::kurbo::Affine::IDENTITY {
+            for v in &mut mesh.verts {
+                let p = placed * crate::kurbo::Point::new(v.0 as f64, v.1 as f64);
+                *v = (p.x as f32, p.y as f32);
+            }
+        }
+        mesh
+    } else {
+        let tess = match ctx.quality {
+            QualityProfile::Fast => 8usize,
+            QualityProfile::Balanced => 12,
+            QualityProfile::Highest | QualityProfile::Raster => 20,
+        };
+        // objectBoundingBox units: patch coordinates live in the unit square of
+        // the shape's bbox
+        let unit_map = if paint.attribute("gradientUnits") == Some("objectBoundingBox") {
+            let Some(bb) = svg_path_bbox(&shape_d) else {
+                return false;
+            };
+            crate::kurbo::Affine::translate((bb.x0, bb.y0))
+                * crate::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
+        } else {
+            crate::kurbo::Affine::IDENTITY
+        };
+        let Some(mesh) = parse_meshgradient(paint, tess, unit_map, ctx) else {
+            out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
             return false;
         };
-        crate::kurbo::Affine::translate((bb.x0, bb.y0))
-            * crate::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
-    } else {
-        crate::kurbo::Affine::IDENTITY
-    };
-    let Some(mesh) = parse_meshgradient(mg, tess, unit_map, ctx) else {
-        out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
-        return false;
+        mesh
     };
     let pos = gen_id_seed(node, ctx);
     let filter = effect_attr(node, out, ctx, || svg_path_bbox(&shape_d));
@@ -429,7 +479,7 @@ pub(super) fn emit_meshgradient_fill(
     }
     out.push('>');
     if !lower_mesh(&mesh, &pos, node, out, ctx) {
-        out.push_str("<!-- xsvg: meshgradient degenerate extent -->");
+        out.push_str("<!-- xsvg: mesh fill degenerate extent -->");
     }
     out.push_str("</g>");
     // the stroke still paints over the mesh fill

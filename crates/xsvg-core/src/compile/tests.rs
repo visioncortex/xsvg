@@ -11817,3 +11817,281 @@ fn editing_a_meshgradient_still_re_emits_the_shapes_it_fills() {
         "{deps:?}"
     );
 }
+
+/// The `<image …/>` elements of compiled output with their clip ids removed:
+/// what a mesh paints, independent of who asked for it.
+fn mesh_images(out: &str) -> Vec<String> {
+    let mut images = Vec::new();
+    let mut rest = out;
+    while let Some(at) = rest.find("<image") {
+        let end = at + rest[at..].find("/>").unwrap() + 2;
+        let image = &rest[at..end];
+        let clip = image.find(" clip-path=\"").unwrap();
+        let close = clip + 12 + image[clip + 12..].find('"').unwrap() + 1;
+        images.push(format!("{}{}", &image[..clip], &image[close..]));
+        rest = &rest[end..];
+    }
+    images
+}
+
+const PAINT_MESH: &str = r##"<x:mesh id="m" points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##;
+
+#[test]
+fn a_path_filled_by_an_x_mesh_is_clipped_mesh_paint() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{PAINT_MESH}</defs><path d="M10,10 L90,10 L50,45 Z" fill="url(#m)" stroke="#000" stroke-width="2"/></svg>"##
+    ));
+    // the shape is the clip, the mesh the paint, the stroke on top
+    assert!(out.contains(r##"<clipPath id="x-mgc-"##), "{out}");
+    assert!(
+        out.contains(r##"<path d="M10,10 L90,10 L50,45 Z"/></clipPath><g clip-path="url(#x-mgc-"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            r##"<path stroke="#000" stroke-width="2" fill="none" d="M10,10 L90,10 L50,45 Z"/>"##
+        ),
+        "{out}"
+    );
+    assert!(
+        !out.contains(r##"fill="url(#m)""##),
+        "the reference is compiled: {out}"
+    );
+    // the paint is the mesh's own: once where it is defined, once in the shape
+    let images = mesh_images(&out);
+    assert_eq!(images.len(), 2, "{out}");
+    assert_eq!(images[0], images[1]);
+    assert_eq!(region_clips(&out), vec![(1, 4, 10_000.0), (1, 4, 10_000.0)]);
+    roxmltree::Document::parse(&out).unwrap();
+}
+
+#[test]
+fn every_shape_takes_an_x_mesh_fill_wherever_the_mesh_stands() {
+    for shape in [
+        r##"<path d="M0,0H80V40H0Z" fill="url(#m)"/>"##,
+        r##"<rect x="5" y="5" width="60" height="30" fill="url(#m)"/>"##,
+        r##"<rect x="5" y="5" width="60" height="30" rx="6" fill="url(#m)"/>"##,
+        r##"<circle cx="50" cy="25" r="20" fill="url(#m)"/>"##,
+        r##"<ellipse cx="50" cy="25" rx="30" ry="15" fill="url(#m)"/>"##,
+        r##"<polygon points="10,10 90,10 50,45" fill="url(#m)"/>"##,
+        r##"<path d="M0,0H80V40H0Z" fill="url(#m)" transform="rotate(10)" opacity=".5"/>"##,
+    ] {
+        for source in [
+            format!("{XW}<defs>{PAINT_MESH}</defs>{shape}</svg>"),
+            // a forward reference, and a mesh that is also drawn in place
+            format!("{XW}{shape}{PAINT_MESH}</svg>"),
+            // nothing above the mesh places the paint
+            format!(
+                r##"{XW}<g transform="translate(500 500) scale(9)"><defs>{PAINT_MESH}</defs></g>{shape}</svg>"##
+            ),
+        ] {
+            let out = compile_test(&source);
+            assert_eq!(out.matches("x-mgc-").count(), 2, "{shape}: {out}");
+            let images = mesh_images(&out);
+            assert_eq!(images.len(), 2, "{shape}: {out}");
+            assert_eq!(images[0], images[1], "{shape}");
+            assert!(!out.contains("left live"), "{out}");
+        }
+    }
+}
+
+#[test]
+fn an_x_mesh_fill_reads_the_grid_form_cracks_and_feathering() {
+    // grid sugar
+    let out = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="m" x="10" y="20" width="80" height="40" cols="2" rows="1" fill="#f00 #0f0 #00f #ff0 #f0f #0ff"/></defs><circle cx="50" cy="40" r="15" fill="url(#m)"/></svg>"##
+    ));
+    assert_eq!(mesh_images(&out).len(), 2, "{out}");
+    assert_eq!(region_clips(&out)[1], (1, 6, 6_400.0));
+    // a colour crack: the fill has both regions
+    let out = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="m" points="0,0 50,0 100,0 0,50 50,50 100,50"><x:face v="0 1 4 3" fill="#f00 #0f0 #00f #fff"/><x:face v="1 2 5 4" fill="#000 #f0f #ff0 #000"/></x:mesh></defs><rect width="100" height="50" fill="url(#m)"/></svg>"##
+    ));
+    assert_eq!(mesh_images(&out).len(), 4, "{out}");
+    assert_eq!(region_clips(&out).len(), 4);
+    // per-corner alpha: the fill's texture carries it
+    let out = compile_test(&format!(
+        r##"{XW}<rect width="100" height="50" fill="url(#m)"/><defs><x:mesh id="m" points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00f #0f0f #00f0 #fff0"/></x:mesh></defs></svg>"##
+    ));
+    assert_eq!(b64_prefix(&out, 26)[25], 6, "RGBA: {out}");
+    // a skipped face does not stop the rest filling
+    let out = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="m" points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/><x:face v="0 1 9" fill="#000"/></x:mesh></defs><rect width="100" height="50" fill="url(#m)"/></svg>"##
+    ));
+    assert_eq!(mesh_images(&out).len(), 2, "{out}");
+    assert_eq!(
+        out.matches("<x:face> skipped").count(),
+        1,
+        "said once, where the mesh stands: {out}"
+    );
+}
+
+#[test]
+fn an_x_mesh_fill_is_placed_by_the_meshs_own_transform() {
+    let clip = |mesh_attrs: &str| {
+        let out = compile_test(&format!(
+            r##"{XW}<rect width="400" height="300" fill="url(#m)"/><defs><x:mesh id="m" points="0,0 100,0 100,50 0,50"{mesh_attrs}><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs></svg>"##
+        ));
+        let doc = roxmltree::Document::parse(&out).unwrap();
+        let d = doc
+            .descendants()
+            .find(|n| n.attribute("id").is_some_and(|i| i.starts_with("x-mesh-")))
+            .and_then(|n| n.first_element_child())
+            .and_then(|p| p.attribute("d"))
+            .unwrap()
+            .to_string();
+        d
+    };
+    assert_eq!(clip(""), "M0,0L100,0L100,50L0,50Z");
+    // as gradientTransform places a gradient
+    assert_eq!(
+        clip(r#" transform="translate(20 10) scale(2)""#),
+        "M20,10L220,10L220,110L20,110Z"
+    );
+    assert_eq!(
+        clip(r#" transform="matrix(0 1 -1 0 60 0)""#),
+        "M60,0L60,100L10,100L10,0Z"
+    );
+    assert_eq!(
+        clip(r#" style="transform:translate(5px,5px)""#),
+        "M5,5L105,5L105,55L5,55Z"
+    );
+}
+
+#[test]
+fn an_unusable_x_mesh_fill_stays_live_with_a_marker() {
+    for mesh in [
+        r##"<x:mesh id="m" points="0,0 1,0"/>"##,
+        r##"<x:mesh id="m" points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 7" fill="#f00"/></x:mesh>"##,
+        r##"<x:mesh id="m" x="0" y="0" width="10" height="10" cols="2" rows="2" fill="#f00"/>"##,
+    ] {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{mesh}</defs><rect width="20" height="20" rx="2" fill="url(#m)"/></svg>"##
+        ));
+        assert!(out.contains("x:mesh fill left live"), "{out}");
+        assert!(out.contains(r##"fill="url(#m)""##), "{out}");
+        assert!(!out.contains("<image"), "{out}");
+        roxmltree::Document::parse(&out).unwrap();
+    }
+    // a mesh with no extent parses but has nothing to paint
+    let out = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="m" points="0,0 10,0 20,0"><x:face v="0 1 2" fill="#f00"/></x:mesh></defs><rect width="20" height="20" fill="url(#m)"/></svg>"##
+    ));
+    assert!(out.contains("mesh fill degenerate extent"), "{out}");
+}
+
+#[test]
+fn only_real_meshes_are_mesh_paint() {
+    for (paint, compiled) in [
+        (PAINT_MESH.to_string(), true),
+        (INKMESH.to_string(), true),
+        // right names, wrong namespaces
+        (
+            r##"<mesh id="m" points="0,0 100,0 100,50 0,50"/>"##.to_string(),
+            false,
+        ),
+        (r##"<x:meshgradient id="m"/>"##.to_string(), false),
+        // inside the editor's island an id does not exist (§4.4)
+        (format!("<x:doc>{PAINT_MESH}</x:doc>"), false),
+        (
+            r##"<linearGradient id="m"><stop offset="0" stop-color="#f00"/></linearGradient>"##
+                .to_string(),
+            false,
+        ),
+    ] {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{paint}</defs><rect width="100" height="50" rx="3" fill="url(#m)"/></svg>"##
+        ));
+        assert_eq!(out.contains("x-mgc-"), compiled, "{paint}: {out}");
+        assert_eq!(
+            out.contains(r##"fill="url(#m)""##),
+            !compiled,
+            "{paint}: {out}"
+        );
+    }
+}
+
+#[test]
+fn an_x_mesh_fill_is_a_baked_reference() {
+    let source = format!(
+        r##"{XW}<defs>{PAINT_MESH}</defs><path d="M0,0H80V40H0Z" fill="url(#m)"/><circle cx="9" cy="9" r="5" fill="url(#m)"/><rect y="90" width="20" height="20"/></svg>"##
+    );
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let session = CompileSession::new(&platform, &source, "balanced", false, "").unwrap();
+    let mesh = source.find("<x:mesh").unwrap();
+    let (path, circle) = (
+        source.find("<path").unwrap(),
+        source.find("<circle").unwrap(),
+    );
+    let starts = |deps: Vec<(usize, usize)>| deps.iter().map(|d| d.0).collect::<Vec<_>>();
+    // editing the mesh re-emits both shapes it fills, and nothing else
+    assert_eq!(starts(session.unit_dependents(&[mesh])), vec![path, circle]);
+    assert_eq!(
+        starts(session.dependents(&[source.find("<defs").unwrap()])),
+        vec![path, circle]
+    );
+    // each shape's fragment is its span in the whole compile
+    let whole = compile_test(&source);
+    for at in [path, circle] {
+        let fragment = compile_with(
+            &source,
+            &Options {
+                fragment: Some(at),
+                ..Default::default()
+            },
+            &platform,
+        )
+        .unwrap();
+        assert!(
+            fragment.contains("x-mgc-") && whole.contains(&fragment),
+            "{fragment}"
+        );
+    }
+}
+
+#[test]
+fn an_x_mesh_fill_inside_a_clip_path_is_geometry_only() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{PAINT_MESH}<clipPath id="c"><circle cx="50" cy="25" r="20" fill="url(#m)"/></clipPath></defs><rect width="100" height="50" clip-path="url(#c)"/></svg>"##
+    ));
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let clip = doc
+        .descendants()
+        .find(|n| n.attribute("id") == Some("c"))
+        .unwrap();
+    assert!(
+        clip.descendants().all(|n| !n.has_tag_name("image")),
+        "{out}"
+    );
+    assert_eq!(
+        mesh_images(&out).len(),
+        1,
+        "only where the mesh is defined: {out}"
+    );
+}
+
+#[test]
+fn an_x_mesh_fill_is_sized_for_the_shape_at_display_resolution() {
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let out = compile_with(
+        &format!(
+            r##"{XW}<defs>{PAINT_MESH}</defs><g transform="scale(4)"><path d="M0,0H100V50H0Z" fill="url(#m)"/></g></svg>"##
+        ),
+        &display_options(1.0),
+        &platform,
+    )
+    .unwrap();
+    // the second texture is the fill's: drawn 4× the size of the definition's
+    let pngs: Vec<Vec<u8>> = out
+        .match_indices("base64,")
+        .map(|(at, _)| b64_prefix(&out[at - 1..], 24))
+        .collect();
+    let width = |png: &[u8]| u32::from_be_bytes(png[16..20].try_into().unwrap()) as f64;
+    assert_eq!(pngs.len(), 2);
+    assert!(
+        (width(&pngs[1]) / width(&pngs[0]) - 4.0).abs() < 0.1,
+        "{} vs {}",
+        width(&pngs[1]),
+        width(&pngs[0])
+    );
+}

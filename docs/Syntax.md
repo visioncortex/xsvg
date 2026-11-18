@@ -170,7 +170,7 @@ Three shaping controls, usable on `<text inline-size>`, `<textArea>`, and `<x:te
 These are genuinely-new concepts, so they're `x:` elements with unprefixed inner attributes. Syntax
 sketches live in [Plan.md](Plan.md):
 - **`<x:vstroke>`** — variable-width strokes ([§2.3](Plan.md))
-- **`<x:mesh>`** — Coons/tensor mesh gradients with transparency ([§2.4](Plan.md))
+- **`<x:mesh>`** — Coons/tensor mesh gradients with transparency ([§2.4](Plan.md)); also a paint any shape may name, `fill="url(#mesh)"` ([§8.2](Specification.md))
 - **`<x:boolean op="…">`** — live boolean shape operators ([§2.5](Plan.md))
 - **`<x:connector from to route arrow>`** — lines routed between two elements' boxes ([§7.6](Specification.md))
 - **`<x:offset in distance join>`** — grow / shrink a region by a distance (inset & outset) ([§7.7](Specification.md))

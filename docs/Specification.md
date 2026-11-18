@@ -1784,6 +1784,40 @@ alpha interpolates in straight (unpremultiplied) form — a steep alpha cliff ag
 different color can fringe slightly at extreme zoom (measured to be the *better* side of the
 trade: fitting premultiplied loses at every grid size — [Bench.md](Bench.md) §2).
 
+#### A mesh as a fill — `fill="url(#mesh)"` [implemented]
+
+An `<x:mesh>` is also a **paint**: any shape may name it as its fill, exactly as it would name a
+gradient.
+
+```xml
+<defs>
+  <x:mesh id="glow" points="0,0 200,0 200,120 0,120">
+    <x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/>
+  </x:mesh>
+</defs>
+<path d="M20,10 C80,-20 160,40 180,100 L30,110 Z" fill="url(#glow)" stroke="#222"/>
+```
+
+The shape lowers to the mesh's paint — the same regions, textures and clips the mesh emits where
+it is drawn — inside a clip of the shape's own geometry, with the stroke (if any) re-emitted on
+top. It applies to every shape that has geometry of its own (`<path>`, `<rect>`, `<circle>`,
+`<ellipse>`, `<polygon>`, `<polyline>`, `<line>`), and both mesh syntaxes, cracks and feathering
+work as they do for the element.
+
+- **Coordinates.** The mesh's `points` (or `x`/`y`/`width`/`height`) are read in the **user space
+  of the shape it fills**, under the mesh's own `transform` — which plays the part
+  `gradientTransform` plays for a gradient. Nothing above the mesh applies: like every paint
+  server, where it sits in the tree places nothing.
+- **Where the mesh stands.** In `<defs>` it is a definition and paints only through its
+  references; anywhere else it is also drawn in place. One mesh may fill any number of shapes.
+- **Baked.** The reference is resolved at compile time, so the `dependents` scan reports every
+  shape a mesh fills when the mesh is edited, as for `in=`. Forward references work.
+- **Degradation.** A mesh with nothing usable (no valid face, a malformed grid) leaves the shape
+  as authored with a marker; its `fill` then names an element that is not a paint server and
+  paints nothing. `stroke="url(#mesh)"` is not lowered.
+
+An SVG 2 `<meshgradient>` is the same kind of paint, in the one dialect that authors it:
+
 #### SVG 2 / Inkscape `<meshgradient>` compatibility [implemented: v1]
 
 Inkscape is the only major tool that *authors* SVG 2 mesh gradients, and no browser renders them —
@@ -1860,6 +1894,7 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
+| `<x:mesh>` as a paint — `fill="url(#mesh)"` on any shape, clipped to its geometry (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha / feathering (`#rrggbbaa`, `stop-opacity`, RGBA texel PNGs) | implemented |
 | `<x:mesh>` — smooth-interior T-junctions (color-consistent hanging nodes join regions) | implemented |
 | SVG 2 `<meshgradient>` — `objectBoundingBox` units + `type="bicubic"` (eased approximation) | implemented |
