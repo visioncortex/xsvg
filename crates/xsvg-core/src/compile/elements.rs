@@ -202,6 +202,22 @@ pub(super) struct Mesh {
     pub cols: f64,
     #[param(default = 0.0, min = 0.0, max = 64.0)]
     pub rows: f64,
+    #[param(
+        default = "userSpaceOnUse",
+        doc = "as a paint: its coordinates in the painted element's user space, or as fractions of its bounding box"
+    )]
+    pub units: MeshUnits,
+}
+
+/// The coordinate system of a mesh used as a paint (`fill`/`stroke`), spelled
+/// as SVG spells `gradientUnits`.
+#[derive(ParamEnum, Clone, Copy, PartialEq, Default, Debug)]
+pub(super) enum MeshUnits {
+    #[default]
+    #[value("userSpaceOnUse")]
+    UserSpaceOnUse,
+    #[value("objectBoundingBox")]
+    ObjectBoundingBox,
 }
 
 // ---- connector ------------------------------------------------------------

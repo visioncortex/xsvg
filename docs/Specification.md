@@ -1784,37 +1784,89 @@ alpha interpolates in straight (unpremultiplied) form — a steep alpha cliff ag
 different color can fringe slightly at extreme zoom (measured to be the *better* side of the
 trade: fitting premultiplied loses at every grid size — [Bench.md](Bench.md) §2).
 
-#### A mesh as a fill — `fill="url(#mesh)"` [implemented]
+#### A mesh as a paint — `fill="url(#mesh)"`, `stroke="url(#mesh)"` [implemented]
 
-An `<x:mesh>` is also a **paint**: any shape may name it as its fill, exactly as it would name a
-gradient.
+An `<x:mesh>` is also a **paint**: an element may name it as its fill, its stroke, or both,
+exactly as it would name a gradient.
 
 ```xml
 <defs>
   <x:mesh id="glow" points="0,0 200,0 200,120 0,120">
     <x:face v="0 1 2 3" fill="#e11 #fa0 #3b7 #06c"/>
   </x:mesh>
+  <x:mesh id="rim" units="objectBoundingBox" points="0,0 1,0 1,1 0,1">
+    <x:face v="0 1 2 3" fill="#fff #222 #fff #222"/>
+  </x:mesh>
 </defs>
-<path d="M20,10 C80,-20 160,40 180,100 L30,110 Z" fill="url(#glow)" stroke="#222"/>
+<path d="M20,10 C80,-20 160,40 180,100 L30,110 Z" fill="url(#glow)" stroke="url(#rim)" stroke-width="6"/>
 ```
 
-The shape lowers to the mesh's paint — the same regions, textures and clips the mesh emits where
-it is drawn — inside a clip of the shape's own geometry, with the stroke (if any) re-emitted on
-top. It applies to every shape that has geometry of its own (`<path>`, `<rect>`, `<circle>`,
-`<ellipse>`, `<polygon>`, `<polyline>`, `<line>`), and both mesh syntaxes, cracks and feathering
-work as they do for the element.
+**What takes it (normative).** Every element with geometry of its own whose `fill` and `stroke`
+are ordinary paints:
 
-- **Coordinates.** The mesh's `points` (or `x`/`y`/`width`/`height`) are read in the **user space
-  of the shape it fills**, under the mesh's own `transform` — which plays the part
-  `gradientTransform` plays for a gradient. Nothing above the mesh applies: like every paint
-  server, where it sits in the tree places nothing.
+| element | the geometry a mesh paints |
+|---|---|
+| `<path>`, `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, `<line>` | the shape (with its `x:corners`, §5.4) |
+| `<x:boolean>`, `<x:offset>` | the result — one outline, as `in="#id"` reads it |
+| `<text>`, `<x:textbox>`, `<x:textpath>` | the glyph outlines (§6.12) — the text is outlined, not live |
+
+`<x:connector>` (whose stroke is a parameter and whose arrowheads are filled with it), the chart
+and table elements (whose `fill` is not one paint), an `<x:warp>`'s children (which lower to
+warped paths, and a texture cannot be warped), `<image>` and `<use>` are not painted by a mesh;
+a reference there is left as written.
+
+**Lowering (normative).** The element becomes a `<g>` that carries its identity and everything
+that is not paint — `id`, `class`, `transform`, `opacity`, `clip-path`, `mask`, `filter`,
+`display`, `visibility` (and, for a basic shape, any attribute that is not its geometry). Inside,
+in paint order:
+
+- a **fill** that is a mesh → the mesh's own paint (the regions, textures and clips it emits
+  where it is drawn) inside a `<clipPath>` of the element's geometry, with `clip-rule` from the
+  shape's `fill-rule`;
+- a **stroke** that is a mesh → the mesh's paint inside a `<clipPath>` of the **stroke
+  outline**: the geometry stroked to fill geometry under `stroke-width`, `stroke-linecap`,
+  `stroke-linejoin`, `stroke-miterlimit`, `stroke-dasharray` and `stroke-dashoffset`, at the
+  profile's shape tolerance (§7);
+- whatever paint is **left** — a plain fill or stroke, markers — on one `<path>` of the
+  geometry, the lowered paint written `none`. With nothing left there is no path.
+
+`paint-order` decides which goes under (the stroke, when it is named before the fill).
+`fill-opacity` and `stroke-opacity` become the `opacity` of their piece. `fill`, `stroke` and the
+`stroke-*` properties are read as **presentation attributes, inherited** from ancestors as SVG
+inherits them — so `<g fill="url(#mesh)">` paints every shape below it that does not set its
+own — except that an `x:` text element's `fill` is its own (unset is black, §6). They are not
+read from `style`. A paint value may be quoted and may carry a fallback (`url("#m") #888`); the
+fallback is unused once the mesh is lowered.
+
+- **Coordinates.** By default (`units="userSpaceOnUse"`) the mesh's `points` (or
+  `x`/`y`/`width`/`height`) are read in the **user space of the element it paints**. With
+  **`units="objectBoundingBox"`** they are fractions of that element's **fill bounding box**
+  (`0,0` its top-left, `1,1` its bottom-right) — for a stroke too, as in SVG — so one mesh fits
+  every shape it paints. Either way the mesh's own `transform` applies first, which is the part
+  `gradientTransform` plays for a gradient; nothing above the mesh applies, since like every
+  paint server where it sits in the tree places nothing. `units` says nothing where the mesh
+  is drawn in place.
 - **Where the mesh stands.** In `<defs>` it is a definition and paints only through its
-  references; anywhere else it is also drawn in place. One mesh may fill any number of shapes.
+  references; anywhere else it is also drawn in place. One mesh may paint any number of elements.
 - **Baked.** The reference is resolved at compile time, so the `dependents` scan reports every
-  shape a mesh fills when the mesh is edited, as for `in=`. Forward references work.
-- **Degradation.** A mesh with nothing usable (no valid face, a malformed grid) leaves the shape
-  as authored with a marker; its `fill` then names an element that is not a paint server and
-  paints nothing. `stroke="url(#mesh)"` is not lowered.
+  element a mesh paints — through its own attribute or an inherited one — when the mesh is
+  edited, as for `in=`. Forward references work.
+- **Geometry, not paint.** Where an element is read for its geometry — a boolean operand, a
+  reference target, a `<clipPath>` child, convert-to-path — a mesh paint is not lowered; the
+  reference stays as written.
+- **Degradation.** Each paint degrades on its own, with a marker, and leaves the other lowered;
+  a paint left as written names an element that is not a paint server and paints nothing:
+  a mesh with nothing usable (no valid face, a malformed grid); bounding-box units on an element
+  whose box has no width or no height (SVG's rule: such a paint is no paint); text with no
+  outliner, or with a run that sets a `fill`/`stroke` of its own (one mesh over every glyph
+  would repaint it); a stroke with `vector-effect="non-scaling-stroke"` (its width is not in
+  user space); a dash pattern that would outline into more than 20 000 dashes. A stroke of no
+  width paints nothing and leaves no reference.
+
+**Fitting a sliver.** A mesh more elongated than 256:1 is fitted with its long axis squeezed to
+that ratio and the result stretched back — the fit raster gives the short axis a minimum of rows,
+which would otherwise cost the long axis pixels without limit. The map is affine, so the field
+is the same one; meshes of ordinary proportions are fitted exactly as before.
 
 An SVG 2 `<meshgradient>` is the same kind of paint, in the one dialect that authors it:
 
@@ -1824,7 +1876,8 @@ Inkscape is the only major tool that *authors* SVG 2 mesh gradients, and no brow
 xsvg compiles them. A shape whose `fill` references a `<meshgradient>` lowers through the same
 pipeline: each Coons patch (four cubic edges, four corner colors) **tessellates into the
 straight-quad mesh** (polycurve → points, at a profile-graded density of 8/12/20 cells per patch
-axis), the shape's geometry becomes the clip, and the stroke (if any) re-emits on top. Dialect
+axis), and from there it is the paint an `<x:mesh>` is — fill or stroke, on the same elements,
+by the same lowering. Dialect
 coverage: `meshrow`/`meshpatch`/`stop` with one `c`/`C`/`l`/`L` edge per stop, `stop-color` as an
 attribute or inside `style` (hex, alpha forms included) with **`stop-opacity`** honored
 (feathering), the standard edge/corner **inheritance** (a patch after the
@@ -1834,8 +1887,8 @@ shape's unit bbox), and **`type="bicubic"`** — approximated by smoothstep-easi
 each patch, which zeroes the tangential derivative at every patch boundary so adjacent patches
 meet C¹ and the bilinear Mach bands at seams disappear. Adjacent patches join smoothly by
 construction (shared edges tessellate to shared vertices with matching colors). The reference is
-**compile-time baked**, so the incremental `dependents` scan treats `fill="url(#mesh)"` like an
-`in=` edge. The `<meshgradient>` element itself is a **definition the compiler consumes**: like
+**compile-time baked**, so the incremental `dependents` scan treats `fill="url(#mesh)"` and
+`stroke="url(#mesh)"` like an `in=` edge. The `<meshgradient>` element itself is a **definition the compiler consumes**: like
 `<x:theme>` it emits nothing, wherever it stands, so the output carries the lowered paint and not
 the patches it was lowered from (§9). An unparseable dialect leaves the shape as authored with a
 marker; its reference then names nothing and paints nothing — exactly what it painted in a
@@ -1894,7 +1947,8 @@ Enforced by the §5 deny list (script/animation elements drop with markers; `on*
 | `<x:mesh>` — quad/tri mesh gradients with cracks; render→refit lowering to texel-aligned tiny PNGs (§8.2) | implemented |
 | `<x:mesh cols rows fill>` grid sugar — vertex-color grids without indices (§8.2) | implemented |
 | SVG 2 / Inkscape `<meshgradient>` fills — Coons patches tessellated through the mesh pipeline (§8.2) | implemented |
-| `<x:mesh>` as a paint — `fill="url(#mesh)"` on any shape, clipped to its geometry (§8.2) | implemented |
+| `<x:mesh>` / `<meshgradient>` as a paint — `fill="url(#mesh)"` and `stroke="url(#mesh)"` on shapes, `<x:boolean>`, `<x:offset>` and outlined text, inherited like any paint (§8.2) | implemented |
+| `<x:mesh units="objectBoundingBox">` — a paint in fractions of the painted element's box (§8.2) | implemented |
 | `<x:mesh>` — per-corner alpha / feathering (`#rrggbbaa`, `stop-opacity`, RGBA texel PNGs) | implemented |
 | `<x:mesh>` — smooth-interior T-junctions (color-consistent hanging nodes join regions) | implemented |
 | SVG 2 `<meshgradient>` — `objectBoundingBox` units + `type="bicubic"` (eased approximation) | implemented |

@@ -220,7 +220,11 @@ pub(super) fn warp_child_markup(child: roxmltree::Node, ctx: &Ctx) -> Result<Str
         return Ok(s);
     }
     let mut buf = String::new();
+    // an operand is geometry and a warped child is a path: neither can be the
+    // clips and textures a mesh paint lowers to
+    let live = ctx.paint_live.replace(true);
     serialize(child, &mut buf, false, ctx);
+    ctx.paint_live.set(live);
     for tag in [
         "text", "rect", "circle", "ellipse", "line", "image", "use", "polygon", "polyline",
     ] {

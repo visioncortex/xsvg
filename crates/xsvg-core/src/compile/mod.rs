@@ -111,6 +111,10 @@ struct Ctx<'a> {
     force_outline: std::cell::Cell<bool>,
     /// Geometry-only lowering while compiling authored clipping shapes.
     clip_geometry: std::cell::Cell<bool>,
+    /// The output is being read back for its geometry (a boolean operand, a
+    /// warp child, a reference target): a mesh paint stays the reference it
+    /// was written as instead of becoming clips and textures (mesh.rs).
+    paint_live: std::cell::Cell<bool>,
     /// `to_path` (trace.rs): the output goes back into the SOURCE, so paints
     /// keep their `var()` tokens and a `filter` list stays as authored.
     to_path: std::cell::Cell<bool>,
@@ -349,6 +353,7 @@ impl<'a> Ctx<'a> {
             fuel: std::cell::Cell::new(REF_FUEL),
             force_outline: std::cell::Cell::new(false),
             clip_geometry: std::cell::Cell::new(false),
+            paint_live: std::cell::Cell::new(false),
             to_path: std::cell::Cell::new(false),
             live_corners: std::cell::Cell::new(false),
             to_path_carry: std::cell::RefCell::new(None),
@@ -742,16 +747,14 @@ fn baked_refs<'a>(
             out.push(id);
         }
     }
-    // a fill referencing a mesh — <meshgradient> or <x:mesh> — is compiled,
-    // not live (§8.2)
-    if let Some(id) = n
-        .attribute("fill")
-        .and_then(|f| f.strip_prefix("url(#"))
-        .and_then(|f| f.strip_suffix(')'))
-    {
-        let target = ids.get(id).and_then(|&nid| n.document().get_node(nid));
-        if target.is_some_and(is_mesh_paint) {
-            out.push(id);
+    // a fill or stroke naming a mesh — <meshgradient> or <x:mesh> — is
+    // compiled, not live (§8.2); the paint may be inherited
+    for prop in ["fill", "stroke"] {
+        if let Some(id) = bearer_paint_id(n, prop) {
+            let target = ids.get(id).and_then(|&nid| n.document().get_node(nid));
+            if target.is_some_and(is_mesh_paint) {
+                out.push(id);
+            }
         }
     }
     out
@@ -1037,6 +1040,13 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
         return;
     }
 
+    // An element painted with a mesh — an SVG 2 <meshgradient> (the Inkscape
+    // dialect no browser renders) or an <x:mesh>, as its fill or its stroke —
+    // compiles to the mesh pipeline, clipped to what that paint covers.
+    if !is_root && emit_mesh_paint(node, out, ctx) {
+        return;
+    }
+
     // xsvg extension elements.
     if node.tag_name().namespace() == Some(XSVG_NS) {
         match node.tag_name().name() {
@@ -1156,15 +1166,6 @@ fn serialize(node: roxmltree::Node, out: &mut String, is_root: bool, ctx: &Ctx) 
     if name == "textArea" {
         emit_text_area(node, out, ctx);
         return;
-    }
-
-    // A fill referencing a mesh — an SVG 2 <meshgradient> (the Inkscape
-    // dialect no browser renders) or an <x:mesh> — compiles to the mesh
-    // pipeline, clipped by the shape.
-    if let Some(paint) = mesh_fill_target(node, ctx).filter(|_| !ctx.clip_geometry.get()) {
-        if emit_mesh_fill(node, paint, out, ctx) {
-            return;
-        }
     }
 
     // Corners (§5.4): a shape asked for them lowers to the <path> it rounds to.

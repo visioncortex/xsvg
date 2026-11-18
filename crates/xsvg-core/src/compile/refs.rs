@@ -451,10 +451,12 @@ pub(super) fn target_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<Stri
 /// winding-sensitive output through the boolean engine, and join the rest.
 pub(super) fn x_output_geometry(target: roxmltree::Node, ctx: &Ctx) -> Result<String, RefFail> {
     let prev = ctx.force_outline.replace(true);
+    let live = ctx.paint_live.replace(true);
     let _stops = ctx.suspend_stops(); // a harvest, not the target's own rendering
     let mut buf = String::new();
     serialize(target, &mut buf, false, ctx);
     ctx.force_outline.set(prev);
+    ctx.paint_live.set(live);
     // the target's own transform reappears on its output wrapper (copy_attrs)
     // and is applied by target_geometry; any FURTHER transform nested in the
     // output would be silently lost by a d-only harvest — degrade loudly

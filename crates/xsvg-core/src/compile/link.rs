@@ -116,6 +116,7 @@ pub(super) fn emit_link(node: roxmltree::Node, href: &str, out: &mut String, ctx
             child.cuts.set(ctx.cuts.get());
             child.force_outline.set(ctx.force_outline.get());
             child.clip_geometry.set(ctx.clip_geometry.get());
+            child.paint_live.set(ctx.paint_live.get());
             child.in_plugin.set(ctx.in_plugin.get());
             let mut s = String::new();
             serialize(parsed.doc.root_element(), &mut s, true, &child);

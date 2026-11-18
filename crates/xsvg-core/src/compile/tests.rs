@@ -12095,3 +12095,1161 @@ fn an_x_mesh_fill_is_sized_for_the_shape_at_display_resolution() {
         width(&pngs[0])
     );
 }
+
+// ---- a mesh as any paint: stroke, bounding-box units, every bearer (§8.2) ----
+
+/// A solid mesh covering everything: the paint is then exactly the clip.
+const WASH: &str = r##"<x:mesh id="w" points="-900,-900 900,-900 900,900 -900,900"><x:face v="0 1 2 3" fill="#c33"/></x:mesh>"##;
+
+/// The clip whose id starts with `prefix` (`x-mgc-` a fill's, `x-mgs-` a
+/// stroke's), as geometry.
+fn paint_clip(out: &str, prefix: &str) -> crate::kurbo::BezPath {
+    let doc = roxmltree::Document::parse(out).unwrap_or_else(|e| panic!("{e}: {out}"));
+    let clip = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("clipPath") && n.attribute("id").is_some_and(|i| i.starts_with(prefix))
+        })
+        .unwrap_or_else(|| panic!("no {prefix} clip: {out}"));
+    let d = clip.first_element_child().unwrap().attribute("d").unwrap();
+    crate::kurbo::BezPath::from_svg(d).unwrap()
+}
+
+fn covers(path: &crate::kurbo::BezPath, x: f64, y: f64) -> bool {
+    use crate::kurbo::Shape;
+    path.winding(crate::kurbo::Point::new(x, y)) != 0
+}
+
+fn stroke_clip_of(shape: &str) -> crate::kurbo::BezPath {
+    let out = compile_test(&format!("{XW}<defs>{WASH}</defs>{shape}</svg>"));
+    assert!(!out.contains("left live"), "{out}");
+    paint_clip(&out, "x-mgs-")
+}
+
+#[test]
+fn a_mesh_stroke_is_mesh_paint_clipped_to_the_stroke_outline() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{PAINT_MESH}</defs><rect x="10" y="10" width="80" height="30" fill="#eea" stroke="url(#m)" stroke-width="8"/></svg>"##
+    ));
+    assert!(
+        !out.contains(r#"stroke="url(#m)""#),
+        "the reference is compiled: {out}"
+    );
+    // the plain fill stays a path, under the stroke's mesh
+    let fill = out
+        .find(r##"<path fill="#eea" stroke-width="8" stroke="none" d=""##)
+        .expect(&out);
+    let stroke = out.find(r#"<clipPath id="x-mgs-"#).expect(&out);
+    assert!(fill < stroke, "{out}");
+    assert!(!out.contains("x-mgc-"), "no fill piece: {out}");
+    // the paint is the mesh's own
+    let images = mesh_images(&out);
+    assert_eq!(images.len(), 2, "{out}");
+    assert_eq!(images[0], images[1]);
+    // and the clip is the band 4 either side of the outline
+    let band = paint_clip(&out, "x-mgs-");
+    for (x, y, on) in [
+        (10.0, 25.0, true),
+        (7.0, 25.0, true),
+        (13.0, 25.0, true),
+        (5.0, 25.0, false),
+        (15.0, 25.0, false),
+        (50.0, 25.0, false),
+        (50.0, 10.0, true),
+        (50.0, 43.0, true),
+        (50.0, 45.0, false),
+        // a miter corner is square
+        (6.5, 6.5, true),
+    ] {
+        assert_eq!(covers(&band, x, y), on, "({x},{y}) in {out}");
+    }
+    // outer 88×38 less inner 72×22, by counting: joins overlap, so the signed
+    // area of the outline is not the area it covers
+    let covered = (0..200 * 100)
+        .filter(|i| {
+            covers(
+                &band,
+                (i % 200) as f64 * 0.5 + 0.25,
+                (i / 200) as f64 * 0.5 + 0.25,
+            )
+        })
+        .count() as f64
+        * 0.25;
+    assert_eq!(covered, 88.0 * 38.0 - 72.0 * 22.0);
+}
+
+#[test]
+fn a_mesh_stroke_honours_caps() {
+    let line = |cap: &str| {
+        stroke_clip_of(&format!(
+            r##"<line x1="20" y1="50" x2="80" y2="50" stroke="url(#w)" stroke-width="10" {cap}/>"##
+        ))
+    };
+    let (butt, round, square) = (
+        line(""),
+        line(r#"stroke-linecap="round""#),
+        line(r#"stroke-linecap="square""#),
+    );
+    for clip in [&butt, &round, &square] {
+        assert!(covers(clip, 50.0, 46.0) && !covers(clip, 50.0, 56.0));
+    }
+    // past the end, on the axis: only a cap reaches
+    assert!(!covers(&butt, 83.0, 50.0));
+    assert!(covers(&round, 83.0, 50.0) && covers(&square, 83.0, 50.0));
+    // the corner of the cap's box: only square reaches
+    assert!(!covers(&round, 84.0, 54.0) && covers(&square, 84.0, 54.0));
+    assert!(!covers(&square, 86.0, 50.0));
+}
+
+#[test]
+fn a_mesh_stroke_honours_joins_and_the_miter_limit() {
+    // a 53° corner at (50,10): miter length is 2.24 widths
+    let corner = |style: &str| {
+        stroke_clip_of(&format!(
+            r##"<path d="M30,50 L50,10 L70,50" fill="none" stroke="url(#w)" stroke-width="10" {style}/>"##
+        ))
+    };
+    let tip = |clip: &crate::kurbo::BezPath| covers(clip, 50.0, 2.0);
+    assert!(tip(&corner("")), "the default limit of 4 keeps this miter");
+    assert!(!tip(&corner(r#"stroke-miterlimit="2""#)));
+    assert!(!tip(&corner(r#"stroke-linejoin="bevel""#)));
+    let round = corner(r#"stroke-linejoin="round""#);
+    assert!(!tip(&round) && covers(&round, 50.0, 6.0));
+    // a limit below 1 is not a limit SVG knows; it must not panic or widen
+    assert!(!tip(&corner(r#"stroke-miterlimit="0""#)));
+}
+
+#[test]
+fn a_mesh_stroke_honours_dashes() {
+    let dashed = |style: &str| {
+        stroke_clip_of(&format!(
+            r##"<line x1="0" y1="50" x2="100" y2="50" stroke="url(#w)" stroke-width="6" {style}/>"##
+        ))
+    };
+    let on = |clip: &crate::kurbo::BezPath, x: f64| covers(clip, x, 50.0);
+    let d = dashed(r#"stroke-dasharray="10 5""#);
+    assert!(on(&d, 5.0) && !on(&d, 12.5) && on(&d, 20.0) && !on(&d, 27.5));
+    // the offset slides the pattern back along the path
+    let d = dashed(r#"stroke-dasharray="10 5" stroke-dashoffset="10""#);
+    assert!(!on(&d, 2.5) && on(&d, 10.0));
+    // an odd list repeats: 10 on, 10 off
+    let d = dashed(r#"stroke-dasharray="10""#);
+    assert!(on(&d, 5.0) && !on(&d, 15.0) && on(&d, 25.0));
+    // comma separated
+    let d = dashed(r#"stroke-dasharray="10,5""#);
+    assert!(on(&d, 5.0) && !on(&d, 12.5));
+    // not a pattern: solid
+    for solid in [
+        r#"stroke-dasharray="none""#,
+        r#"stroke-dasharray="0 0""#,
+        r#"stroke-dasharray="10 -5""#,
+        r#"stroke-dasharray="10 x""#,
+        r#"stroke-dasharray="""#,
+    ] {
+        let d = dashed(solid);
+        assert!((0..20).all(|i| on(&d, 2.5 + 5.0 * i as f64)), "{solid}");
+    }
+}
+
+#[test]
+fn a_mesh_stroke_inherits_its_style() {
+    let band = stroke_clip_of(
+        r##"<g stroke-width="20" stroke-linecap="round"><g><line x1="20" y1="50" x2="80" y2="50" stroke="url(#w)"/></g></g>"##,
+    );
+    assert!(covers(&band, 50.0, 41.0) && !covers(&band, 50.0, 61.0));
+    assert!(covers(&band, 88.0, 50.0), "the inherited cap");
+    // the element's own value wins
+    let band = stroke_clip_of(
+        r##"<g stroke-width="20"><line x1="20" y1="50" x2="80" y2="50" stroke="url(#w)" stroke-width="4"/></g>"##,
+    );
+    assert!(covers(&band, 50.0, 51.0) && !covers(&band, 50.0, 53.0));
+    // the default width is 1
+    let band = stroke_clip_of(r##"<line x1="20" y1="50" x2="80" y2="50" stroke="url(#w)"/>"##);
+    assert!(covers(&band, 50.0, 50.4) && !covers(&band, 50.0, 50.6));
+}
+
+#[test]
+fn a_stroke_with_no_width_paints_nothing_and_leaves_no_reference() {
+    for width in ["0", "-3"] {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{WASH}</defs><rect width="40" height="20" fill="#eea" stroke="url(#w)" stroke-width="{width}"/></svg>"##
+        ));
+        assert!(!out.contains("x-mgs-") && !out.contains("url(#w)"), "{out}");
+        assert!(
+            out.contains(r##"fill="#eea""##) && out.contains(r#"stroke="none""#),
+            "{out}"
+        );
+        roxmltree::Document::parse(&out).unwrap();
+    }
+}
+
+#[test]
+fn a_non_scaling_mesh_stroke_stays_live_and_the_fill_is_still_lowered() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><rect width="40" height="20" fill="url(#w)" stroke="url(#w)" vector-effect="non-scaling-stroke"/></svg>"##
+    ));
+    assert!(
+        out.contains("mesh stroke left live (non-scaling-stroke)"),
+        "{out}"
+    );
+    assert!(out.contains("x-mgc-") && !out.contains("x-mgs-"), "{out}");
+    // the stroke is as authored, on the path that keeps the element's paint
+    assert!(
+        out.contains(
+            r##"<path stroke="url(#w)" vector-effect="non-scaling-stroke" fill="none" d="##
+        ),
+        "{out}"
+    );
+    // alone, the element is left exactly as it would be without the feature
+    let alone = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><rect width="40" height="20" rx="2" stroke="url(#w)" vector-effect="non-scaling-stroke"/></svg>"##
+    ));
+    assert!(
+        alone.contains(r##"<rect width="40" height="20" rx="2" stroke="url(#w)" vector-effect="non-scaling-stroke"/>"##),
+        "{alone}"
+    );
+}
+
+#[test]
+fn both_paints_as_meshes_make_two_pieces_with_ids_of_their_own() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{PAINT_MESH}<x:mesh id="n" points="0,0 100,0 100,50 0,50"><x:face v="0 1 2 3" fill="#000 #fff #000 #fff"/></x:mesh></defs><rect x="10" y="10" width="80" height="30" fill="url(#m)" stroke="url(#n)" stroke-width="6"/></svg>"##
+    ));
+    let (fill, stroke) = (out.find("x-mgc-").unwrap(), out.find("x-mgs-").unwrap());
+    assert!(fill < stroke, "fill under stroke: {out}");
+    assert!(
+        !out.contains("url(#m)") && !out.contains("url(#n)"),
+        "{out}"
+    );
+    // nothing is left for a path of the element's own
+    assert!(!out.contains(r#"fill="none""#), "{out}");
+    // each piece carries its own mesh
+    let images = mesh_images(&out);
+    assert_eq!(images.len(), 4, "{out}");
+    assert_eq!((&images[0], &images[1]), (&images[2], &images[3]));
+    assert_ne!(images[2], images[3]);
+    // every id in the output is defined once
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let mut ids: Vec<&str> = doc
+        .descendants()
+        .filter_map(|n| n.attribute("id"))
+        .collect();
+    let all = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), all, "{out}");
+    // and every clip reference resolves
+    for n in doc.descendants() {
+        if let Some(id) = n.attribute("clip-path").and_then(paint_ref) {
+            assert!(ids.contains(&id), "{id} in {out}");
+        }
+    }
+}
+
+#[test]
+fn the_group_carries_the_element_and_the_path_only_its_paint() {
+    let out = compile_mapped(&format!(
+        r##"{XW}<defs>{WASH}</defs><rect id="card" class="k" data-role="hero" x="10" y="10" width="80" height="30" transform="rotate(5)" opacity=".5" mask="url(#q)" fill="url(#w)" stroke="#222" stroke-width="3" stroke-dasharray="4 2"/></svg>"##
+    ));
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let group = doc
+        .descendants()
+        .find(|n| n.attribute("id") == Some("card"))
+        .expect(&out);
+    assert_eq!(group.tag_name().name(), "g");
+    for (name, value) in [
+        ("class", "k"),
+        ("data-role", "hero"),
+        ("transform", "rotate(5)"),
+        ("opacity", ".5"),
+        ("mask", "url(#q)"),
+    ] {
+        assert_eq!(group.attribute(name), Some(value), "{name}: {out}");
+        assert_eq!(
+            out.matches(&format!(" {name}=\"")).count(),
+            1,
+            "{name} once: {out}"
+        );
+    }
+    assert!(group.attribute("data-xsvg-pos").is_some(), "{out}");
+    for gone in [
+        "x",
+        "y",
+        "width",
+        "height",
+        "fill",
+        "stroke",
+        "stroke-width",
+    ] {
+        assert!(group.attribute(gone).is_none(), "{gone}: {out}");
+    }
+    let kids: Vec<_> = group.children().filter(|n| n.is_element()).collect();
+    let names: Vec<&str> = kids.iter().map(|n| n.tag_name().name()).collect();
+    assert_eq!(names, ["clipPath", "g", "path"], "{out}");
+    let path = kids[2];
+    let attrs: Vec<(&str, &str)> = path.attributes().map(|a| (a.name(), a.value())).collect();
+    assert_eq!(
+        attrs,
+        [
+            ("stroke", "#222"),
+            ("stroke-width", "3"),
+            ("stroke-dasharray", "4 2"),
+            ("fill", "none"),
+            ("d", "M10,10 h80 v30 h-80 Z"),
+        ],
+        "{out}"
+    );
+}
+
+#[test]
+fn an_unstroked_mesh_filled_shape_keeps_its_identity() {
+    // there is no path to hang them on: the group is the element
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><circle id="dot" cx="20" cy="20" r="9" opacity=".3" display="none" fill="url(#w)"/><use href="#dot" x="40"/></svg>"##
+    ));
+    assert!(
+        out.contains(r#"<g id="dot" opacity=".3" display="none"><clipPath id="x-mgc-"#),
+        "{out}"
+    );
+    assert_eq!(
+        out.matches("<path").count(),
+        2 + 1,
+        "wash ×2 and the clip: {out}"
+    );
+}
+
+#[test]
+fn paint_order_stacks_the_pieces() {
+    let order = |attrs: &str| {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{PAINT_MESH}</defs><circle cx="50" cy="50" r="30" stroke-width="8" {attrs}/></svg>"##
+        ));
+        assert!(!out.contains("url(#m)"), "{out}");
+        let mut at: Vec<(usize, &str)> = [
+            ("x-mgc-", "fill-mesh"),
+            ("x-mgs-", "stroke-mesh"),
+            // the element's own path, in the order its attributes were written
+            ("<path stroke-width=", "path"),
+        ]
+        .iter()
+        .filter_map(|(needle, name)| out.find(needle).map(|i| (i, *name)))
+        .collect();
+        at.sort_unstable();
+        at.into_iter().map(|(_, n)| n).collect::<Vec<_>>().join(" ")
+    };
+    let (f, s) = (r#"fill="url(#m)""#, r#"stroke="url(#m)""#);
+    assert_eq!(order(&format!("{f} {s}")), "fill-mesh stroke-mesh");
+    assert_eq!(order(&format!(r#"{f} stroke="red""#)), "fill-mesh path");
+    assert_eq!(order(&format!(r#"fill="red" {s}"#)), "path stroke-mesh");
+    assert_eq!(order(s), "path stroke-mesh", "an unset fill is black");
+    assert_eq!(order(&format!(r#"fill="none" {s}"#)), "stroke-mesh");
+    assert_eq!(order(f), "fill-mesh");
+    assert_eq!(order(&format!(r#"{f} stroke="none""#)), "fill-mesh");
+    for first in [
+        "stroke",
+        "stroke markers",
+        "markers stroke",
+        "stroke fill markers",
+    ] {
+        let po = format!(r#"paint-order="{first}""#);
+        assert_eq!(
+            order(&format!("{po} {f} {s}")),
+            "stroke-mesh fill-mesh",
+            "{first}"
+        );
+        assert_eq!(
+            order(&format!(r#"{f} stroke="red" {po}"#)),
+            "path fill-mesh",
+            "{first}"
+        );
+        assert_eq!(
+            order(&format!(r#"{po} fill="red" {s}"#)),
+            "stroke-mesh path",
+            "{first}"
+        );
+    }
+    for normal in ["normal", "fill", "fill stroke", "markers", "markers fill"] {
+        let po = format!(r#"paint-order="{normal}""#);
+        assert_eq!(
+            order(&format!("{f} {s} {po}")),
+            "fill-mesh stroke-mesh",
+            "{normal}"
+        );
+    }
+    // markers are the path's: it stays even with nothing else to paint
+    assert_eq!(
+        order(&format!(r#"marker-end="url(#a)" {f} {s}"#)),
+        "fill-mesh stroke-mesh path"
+    );
+    assert_eq!(
+        order(&format!(r#"marker-end="url(#a)" {f}"#)),
+        "fill-mesh path"
+    );
+    assert_eq!(order(&format!(r#"marker-end="none" {f}"#)), "fill-mesh");
+}
+
+#[test]
+fn a_mesh_fill_is_clipped_by_the_shape_s_own_winding() {
+    let holed = r#"d="M0,0 H100 V60 H0 Z M30,20 H70 V40 H30 Z""#;
+    let clip = |attrs: &str, wrap: (&str, &str)| {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{WASH}</defs>{}<path {holed} fill="url(#w)" {attrs}/>{}</svg>"##,
+            wrap.0, wrap.1
+        ));
+        let doc = roxmltree::Document::parse(&out).unwrap();
+        let path = doc
+            .descendants()
+            .find(|n| n.attribute("id").is_some_and(|i| i.starts_with("x-mgc-")))
+            .unwrap()
+            .first_element_child()
+            .unwrap();
+        path.attribute("clip-rule").map(str::to_string)
+    };
+    assert_eq!(clip("", ("", "")), None);
+    assert_eq!(clip(r#"fill-rule="nonzero""#, ("", "")), None);
+    assert_eq!(
+        clip(r#"fill-rule="evenodd""#, ("", "")).as_deref(),
+        Some("evenodd")
+    );
+    // inherited, and overridden
+    let g = (r#"<g fill-rule="evenodd">"#, "</g>");
+    assert_eq!(clip("", g).as_deref(), Some("evenodd"));
+    assert_eq!(clip(r#"fill-rule="nonzero""#, g), None);
+}
+
+#[test]
+fn paint_opacities_go_on_their_pieces() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g stroke-opacity=".25"><rect width="40" height="20" opacity=".9" fill-opacity="0.4" fill="url(#w)" stroke="url(#w)"/></g></svg>"##
+    ));
+    assert!(
+        out.contains(r#"<g opacity=".9"><clipPath id="x-mgc-"#),
+        "{out}"
+    );
+    let piece = |prefix: &str| {
+        let at = out.find(&format!("<g clip-path=\"url(#{prefix}")).unwrap();
+        out[at..out[at..].find('>').unwrap() + at].to_string()
+    };
+    assert!(piece("x-mgc-").ends_with(r#" opacity="0.4""#), "{out}");
+    assert!(piece("x-mgs-").ends_with(r#" opacity=".25""#), "{out}");
+    // none set: none written
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><rect width="40" height="20" fill="url(#w)"/></svg>"##
+    ));
+    assert_eq!(out.matches("opacity").count(), 0, "{out}");
+}
+
+#[test]
+fn a_polyline_is_stroked_open() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><polyline points="10,10 50,10 50,50" fill="url(#w)" stroke="url(#w)" stroke-width="4"/><polyline points="10,10 50,10 50,50" fill="url(#w)" stroke="#000"/></svg>"##
+    ));
+    let band = paint_clip(&out, "x-mgs-");
+    assert!(covers(&band, 30.0, 10.0) && covers(&band, 50.0, 30.0));
+    assert!(
+        !covers(&band, 30.0, 30.0),
+        "no closing edge back to the start: {out}"
+    );
+    // the fill still covers the triangle the closing edge would bound
+    let mut area = paint_clip(&out, "x-mgc-");
+    area.close_path(); // as a fill closes it
+    assert!(covers(&area, 40.0, 20.0));
+    // and the plain stroke of the second is open too
+    assert!(
+        out.contains(r##"<path stroke="#000" fill="none" d="M10,10 L50,10 L50,50"/>"##),
+        "{out}"
+    );
+    // a polygon closes
+    let closed = stroke_clip_of(
+        r##"<polygon points="10,10 50,10 50,50" fill="none" stroke="url(#w)" stroke-width="4"/>"##,
+    );
+    assert!(covers(&closed, 30.0, 30.0));
+}
+
+#[test]
+fn every_shape_takes_a_mesh_stroke_of_either_kind() {
+    let mg = r##"<meshgradient id="m" x="0" y="0" gradientUnits="userSpaceOnUse"><meshrow><meshpatch><stop path="l 100,0" stop-color="#f00"/><stop path="l 0,50" stop-color="#0f0"/><stop path="l -100,0" stop-color="#00f"/><stop path="l 0,-50" stop-color="#fff"/></meshpatch></meshrow></meshgradient>"##;
+    for (paint, defined) in [(PAINT_MESH, 1), (mg, 0)] {
+        for shape in [
+            r##"<path d="M0,0H80V40H0Z" fill="none" stroke="url(#m)"/>"##,
+            r##"<rect x="5" y="5" width="60" height="30" fill="none" stroke="url(#m)"/>"##,
+            r##"<rect x="5" y="5" width="60" height="30" rx="6" fill="none" stroke="url(#m)"/>"##,
+            r##"<circle cx="50" cy="25" r="20" fill="none" stroke="url(#m)"/>"##,
+            r##"<ellipse cx="50" cy="25" rx="30" ry="15" fill="none" stroke="url(#m)"/>"##,
+            r##"<polygon points="10,10 90,10 50,45" fill="none" stroke="url(#m)"/>"##,
+            r##"<polyline points="10,10 90,10 50,45" fill="none" stroke="url(#m)"/>"##,
+            r##"<line x1="10" y1="10" x2="90" y2="40" stroke="url(#m)"/>"##,
+        ] {
+            let out = compile_test(&format!("{XW}<defs>{paint}</defs>{shape}</svg>"));
+            assert_eq!(
+                out.matches("<clipPath id=\"x-mgs-").count(),
+                1,
+                "{shape}: {out}"
+            );
+            assert_eq!(mesh_images(&out).len(), defined + 1, "{shape}: {out}");
+            assert!(
+                !out.contains("url(#m)") && !out.contains("left live"),
+                "{shape}: {out}"
+            );
+            roxmltree::Document::parse(&out).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_mesh_paint_is_inherited_like_any_paint() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g id="grp" fill="url(#w)" stroke="url(#w)" stroke-width="2"><rect width="20" height="20"/><g><circle cx="50" cy="10" r="8"/></g><path d="M0,40H20V60Z" fill="#00f" stroke="none"/><path d="M30,40H50V60Z" fill="none"/></g></svg>"##
+    ));
+    // rect and circle: both paints; the last path: only the stroke
+    assert_eq!(out.matches("<clipPath id=\"x-mgc-").count(), 2, "{out}");
+    assert_eq!(out.matches("<clipPath id=\"x-mgs-").count(), 3, "{out}");
+    // the path with paints of its own is untouched
+    assert!(
+        out.contains(r##"<path d="M0,40H20V60Z" fill="#00f" stroke="none"/>"##),
+        "{out}"
+    );
+    // with no fill and a mesh stroke, the last has nothing left for a path
+    assert_eq!(out.matches("<path d=\"M30,40H50V60Z\"").count(), 0, "{out}");
+    // an inherited paint has no attribute to drop: where a path remains, it
+    // is overridden
+    let out2 = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g stroke="url(#w)"><rect width="20" height="20" fill="#eea"/></g></svg>"##
+    ));
+    assert!(
+        out2.contains(r##"<path fill="#eea" stroke="none" d=""##),
+        "{out2}"
+    );
+    roxmltree::Document::parse(&out).unwrap();
+    // editing the mesh re-emits the group whose shapes it paints
+    let source = format!(
+        r##"{XW}<defs>{WASH}</defs><g stroke="url(#w)"><rect width="20" height="20"/></g><rect y="90" width="20" height="20"/></svg>"##
+    );
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let session = CompileSession::new(&platform, &source, "balanced", false, "").unwrap();
+    let deps = session.unit_dependents(&[source.find("<x:mesh").unwrap()]);
+    assert_eq!(
+        deps.iter().map(|d| d.0).collect::<Vec<_>>(),
+        vec![source.find("<rect").unwrap()],
+        "the shape that inherits it, not the group that carries it"
+    );
+}
+
+#[test]
+fn a_mesh_stroke_is_a_baked_reference() {
+    let source = format!(
+        r##"{XW}<defs>{PAINT_MESH}</defs><path d="M0,0H80V40H0Z" stroke="url(#m)"/><circle cx="9" cy="9" r="5" stroke="url(#other)"/><x:boolean stroke="url(#m)"><rect width="9" height="9"/></x:boolean></svg>"##
+    );
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let session = CompileSession::new(&platform, &source, "balanced", false, "").unwrap();
+    let deps = session.unit_dependents(&[source.find("<x:mesh").unwrap()]);
+    assert_eq!(
+        deps.iter().map(|d| d.0).collect::<Vec<_>>(),
+        vec![
+            source.find("<path").unwrap(),
+            source.find("<x:boolean").unwrap()
+        ]
+    );
+}
+
+#[test]
+fn paint_references_are_read_in_every_spelling() {
+    assert_eq!(paint_ref("url(#m)"), Some("m"));
+    assert_eq!(paint_ref("  url( #m )  "), Some("m"));
+    assert_eq!(paint_ref(r##"url("#m")"##), Some("m"));
+    assert_eq!(paint_ref("url('#m') #888"), Some("m"));
+    assert_eq!(paint_ref("url(#m) none"), Some("m"));
+    for not in [
+        "",
+        "none",
+        "#m",
+        "url(m)",
+        "url(#)",
+        "url(#m",
+        "red url(#m)",
+        "url(other.svg#m)",
+    ] {
+        assert_eq!(paint_ref(not), None, "{not}");
+    }
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><rect width="9" height="9" fill='url("#w") #888'/></svg>"##
+    ));
+    assert!(out.contains("x-mgc-") && !out.contains("#888"), "{out}");
+}
+
+#[test]
+fn what_the_element_inherits_does_not_paint_the_mesh_again() {
+    // a solid region is a plain path: an inherited stroke would outline it,
+    // an inherited fill-opacity would fade it twice
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g stroke="#00f" stroke-width="5" fill-opacity=".5"><rect width="40" height="20" fill="url(#w)"/></g></svg>"##
+    ));
+    assert!(
+        out.contains(r#"<g clip-path="url(#x-mgc-"#)
+            && out.contains(
+                r##"" opacity=".5" stroke="none" fill-opacity="1"><path fill="#cc3333""##
+            ),
+        "{out}"
+    );
+    // the inherited stroke still strokes the element
+    assert!(
+        out.contains(r#"<path fill="none" d="M0,0 h40 v20 h-40 Z"/>"#),
+        "{out}"
+    );
+    // nothing inherited: nothing reset
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g><rect width="40" height="20" stroke="#00f" fill-opacity=".5" fill="url(#w)"/></g></svg>"##
+    ));
+    assert!(
+        out.contains(r##"" opacity=".5"><path fill="#cc3333""##),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_dash_pattern_too_fine_to_outline_leaves_the_stroke_live() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><path d="M0,0 H100000" stroke="url(#w)" stroke-dasharray="0.001"/><path d="M0,9 H100" stroke="url(#w)" stroke-dasharray="1 1"/></svg>"##
+    ));
+    assert_eq!(
+        out.matches("mesh stroke left live (dash pattern too fine)")
+            .count(),
+        1,
+        "{out}"
+    );
+    assert_eq!(out.matches("<clipPath id=\"x-mgs-").count(), 1, "{out}");
+    assert!(
+        out.contains(r#"<path d="M0,0 H100000" stroke="url(#w)" stroke-dasharray="0.001"/>"#),
+        "{out}"
+    );
+    // an offset of any size is the same pattern
+    let near = stroke_clip_of(
+        r##"<line x2="40" stroke="url(#w)" stroke-width="2" stroke-dasharray="4" stroke-dashoffset="2"/>"##,
+    );
+    let far = stroke_clip_of(
+        r##"<line x2="40" stroke="url(#w)" stroke-width="2" stroke-dasharray="4" stroke-dashoffset="8000000002"/>"##,
+    );
+    let back = stroke_clip_of(
+        r##"<line x2="40" stroke="url(#w)" stroke-width="2" stroke-dasharray="4" stroke-dashoffset="-6"/>"##,
+    );
+    for x in 0..40 {
+        let on = covers(&near, x as f64 + 0.5, 0.0);
+        assert_eq!(covers(&far, x as f64 + 0.5, 0.0), on, "{x}");
+        assert_eq!(covers(&back, x as f64 + 0.5, 0.0), on, "{x}");
+    }
+}
+
+#[test]
+fn a_sliver_of_a_mesh_is_fitted_on_a_bounded_raster() {
+    // 100000:1 — the long axis no longer buys pixels without limit
+    let out = compile_test(&format!(
+        r##"{XW}<x:mesh points="0,0 100000,0 100000,1 0,1"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh><defs><x:mesh id="u" units="objectBoundingBox" points="0,0 1,0 1,1 0,1"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs><rect width="50000" height="0.01" fill="url(#u)"/></svg>"##
+    ));
+    let images = mesh_images(&out);
+    assert_eq!(images.len(), 3, "{out}");
+    assert!(out.len() < 60_000, "{}", out.len());
+    // each texture still spans its mesh: placed across the whole long axis
+    let span = |image: &str, name: &str| -> f64 {
+        let at = image.find(&format!(" {name}=\"")).unwrap() + name.len() + 3;
+        image[at..at + image[at..].find('"').unwrap()]
+            .parse()
+            .unwrap()
+    };
+    assert!(
+        span(&images[0], "width") >= 100_000.0 && span(&images[0], "height") >= 1.0,
+        "{}",
+        images[0]
+    );
+    assert!(
+        span(&images[2], "width") >= 50_000.0 && span(&images[2], "height") >= 0.01,
+        "{}",
+        images[2]
+    );
+    // and a mesh of ordinary proportions is fitted exactly as before
+    let wide = compile_test(&format!(
+        r##"{XW}<x:mesh points="0,0 2000,0 2000,10 0,10"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></svg>"##
+    ));
+    assert_eq!(region_clips(&wide), vec![(1, 4, 40_000.0)]);
+}
+
+// ---- bounding-box units ----
+
+#[test]
+fn an_x_mesh_in_bounding_box_units_spans_the_box_of_what_it_paints() {
+    let unit = r##"<x:mesh id="u" units="objectBoundingBox" points="0,0 1,0 1,1 0,1"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##;
+    let user = r##"<x:mesh id="a" points="20,10 120,10 120,60 20,60"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh>"##;
+    let paint = |defs: &str, id: &str, shape: &str| {
+        let out = compile_test(&format!(
+            "{XW}<defs>{defs}</defs>{}</svg>",
+            shape.replace("ID", id)
+        ));
+        assert!(!out.contains("left live"), "{out}");
+        (
+            mesh_images(&out).pop().unwrap(),
+            region_clips(&out).pop().unwrap(),
+        )
+    };
+    // every shape whose box is (20,10)–(120,60): the unit mesh is the user one
+    for shape in [
+        r##"<rect x="20" y="10" width="100" height="50" fill="url(#ID)"/>"##,
+        r##"<ellipse cx="70" cy="35" rx="50" ry="25" fill="url(#ID)"/>"##,
+        r##"<path d="M20,10 L120,35 L20,60 Z" fill="url(#ID)"/>"##,
+        r##"<polygon points="20,60 70,10 120,60" fill="url(#ID)"/>"##,
+        // a stroke takes the fill box, not the box of its ink
+        r##"<rect x="20" y="10" width="100" height="50" fill="none" stroke="url(#ID)" stroke-width="12"/>"##,
+        // the element's transform is outside its own user space
+        r##"<rect x="20" y="10" width="100" height="50" transform="translate(300) scale(3)" fill="url(#ID)"/>"##,
+    ] {
+        assert_eq!(paint(unit, "u", shape), paint(user, "a", shape), "{shape}");
+    }
+    // each shape has a box of its own: one mesh, two extents
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{unit}</defs><rect width="10" height="10" fill="url(#u)"/><rect x="50" width="200" height="40" fill="url(#u)"/></svg>"##
+    ));
+    let clips = region_clips(&out);
+    // (twice the area, as `region_clips` counts it)
+    assert_eq!((clips[1].2, clips[2].2), (200.0, 16_000.0), "{out}");
+}
+
+#[test]
+fn bounding_box_units_compose_with_the_mesh_s_transform_and_the_grid_form() {
+    // SVG's order for gradientTransform: the box map applies last
+    let moved = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="u" units="objectBoundingBox" transform="translate(.5 0) scale(.5 1)" points="0,0 1,0 1,1 0,1"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs><rect x="20" y="10" width="100" height="50" fill="url(#u)"/></svg>"##
+    ));
+    let direct = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="a" points="70,10 120,10 120,60 70,60"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs><rect x="20" y="10" width="100" height="50" fill="url(#a)"/></svg>"##
+    ));
+    assert_eq!(mesh_images(&moved).pop(), mesh_images(&direct).pop());
+    assert_eq!(region_clips(&moved).pop(), region_clips(&direct).pop());
+    // grid sugar: x/y/width/height are fractions too
+    let grid = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="u" units="objectBoundingBox" width="1" height="1" cols="2" rows="1" fill="#f00 #0f0 #00f #ff0 #f0f #0ff"/></defs><rect x="20" y="10" width="100" height="50" fill="url(#u)"/></svg>"##
+    ));
+    assert_eq!(region_clips(&grid).pop(), Some((1, 6, 10_000.0)), "{grid}");
+}
+
+#[test]
+fn bounding_box_units_need_a_box() {
+    // a horizontal line has no height: SVG paints nothing, and so do we
+    let out = compile_test(&format!(
+        r##"{XW}<defs><x:mesh id="u" units="objectBoundingBox" points="0,0 1,0 1,1 0,1"><x:face v="0 1 2 3" fill="#f00"/></x:mesh></defs><line x1="0" y1="5" x2="90" y2="5" stroke="url(#u)" stroke-width="4"/></svg>"##
+    ));
+    assert!(
+        out.contains("no bounding box for objectBoundingBox units"),
+        "{out}"
+    );
+    assert!(!out.contains("x-mgs-"), "{out}");
+    // the same mesh in user space is fine on the same line
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><line x1="0" y1="5" x2="90" y2="5" stroke="url(#w)" stroke-width="4"/></svg>"##
+    ));
+    assert!(
+        out.contains("x-mgs-") && !out.contains("left live"),
+        "{out}"
+    );
+    // a meshgradient plays by the same rule
+    let out = compile_test(&format!(
+        r##"{XW}<defs><meshgradient id="g" gradientUnits="objectBoundingBox"><meshrow><meshpatch><stop path="l 1,0" stop-color="#f00"/><stop path="l 0,1" stop-color="#0f0"/><stop path="l -1,0" stop-color="#00f"/><stop path="l 0,-1" stop-color="#fff"/></meshpatch></meshrow></meshgradient></defs><line x1="0" y1="5" x2="90" y2="5" stroke="url(#g)" stroke-width="4"/><rect y="20" width="30" height="20" stroke="url(#g)" stroke-width="4"/></svg>"##
+    ));
+    assert_eq!(out.matches("no bounding box").count(), 1, "{out}");
+    assert_eq!(out.matches("<clipPath id=\"x-mgs-").count(), 1, "{out}");
+}
+
+#[test]
+fn units_say_nothing_where_the_mesh_is_drawn() {
+    let out = compile_test(&format!(
+        r##"{XW}<x:mesh units="objectBoundingBox" points="0,0 40,0 40,30 0,30"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></svg>"##
+    ));
+    assert!(!out.contains("units"), "consumed: {out}");
+    assert_eq!(region_clips(&out), vec![(1, 4, 2_400.0)]);
+    // any other value is user space
+    for units in ["userSpaceOnUse", "bogus", ""] {
+        let out = compile_test(&format!(
+            r##"{XW}<defs><x:mesh id="u" units="{units}" points="0,0 40,0 40,30 0,30"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs><rect x="500" width="9" height="9" fill="url(#u)"/></svg>"##
+        ));
+        assert_eq!(region_clips(&out).pop(), Some((1, 4, 2_400.0)), "{units}");
+    }
+}
+
+// ---- the x: elements and text ----
+
+/// The `d` of the one path a compiled element is.
+fn only_path_d(out: &str) -> String {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    let paths: Vec<_> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("path"))
+        .collect();
+    assert_eq!(paths.len(), 1, "{out}");
+    paths[0].attribute("d").unwrap().to_string()
+}
+
+#[test]
+fn a_boolean_takes_mesh_paint_over_its_result() {
+    let operands = r#"<circle cx="40" cy="40" r="30"/><circle cx="70" cy="40" r="30"/>"#;
+    for op in ["union", "intersect", "subtract", "exclude"] {
+        let plain = only_path_d(&compile_test(&format!(
+            r##"{XW}<x:boolean op="{op}" fill="#abc">{operands}</x:boolean></svg>"##
+        )));
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{WASH}</defs><x:boolean id="b" op="{op}" transform="translate(5 6)" opacity=".5" fill="url(#w)" stroke="url(#w)" stroke-width="4">{operands}</x:boolean></svg>"##
+        ));
+        assert!(
+            !out.contains("left live") && !out.contains("url(#w)"),
+            "{op}: {out}"
+        );
+        // the fill's clip is the boolean's own result
+        let doc = roxmltree::Document::parse(&out).unwrap();
+        let clip = doc
+            .descendants()
+            .find(|n| n.attribute("id").is_some_and(|i| i.starts_with("x-mgc-")))
+            .unwrap();
+        assert_eq!(
+            clip.first_element_child().unwrap().attribute("d"),
+            Some(plain.as_str()),
+            "{op}"
+        );
+        // the element's own vocabulary stays out of the output
+        assert!(
+            out.contains(r#"<g id="b" transform="translate(5 6)" opacity=".5"><clipPath"#),
+            "{op}: {out}"
+        );
+        assert!(!out.contains(" op="), "{op}: {out}");
+        // the stroke follows the result's outline, not the operands'
+        let band = paint_clip(&out, "x-mgs-");
+        let seam = covers(&band, 55.0, 40.0); // where the circles overlap, mid-figure
+        assert!(!seam, "{op}: {out}");
+    }
+}
+
+#[test]
+fn a_boolean_with_a_plain_paint_keeps_it_beside_the_mesh() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><x:boolean fill-rule="evenodd" fill="url(#w)" stroke="#222" stroke-width="2"><rect width="40" height="40"/><rect x="20" y="20" width="40" height="40"/></x:boolean></svg>"##
+    ));
+    // one path of the result, stroked; the operands' winding is already spent
+    assert!(
+        out.contains(r##"<path stroke="#222" stroke-width="2" fill="none" d=""##),
+        "{out}"
+    );
+    assert!(
+        !out.contains("fill-rule") && !out.contains("clip-rule"),
+        "{out}"
+    );
+    let fill = paint_clip(&out, "x-mgc-");
+    assert!(covers(&fill, 10.0, 10.0) && covers(&fill, 30.0, 30.0) && covers(&fill, 50.0, 50.0));
+}
+
+#[test]
+fn a_boolean_inherits_a_mesh_paint_and_nests() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}</defs><g fill="url(#w)"><x:boolean><rect width="40" height="40"/><rect x="20" y="20" width="40" height="40"/></x:boolean></g></svg>"##
+    ));
+    assert_eq!(out.matches("<clipPath id=\"x-mgc-").count(), 1, "{out}");
+    // a mesh-painted boolean as an operand gives geometry, not its paint
+    let nested = |inner_fill: &str| {
+        compile_test(&format!(
+            r##"{XW}<defs>{WASH}</defs><x:boolean op="subtract" fill="#abc"><rect width="60" height="60"/><x:boolean {inner_fill}><circle cx="30" cy="30" r="10"/><circle cx="40" cy="30" r="10"/></x:boolean></x:boolean></svg>"##
+        ))
+    };
+    assert_eq!(nested(r#"fill="url(#w)" stroke="url(#w)""#), nested(""));
+    // and by reference
+    let by_ref = |paint: &str| {
+        let out = compile_test(&format!(
+            r##"{XW}<defs>{WASH}</defs><x:boolean op="subtract" fill="#abc"><rect width="60" height="60"/><use href="#hole"/></x:boolean><x:boolean id="hole" {paint}><circle cx="30" cy="30" r="10"/></x:boolean></svg>"##
+        ));
+        let at = out.find(r##"<path fill="#abc""##).expect(&out);
+        out[at..at + out[at..].find("/>").unwrap()].to_string()
+    };
+    assert_eq!(by_ref(r#"fill="url(#w)" stroke="url(#w)""#), by_ref(""));
+}
+
+#[test]
+fn an_offset_takes_mesh_paint() {
+    let plain = compile_test(&format!(
+        r##"{XW}<x:offset in="#o" distance="6" fill="#abc"/><defs><path id="o" d="M20,20 H80 V60 H20 Z"/></defs></svg>"##
+    ));
+    let plain = roxmltree::Document::parse(&plain)
+        .unwrap()
+        .descendants()
+        .find(|n| n.attribute("fill") == Some("#abc"))
+        .and_then(|n| n.attribute("d").map(str::to_string))
+        .unwrap();
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}<path id="o" d="M20,20 H80 V60 H20 Z"/></defs><x:offset in="#o" distance="6" fill="url(#w)" stroke="url(#w)" stroke-width="2"/></svg>"##
+    ));
+    assert!(
+        !out.contains("left live") && !out.contains(" distance=") && !out.contains(" in="),
+        "{out}"
+    );
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let clip = doc
+        .descendants()
+        .find(|n| n.attribute("id").is_some_and(|i| i.starts_with("x-mgc-")))
+        .unwrap();
+    assert_eq!(
+        clip.first_element_child().unwrap().attribute("d"),
+        Some(plain.as_str())
+    );
+    let band = paint_clip(&out, "x-mgs-");
+    assert!(
+        covers(&band, 14.0, 40.0) && !covers(&band, 20.0, 40.0),
+        "{out}"
+    );
+}
+
+#[test]
+fn text_takes_mesh_paint_over_its_glyph_outlines() {
+    for text in [
+        r##"<x:textbox x="10" y="10" width="200" height="80" font-size="20" PAINT>Mesh</x:textbox>"##,
+        r##"<text x="10" y="40" font-size="20" PAINT>Mesh</text>"##,
+        r##"<x:textpath in="#spine" font-size="20" PAINT>Mesh</x:textpath>"##,
+    ] {
+        let spine = r#"<path id="spine" d="M10,60 H300" fill="none"/>"#;
+        let outlined = compile_outlined(&format!(
+            r##"{XW}{spine}{}</svg>"##,
+            text.replace(
+                "PAINT",
+                if text.starts_with("<text") {
+                    r#"x:outline="true""#
+                } else {
+                    r#"outline="true""#
+                }
+            )
+        ));
+        let glyphs = outlined.matches("<path").count() - 1;
+        assert!(glyphs > 0, "{outlined}");
+        for paint in [
+            r#"fill="url(#w)""#,
+            r#"fill="url(#w)" stroke="url(#w)" stroke-width="2""#,
+            r##"fill="#eea" stroke="url(#w)""##,
+        ] {
+            let out = compile_outlined(&format!(
+                "{XW}<defs>{WASH}</defs>{spine}{}</svg>",
+                text.replace("PAINT", paint)
+            ));
+            assert!(
+                !out.contains("left live") && !out.contains("url(#w)"),
+                "{text} {paint}: {out}"
+            );
+            assert!(
+                !out.contains("<text") && !out.contains("font-size"),
+                "{text}: {out}"
+            );
+            let prefix = if paint.starts_with("fill=\"url") {
+                "x-mgc-"
+            } else {
+                "x-mgs-"
+            };
+            use crate::kurbo::Shape;
+            assert!(paint_clip(&out, prefix).area().abs() > 0.0, "{text}: {out}");
+            roxmltree::Document::parse(&out).unwrap();
+        }
+    }
+}
+
+#[test]
+fn text_that_cannot_be_outlined_keeps_its_paint_as_authored() {
+    // no outliner: there is no geometry to clip the mesh to
+    for text in [
+        r##"<x:textbox x="10" y="10" width="200" height="80" font-size="20" fill="url(#w)">Mesh</x:textbox>"##,
+        r##"<text x="10" y="40" font-size="20" stroke="url(#w)">Mesh</text>"##,
+    ] {
+        let out = compile_test(&format!("{XW}<defs>{WASH}</defs>{text}</svg>"));
+        assert!(
+            out.contains("mesh paint left live (no geometry to paint)"),
+            "{out}"
+        );
+        assert!(out.contains("<text") && out.contains("url(#w)"), "{out}");
+        assert!(!out.contains("x-mgc-") && !out.contains("x-mgs-"), "{out}");
+    }
+}
+
+#[test]
+fn runs_with_paint_of_their_own_keep_the_text_live() {
+    let out = compile_outlined(&format!(
+        r##"{XW}<defs>{WASH}</defs><x:textbox x="10" y="10" width="200" height="80" font-size="20" fill="url(#w)">Mesh <tspan fill="#00f">blue</tspan></x:textbox></svg>"##
+    ));
+    assert!(out.contains("runs with their own fill or stroke"), "{out}");
+    assert!(!out.contains("x-mgc-"), "{out}");
+    // a run's stroke does not stop a mesh fill, nor its fill a mesh stroke
+    let out = compile_outlined(&format!(
+        r##"{XW}<defs>{WASH}</defs><x:textbox x="10" y="10" width="200" height="80" font-size="20" stroke="url(#w)">Mesh <tspan fill="#00f">blue</tspan></x:textbox></svg>"##
+    ));
+    assert!(
+        out.contains("x-mgs-") && !out.contains("left live"),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_x_text_element_does_not_inherit_a_mesh_fill() {
+    // an unset fill on a textbox is black (§6), never the ancestor's
+    let out = compile_outlined(&format!(
+        r##"{XW}<defs>{WASH}</defs><g fill="url(#w)"><x:textbox x="10" y="10" width="200" height="80" font-size="20">Mesh</x:textbox></g></svg>"##
+    ));
+    assert!(!out.contains("x-mgc-"), "{out}");
+}
+
+// ---- where mesh paint must not be lowered ----
+
+#[test]
+fn elements_that_are_not_painted_by_fill_are_left_alone() {
+    let before = |body: &str| compile_test(&format!("{XW}<defs>{WASH}</defs>{body}</svg>"));
+    for body in [
+        r##"<g fill="url(#w)"><image width="9" height="9" href="data:,"/></g>"##,
+        r##"<x:pie cx="50" cy="50" r="40" fill="url(#w)"><x:slice value="1"/><x:slice value="2"/></x:pie>"##,
+        r##"<rect id="a" width="9" height="9"/><rect id="b" x="90" width="9" height="9"/><x:connector from="#a" to="#b" stroke="url(#w)"/>"##,
+        r##"<svg width="50" height="50" fill="url(#w)"/>"##,
+    ] {
+        let out = before(body);
+        assert!(
+            !out.contains("x-mgc-") && !out.contains("x-mgs-"),
+            "{body}: {out}"
+        );
+        roxmltree::Document::parse(&out).unwrap();
+    }
+    // a paint that names something other than a mesh is as it always was
+    let out = before(
+        r##"<linearGradient id="lg"/><rect width="9" height="9" rx="1" fill="url(#lg)" stroke="url(#nowhere)"/>"##,
+    );
+    assert!(
+        out.contains(
+            r##"<rect width="9" height="9" rx="1" fill="url(#lg)" stroke="url(#nowhere)"/>"##
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_mesh_stroke_in_a_clip_path_is_only_geometry() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}<clipPath id="c"><circle cx="50" cy="25" r="20" stroke="url(#w)" stroke-width="9"/></clipPath></defs><rect width="100" height="50" clip-path="url(#c)"/></svg>"##
+    ));
+    assert!(!out.contains("x-mgs-") && !out.contains("x-mgc-"), "{out}");
+    assert!(
+        out.contains(r#"<clipPath id="c"><circle cx="50" cy="25" r="20""#),
+        "{out}"
+    );
+}
+
+#[test]
+fn to_path_leaves_a_mesh_paint_in_the_source() {
+    let source = format!(
+        r##"{XW}<defs>{WASH}</defs><x:boolean fill="url(#w)" stroke="url(#w)"><rect width="9" height="9"/><rect x="5" width="9" height="9"/></x:boolean></svg>"##
+    );
+    let platform = Platform::new(Mono, NoShaper, NoOutliner);
+    let session = CompileSession::new(&platform, &source, "balanced", false, "").unwrap();
+    let markup = session.to_path(source.find("<x:boolean").unwrap()).unwrap();
+    assert!(
+        markup.contains(r#"fill="url(#w)""#) && markup.contains(r#"stroke="url(#w)""#),
+        "{markup}"
+    );
+    assert!(!markup.contains("clipPath"), "{markup}");
+}
+
+#[test]
+fn one_unusable_mesh_does_not_stop_the_other_paint() {
+    let out = compile_test(&format!(
+        r##"{XW}<defs>{WASH}<x:mesh id="bad" points="0,0 1,1"/></defs><rect width="40" height="20" fill="url(#bad)" stroke="url(#w)"/><rect y="50" width="40" height="20" fill="url(#w)" stroke="url(#bad)"/></svg>"##
+    ));
+    assert_eq!(
+        out.matches("x:mesh fill left live (no usable mesh)")
+            .count(),
+        2,
+        "{out}"
+    );
+    assert_eq!(out.matches("<clipPath id=\"x-mgs-").count(), 1, "{out}");
+    assert_eq!(out.matches("<clipPath id=\"x-mgc-").count(), 1, "{out}");
+    // the unusable one is kept as written: a reference that paints nothing
+    assert!(
+        out.contains(r#"<path fill="url(#bad)" stroke="none" d="#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"<path stroke="url(#bad)" fill="none" d="#),
+        "{out}"
+    );
+}
+
+#[test]
+fn mesh_paint_lowering_survives_arbitrary_stroke_styles() {
+    // a deterministic sweep: every output is well-formed, and stable
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let pick = |n: u64, of: &[&'static str]| of[(n % of.len() as u64) as usize];
+    for round in 0..300 {
+        let shape = pick(
+            next(),
+            &[
+                r#"path d="M10,10 C40,-20 90,60 60,90 L20,70 Z""#,
+                r#"path d="M10,10 L10,10""#,
+                r#"path d="M10,10 L50,50 L10,10 L50,50""#,
+                r#"path d="M0,0 H50 M60,0 H90 M0,30 Q40,90 80,30 Z M5,5""#,
+                r#"path d="""#,
+                r#"path d="M1e9,1e9 L-1e9,3""#,
+                r#"rect x="5" y="5" width="60" height="30" rx="40""#,
+                r#"rect width="0" height="9""#,
+                r#"circle cx="40" cy="40" r="0.001""#,
+                r#"polyline points="1,1 9,9 1,9 9,1 5,5 5,5""#,
+                r#"line x1="3" y1="3" x2="3" y2="3""#,
+                r#"ellipse cx="50" cy="20" rx="45" ry="2""#,
+            ],
+        );
+        let style = format!(
+            r#"stroke-width="{}" stroke-linecap="{}" stroke-linejoin="{}" stroke-miterlimit="{}" stroke-dasharray="{}" stroke-dashoffset="{}" paint-order="{}" fill-rule="{}""#,
+            pick(
+                next(),
+                &["1", "0.01", "30", "1e4", "0", "-1", "abc", "5px", "50%"]
+            ),
+            pick(next(), &["butt", "round", "square", "bogus"]),
+            pick(next(), &["miter", "round", "bevel", "arcs"]),
+            pick(next(), &["4", "1", "0", "-9", "1e9", "x"]),
+            pick(
+                next(),
+                &[
+                    "none",
+                    "3",
+                    "3 1",
+                    "0.001",
+                    "1e-9 1e-9",
+                    "1e9",
+                    "5,0,5",
+                    "0 9"
+                ]
+            ),
+            pick(next(), &["0", "2.5", "-7", "1e12", "x"]),
+            pick(
+                next(),
+                &["normal", "stroke", "markers stroke fill", "bogus"]
+            ),
+            pick(next(), &["nonzero", "evenodd"]),
+        );
+        let paints = pick(
+            next(),
+            &[
+                r#"fill="url(#w)" stroke="url(#u)""#,
+                r#"fill="none" stroke="url(#w)""#,
+                r#"fill="url(#u)" stroke="red""#,
+                r#"stroke="url(#u)""#,
+            ],
+        );
+        let source = format!(
+            r##"{XW}<defs>{WASH}<x:mesh id="u" units="objectBoundingBox" points="0,0 1,0 1,1 0,1"><x:face v="0 1 2 3" fill="#f00 #0f0 #00f #fff"/></x:mesh></defs><{shape} {paints} {style}/></svg>"##
+        );
+        let out = compile_fast(&source);
+        roxmltree::Document::parse(&out)
+            .unwrap_or_else(|e| panic!("round {round}: {e}\n{source}\n{out}"));
+        assert_eq!(out, compile_fast(&source), "round {round}");
+        assert!(
+            !out.contains("NaN") && !out.contains("inf"),
+            "round {round}: {source}\n{out}"
+        );
+    }
+}

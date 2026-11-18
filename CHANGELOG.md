@@ -14,11 +14,27 @@ partial one.
 
 ## [Unreleased]
 
-- **`<x:mesh>` as a fill.** A shape may name an `<x:mesh>` as its paint —
-  `<path d="…" fill="url(#mesh)">` — as it already could an SVG 2 `<meshgradient>`. It lowers to
-  the mesh's paint inside a clip of the shape, with the stroke on top. The mesh's coordinates
-  are the shape's user space, under the mesh's own `transform`; the reference is baked, so
-  editing the mesh re-emits the shapes it fills.
+### Added
+
+- **A mesh as any paint.** An element may name an `<x:mesh>` — as it already could an SVG 2
+  `<meshgradient>` — as its **fill, its stroke, or both**: `<path d="…" fill="url(#a)"
+  stroke="url(#b)">`. A fill is the mesh's paint inside a clip of the geometry; a stroke is the
+  mesh's paint inside a clip of the stroke outline (width, caps, joins, miter limit, dashes).
+  Besides the basic shapes it applies to `<x:boolean>`, `<x:offset>` and — outlined — `<text>`,
+  `<x:textbox>` and `<x:textpath>`, and it is inherited from an ancestor's attribute like any
+  paint. The mesh's coordinates are the painted element's user space under the mesh's own
+  `transform`, or, with **`units="objectBoundingBox"`** on the `<x:mesh>`, fractions of the
+  element's bounding box. The reference is baked, so editing the mesh re-emits what it paints.
+- **Mesh textures at display resolution** (`Options::rasterize_at_display_resolution`,
+  `CompileSession::with_display_resolution`): a fitted mesh's texture is emitted at the given
+  number of pixels per root user unit instead of as its compact grid, for consumers that cannot
+  rely on the renderer's bilinear image filter. Density follows every transform and viewport fit
+  the mesh is drawn through, including each `<use>` that instances it (the densest placement
+  decides), capped at 8192 px a side and 16.7 Mpx. These textures are filtered and
+  DEFLATE-compressed (`miniz_oxide`, pure Rust); the default compact output is byte-identical.
+  `xsvg-gradient` gains `png::encode_png_with`, which takes the zlib compressor from its caller
+  and so stays dependency-free. `Options` and `Backend` gain public fields: build them with
+  `..Default::default()`.
 
 ### Changed
 
@@ -36,18 +52,19 @@ partial one.
   fragments gets an empty one for the definition; the shapes it fills are still reported as its
   dependents.
 
-### Added
+### Fixed
 
-- **Mesh textures at display resolution** (`Options::rasterize_at_display_resolution`,
-  `CompileSession::with_display_resolution`): a fitted mesh's texture is emitted at the given
-  number of pixels per root user unit instead of as its compact grid, for consumers that cannot
-  rely on the renderer's bilinear image filter. Density follows every transform and viewport fit
-  the mesh is drawn through, including each `<use>` that instances it (the densest placement
-  decides), capped at 8192 px a side and 16.7 Mpx. These textures are filtered and
-  DEFLATE-compressed (`miniz_oxide`, pure Rust); the default compact output is byte-identical.
-  `xsvg-gradient` gains `png::encode_png_with`, which takes the zlib compressor from its caller
-  and so stays dependency-free. `Options` and `Backend` gain public fields: build them with
-  `..Default::default()`.
+- **A mesh-filled shape keeps what was not paint.** Its `id`, `opacity`, `clip-path`, `mask`
+  and `display` were lost unless the shape also had a stroke (they rode on the re-emitted stroke
+  path, and then applied to the stroke alone). The shape now lowers to a group that carries
+  them. Also: `fill-rule="evenodd"` reaches the fill's clip, `fill-opacity` applies,
+  `paint-order` is honoured, a filled `<polyline>` is stroked open, and a stroke or
+  `fill-opacity` inherited from an ancestor no longer paints the mesh's solid regions again.
+- **A sliver of a mesh no longer costs unbounded memory.** A mesh more elongated than 256:1 —
+  easy to reach now that a mesh can take a hairline's bounding box — is fitted with its long
+  axis squeezed and the result stretched back. Meshes of ordinary proportions are unchanged.
+- **A mesh-painted child of an `<x:boolean>` or `<x:warp>`** is read for its geometry; it used
+  to contribute the clips and textures of its lowered paint.
 
 ## [0.3.0] — 2026-11-13
 

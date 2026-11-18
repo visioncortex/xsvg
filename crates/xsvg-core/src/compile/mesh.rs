@@ -31,7 +31,8 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
             node,
             out,
             &[
-                "cols", "rows", "x", "y", "width", "height", "fill", "points", "filter", "opacity",
+                "cols", "rows", "x", "y", "width", "height", "fill", "points", "units", "filter",
+                "opacity",
             ],
             ctx,
         );
@@ -51,7 +52,7 @@ pub(super) fn emit_mesh(node: roxmltree::Node, out: &mut String, ctx: &Ctx) {
         "g",
         out,
         &[
-            "cols", "rows", "x", "y", "width", "height", "fill", "points",
+            "cols", "rows", "x", "y", "width", "height", "fill", "points", "units",
         ],
         ctx,
         || None,
@@ -185,6 +186,12 @@ pub(super) fn parse_mesh(
     Ok(mesh)
 }
 
+/// The most elongated a mesh is fitted at. The raster gives the short axis a
+/// minimum of rows, so the long axis of a sliver would otherwise cost pixels
+/// without limit; past this ratio the long axis is squeezed for the fit and
+/// the result stretched back (an affine map, which the field survives).
+const MAX_FIT_ASPECT: f32 = 256.0;
+
 /// The shared mesh lowering (§8.2 stage 1 + 2): rasterize at a profile-graded
 /// resolution, fit each crack region with a grown grid field, and emit one
 /// texel-aligned PNG (or plain path for constant regions) per region. Compact
@@ -210,6 +217,34 @@ pub(super) fn lower_mesh(
     if !(x1 > x0 && y1 > y0) {
         return false;
     }
+    // fit space = user space ÷ (kx, ky); all of it but a sliver is 1:1
+    let (kx, ky) = {
+        let (ex, ey) = (x1 - x0, y1 - y0);
+        if ex > ey * MAX_FIT_ASPECT {
+            (ex / (ey * MAX_FIT_ASPECT), 1.0)
+        } else if ey > ex * MAX_FIT_ASPECT {
+            (1.0, ey / (ex * MAX_FIT_ASPECT))
+        } else {
+            (1.0f32, 1.0f32)
+        }
+    };
+    if !(kx.is_finite() && ky.is_finite()) {
+        return false;
+    }
+    let squeezed;
+    let (user, mesh) = (mesh, {
+        if (kx, ky) == (1.0, 1.0) {
+            mesh
+        } else {
+            let mut m = mesh.clone();
+            for v in &mut m.verts {
+                *v = (v.0 / kx, v.1 / ky);
+            }
+            squeezed = m;
+            &squeezed
+        }
+    });
+    let (x0, y0, x1, y1) = (x0 / kx, y0 / ky, x1 / kx, y1 / ky);
     let (max_px, min_px) = match ctx.quality {
         QualityProfile::Fast => (64.0f32, 24.0f32),
         QualityProfile::Balanced => (128.0, 32.0),
@@ -255,13 +290,13 @@ pub(super) fn lower_mesh(
     // Exact clip geometry: each region's outline. Naming every face instead
     // costs a polygon per tessellated quad — megabytes for a fine mesh, all of
     // it interior edges that cancel (crates/gradient `region_outlines`).
-    let outlines = mesh.region_outlines(&raster.face_regions, raster.regions);
+    let outlines = user.region_outlines(&raster.face_regions, raster.regions);
     for r in 0..raster.regions {
         if region_px[r].is_empty() {
             continue;
         }
         let mut clip_d = String::new();
-        append_outline(mesh, &outlines[r], &mut clip_d);
+        append_outline(user, &outlines[r], &mut clip_d);
 
         let single = fit_field(&region_px[r], w, &rgba, 2.0);
         if single.dof == Dof::Solid {
@@ -337,8 +372,12 @@ pub(super) fn lower_mesh(
         }
         let (ix, iy, iw, ih) = texel_placement(bx0, by0, bx1, by1, tw, th);
         // Keep the fitted grid's placement regardless of output texture density.
-        let (ux, uy) = (x0 as f64 + ix * scale as f64, y0 as f64 + iy * scale as f64);
-        let (uw, uh) = (iw * scale as f64, ih * scale as f64);
+        let (kx, ky) = (kx as f64, ky as f64);
+        let (ux, uy) = (
+            (x0 as f64 + ix * scale as f64) * kx,
+            (y0 as f64 + iy * scale as f64) * ky,
+        );
+        let (uw, uh) = (iw * scale as f64 * kx, ih * scale as f64 * ky);
         let (pw, ph) = super::mesh_texture::dimensions(density, (uw, uh), (tw, th));
         let pixels = if (pw, ph) == (tw, th) {
             px
@@ -388,117 +427,534 @@ pub(super) fn is_mesh_paint(node: roxmltree::Node) -> bool {
     )
 }
 
-/// The `fill="url(#id)"` target, when it is a mesh ([`is_mesh_paint`]).
-pub(super) fn mesh_fill_target<'a>(
+/// The id a paint value names — `url(#id)`, quotes and a fallback colour
+/// tolerated (`url("#id") #888`).
+pub(super) fn paint_ref(value: &str) -> Option<&str> {
+    let (inner, _fallback) = value.trim().strip_prefix("url(")?.split_once(')')?;
+    inner
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .strip_prefix('#')
+        .filter(|id| !id.is_empty())
+}
+
+/// How an element that may be painted with a mesh gives up its geometry.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Bearer {
+    /// a basic shape: its own path, and `fill-rule` is its winding
+    Shape,
+    /// compiled output read back as one outline: a boolean or an offset
+    Outline,
+    /// glyph outlines: `<text>`, `<x:textbox>`, `<x:textpath>`
+    Text,
+}
+
+/// The elements a mesh can paint (§8.2): everything with geometry of its own
+/// whose `fill` and `stroke` are ordinary paints.
+pub(super) fn mesh_bearer(node: roxmltree::Node) -> Option<Bearer> {
+    match (node.tag_name().namespace(), node.tag_name().name()) {
+        (
+            Some(SVG_NS),
+            "path" | "rect" | "circle" | "ellipse" | "polygon" | "polyline" | "line",
+        ) => Some(Bearer::Shape),
+        (Some(SVG_NS), "text") => Some(Bearer::Text),
+        (Some(XSVG_NS), "boolean" | "offset") => Some(Bearer::Outline),
+        (Some(XSVG_NS), "textbox" | "textpath") => Some(Bearer::Text),
+        _ => None,
+    }
+}
+
+/// A presentation attribute as the element sees it: its own, else the nearest
+/// ancestor's — SVG inheritance, over attributes. The `x:` text elements do
+/// not inherit paint (an unset `fill` is black, §6), so theirs is their own.
+fn presentation<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<&'a str> {
+    let own_only = matches!(name, "fill" | "stroke")
+        && node.tag_name().namespace() == Some(XSVG_NS)
+        && mesh_bearer(node) == Some(Bearer::Text);
+    if own_only {
+        return node.attribute(name);
+    }
+    node.ancestors().find_map(|a| a.attribute(name))
+}
+
+/// The id of the paint `node` is painted with in `prop` (`fill` / `stroke`),
+/// when the element is one a mesh can paint. Says nothing about what the id
+/// names: [`mesh_paint_target`] and the `dependents` scan each look it up.
+pub(super) fn bearer_paint_id<'a>(node: roxmltree::Node<'a, 'a>, prop: &str) -> Option<&'a str> {
+    mesh_bearer(node)?;
+    paint_ref(presentation(node, prop)?)
+}
+
+/// The mesh `node` is painted with in `prop`, if its paint names one.
+fn mesh_paint_target<'a>(
     node: roxmltree::Node<'a, 'a>,
+    prop: &str,
     ctx: &Ctx,
 ) -> Option<roxmltree::Node<'a, 'a>> {
-    let fill = node.attribute("fill")?;
-    let id = fill.strip_prefix("url(#")?.strip_suffix(')')?;
-    let target = ctx.resolve_ref(node, id)?;
+    let target = ctx.resolve_ref(node, bearer_paint_id(node, prop)?)?;
     is_mesh_paint(target).then_some(target)
 }
 
-/// Lower a shape whose fill references a mesh: build the mesh in the shape's
-/// user space, lower it through the standard pipeline, clip by the shape's
-/// geometry, and re-emit the stroke (if any) on top.
+/// Why a mesh paint was not lowered.
+const NO_GEOMETRY: &str = "<!-- xsvg: mesh paint left live (no geometry to paint) -->";
+const OWN_PAINT: &str = "<!-- xsvg: mesh paint left live (runs with their own fill or stroke) -->";
+const NON_SCALING: &str = "<!-- xsvg: mesh stroke left live (non-scaling-stroke) -->";
+const TOO_MANY_DASHES: &str = "<!-- xsvg: mesh stroke left live (dash pattern too fine) -->";
+
+/// How many dashes a mesh stroke may be outlined into.
+const MAX_DASHES: f64 = 20_000.0;
+
+/// The attributes that say how a shape is painted. They go on the one path
+/// that carries what is left of the element's own paint; everything else
+/// (identity, transform, opacity, clipping, effects) goes on the group.
+const PAINT_ATTRS: &[&str] = &[
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-opacity",
+    "paint-order",
+    "vector-effect",
+    "shape-rendering",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    "style",
+];
+
+/// A basic shape's own geometry attributes: consumed into the path.
+const SHAPE_GEOMETRY: &[&str] = &[
+    "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points", "x1", "y1", "x2", "y2",
+];
+
+/// What the group keeps of an element that is not a basic shape — the rest of
+/// its attributes are that element's own vocabulary, already spent on the
+/// geometry.
+const GROUP_ATTRS: &[&str] = &[
+    "id",
+    "class",
+    "transform",
+    "opacity",
+    "clip-path",
+    "mask",
+    "display",
+    "visibility",
+    "pointer-events",
+];
+
+/// Lower an element painted with a mesh — its `fill`, its `stroke`, or both
+/// (§8.2). The element becomes a group carrying its identity, transform and
+/// effects; inside, each mesh paint is the mesh's own output clipped to the
+/// region that paint covers — the element's geometry for a fill, its stroke
+/// outline for a stroke — and one path carries whatever paint is left (a plain
+/// fill or stroke, markers). Pieces stack in `paint-order`.
 ///
 /// A `<meshgradient>` tessellates its Coons patches into the straight-quad
 /// mesh (polycurve → points), under `gradientTransform` and `gradientUnits`.
-/// An `<x:mesh>` is that mesh already: its `points` are read as the shape's
-/// user space, under the mesh's own `transform` — the same role, and nothing
-/// above the mesh applies, as with any paint server.
+/// An `<x:mesh>` is that mesh already: its coordinates are the element's user
+/// space — or fractions of its bounding box, `units="objectBoundingBox"` —
+/// under the mesh's own `transform`. Nothing above the mesh applies, as with
+/// any paint server.
 ///
-/// Returns `false` (caller falls through to normal emission, the fill
-/// unrendered as in any browser) when the mesh does not parse.
-pub(super) fn emit_mesh_fill(
-    node: roxmltree::Node,
-    paint: roxmltree::Node,
-    out: &mut String,
-    ctx: &Ctx,
-) -> bool {
-    let Some(shape_d) = shape_to_path_d(node, ctx) else {
+/// Returns `false` (the caller emits the element as it always did, the paint
+/// unrendered as in any browser) when no mesh paint could be lowered.
+pub(super) fn emit_mesh_paint(node: roxmltree::Node, out: &mut String, ctx: &Ctx) -> bool {
+    // a harvest wants geometry, a clip ignores paint, `to_path` writes source
+    if ctx.clip_geometry.get() || ctx.paint_live.get() || ctx.to_path.get() {
+        return false;
+    }
+    let Some(bearer) = mesh_bearer(node) else {
         return false;
     };
-    let mesh = if paint.tag_name().name() == "mesh" {
-        // its own markers (a skipped face) are said where the mesh stands
-        let mut mesh = match parse_mesh(paint, &mut String::new()) {
-            Ok(mesh) => mesh,
-            Err(_) => {
-                out.push_str("<!-- xsvg: x:mesh fill left live (no usable mesh) -->");
-                return false;
+    let fill_paint = mesh_paint_target(node, "fill", ctx);
+    let mut stroke_paint = mesh_paint_target(node, "stroke", ctx);
+    if fill_paint.is_none() && stroke_paint.is_none() {
+        return false;
+    }
+    // A run's own paint is drawn by the text, not by the element's geometry;
+    // one mesh over every glyph would repaint it.
+    if bearer == Bearer::Text
+        && node.descendants().skip(1).any(|n| {
+            (fill_paint.is_some() && n.attribute("fill").is_some())
+                || (stroke_paint.is_some() && n.attribute("stroke").is_some())
+        })
+    {
+        out.push_str(OWN_PAINT);
+        return false;
+    }
+    let geometry = match bearer {
+        Bearer::Shape => shape_to_path_d(node, ctx),
+        // scratch-compiled, glyphs outlined; the harvest keeps paint live,
+        // which is what keeps this function out of it
+        Bearer::Outline | Bearer::Text => x_output_geometry(node, ctx).ok(),
+    };
+    let Some(mut shape_d) = geometry else {
+        out.push_str(NO_GEOMETRY);
+        return false;
+    };
+    // A polyline is open: its geometry is closed for the operations that need
+    // an area, and fills the same either way, but its stroke has two ends.
+    if node.tag_name().name() == "polyline" && corner_spec(node, ctx.theme).is_none() {
+        if let Some(open) = shape_d.strip_suffix('Z') {
+            shape_d = open.trim_end().to_string();
+        }
+    }
+    let bbox = svg_path_bbox(&shape_d);
+
+    // the stroke's own region: its outline, as fill geometry
+    let mut stroke_d = None;
+    if stroke_paint.is_some() {
+        match stroke_outline(node, &shape_d, ctx) {
+            Ok(d) => stroke_d = d,
+            Err(why) => {
+                out.push_str(why);
+                stroke_paint = None;
             }
+        }
+    }
+    let fill_mesh = fill_paint.and_then(|p| paint_mesh(p, bbox, out, ctx));
+    let stroke_mesh = stroke_paint.and_then(|p| paint_mesh(p, bbox, out, ctx));
+    if fill_mesh.is_none() && stroke_mesh.is_none() {
+        return false;
+    }
+
+    let pos = gen_id_seed(node, ctx);
+    let filter = effect_attr(node, out, ctx, || bbox);
+    out.push_str("<g");
+    if bearer == Bearer::Shape {
+        let mut skip = [SHAPE_GEOMETRY, PAINT_ATTRS].concat();
+        skip.push("filter");
+        copy_attrs(node, out, &skip, ctx);
+    } else {
+        for a in node.attributes() {
+            if a.namespace().is_none() && GROUP_ATTRS.contains(&a.name()) {
+                push_attr(out, a.name(), &ctx.resolve_var(a.value()));
+            }
+        }
+    }
+    out.push_str(&ctx.carry_x(node));
+    out.push_str(&filter);
+    out.push_str(&pos_attr(node, ctx));
+    out.push('>');
+
+    // what is left for the element's own path: a paint that is not a mesh
+    let painted = |prop: &str| presentation(node, prop).is_some_and(|v| v.trim() != "none");
+    let plain_fill =
+        fill_mesh.is_none() && presentation(node, "fill").is_none_or(|v| v.trim() != "none");
+    let plain_stroke = stroke_mesh.is_none() && painted("stroke");
+    let markers = ["marker", "marker-start", "marker-mid", "marker-end"]
+        .iter()
+        .any(|m| painted(m));
+    let rest = |out: &mut String| {
+        out.push_str("<path");
+        for a in node.attributes() {
+            let name = a.name();
+            let lowered = (name == "fill" && fill_mesh.is_some())
+                || (name == "stroke" && stroke_mesh.is_some());
+            // an outline's `fill-rule` was its operands' winding, now resolved
+            let spent = name == "fill-rule" && bearer != Bearer::Shape;
+            if a.namespace().is_none() && PAINT_ATTRS.contains(&name) && !lowered && !spent {
+                push_attr(out, name, &ctx.resolve_var(a.value()));
+            }
+        }
+        if fill_mesh.is_some() {
+            out.push_str(" fill=\"none\"");
+        }
+        if stroke_mesh.is_some() {
+            out.push_str(" stroke=\"none\"");
+        }
+        out.push_str(&format!(" d=\"{shape_d}\"/>"));
+    };
+    let above = |name: &str| node.ancestors().skip(1).find_map(|a| a.attribute(name));
+    let mut inherited_reset = String::new();
+    if above("stroke").is_some_and(|v| v.trim() != "none") {
+        inherited_reset.push_str(" stroke=\"none\"");
+    }
+    if above("fill-opacity").is_some() {
+        inherited_reset.push_str(" fill-opacity=\"1\"");
+    }
+    let piece = |out: &mut String,
+                 mesh: &crate::gradient::Mesh,
+                 clip_d: &str,
+                 tag: &str,
+                 rule: &str,
+                 opacity: Option<&str>| {
+        out.push_str(&format!(
+            "<clipPath id=\"x-{tag}-{pos}\"><path{rule} d=\"{clip_d}\"/></clipPath><g clip-path=\"url(#x-{tag}-{pos})\""
+        ));
+        if let Some(o) = opacity {
+            push_attr(out, "opacity", &ctx.resolve_var(o));
+        }
+        // The piece is the mesh's own markup, and its solid regions are
+        // plain paths: what the element inherits must not paint them again.
+        out.push_str(&inherited_reset);
+        out.push('>');
+        // the stroke's regions get clip ids of their own
+        let seed = if tag == "mgc" {
+            pos.clone()
+        } else {
+            format!("{pos}s")
         };
-        let placed = element_transform(paint);
-        if placed != crate::kurbo::Affine::IDENTITY {
+        if !lower_mesh(mesh, &seed, node, out, ctx) {
+            out.push_str("<!-- xsvg: mesh fill degenerate extent -->");
+        }
+        out.push_str("</g>");
+    };
+    let even_odd = bearer == Bearer::Shape
+        && presentation(node, "fill-rule").map(str::trim) == Some("evenodd");
+    let fill_piece = |out: &mut String| match &fill_mesh {
+        Some(mesh) => piece(
+            out,
+            mesh,
+            &shape_d,
+            "mgc",
+            if even_odd {
+                " clip-rule=\"evenodd\""
+            } else {
+                ""
+            },
+            presentation(node, "fill-opacity"),
+        ),
+        None => rest(out),
+    };
+    let stroke_piece = |out: &mut String| match (&stroke_mesh, &stroke_d) {
+        (Some(mesh), Some(d)) => piece(
+            out,
+            mesh,
+            d,
+            "mgs",
+            "",
+            presentation(node, "stroke-opacity"),
+        ),
+        (Some(_), None) => {} // a zero-width stroke paints nothing
+        (None, _) => rest(out),
+    };
+    // `paint-order` (SVG 2): the stroke goes under the fill when it is named
+    // first, or when markers are named first and the fill is not second
+    let order: Vec<&str> = presentation(node, "paint-order")
+        .unwrap_or("")
+        .split_whitespace()
+        .collect();
+    let stroke_first = matches!(order.as_slice(), ["stroke", ..] | ["markers", "stroke", ..]);
+    let both = fill_mesh.is_some() && stroke_mesh.is_some();
+    if both {
+        // neither piece is the path, so it follows with whatever it has left
+        if stroke_first {
+            stroke_piece(out);
+            fill_piece(out);
+        } else {
+            fill_piece(out);
+            stroke_piece(out);
+        }
+        if markers {
+            rest(out);
+        }
+    } else if fill_mesh.is_some() {
+        // the path holds the plain stroke and the markers
+        let path = plain_stroke || markers;
+        if stroke_first && path {
+            rest(out);
+        }
+        fill_piece(out);
+        if !stroke_first && path {
+            rest(out);
+        }
+    } else {
+        // the path holds the plain fill and the markers
+        let path = plain_fill || markers;
+        if stroke_first {
+            stroke_piece(out);
+        }
+        if path {
+            rest(out);
+        }
+        if !stroke_first {
+            stroke_piece(out);
+        }
+    }
+    out.push_str("</g>");
+    true
+}
+
+/// ` name="value"`, escaped.
+fn push_attr(out: &mut String, name: &str, value: &str) {
+    out.push(' ');
+    out.push_str(name);
+    out.push_str("=\"");
+    push_escaped(out, value, true);
+    out.push('"');
+}
+
+/// The region a stroke covers, as fill geometry (nonzero): kurbo's
+/// stroke-to-fill under the element's `stroke-*` properties, inherited as SVG
+/// inherits them. `Ok(None)` is a stroke with no width — nothing to paint;
+/// `Err` is the marker for a stroke whose width is not in user space.
+fn stroke_outline(
+    node: roxmltree::Node,
+    d: &str,
+    ctx: &Ctx,
+) -> Result<Option<String>, &'static str> {
+    use crate::kurbo::{stroke, Cap, Join, Stroke, StrokeOpts};
+    let prop = |name: &str| presentation(node, name).map(|v| ctx.resolve_var(v).trim().to_string());
+    if prop("vector-effect").as_deref() == Some("non-scaling-stroke") {
+        return Err(NON_SCALING);
+    }
+    let num = |name: &str, default: f64| {
+        prop(name)
+            .and_then(|v| parse_num(&v))
+            .filter(|v| v.is_finite())
+            .unwrap_or(default)
+    };
+    let width = num("stroke-width", 1.0);
+    if width <= 0.0 {
+        return Ok(None);
+    }
+    let Ok(path) = crate::kurbo::BezPath::from_svg(d) else {
+        return Ok(None);
+    };
+    {
+        use crate::kurbo::Shape;
+        let bb = path.bounding_box();
+        if !(bb.is_finite() && width.is_finite()) {
+            return Ok(None);
+        }
+    }
+    let cap = match prop("stroke-linecap").as_deref() {
+        Some("round") => Cap::Round,
+        Some("square") => Cap::Square,
+        _ => Cap::Butt,
+    };
+    let join = match prop("stroke-linejoin").as_deref() {
+        Some("round") => Join::Round,
+        Some("bevel") => Join::Bevel,
+        _ => Join::Miter,
+    };
+    let mut style = Stroke::new(width)
+        .with_caps(cap)
+        .with_join(join)
+        .with_miter_limit(num("stroke-miterlimit", 4.0).max(1.0));
+    if let Some(dashes) = prop("stroke-dasharray") {
+        let tokens: Vec<&str> = dashes
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let mut pattern: Vec<f64> = tokens.iter().filter_map(|t| parse_num(t)).collect();
+        // SVG: a negative or unreadable entry voids the list (solid), all zero
+        // is solid, and an odd count repeats to make it even
+        let valid = !pattern.is_empty()
+            && pattern.len() == tokens.len()
+            && pattern.iter().all(|v| v.is_finite() && *v >= 0.0)
+            && pattern.iter().any(|v| *v > 0.0);
+        if valid {
+            if pattern.len() % 2 == 1 {
+                pattern.extend_from_within(..);
+            }
+            // Every dash is geometry here, where a renderer only paints it: a
+            // pattern far finer than the path is long would be millions of
+            // them. Past the budget the stroke is left to the renderer.
+            use crate::kurbo::Shape;
+            let period: f64 = pattern.iter().sum();
+            let dashes = path.perimeter(1.0) / period * (pattern.len() / 2) as f64;
+            // (a count that is not a number is over budget too)
+            if dashes.is_nan() || dashes > MAX_DASHES {
+                return Err(TOO_MANY_DASHES);
+            }
+            let offset = num("stroke-dashoffset", 0.0);
+            // the pattern repeats, so the offset matters only within a period
+            style = style.with_dashes(offset.rem_euclid(period), pattern);
+        }
+    }
+    let outline = stroke(
+        path,
+        &style,
+        &StrokeOpts::default(),
+        ctx.quality.tolerance().max(0.01),
+    );
+    // kurbo writes full f64 digits; three decimals is the output's precision
+    let mut d = String::new();
+    let pt = |p: crate::kurbo::Point| format!("{},{}", fmt(p.x), fmt(p.y));
+    for el in outline.elements() {
+        use crate::kurbo::PathEl::*;
+        match *el {
+            MoveTo(p) => d.push_str(&format!("M{}", pt(p))),
+            LineTo(p) => d.push_str(&format!("L{}", pt(p))),
+            QuadTo(a, p) => d.push_str(&format!("Q{} {}", pt(a), pt(p))),
+            CurveTo(a, b, p) => d.push_str(&format!("C{} {} {}", pt(a), pt(b), pt(p))),
+            ClosePath => d.push('Z'),
+        }
+    }
+    if d.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(d))
+}
+
+/// The mesh a paint server stands for, in the user space of the element it
+/// paints (`bbox` is that element's fill bounding box, for bounding-box
+/// units). `None` leaves its marker and the paint as authored.
+fn paint_mesh(
+    paint: roxmltree::Node,
+    bbox: Option<Rect>,
+    out: &mut String,
+    ctx: &Ctx,
+) -> Option<crate::gradient::Mesh> {
+    use crate::kurbo::Affine;
+    let is_x = paint.tag_name().name() == "mesh";
+    let boxed = if is_x {
+        let declared: super::elements::Mesh = params_of(paint);
+        declared.units == super::elements::MeshUnits::ObjectBoundingBox
+    } else {
+        paint.attribute("gradientUnits").map(str::trim) == Some("objectBoundingBox")
+    };
+    // objectBoundingBox units: coordinates live in the unit square of the
+    // element's bbox. A box with no width or height has no such square, and
+    // the paint is then nothing at all (SVG's rule for every paint server).
+    let unit_map = if boxed {
+        match bbox.filter(|bb| bb.width() > 0.0 && bb.height() > 0.0) {
+            Some(bb) => {
+                Affine::translate((bb.x0, bb.y0))
+                    * Affine::scale_non_uniform(bb.width(), bb.height())
+            }
+            None => {
+                out.push_str("<!-- xsvg: mesh paint left live (no bounding box for objectBoundingBox units) -->");
+                return None;
+            }
+        }
+    } else {
+        Affine::IDENTITY
+    };
+    if is_x {
+        // its own markers (a skipped face) are said where the mesh stands
+        let Ok(mut mesh) = parse_mesh(paint, &mut String::new()) else {
+            out.push_str("<!-- xsvg: x:mesh fill left live (no usable mesh) -->");
+            return None;
+        };
+        let placed = unit_map * element_transform(paint);
+        if placed != Affine::IDENTITY {
             for v in &mut mesh.verts {
                 let p = placed * crate::kurbo::Point::new(v.0 as f64, v.1 as f64);
                 *v = (p.x as f32, p.y as f32);
             }
         }
-        mesh
-    } else {
-        let tess = match ctx.quality {
-            QualityProfile::Fast => 8usize,
-            QualityProfile::Balanced => 12,
-            QualityProfile::Highest | QualityProfile::Raster => 20,
-        };
-        // objectBoundingBox units: patch coordinates live in the unit square of
-        // the shape's bbox
-        let unit_map = if paint.attribute("gradientUnits") == Some("objectBoundingBox") {
-            let Some(bb) = svg_path_bbox(&shape_d) else {
-                return false;
-            };
-            crate::kurbo::Affine::translate((bb.x0, bb.y0))
-                * crate::kurbo::Affine::scale_non_uniform(bb.width(), bb.height())
-        } else {
-            crate::kurbo::Affine::IDENTITY
-        };
-        let Some(mesh) = parse_meshgradient(paint, tess, unit_map, ctx) else {
-            out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
-            return false;
-        };
-        mesh
+        return Some(mesh);
+    }
+    let tess = match ctx.quality {
+        QualityProfile::Fast => 8usize,
+        QualityProfile::Balanced => 12,
+        QualityProfile::Highest | QualityProfile::Raster => 20,
     };
-    let pos = gen_id_seed(node, ctx);
-    let filter = effect_attr(node, out, ctx, || svg_path_bbox(&shape_d));
-    let filtered = !filter.is_empty();
-    if filtered {
-        out.push_str("<g");
-        out.push_str(&filter);
-        out.push_str(&transform_attr(node));
-        out.push_str(&pos_attr(node, ctx));
-        out.push('>');
+    let mesh = parse_meshgradient(paint, tess, unit_map, ctx);
+    if mesh.is_none() {
+        out.push_str("<!-- xsvg: meshgradient fill left live (malformed dialect) -->");
     }
-    out.push_str(&format!(
-        "<clipPath id=\"x-mgc-{pos}\"><path d=\"{shape_d}\"/></clipPath><g clip-path=\"url(#x-mgc-{pos})\""
-    ));
-    if !filtered {
-        out.push_str(&transform_attr(node));
-        out.push_str(&pos_attr(node, ctx));
-    }
-    out.push('>');
-    if !lower_mesh(&mesh, &pos, node, out, ctx) {
-        out.push_str("<!-- xsvg: mesh fill degenerate extent -->");
-    }
-    out.push_str("</g>");
-    // the stroke still paints over the mesh fill
-    if node.attribute("stroke").is_some() {
-        out.push_str("<path");
-        let mut skip = vec![
-            "fill", "d", "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry", "points", "x1",
-            "y1", "x2", "y2",
-        ];
-        if filtered {
-            skip.extend(["filter", "transform"]);
-        }
-        copy_attrs(node, out, &skip, ctx);
-        out.push_str(&format!(" fill=\"none\" d=\"{shape_d}\"/>"));
-    }
-    if filtered {
-        out.push_str("</g>");
-    }
-    true
+    mesh
 }
 
 /// Parse the SVG 2 / Inkscape `<meshgradient>` dialect into a tessellated
