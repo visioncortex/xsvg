@@ -204,7 +204,7 @@ pub(super) fn lower_mesh(
     let Some(fitted) = fitted_mesh(mesh, ctx) else {
         return false;
     };
-    emit_fitted(&fitted, seed, node, out, ctx);
+    emit_fitted(&fitted, seed, None, node, out, ctx);
     true
 }
 
@@ -231,9 +231,12 @@ fn fitted_mesh(mesh: &crate::gradient::Mesh, ctx: &Ctx) -> Option<std::sync::Arc
 /// in a palette.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshSwatch {
-    /// A complete SVG document: the mesh's paint, its `viewBox` the mesh's
-    /// bounds. Its ids are derived from [`Self::key`], so swatches of
-    /// different meshes can share one DOM.
+    /// A complete SVG document: the mesh as a fill of its bounds, which are
+    /// the `viewBox`. The whole box is painted — where the mesh's own shape
+    /// stops short of it, its colours continue — so a swatch is a rectangle of
+    /// paint whatever shape the mesh is. Only a mesh with a crack in it has
+    /// ids, derived from [`Self::key`], so swatches of different meshes can
+    /// share one DOM.
     pub svg: String,
     /// The mesh's bounds — `x, y, width, height` — in its own coordinates
     /// (for bounding-box units, within the unit square).
@@ -244,8 +247,8 @@ pub struct MeshSwatch {
 }
 
 /// Compile the mesh definition `node` — an `<x:mesh>` or a `<meshgradient>` —
-/// on its own: the paint it is, under its own `transform` /
-/// `gradientTransform` and nothing else, in a document of its own. The fit is
+/// on its own: the paint it is, filling its bounds, under its own `transform`
+/// / `gradientTransform` and nothing else, in a document of its own. The fit is
 /// the one the document's compile makes for a mesh drawn or used in those
 /// coordinates, so with a [`MeshFits`] store it is usually already there.
 pub(super) fn mesh_swatch(node: roxmltree::Node, ctx: &Ctx) -> Result<MeshSwatch, String> {
@@ -276,7 +279,7 @@ pub(super) fn mesh_swatch(node: roxmltree::Node, ctx: &Ctx) -> Result<MeshSwatch
         fmt(bounds[2]),
         fmt(bounds[3])
     );
-    emit_fitted(&fitted, &key.to_string(), node, &mut svg, ctx);
+    emit_fitted(&fitted, &key.to_string(), Some(bounds), node, &mut svg, ctx);
     svg.push_str("</svg>");
     Ok(MeshSwatch { svg, bounds, key })
 }
@@ -284,9 +287,16 @@ pub(super) fn mesh_swatch(node: roxmltree::Node, ctx: &Ctx) -> Result<MeshSwatch
 /// Write a fit into the document: the half of the lowering that depends on
 /// where the mesh is drawn — the clip ids (`seed`) and, at display resolution,
 /// the density it is seen at.
+///
+/// `fill` asks for the mesh as a fill of that box (`x, y, width, height`)
+/// rather than as the shape it is: its largest region is painted first and
+/// unclipped, over the whole box, and only the regions on the far side of a
+/// crack keep their outlines. A mesh without a crack is then one image and no
+/// clip at all.
 fn emit_fitted(
     fitted: &FittedMesh,
     seed: &str,
+    fill: Option<[f64; 4]>,
     node: roxmltree::Node,
     out: &mut String,
     ctx: &Ctx,
@@ -295,10 +305,42 @@ fn emit_fitted(
     // one answer for the whole mesh: every region shares its placements
     let density = super::mesh_texture::density(node, ctx);
     let ch = fitted.channels;
-    for region in &fitted.regions {
+    // the first of the largest, so the choice does not depend on anything
+    // but the fit
+    let ground = fill.and_then(|_| {
+        let most = fitted.regions.iter().map(|r| r.pixels).max()?;
+        fitted.regions.iter().position(|r| r.pixels == most)
+    });
+    let order = ground
+        .into_iter()
+        .chain((0..fitted.regions.len()).filter(|&i| Some(i) != ground));
+    for at in order {
+        let region = &fitted.regions[at];
         let (r, clip_d) = (region.index, &region.clip_d);
+        let open = fill.filter(|_| Some(at) == ground);
+        let rect = |[x, y, w, h]: [f64; 4], rgb: [u8; 3], alpha: f32| {
+            let opacity = if alpha < 254.5 / 255.0 {
+                format!(" fill-opacity=\"{}\"", fmt(alpha as f64))
+            } else {
+                String::new()
+            };
+            format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#{:02x}{:02x}{:02x}\"{opacity}/>",
+                fmt(x),
+                fmt(y),
+                fmt(w),
+                fmt(h),
+                rgb[0],
+                rgb[1],
+                rgb[2]
+            )
+        };
         match &region.paint {
             RegionPaint::Solid { rgb, alpha } => {
+                if let Some(area) = open {
+                    out.push_str(&rect(area, *rgb, *alpha));
+                    continue;
+                }
                 let opacity = if *alpha < 254.5 / 255.0 {
                     format!(" fill-opacity=\"{}\"", fmt(*alpha as f64))
                 } else {
@@ -331,6 +373,36 @@ fn emit_fitted(
                     &resampled
                 };
                 let cid = format!("x-mesh-{seed}-{r}");
+                // A region that is not the whole mesh has an image smaller
+                // than the box: what the image leaves is the region's mean.
+                if let Some(area) = open {
+                    let [x, y, w, h] = area;
+                    if ux > x || uy > y || ux + uw < x + w || uy + uh < y + h {
+                        let n = (texels.len() / ch).max(1) as f64;
+                        let mean = |c: usize| {
+                            texels
+                                .iter()
+                                .skip(c)
+                                .step_by(ch)
+                                .map(|&v| v as f64)
+                                .sum::<f64>()
+                                / n
+                        };
+                        let alpha = if ch == 4 { mean(3) / 255.0 } else { 1.0 };
+                        out.push_str(&rect(
+                            area,
+                            [0, 1, 2].map(|c| mean(c).round() as u8),
+                            alpha as f32,
+                        ));
+                    }
+                }
+                let clip = match open {
+                    Some(_) => [String::new(), String::new()],
+                    None => [
+                        format!("<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath>"),
+                        format!(" clip-path=\"url(#{cid})\""),
+                    ],
+                };
                 // The texel grid is placed so that *bilinear* reconstruction reproduces the
                 // fitted field exactly, so the image must ask for bilinear by name. `auto` is
                 // the renderer's choice, and resvg chooses bicubic: measured, that drifts up to
@@ -343,11 +415,13 @@ fn emit_fitted(
                 // treats it as invalid and keeps `auto` — Chromium renders identically with or
                 // without it.
                 out.push_str(&format!(
-                    "<clipPath id=\"{cid}\"><path d=\"{clip_d}\"/></clipPath><image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" image-rendering=\"smooth\" style=\"image-rendering:smooth\" clip-path=\"url(#{cid})\" href=\"data:image/png;base64,{href}\"/>",
+                    "{}<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" image-rendering=\"smooth\" style=\"image-rendering:smooth\"{} href=\"data:image/png;base64,{href}\"/>",
+                    clip[0],
                     fmt(ux),
                     fmt(uy),
                     fmt(uw),
                     fmt(uh),
+                    clip[1],
                 ));
             }
         }

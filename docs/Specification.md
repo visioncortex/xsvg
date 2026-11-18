@@ -1868,8 +1868,10 @@ fallback is unused once the mesh is lowered.
 **A mesh on its own — swatches.** `CompileSession::mesh_swatch(offset)` compiles one mesh
 definition (`<x:mesh>` or `<meshgradient>`) into a standalone SVG of its paint: `viewBox` the
 mesh's bounds, under the mesh's own `transform` / `gradientTransform` and nothing else
-(bounding-box units stay the unit square they are written in), ids derived from the mesh's
-content so several can share a DOM. `mesh_definitions()` lists the definitions in document
+(bounding-box units stay the unit square they are written in). A swatch is the mesh **as a fill
+of that box**, not as the shape it is: the whole box is painted, the mesh's colours continuing
+past its outline, so a mesh without a crack is one unclipped image. Only the far side of a crack
+keeps a clip, its id derived from the mesh's content so several swatches can share a DOM. `mesh_definitions()` lists the definitions in document
 order. This is what an editor shows in a palette; the swatch carries a `key` that changes
 exactly when the picture does.
 

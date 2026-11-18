@@ -26,8 +26,9 @@ partial one.
   type parameter for the store.
 - **Mesh swatches.** `CompileSession::mesh_definitions()` lists a document's `<x:mesh>` and
   `<meshgradient>` definitions and `CompileSession::mesh_swatch(offset)` compiles one on its
-  own into a standalone SVG (`MeshSwatch { svg, bounds, key }`) — for a palette. It shares
-  its fit with the document's compile.
+  own into a standalone SVG (`MeshSwatch { svg, bounds, key }`) — for a palette. A swatch is
+  the mesh as a fill of its bounding box: the whole box is painted, with no clip to the mesh's
+  own outline. It shares its fit with the document's compile.
 - **A mesh as any paint.** An element may name an `<x:mesh>` — as it already could an SVG 2
   `<meshgradient>` — as its **fill, its stroke, or both**: `<path d="…" fill="url(#a)"
   stroke="url(#b)">`. A fill is the mesh's paint inside a clip of the geometry; a stroke is the

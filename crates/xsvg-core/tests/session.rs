@@ -624,7 +624,9 @@ fn images(out: &str) -> Vec<String> {
     out.match_indices("<image")
         .map(|(at, _)| {
             let image = &out[at..at + out[at..].find("/>").unwrap()];
-            let clip = image.find(" clip-path=\"").unwrap();
+            let Some(clip) = image.find(" clip-path=\"") else {
+                return image.to_string();
+            };
             let close = clip + 12 + image[clip + 12..].find('"').unwrap() + 1;
             format!("{}{}", &image[..clip], &image[close..])
         })
@@ -708,7 +710,7 @@ fn a_document_s_meshes_are_listed_and_each_compiles_on_its_own() {
         );
         // every clip it names is its own, and named after the mesh
         let own = ids(&swatch.svg);
-        assert!(!own.is_empty() && own.iter().all(|i| i.contains(&swatch.key.to_string())));
+        assert!(own.iter().all(|i| i.contains(&swatch.key.to_string())));
         for n in doc.descendants() {
             if let Some(clip) = n.attribute("clip-path") {
                 let id = clip.trim_start_matches("url(#").trim_end_matches(')');
@@ -718,10 +720,29 @@ fn a_document_s_meshes_are_listed_and_each_compiles_on_its_own() {
     }
     assert_eq!(swatches[0].bounds, [0.0, 0.0, 100.0, 50.0]);
     assert_eq!(swatches[1].bounds, [10.0, 20.0, 60.0, 30.0]);
+    // a swatch is a fill of its box: a mesh without a crack is one image,
+    // unclipped, and has no id at all
+    for whole in [&swatches[0], &swatches[1]] {
+        assert_eq!(images(&whole.svg).len(), 1, "{}", whole.svg);
+        assert!(
+            !whole.svg.contains("clip") && ids(&whole.svg).is_empty(),
+            "{}",
+            whole.svg
+        );
+        covers(whole);
+    }
+    // a crack keeps its edge: the far side is clipped over the near one
     assert_eq!(
         images(&swatches[2].svg).len(),
         2,
         "one texture per crack region"
+    );
+    assert_eq!(swatches[2].svg.matches("<clipPath").count(), 1);
+    assert_eq!(swatches[2].svg.matches(" clip-path=").count(), 1);
+    assert!(
+        swatches[2].svg.find("<rect").unwrap() < swatches[2].svg.find("<image").unwrap(),
+        "half a mesh's image stops short of the box, so a ground lies under it: {}",
+        swatches[2].svg
     );
 
     // the picture is the one the document draws for that mesh (the gradient
@@ -738,6 +759,75 @@ fn a_document_s_meshes_are_listed_and_each_compiles_on_its_own() {
     all.sort();
     all.dedup();
     assert_eq!(all.len(), count);
+}
+
+/// The swatch's first, unclipped paint reaches every edge of its box.
+fn covers(swatch: &xsvg_core::MeshSwatch) {
+    let doc = roxmltree::Document::parse(&swatch.svg).unwrap();
+    let ground = doc
+        .root_element()
+        .children()
+        .find(|n| n.is_element())
+        .unwrap();
+    assert!(
+        matches!(ground.tag_name().name(), "image" | "rect")
+            && ground.attribute("clip-path").is_none(),
+        "{}",
+        swatch.svg
+    );
+    let at = |name: &str| ground.attribute(name).unwrap().parse::<f64>().unwrap();
+    let [x, y, w, h] = swatch.bounds;
+    assert!(
+        at("x") <= x
+            && at("y") <= y
+            && at("x") + at("width") >= x + w
+            && at("y") + at("height") >= y + h,
+        "{}",
+        swatch.svg
+    );
+}
+
+#[test]
+fn a_swatch_fills_its_box_whatever_shape_the_mesh_is() {
+    let swatch = |mesh: &str| {
+        let src = format!("{XW}{mesh}</svg>");
+        let platform = Platform::new(Mono, BoxShaper, BoxOutliner);
+        let session = platform.session(&src, "highest", false, "").unwrap();
+        session.mesh_swatch(src.find("<x:mesh").unwrap()).unwrap()
+    };
+    // a triangle, an L of three squares, a quad with a notch: each
+    // leaves part of its bounding box empty
+    for mesh in [
+        r##"<x:mesh points="0,0 100,0 0,80"><x:face v="0 1 2" fill="#c33 #3c3 #33c"/></x:mesh>"##,
+        r##"<x:mesh points="0,0 32,0 0,32 32,32 0,64 32,64 64,32 64,64"><x:face v="0 1 3 2" fill="#a49e9f #9d9799 #856976 #886f7b"/><x:face v="2 3 5 4" fill="#886f7b #856976 #7b5f6d #7a606d"/><x:face v="3 6 7 5" fill="#856976 #8e7e85 #775d6a #7b5f6d"/></x:mesh>"##,
+        r##"<x:mesh points="0,0 60,0 60,20 30,20 30,40 0,40"><x:face v="0 1 2 3" fill="#fc0 #f60 #f06 #c0f"/><x:face v="0 3 4 5" fill="#fc0 #c0f #60f #06f"/></x:mesh>"##,
+    ] {
+        let s = swatch(mesh);
+        assert!(!s.svg.contains("clip"), "{}", s.svg);
+        assert_eq!(images(&s.svg).len(), 1, "{}", s.svg);
+        covers(&s);
+    }
+    // one colour throughout: a rectangle of it
+    let flat =
+        swatch(r##"<x:mesh points="5,5 45,5 5,35"><x:face v="0 1 2" fill="#336699"/></x:mesh>"##);
+    assert_eq!(
+        flat.svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="5 5 40 30"><rect x="5" y="5" width="40" height="30" fill="#336699"/></svg>"##
+    );
+    // the document still draws the mesh as the shape it is
+    let src = format!(
+        "{XW}{}</svg>",
+        r##"<x:mesh points="0,0 100,0 0,80"><x:face v="0 1 2" fill="#c33 #3c3 #33c"/></x:mesh>"##
+    );
+    let out = Platform::new(Mono, BoxShaper, BoxOutliner)
+        .session(&src, "highest", false, "")
+        .unwrap()
+        .compile()
+        .unwrap();
+    assert!(
+        out.contains("<clipPath") && out.contains(" clip-path="),
+        "{out}"
+    );
 }
 
 #[test]

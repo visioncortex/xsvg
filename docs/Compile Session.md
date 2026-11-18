@@ -209,9 +209,11 @@ passes `&mut` storage and keeps it as long as it likes.
   5 ms warm; at `balanced` 18 → 1.6 ms.
   The same split is what `CompileSession::mesh_swatch(offset)` stands on: one
   mesh definition compiled on its own into a standalone SVG — a palette
-  swatch — with `mesh_definitions()` listing what there is to show. Its ids
-  are derived from the key rather than a source position, so swatches share a
-  DOM, and `MeshSwatch::key` is what a palette caches its swatches by.
+  swatch — with `mesh_definitions()` listing what there is to show. A swatch
+  fills its box: the mesh's outline is not clipped, and only a crack inside it
+  keeps a clip. Such an id is derived from the key rather than a source
+  position, so swatches share a DOM, and `MeshSwatch::key` is what a palette
+  caches its swatches by.
 - **Still open: fits by URL.** The key is also the address a fit would have
   outside the document — an `<image href>` to a store that compiles a mesh on
   request — which would take the fit out of the compile entirely and let a

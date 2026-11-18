@@ -178,6 +178,9 @@ pub(super) struct FittedRegion {
     pub(super) index: usize,
     /// the region's outline, as path data in the mesh's coordinates
     pub(super) clip_d: String,
+    /// how many pixels of the fit's raster the region covers: its share of
+    /// the mesh
+    pub(super) pixels: usize,
     pub(super) paint: RegionPaint,
 }
 
@@ -312,6 +315,7 @@ pub(super) fn fit(mesh: &Mesh, class: FitClass) -> Option<FittedMesh> {
             regions.push(FittedRegion {
                 index: r,
                 clip_d,
+                pixels: region_px[r].len(),
                 paint: RegionPaint::Solid {
                     rgb: [0, 1, 2].map(|k| c[k].round().clamp(0.0, 255.0) as u8),
                     alpha: (c[3] / 255.0).clamp(0.0, 1.0),
@@ -392,6 +396,7 @@ pub(super) fn fit(mesh: &Mesh, class: FitClass) -> Option<FittedMesh> {
         regions.push(FittedRegion {
             index: r,
             clip_d,
+            pixels: region_px[r].len(),
             paint: RegionPaint::Texture {
                 texels,
                 size: (tw, th),
@@ -745,6 +750,7 @@ mod tests {
             regions: vec![FittedRegion {
                 index: 0,
                 clip_d: "M".repeat(bytes),
+                pixels: 1,
                 paint: RegionPaint::Solid {
                     rgb: [0; 3],
                     alpha: 1.0,
