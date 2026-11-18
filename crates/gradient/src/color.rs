@@ -70,6 +70,19 @@ pub fn srgb8_to_linear(c: u8) -> f32 {
     }
 }
 
+/// linear-light float -> sRGB code value in quanta (0..=255, clamped,
+/// NOT rounded) — where 8-bit colours are compared at their own
+/// resolution.
+pub fn linear_to_srgb_quanta(l: f32) -> f32 {
+    let l = l.clamp(0.0, 1.0);
+    let s = if l <= 0.003_130_8 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
+    (s * 255.0).clamp(0.0, 255.0)
+}
+
 /// linear-light float -> sRGB8 channel (clamped, rounded).
 pub fn linear_to_srgb8(l: f32) -> u8 {
     let l = l.clamp(0.0, 1.0);

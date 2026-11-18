@@ -219,6 +219,21 @@ impl Mesh {
         };
         let lerp_corner =
             |a: (LinRgb, f32), b: (LinRgb, f32), t: f32| (a.0.lerp(b.0, t), a.1 + (b.1 - a.1) * t);
+        // A hanging node is judged at the resolution the format can SAY:
+        // corner colours are 8-bit, so the best any author can write is
+        // the coarse edge's interpolation ROUNDED to 8 bits — and near
+        // white half a quantum is ~4.5e-3 in linear light, past `eps`
+        // (a pinned node on a pale skin field cracked at 1.05e-3). Within
+        // half a quantum per channel (alpha in 1/255 steps) the hex IS
+        // the interpolation, so the junction is smooth.
+        let within_8bit = |want: (LinRgb, f32), got: (LinRgb, f32)| {
+            const HALF: f32 = 0.5 + 1e-3; // a rounding tie, with f32 slack
+            let q = crate::color::linear_to_srgb_quanta;
+            (q(want.0.r) - q(got.0.r)).abs() <= HALF
+                && (q(want.0.g) - q(got.0.g)).abs() <= HALF
+                && (q(want.0.b) - q(got.0.b)).abs() <= HALF
+                && ((want.1 - got.1) * 255.0).abs() <= HALF
+        };
         // is p on segment (a,b), strictly interior-ish? returns the parameter
         let on_segment = |a: (f32, f32), b: (f32, f32), p: (f32, f32)| -> Option<f32> {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -252,7 +267,8 @@ impl Mesh {
                 }
                 let want_a = lerp_corner(coarse.c_a, coarse.c_b, ta);
                 let want_b = lerp_corner(coarse.c_a, coarse.c_b, tb);
-                if close(want_a, fine.c_a) && close(want_b, fine.c_b) {
+                let agree = |want, got| close(want, got) || within_8bit(want, got);
+                if agree(want_a, fine.c_a) && agree(want_b, fine.c_b) {
                     let (ra, rb) = (find(&mut parent, coarse.face), find(&mut parent, fine.face));
                     if ra != rb {
                         parent[ra as usize] = rb;
@@ -680,6 +696,49 @@ mod tests {
         m2.faces[1].colors[3] = black; // fine-top's corner at the hanging node
         let (_, count) = m2.face_regions(1e-3);
         assert!(count >= 2, "mismatched hanging node must split");
+    }
+
+    #[test]
+    fn an_8bit_hanging_node_on_a_pale_field_is_smooth() {
+        // The authored case: every corner is a HEX colour, so the hanging
+        // node can only be the coarse edge's interpolation rounded to
+        // 8 bits. Near white that misses the exact lerp by more than eps
+        // in linear light (here 1.05e-3) — still the same colour, at the
+        // only resolution the format has.
+        let hex = |r, g, b| RgbColor::new(r, g, b).to_linear();
+        let (tr, br) = (hex(244, 210, 200), hex(236, 200, 214));
+        let mid8 = tr.lerp(br, 0.5).to_srgb8().to_linear();
+        let mut m = Mesh::default();
+        let v = [
+            m.add_vertex(0.0, 0.0),
+            m.add_vertex(64.0, 0.0),
+            m.add_vertex(64.0, 64.0),
+            m.add_vertex(0.0, 64.0),
+            m.add_vertex(64.0, 32.0), // hanging on 1-2
+            m.add_vertex(96.0, 0.0),
+            m.add_vertex(96.0, 32.0),
+            m.add_vertex(96.0, 64.0),
+        ];
+        let (tl, bl) = (hex(250, 228, 214), hex(248, 220, 206));
+        let (e, f, g) = (hex(238, 214, 196), hex(232, 206, 210), hex(240, 190, 200));
+        m.add_quad([v[0], v[1], v[2], v[3]], [tl, tr, br, bl]);
+        m.add_quad([v[1], v[5], v[6], v[4]], [tr, e, f, mid8]);
+        m.add_quad([v[4], v[6], v[7], v[2]], [mid8, f, g, br]);
+        let (_, count) = m.face_regions(1e-3);
+        assert_eq!(count, 1, "an 8-bit-exact hanging node is smooth");
+
+        // two quanta off is a real disagreement: still a crack
+        let off = RgbColor::new(
+            mid8.to_srgb8().r.saturating_sub(2),
+            mid8.to_srgb8().g,
+            mid8.to_srgb8().b,
+        )
+        .to_linear();
+        let mut m2 = m.clone();
+        m2.faces[1].colors[3] = off;
+        m2.faces[2].colors[0] = off;
+        let (_, count) = m2.face_regions(1e-3);
+        assert!(count >= 2, "a 2-quanta hanging-node miss must crack");
     }
 
     #[test]
