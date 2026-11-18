@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 /// Bumped whenever [`fit`] would answer differently for the same mesh, so a
 /// key minted by one fitter never names another's result.
-const FIT_VERSION: u64 = 1;
+const FIT_VERSION: u64 = 2;
 
 /// The most elongated a mesh is fitted at. The raster gives the short axis a
 /// minimum of rows, so the long axis of a sliver would otherwise cost pixels

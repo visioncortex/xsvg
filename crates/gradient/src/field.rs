@@ -274,7 +274,7 @@ impl GridField {
 /// Fit a seam-free subdivided RGBA field: solve for the **shared** grid-vertex
 /// colors that best reproduce the pixels (one global least squares, so adjacent
 /// cells agree at shared vertices → C⁰). Never fit sub-cells independently —
-/// that seams.
+/// that seams. Vertices outside the region continue its boundary colour.
 pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) -> GridField {
     let (gx, gy) = (gx.max(1), gy.max(1));
     let rect = Rect::of_indices(indices, w);
@@ -292,6 +292,20 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
     // cap — the banded CG is linear in nv per iteration (see docs/Bench.md).
     let mut band = Band::new(g, gy + 1);
     let mut rhs = vec![[0f64; 4]; nv];
+    // The fit is of each pixel's distance from the region's mean colour, so
+    // the ridge below draws a barely-held vertex toward that mean rather than
+    // toward black.
+    let mut mean = [0f64; 4];
+    for &idx in indices {
+        for c in 0..4 {
+            mean[c] += rgba[idx as usize * 4 + c] as f64 / 255.0;
+        }
+    }
+    for m in &mut mean {
+        *m /= indices.len().max(1) as f64;
+    }
+    // how firmly the pixels hold each vertex: the sum of its squared weights
+    let mut hold = vec![0f64; nv];
     for &idx in indices {
         let i = idx as usize;
         let (x, y) = ((i % w) as i32, (i / w) as i32);
@@ -311,18 +325,26 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
             for b in 0..4 {
                 band.add(vs[a], vs[b], wt[a] * wt[b]);
             }
+            hold[vs[a]] += wt[a] * wt[a];
             for c in 0..4 {
-                rhs[vs[a]][c] += wt[a] * (rgba[i * 4 + c] as f64 / 255.0);
+                rhs[vs[a]][c] += wt[a] * (rgba[i * 4 + c] as f64 / 255.0 - mean[c]);
             }
         }
     }
     // ridge keeps vertices with no incident pixels (empty cells outside the
-    // region) finite; they don't affect any pixel's reconstruction.
+    // region) finite; they don't affect any pixel's reconstruction, and
+    // `extend_held` colours them afterwards.
     let ridge = 1e-6 * indices.len().max(1) as f64;
     for i in 0..nv {
         band.add(i, i, ridge);
     }
-    let sol = band.solve_cg(&rhs);
+    let mut sol = band.solve_cg(&rhs);
+    for v in &mut sol {
+        for c in 0..4 {
+            v[c] += mean[c];
+        }
+    }
+    extend_held(&mut sol, &hold, g);
     let verts: Vec<[f32; 4]> = sol
         .iter()
         .map(|c| {
@@ -355,6 +377,49 @@ pub fn fit_grid(indices: &[u32], w: usize, rgba: &[u8], gx: usize, gy: usize) ->
     let n = indices.len().max(1) as f64;
     field.rmse = ((sse / (n * 4.0)).max(0.0)).sqrt() as f32;
     field
+}
+
+/// A vertex the pixels hold less firmly than this moves no pixel by a visible
+/// amount (its largest weight on any pixel is the square root, a thousandth),
+/// so its colour is free to be chosen.
+const HELD: f64 = 1e-6;
+
+/// Give every vertex the region does not hold the colour of the held ones
+/// nearest it: a mean of the held vertices along the region's edge, each
+/// weighted by the inverse fourth power of its distance, so the nearest all
+/// but decides and the result still has no steps in it. What lies beyond the
+/// region then continues its boundary — it is what a renderer blends in at the
+/// very edge of the clip, and what shows if the clip is left off — instead of
+/// whatever the solver left there. `g` is the number of vertices in a row.
+fn extend_held(sol: &mut [[f64; 4]], hold: &[f64], g: usize) {
+    let rows = sol.len() / g;
+    let held = |v: usize| hold[v] >= HELD;
+    // the held vertices with a neighbour that is not: the region's edge
+    let mut edge = Vec::new();
+    for v in (0..sol.len()).filter(|&v| held(v)) {
+        let (x, y) = (v % g, v / g);
+        let open = (y.saturating_sub(1)..(y + 2).min(rows))
+            .any(|uy| (x.saturating_sub(1)..(x + 2).min(g)).any(|ux| !held(uy * g + ux)));
+        if open {
+            edge.push((x as f64, y as f64, sol[v]));
+        }
+    }
+    if edge.is_empty() {
+        return;
+    }
+    for v in (0..sol.len()).filter(|&v| !held(v)) {
+        let (x, y) = ((v % g) as f64, (v / g) as f64);
+        let (mut sum, mut weight) = ([0f64; 4], 0f64);
+        for &(ex, ey, colour) in &edge {
+            let d2 = (ex - x).powi(2) + (ey - y).powi(2);
+            let k = 1.0 / (d2 * d2);
+            weight += k;
+            for c in 0..4 {
+                sum[c] += k * colour[c];
+            }
+        }
+        sol[v] = sum.map(|s| s / weight);
+    }
 }
 
 /// Fit a seam-free `gx×gy` shared-vertex bilinear field over the **whole**
@@ -509,6 +574,99 @@ impl Band {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A disc of a diagonal gradient inside a `n`×`n` raster: its bounding box
+    /// has four corners the disc never reaches.
+    fn disc(n: usize) -> (Vec<u32>, Vec<u8>) {
+        let (mut idx, mut rgba) = (Vec::new(), vec![0u8; n * n * 4]);
+        let c = (n as f64 - 1.0) / 2.0;
+        for y in 0..n {
+            for x in 0..n {
+                let i = y * n + x;
+                if (x as f64 - c).powi(2) + (y as f64 - c).powi(2) <= c * c {
+                    idx.push(i as u32);
+                    let t = (x + y) as f64 / (2 * n - 2) as f64;
+                    rgba[i * 4] = (200.0 + 40.0 * t) as u8;
+                    rgba[i * 4 + 1] = (120.0 + 60.0 * t) as u8;
+                    rgba[i * 4 + 2] = (90.0 + 100.0 * t) as u8;
+                    rgba[i * 4 + 3] = 255;
+                }
+            }
+        }
+        (idx, rgba)
+    }
+
+    #[test]
+    fn vertices_outside_the_region_continue_its_colour() {
+        let n = 96;
+        let (idx, rgba) = disc(n);
+        for g in [4usize, 8, 16, 24] {
+            let f = fit_grid(&idx, n, &rgba, g, g);
+            assert!(f.rmse < 1.0, "g={g} rmse {}", f.rmse);
+            // every vertex, the unreached corners included, lies in the range
+            // of colours the disc holds (with a little room for the fit)
+            for (v, c) in f.verts.iter().enumerate() {
+                assert!(
+                    (190.0..=250.0).contains(&c[0])
+                        && (110.0..=190.0).contains(&c[1])
+                        && (80.0..=200.0).contains(&c[2])
+                        && c[3] > 250.0,
+                    "g={g} vertex {v} = {c:?}"
+                );
+            }
+            // and a corner is the colour of the disc's nearest edge, not a
+            // flat average: the two ends of the gradient stay apart
+            let (first, last) = (f.verts[0], f.verts[f.verts.len() - 1]);
+            assert!(last[2] - first[2] > 40.0, "g={g} {first:?} {last:?}");
+        }
+    }
+
+    #[test]
+    fn extending_leaves_the_fit_inside_the_region_alone() {
+        // the pixels are reproduced as closely with the corners coloured as
+        // the residual the fit itself reports
+        let n = 96;
+        let (idx, rgba) = disc(n);
+        let f = fit_grid(&idx, n, &rgba, 16, 16);
+        let mut worst = 0f32;
+        for &i in &idx {
+            let i = i as usize;
+            let p = f.eval((i % n) as i32, (i / n) as i32);
+            for c in 0..4 {
+                worst = worst.max((p[c] - rgba[i * 4 + c] as f32).abs());
+            }
+        }
+        assert!(worst < 2.0, "worst pixel error {worst}");
+    }
+
+    #[test]
+    fn extend_held_takes_the_nearest_edge() {
+        // one held vertex in a 5×5 grid colours all of it
+        let g = 5;
+        let mut sol = vec![[0f64; 4]; g * g];
+        let mut hold = vec![0f64; g * g];
+        sol[12] = [0.25, 0.5, 0.75, 1.0];
+        hold[12] = 1.0;
+        extend_held(&mut sol, &hold, g);
+        for v in &sol {
+            for c in 0..4 {
+                assert!((v[c] - sol[12][c]).abs() < 1e-12);
+            }
+        }
+        // two held ends: what lies between is between them, nearer its end
+        let mut sol = vec![[0f64; 4]; 5];
+        let mut hold = vec![0f64; 5];
+        sol[4] = [1.0; 4];
+        hold[0] = 1.0;
+        hold[4] = 1.0;
+        extend_held(&mut sol, &hold, 5);
+        assert!(sol[1][0] < 0.02 && sol[3][0] > 0.98, "{sol:?}");
+        assert!((sol[2][0] - 0.5).abs() < 1e-12);
+        // nothing held: left as it was
+        let mut sol = vec![[0.3f64; 4]; 4];
+        extend_held(&mut sol, &[0.0; 4], 2);
+        assert_eq!(sol, vec![[0.3f64; 4]; 4]);
+    }
 
     fn img<F: Fn(usize, usize) -> [u8; 4]>(w: usize, h: usize, f: F) -> Vec<u8> {
         let mut v = vec![0u8; w * h * 4];

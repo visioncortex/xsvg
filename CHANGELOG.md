@@ -72,6 +72,13 @@ partial one.
   them. Also: `fill-rule="evenodd"` reaches the fill's clip, `fill-opacity` applies,
   `paint-order` is honoured, a filled `<polyline>` is stroked open, and a stroke or
   `fill-opacity` inherited from an ancestor no longer paints the mesh's solid regions again.
+- **A mesh no longer darkens at its rim.** A texel the mesh does not reach — a corner of the
+  bounding box of a region that is not a rectangle — was left black, and a renderer blended it in
+  along the edge of the clip (up to 27/255 on the sample meshes). Such a texel now continues the
+  colour of the region's nearest edge, and a texel the region barely reaches is drawn toward the
+  region's mean rather than toward black. The fit is closer for it, so `highest` reaches its
+  tolerance on a smaller grid: `dataset/mesh.xsvg` compiles to 14.0 KB from 19.9 KB. Texture bytes
+  change for any mesh that is not a rectangle, and so do `MeshKey`s.
 - **A sliver of a mesh no longer costs unbounded memory.** A mesh more elongated than 256:1 —
   easy to reach now that a mesh can take a hairline's bounding box — is fitted with its long
   axis squeezed and the result stretched back. Meshes of ordinary proportions are unchanged.

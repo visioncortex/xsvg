@@ -1765,7 +1765,9 @@ column grid — and serialized as a **tiny PNG** (`(gx+1)×(gy+1)` texels, often
 placed so its **texel centers land exactly on the grid vertices**: the image spans `n·s/(n−1)` of
 the region's bbox span `s`, offset by half a texel-interval — the renderer's own smooth bilinear
 image filter then interpolates the exact tensor-product basis of the fitted field. Fitting happens
-in the encoded (sRGB) domain because that is the space image samplers interpolate in. Each region
+in the encoded (sRGB) domain because that is the space image samplers interpolate in. A texel the
+region does not reach — a corner of the bounding box of a region that is not a rectangle — **continues
+the colour of the region's nearest edge**, so nothing foreign is blended in at the rim of the clip. Each region
 is clipped by the **exact union of its face polygons** (nonzero), written as that union's outline —
 the edges two faces of a region share cancel, so a finely tessellated mesh costs its rim, not its
 area — so cracks stay geometry-sharp at
