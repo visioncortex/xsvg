@@ -735,6 +735,11 @@ cornered_shape!(
     "path",
     "A plain SVG path; the compiler rounds the corners between its segments on request."
 );
+cornered_shape!(
+    SvgViewport,
+    "svg",
+    "A nested SVG viewport; the compiler rounds the corners of its clip on request."
+);
 
 /// The `x:` attributes the plain SVG text elements take: declared by hand
 /// because they live in the xsvg namespace (see [`TextBorder`]).
@@ -993,5 +998,6 @@ static ELEMENTS: &[ElementSpec] = &[
     SvgRect::SPEC,
     SvgPolygon::SPEC,
     SvgPolyline::SPEC,
+    SvgViewport::SPEC,
     SvgPath::SPEC,
 ];

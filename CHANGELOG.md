@@ -24,6 +24,11 @@ partial one.
   fitted again. On a 12×12-patch `<meshgradient>` at `highest`, a recompile goes from 118 ms
   to 5 ms. Output is byte-identical with or without. `Platform` gains a seventh, defaulted
   type parameter for the store.
+- **Rounded viewports.** A nested `<svg>` takes `x:corners` and `x:corner-style` as a `<rect>`
+  does: the clip its lowering already generates becomes the frame's outline with those corners
+  — one radius, radii by corner (0–3 clockwise from the top-left), round, chamfered or inverted,
+  a `var()` token. A radius is in the frame's units and stays circular however the content is
+  stretched. `CompileSession::corners(offset)` answers for a viewport too.
 - **Mesh swatches.** `CompileSession::mesh_definitions()` lists a document's `<x:mesh>` and
   `<meshgradient>` definitions and `CompileSession::mesh_swatch(offset)` compiles one on its
   own into a standalone SVG (`MeshSwatch { svg, bounds, key }`) — for a palette. A swatch is

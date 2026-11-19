@@ -8331,6 +8331,204 @@ fn a_nested_svg_lowers_to_one_clipped_group_with_the_fit_folded_in() {
     assert!(keyed.contains("id=\"x-vp-k"), "{keyed}");
 }
 
+/// The clip a compile writes for its `n`th viewport: the `<path>`'s `d` and
+/// `transform` (empty when it has none), and the marker rect of its group.
+fn viewport_clip(out: &str, n: usize) -> (String, String, [f64; 4]) {
+    let doc = roxmltree::Document::parse(out).unwrap();
+    let clip = doc
+        .descendants()
+        .filter(|e| e.tag_name().name() == "clipPath")
+        .nth(n)
+        .unwrap();
+    let path = clip.first_element_child().unwrap();
+    assert_eq!(path.tag_name().name(), "path", "{out}");
+    let id = clip.attribute("id").unwrap();
+    let group = doc
+        .descendants()
+        .find(|e| e.attribute("clip-path") == Some(&format!("url(#{id})")))
+        .unwrap();
+    let marker: Vec<f64> = group
+        .attribute("data-xsvg-viewport")
+        .unwrap()
+        .split(' ')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    (
+        path.attribute("d").unwrap().to_string(),
+        path.attribute("transform").unwrap_or("").to_string(),
+        [marker[0], marker[1], marker[2], marker[3]],
+    )
+}
+
+#[test]
+fn a_viewport_with_corners_clips_to_its_rounded_frame() {
+    // the crop of the test above, its corners rounded: the same one <g>, the
+    // same marker, and the clip the frame's rounded outline — written in the
+    // frame's units, with the fit undone on the path
+    let svg = format!(
+        r##"{XW}<svg x="20" y="20" width="120" height="80" viewBox="0.25 0.1 0.5 0.5" preserveAspectRatio="none" transform="rotate(10 80 60)" x:corners="16"><image x="0" y="0" width="1" height="1" preserveAspectRatio="none" href="p.png"/></svg></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains(r##"><path transform="translate(0.25 0.1) scale(0.00416666666667 0.00625) translate(-20 -20)" d="M36 20 L124 20 A16 16 0 0 1 140 36 L140 84 A16 16 0 0 1 124 100 L36 100 A16 16 0 0 1 20 84 L20 36 A16 16 0 0 1 36 20 Z"/></clipPath>"##),
+        "{out}"
+    );
+    assert!(
+        out.contains(r##"<g transform="rotate(10 80 60) translate(20 20) scale(240 160) translate(-0.25 -0.1)" clip-path="url(#x-vp-"##)
+            && out.contains(r##"data-xsvg-viewport="0.25 0.1 0.5 0.5">"##),
+        "{out}"
+    );
+    assert!(!out.contains("corners") && !out.contains("<rect"), "{out}");
+
+    // Under the group's transform the clip is the frame again, exactly: the
+    // path's transform undoes the fit whatever the fit is — stretched, fitted
+    // inside with slack, covering, or none
+    for (attrs, frame) in [
+        (
+            r#"x="20" y="20" width="120" height="80" viewBox="0.25 0.1 0.5 0.5" preserveAspectRatio="none""#,
+            [20.0, 20.0, 120.0, 80.0],
+        ),
+        (
+            r#"x="7" y="9" width="120" height="80" viewBox="10 20 100 100""#,
+            [7.0, 9.0, 120.0, 80.0],
+        ),
+        (
+            r#"x="200" y="150" width="100" height="60" viewBox="0 0 200 100" preserveAspectRatio="xMaxYMin slice""#,
+            [200.0, 150.0, 100.0, 60.0],
+        ),
+        (
+            r#"x="5" y="6" width="30" height="40""#,
+            [5.0, 6.0, 30.0, 40.0],
+        ),
+        (r#"width="30" height="40""#, [0.0, 0.0, 30.0, 40.0]),
+    ] {
+        let svg =
+            format!(r##"{XW}<svg {attrs} x:corners="8"><rect width="9" height="9"/></svg></svg>"##);
+        let out = compile_test(&svg);
+        let (d, undo, marker) = viewport_clip(&out, 0);
+        let doc = roxmltree::Document::parse(&out).unwrap();
+        let fit = doc
+            .descendants()
+            .find(|e| e.attribute("data-xsvg-viewport").is_some())
+            .and_then(|g| g.attribute("transform"))
+            .map(parse_transform)
+            .unwrap_or_default();
+        let undo = parse_transform(&undo);
+        let path = crate::kurbo::BezPath::from_svg(&d).unwrap();
+        use crate::kurbo::Shape;
+        // in content space the clip's box is the marker's
+        let content = (undo * path.clone()).bounding_box();
+        for (got, want) in [
+            (content.x0, marker[0]),
+            (content.y0, marker[1]),
+            (content.width(), marker[2]),
+            (content.height(), marker[3]),
+        ] {
+            // (the marker is written to three decimals)
+            assert!((got - want).abs() < 1e-3, "{attrs}: {content:?} {marker:?}");
+        }
+        // and drawn, it is the frame with a radius of 8 at each corner: the
+        // frame's area less four corner squares, plus a circle
+        let drawn = fit * undo * path;
+        let b = drawn.bounding_box();
+        for (got, want) in [
+            (b.x0, frame[0]),
+            (b.y0, frame[1]),
+            (b.width(), frame[2]),
+            (b.height(), frame[3]),
+        ] {
+            assert!((got - want).abs() < 1e-6, "{attrs}: {b:?}");
+        }
+        // (to the arcs' flattening into cubics, which is all the slack)
+        let want = frame[2] * frame[3] - (4.0 - std::f64::consts::PI) * 64.0;
+        assert!(
+            (drawn.area().abs() - want).abs() < 0.1,
+            "{attrs}: area {} want {want}",
+            drawn.area()
+        );
+        if attrs == r#"width="30" height="40""# {
+            assert!(!out.contains("<path transform"), "nothing to undo: {out}");
+        }
+    }
+}
+
+#[test]
+fn a_viewport_takes_corners_as_a_rect_does() {
+    let clip = |attrs: &str| {
+        let svg = format!(
+            r##"{XW}<x:theme><x:color name="r" value="8"/></x:theme><svg x="10" y="10" width="40" height="20" {attrs}><rect width="9" height="9"/></svg></svg>"##
+        );
+        compile_test(&svg)
+    };
+    // corners by anchor, 0–3 clockwise from the top-left, and a style at one
+    let out = clip(r#"x:corners="0:10 2:5" x:corner-style="round 2:chamfer""#);
+    assert_eq!(
+        viewport_clip(&out, 0).0,
+        "M20 10 L50 10 L50 25 L45 30 L10 30 L10 20 A10 10 0 0 1 20 10 Z",
+        "{out}"
+    );
+    // a token
+    assert_eq!(
+        viewport_clip(&clip(r#"x:corners="var(r)""#), 0).0,
+        viewport_clip(&clip(r#"x:corners="8""#), 0).0
+    );
+    // more than the frame has: a stadium, the short sides consumed
+    assert_eq!(
+        viewport_clip(&clip(r#"x:corners="999""#), 0).0,
+        "M20 10 L40 10 A10 10 0 0 1 50 20 A10 10 0 0 1 40 30 L20 30 A10 10 0 0 1 10 20 A10 10 0 0 1 20 10 Z"
+    );
+    // nothing to draw: the plain rect, as without the attribute
+    let plain = clip("");
+    assert!(plain.contains(r#"<rect x="0" y="0" width="40" height="20"/></clipPath>"#));
+    for none in [
+        r#"x:corners="0""#,
+        r#"x:corners="nope""#,
+        r#"x:corners="""#,
+        r#"x:corner-style="chamfer""#,
+    ] {
+        assert_eq!(clip(none), plain, "{none}");
+    }
+    // a viewport that does not clip has no corners to round, and the
+    // attribute goes nowhere
+    let open = clip(r#"overflow="visible" x:corners="8""#);
+    assert!(
+        !open.contains("clipPath") && !open.contains("corners"),
+        "{open}"
+    );
+
+    // a kept viewport — here one a <use> sizes — stays the square it is
+    let svg = format!(
+        r##"{XW}<svg id="v" width="40" height="20" x:corners="8"><rect width="9" height="9"/></svg><use href="#v" width="80"/></svg>"##
+    );
+    let out = compile_test(&svg);
+    assert!(
+        out.contains("nested <svg> kept") && !out.contains("corners"),
+        "{out}"
+    );
+
+    // the corners query answers for a viewport as for a rect, in the space
+    // its x y width height are written in
+    let src = format!(
+        r##"{XW}<svg x="10" y="10" width="40" height="20" viewBox="0 0 4 2" x:corners="0:6 2:99"><rect width="9" height="9"/></svg></svg>"##
+    );
+    let s = ParsedDocument::new(&src).unwrap();
+    let c = s.corners(nth_at(&src, "<svg", 1)).unwrap();
+    assert_eq!(c.len(), 2, "{c:?}");
+    assert_eq!(
+        (c[0].anchor, c[0].at, c[0].effective),
+        (0, (10.0, 10.0), 6.0)
+    );
+    assert!(
+        c[1].anchor == 2
+            && c[1].at == (50.0, 30.0)
+            && c[1].clamped
+            && (c[1].effective - 20.0).abs() < 1e-9,
+        "{c:?}"
+    );
+    // the root is no viewport to round
+    assert!(s.corners(nth_at(&src, "<svg", 0)).is_none());
+}
+
 #[test]
 fn a_viewports_sizes_resolve_against_the_enclosing_viewport() {
     // percentages and a missing size take the nearest viewport's extent: the

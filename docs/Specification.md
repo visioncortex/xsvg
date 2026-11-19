@@ -423,6 +423,24 @@ drew it right. Every viewport lowers to the one form every engine draws alike:
   h/sy)` — for a crop, the `viewBox` itself — as a `<clipPath>` def emitted immediately before
   the element (self-contained per fragment, id `x-vp-<key>` like a filter's). Omitted under
   `overflow="visible"` (`auto` is `visible` on a viewport).
+- **Rounded corners — `x:corners`.** A viewport takes `x:corners` and `x:corner-style` exactly
+  as a `<rect>` does (§5.4): its frame is the rectangle, anchors 0–3 clockwise from the top-left,
+  a radius in the units of `width` and `height`. The clip is then the frame's outline with those
+  corners drawn, a `<path>` in place of the `<rect>` under the same `x-vp-<key>` id. Because the
+  corners are the frame's while the clip stands in content space, the path is written in the
+  frame's units and carries the fit undone as its own `transform` — `translate(vx vy)
+  scale(1/sx 1/sy) translate(−(x+ax) −(y+ay))`, to full precision — so a radius of 16 is a
+  circle of 16 however the picture inside is stretched. The `<g>`, its transform and
+  `data-xsvg-viewport` (still the frame's box) are unchanged. Corners that draw nothing leave the
+  plain rect; a viewport that does not clip, or one kept as `<svg>`, has none.
+
+  ```xml
+  <svg x="20" y="20" width="120" height="80" viewBox="0.25 0.1 0.5 0.5"
+       preserveAspectRatio="none" x:corners="16">…</svg>
+
+  <clipPath id="x-vp-K"><path transform="translate(0.25 0.1) scale(0.00416666666667 0.00625) translate(-20 -20)"
+     d="M36 20 L124 20 A16 16 0 0 1 140 36 L140 84 A16 16 0 0 1 124 100 L36 100 A16 16 0 0 1 20 84 L20 36 A16 16 0 0 1 36 20 Z"/></clipPath>
+  ```
 - **`data-xsvg-viewport="x y w h"`** = that same rect. `getBBox` of a clipped group is its
   unclipped content, so an editor reads the frame here and maps it through the element's own CTM.
 - **Sizes**: a percentage or a missing `width`/`height` (initial value 100 %) resolves against
@@ -465,7 +483,8 @@ stays legible as "a rect, radius 8 on two corners". Uncompiled, the document ren
 <rect width="100" height="60" x:corners="12" x:corner-style="round 1:inverted"/> <!-- a style per anchor -->
 ```
 
-**Attributes.** `x:corners` on `<path>`, `<rect>`, `<polygon>` and `<polyline>`: one radius for
+**Attributes.** `x:corners` on `<path>`, `<rect>`, `<polygon>` and `<polyline>` — and on a nested
+`<svg>`, where it rounds the viewport's clip (§5.3): one radius for
 every corner, or `anchor:radius` pairs (whitespace or comma separated) for some; a radius is a
 length or a `var()` token; a pair wins over the single value at its anchor. `x:corner-style` is
 `round` (the default), `chamfer` or `inverted`, in the same shape: one style for every corner,

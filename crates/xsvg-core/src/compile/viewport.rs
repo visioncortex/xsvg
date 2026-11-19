@@ -211,6 +211,53 @@ impl Viewport {
         Rect::new(x0, y0, x0 + self.w / sx, y0 + self.h / sy)
     }
 
+    /// The frame's outline where `x y width height` are written — the
+    /// parent's space, under the element's own transform — as the rectangle
+    /// §5.4 numbers: anchors 0–3 clockwise from the top-left.
+    pub(super) fn frame_d(&self) -> String {
+        format!(
+            "M{},{} h{} v{} h-{} Z",
+            self.x, self.y, self.w, self.h, self.w
+        )
+    }
+
+    /// The clip of a viewport with `x:corners` (§5.3): the frame with its
+    /// corners drawn, as a `<path>` for the `<clipPath>`. The corners are the
+    /// frame's — so many of the units `width` and `height` are in — while the
+    /// clip stands in content space, so the path is written in the frame's
+    /// units and carries the fit undone as its own `transform`: a radius stays
+    /// a circle's however the picture inside is stretched. `None` without
+    /// corners to draw; the clip is then the plain rect.
+    fn cornered_clip(&self, source: roxmltree::Node, theme: &Theme) -> Option<String> {
+        let spec = super::corners::corner_spec(source, theme)?;
+        let (d, drawn) = super::corners::apply_corners(&self.frame_d(), &spec)?;
+        if drawn.is_empty() {
+            return None;
+        }
+        let (sx, sy, ax, ay) = self.fit();
+        let [vx, vy, ..] = self.view_box.unwrap_or([0.0; 4]);
+        // content = translate(vx vy) scale(1/sx 1/sy) translate(−(x+ax) −(y+ay)) · frame.
+        // Written to full precision: a crop's content is a unit square, where
+        // the three decimals of a coordinate are a third of a percent.
+        let mut parts: Vec<String> = Vec::new();
+        if vx != 0.0 || vy != 0.0 {
+            parts.push(format!("translate({} {})", exact(vx), exact(vy)));
+        }
+        if sx != 1.0 || sy != 1.0 {
+            parts.push(format!("scale({} {})", exact(1.0 / sx), exact(1.0 / sy)));
+        }
+        let (tx, ty) = (self.x + ax, self.y + ay);
+        if tx != 0.0 || ty != 0.0 {
+            parts.push(format!("translate({} {})", exact(-tx), exact(-ty)));
+        }
+        let transform = if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" transform=\"{}\"", parts.join(" "))
+        };
+        Some(format!("<path{transform} d=\"{d}\"/>"))
+    }
+
     /// The transform placing the frame's origin in the parent's space, after the
     /// element's own.
     fn frame_transform(&self, own: Option<&str>) -> String {
@@ -228,6 +275,14 @@ impl Viewport {
             compose(own, self.x + ax, self.y + ay, sx, sy, vx, vy)
         }
     }
+}
+
+/// A number to twelve significant digits, the shortest spelling of it: for a
+/// transform that undoes a scale, where [`fmt`]'s three decimals would be most
+/// of the value.
+fn exact(v: f64) -> String {
+    let rounded: f64 = format!("{v:.11e}").parse().unwrap_or(v);
+    format!("{rounded}")
 }
 
 /// `own translate(tx ty) scale(sx sy) translate(-vx -vy)`, identity parts left out.
@@ -279,13 +334,16 @@ pub(super) fn open_viewport(
         .then(|| format!("x-vp-{}", gen_id_seed(source, ctx)));
     let frame = vp.frame_in_content();
     if let Some(id) = &clip_id {
-        out.push_str(&format!(
-            "<clipPath id=\"{id}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
-            fmt(frame.x0),
-            fmt(frame.y0),
-            fmt(frame.width()),
-            fmt(frame.height())
-        ));
+        match vp.cornered_clip(source, ctx.theme) {
+            Some(path) => out.push_str(&format!("<clipPath id=\"{id}\">{path}</clipPath>")),
+            None => out.push_str(&format!(
+                "<clipPath id=\"{id}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
+                fmt(frame.x0),
+                fmt(frame.y0),
+                fmt(frame.width()),
+                fmt(frame.height())
+            )),
+        }
     }
     let push_transform = |out: &mut String, t: String| {
         if !t.is_empty() {

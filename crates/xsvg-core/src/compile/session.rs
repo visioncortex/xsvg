@@ -341,7 +341,12 @@ impl<'a> Parsed<'a> {
     pub(super) fn corners(&self, offset: usize) -> Option<Vec<super::CornerInfo>> {
         let node = self.element_at(offset)?;
         let spec = super::corners::corner_spec(node, &self.theme)?;
-        let base = if node.tag_name().name() == "polyline" {
+        let base = if node.tag_name().name() == "svg" {
+            // a viewport's corners are its frame's (§5.3), where the frame
+            // resolves
+            node.parent_element()?;
+            super::viewport::Viewport::of(node)?.frame_d()
+        } else if node.tag_name().name() == "polyline" {
             node.attribute("points")
                 .and_then(super::points_to_path_d)
                 .map(|d| d.trim_end_matches('Z').trim_end().to_string())?
