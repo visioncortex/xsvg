@@ -14,6 +14,32 @@ partial one.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-19
+
+**Live corners, text that behaves the same outlined as live, and an editor's view of the
+compiler.** `x:corners` rounds, chamfers or scallops any corner of a shape the way a design
+tool's live corner does, compiled to exact arcs. Outlined text now traces what live text draws —
+its spacing, justification, run type and paint — as closed contours. Paragraphs, list items and
+table cells take the whole type block, lists live inside text boxes, and `text-transform` and
+`overflow="visible"` arrive. For editing hosts, the compiler answers what it does with a node
+(`resolved`, `text_style`, `blocks`, `corners`…), converts a node to source paths (`to_path`,
+`to_spline`, a boolean's curves kept by the new `xsvg-path-ops` crate), and declares in its
+`describe` manifest which typography property every text element and block takes.
+
+Existing documents compile the same, apart from the changes below: of the 51 dataset samples
+compiled by the CLI, 18 are byte-identical to 0.2.2's output and 29 more render pixel-identically through resvg (the
+markup changed — inherited `font-family`, baked decorations, no nested `<svg>`). Of the other
+four, `artboards` now paints its dark slides' frames, which 0.2.2 left white under light text,
+and `textpath`, `warp-presets` and `warp-perspective` differ in at most 0.1 % of pixels, at the
+contour seams the outline and warp fixes closed.
+
+The npm packages keep their exported API, and the CLI its flags, adding `--to-path` and
+`--to-spline`. Code below them breaks in three places, hence 0.3.0: the raw wasm module's
+`compile_ext` takes an `advances` callback returning `number[]` where it took `advanceWidth`
+returning a number; in Rust, `GlyphOutliner::advances` replaces `advance_width`; and
+`xsvg_schema::ElementSpec` gains an `ns` field and `ParamEnum` a `DEFAULT`, which the derives
+supply but a hand-written impl must add.
+
 ### Added
 
 - **Mesh fits are kept between compiles.** `Platform::with_mesh_cache(store)` gives the
@@ -53,76 +79,6 @@ partial one.
   `xsvg-gradient` gains `png::encode_png_with`, which takes the zlib compressor from its caller
   and so stays dependency-free. `Options` and `Backend` gain public fields: build them with
   `..Default::default()`.
-
-### Changed
-
-- **Mesh region clips are outlines.** A mesh region's clip path (and an `<x:mesh>` inside a
-  `<clipPath>`) is the outline of its faces instead of one polygon per tessellated face. The
-  filled area is the same; the output is far smaller — a 12×12-patch `<meshgradient>` at
-  `highest` went from 3.5 MB to 53 KB, and the dataset's mesh samples shrank by 20–80% — and the
-  compile is faster for it. Rendered through resvg, before and after differ by at most 4/255 on
-  a few dozen antialiased edge pixels. Faces that overlap with opposite winding, which used to
-  cancel to a hole, now stay filled, matching what the mesh paints. `xsvg-gradient` gains
-  `Mesh::region_outlines`.
-- **`<meshgradient>` definitions are not emitted.** The element is consumed at compile, like
-  `<x:theme>`: the output carries the lowered paint only, as §9 always said. It used to pass
-  through unrendered, often outweighing the paint it compiled to. A host that compiles
-  fragments gets an empty one for the definition; the shapes it fills are still reported as its
-  dependents.
-
-### Fixed
-
-- **A mesh-filled shape keeps what was not paint.** Its `id`, `opacity`, `clip-path`, `mask`
-  and `display` were lost unless the shape also had a stroke (they rode on the re-emitted stroke
-  path, and then applied to the stroke alone). The shape now lowers to a group that carries
-  them. Also: `fill-rule="evenodd"` reaches the fill's clip, `fill-opacity` applies,
-  `paint-order` is honoured, a filled `<polyline>` is stroked open, and a stroke or
-  `fill-opacity` inherited from an ancestor no longer paints the mesh's solid regions again.
-- **A mesh no longer darkens at its rim.** A texel the mesh does not reach — a corner of the
-  bounding box of a region that is not a rectangle — was left black, and a renderer blended it in
-  along the edge of the clip (up to 27/255 on the sample meshes). Such a texel now continues the
-  colour of the region's nearest edge, and a texel the region barely reaches is drawn toward the
-  region's mean rather than toward black. The fit is closer for it, so `highest` reaches its
-  tolerance on a smaller grid: `dataset/mesh.xsvg` compiles to 14.0 KB from 19.9 KB. Texture bytes
-  change for any mesh that is not a rectangle, and so do `MeshKey`s.
-- **A sliver of a mesh no longer costs unbounded memory.** A mesh more elongated than 256:1 —
-  easy to reach now that a mesh can take a hairline's bounding box — is fitted with its long
-  axis squeezed and the result stretched back. Meshes of ordinary proportions are unchanged.
-- **A mesh-painted child of an `<x:boolean>` or `<x:warp>`** is read for its geometry; it used
-  to contribute the clips and textures of its lowered paint.
-- **A fractional viewport fit keeps its precision.** A nested `<svg>`'s fit transform and clip
-  rect were written to three decimals, so a crop under a unit `viewBox` (the kit's
-  `viewBox=".13519 .21018 .43541 .59861"`) drifted off its authored frame. They are now written
-  to twelve significant digits.
-
-## [0.3.0] — 2026-11-13
-
-**Live corners, text that behaves the same outlined as live, and an editor's view of the
-compiler.** `x:corners` rounds, chamfers or scallops any corner of a shape the way a design
-tool's live corner does, compiled to exact arcs. Outlined text now traces what live text draws —
-its spacing, justification, run type and paint — as closed contours. Paragraphs, list items and
-table cells take the whole type block, lists live inside text boxes, and `text-transform` and
-`overflow="visible"` arrive. For editing hosts, the compiler answers what it does with a node
-(`resolved`, `text_style`, `blocks`, `corners`…), converts a node to source paths (`to_path`,
-`to_spline`, a boolean's curves kept by the new `xsvg-path-ops` crate), and declares in its
-`describe` manifest which typography property every text element and block takes.
-
-Existing documents compile the same, apart from the changes below: of the 51 dataset samples
-compiled by the CLI, 18 are byte-identical to 0.2.2's output and 29 more render pixel-identically through resvg (the
-markup changed — inherited `font-family`, baked decorations, no nested `<svg>`). Of the other
-four, `artboards` now paints its dark slides' frames, which 0.2.2 left white under light text,
-and `textpath`, `warp-presets` and `warp-perspective` differ in at most 0.1 % of pixels, at the
-contour seams the outline and warp fixes closed.
-
-The npm packages keep their exported API, and the CLI its flags, adding `--to-path` and
-`--to-spline`. Code below them breaks in three places, hence 0.3.0: the raw wasm module's
-`compile_ext` takes an `advances` callback returning `number[]` where it took `advanceWidth`
-returning a number; in Rust, `GlyphOutliner::advances` replaces `advance_width`; and
-`xsvg_schema::ElementSpec` gains an `ns` field and `ParamEnum` a `DEFAULT`, which the derives
-supply but a hand-written impl must add.
-
-### Added
-
 - **Corners: `x:corners` / `x:corner-style` on `<path>`, `<rect>`, `<polygon>`, `<polyline>`.**
   A design tool's live corner as an attribute (§5.4): one radius for every corner or
   `anchor:radius` pairs (`x:corners="0:8 1:var(radius-md)"`), a length or a theme token;
@@ -300,6 +256,19 @@ supply but a hand-written impl must add.
 
 ### Changed
 
+- **Mesh region clips are outlines.** A mesh region's clip path (and an `<x:mesh>` inside a
+  `<clipPath>`) is the outline of its faces instead of one polygon per tessellated face. The
+  filled area is the same; the output is far smaller — a 12×12-patch `<meshgradient>` at
+  `highest` went from 3.5 MB to 53 KB, and the dataset's mesh samples shrank by 20–80% — and the
+  compile is faster for it. Rendered through resvg, before and after differ by at most 4/255 on
+  a few dozen antialiased edge pixels. Faces that overlap with opposite winding, which used to
+  cancel to a hole, now stay filled, matching what the mesh paints. `xsvg-gradient` gains
+  `Mesh::region_outlines`.
+- **`<meshgradient>` definitions are not emitted.** The element is consumed at compile, like
+  `<x:theme>`: the output carries the lowered paint only, as §9 always said. It used to pass
+  through unrendered, often outweighing the paint it compiled to. A host that compiles
+  fragments gets an empty one for the definition; the shapes it fills are still reported as its
+  dependents.
 - **Compiled text inherits `font-family`.** A textbox, list, table, text on a path or `<textArea>`
   with no `font-family` of its own now takes the nearest ancestor's — a `<g font-family>`, a
   `<g x:font>` token, or the root `<svg>` — the way plain `<text>` always has in the browser, and
@@ -335,6 +304,28 @@ supply but a hand-written impl must add.
 
 ### Fixed
 
+- **A mesh-filled shape keeps what was not paint.** Its `id`, `opacity`, `clip-path`, `mask`
+  and `display` were lost unless the shape also had a stroke (they rode on the re-emitted stroke
+  path, and then applied to the stroke alone). The shape now lowers to a group that carries
+  them. Also: `fill-rule="evenodd"` reaches the fill's clip, `fill-opacity` applies,
+  `paint-order` is honoured, a filled `<polyline>` is stroked open, and a stroke or
+  `fill-opacity` inherited from an ancestor no longer paints the mesh's solid regions again.
+- **A mesh no longer darkens at its rim.** A texel the mesh does not reach — a corner of the
+  bounding box of a region that is not a rectangle — was left black, and a renderer blended it in
+  along the edge of the clip (up to 27/255 on the sample meshes). Such a texel now continues the
+  colour of the region's nearest edge, and a texel the region barely reaches is drawn toward the
+  region's mean rather than toward black. The fit is closer for it, so `highest` reaches its
+  tolerance on a smaller grid: `dataset/mesh.xsvg` compiles to 14.0 KB from 19.9 KB. Texture bytes
+  change for any mesh that is not a rectangle, and so do `MeshKey`s.
+- **A sliver of a mesh no longer costs unbounded memory.** A mesh more elongated than 256:1 —
+  easy to reach now that a mesh can take a hairline's bounding box — is fitted with its long
+  axis squeezed and the result stretched back. Meshes of ordinary proportions are unchanged.
+- **A mesh-painted child of an `<x:boolean>` or `<x:warp>`** is read for its geometry; it used
+  to contribute the clips and textures of its lowered paint.
+- **A fractional viewport fit keeps its precision.** A nested `<svg>`'s fit transform and clip
+  rect were written to three decimals, so a crop under a unit `viewBox` (the kit's
+  `viewBox=".13519 .21018 .43541 .59861"`) drifted off its authored frame. They are now written
+  to twelve significant digits.
 - **Boolean operands keep their transforms.** A `<g transform>` or a nested `<x:boolean>` as an
   operand was combined untransformed — at the origin — and a transformed operand's stroke ink
   stayed where the transform would have moved it from. Every enclosing transform now composes
@@ -955,7 +946,9 @@ Deprecated on npm — published with debug WebAssembly. Use 0.1.2 or later.
   - **`@visioncortex/xsvg-compile`** (Node): browser-free `compile()`.
   - Rust crates on crates.io: `xsvg-gradient`, `xsvg-core`, `xsvg-cli`, `xsvg-wasm`.
 
-[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/visioncortex/xsvg/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/visioncortex/xsvg/releases/tag/v0.3.0
+[0.2.2]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.2
 [0.2.1]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.1
 [0.2.0]: https://github.com/visioncortex/xsvg/releases/tag/v0.2.0
 [0.1.6]: https://github.com/visioncortex/xsvg/releases/tag/v0.1.6
