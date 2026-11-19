@@ -8250,6 +8250,31 @@ fn resolved_cascades_a_blocks_layout_from_its_box() {
 // ---- nested viewports (viewport.rs; §5.3) ------------------------------------
 
 #[test]
+fn fractional_crop_fit_maps_its_marker_back_to_the_authored_frame() {
+    let src = format!(
+        r#"{XW}<svg x="20" y="30" width="160" height="90" viewBox=".13519 .21018 .43541 .59861" preserveAspectRatio="none"><image width="1" height="1" href="p.png"/></svg></svg>"#
+    );
+    let out = compile_test(&src);
+    let doc = roxmltree::Document::parse(&out).unwrap();
+    let viewport = doc
+        .descendants()
+        .find(|n| n.has_attribute("data-xsvg-viewport"))
+        .unwrap();
+    assert_eq!(
+        viewport.attribute("data-xsvg-viewport"),
+        Some("0.13519 0.21018 0.43541 0.59861")
+    );
+    let fit = parse_transform(viewport.attribute("transform").unwrap());
+    for (x, y, fx, fy) in [
+        (0.13519, 0.21018, 20.0, 30.0),
+        (0.57060, 0.80879, 180.0, 120.0),
+    ] {
+        let actual = fit * crate::kurbo::Point::new(x, y);
+        assert!((actual.x - fx).abs() < 1e-8 && (actual.y - fy).abs() < 1e-8);
+    }
+}
+
+#[test]
 fn a_nested_svg_lowers_to_one_clipped_group_with_the_fit_folded_in() {
     // a crop as the kit writes it: a unit picture under a fractional viewBox,
     // stretched (`none`) into a rotated frame — one <g>, the element's own

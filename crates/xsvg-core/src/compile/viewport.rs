@@ -292,17 +292,17 @@ fn compose(own: Option<&str>, tx: f64, ty: f64, sx: f64, sy: f64, vx: f64, vy: f
         parts.push(t.to_string());
     }
     if tx != 0.0 || ty != 0.0 {
-        parts.push(format!("translate({} {})", fmt(tx), fmt(ty)));
+        parts.push(format!("translate({} {})", exact(tx), exact(ty)));
     }
     if sx != 1.0 || sy != 1.0 {
         parts.push(if sx == sy {
-            format!("scale({})", fmt(sx))
+            format!("scale({})", exact(sx))
         } else {
-            format!("scale({} {})", fmt(sx), fmt(sy))
+            format!("scale({} {})", exact(sx), exact(sy))
         });
     }
     if vx != 0.0 || vy != 0.0 {
-        parts.push(format!("translate({} {})", fmt(-vx), fmt(-vy)));
+        parts.push(format!("translate({} {})", exact(-vx), exact(-vy)));
     }
     parts.join(" ")
 }
@@ -338,10 +338,10 @@ pub(super) fn open_viewport(
             Some(path) => out.push_str(&format!("<clipPath id=\"{id}\">{path}</clipPath>")),
             None => out.push_str(&format!(
                 "<clipPath id=\"{id}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
-                fmt(frame.x0),
-                fmt(frame.y0),
-                fmt(frame.width()),
-                fmt(frame.height())
+                exact(frame.x0),
+                exact(frame.y0),
+                exact(frame.width()),
+                exact(frame.height())
             )),
         }
     }
@@ -380,10 +380,10 @@ pub(super) fn open_viewport(
     }
     out.push_str(&format!(
         " data-xsvg-viewport=\"{} {} {} {}\"",
-        fmt(frame.x0),
-        fmt(frame.y0),
-        fmt(frame.width()),
-        fmt(frame.height())
+        exact(frame.x0),
+        exact(frame.y0),
+        exact(frame.width()),
+        exact(frame.height())
     ));
     let mut skips: Vec<&str> = CONSUMED.to_vec();
     skips.extend_from_slice(skip);
