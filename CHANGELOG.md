@@ -90,6 +90,10 @@ partial one.
   axis squeezed and the result stretched back. Meshes of ordinary proportions are unchanged.
 - **A mesh-painted child of an `<x:boolean>` or `<x:warp>`** is read for its geometry; it used
   to contribute the clips and textures of its lowered paint.
+- **A fractional viewport fit keeps its precision.** A nested `<svg>`'s fit transform and clip
+  rect were written to three decimals, so a crop under a unit `viewBox` (the kit's
+  `viewBox=".13519 .21018 .43541 .59861"`) drifted off its authored frame. They are now written
+  to twelve significant digits.
 
 ## [0.3.0] — 2026-11-13
 
